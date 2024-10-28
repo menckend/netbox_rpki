@@ -1,0 +1,86 @@
+{% extends 'generic/_base.html' %}
+{% load buttons %}
+{% load custom_links %}
+{% load helpers %}
+{% load perms %}
+{% load plugins %}
+{% load tabs %}
+{% load i18n %}
+
+{% comment %}
+Blocks:
+  - page-header:          Content displayed above the primary page content
+    - breadcrumbs:        Breadcrumb list items (HTML <li> elements)
+    - object_identifier:  Unique identifier for the object
+  - title:                Page title
+  - subtitle:             Additional context displayed below the title
+  - controls:             Control elements displayed between the header and content
+    - control-buttons:    Action buttons (add/edit/delete/etc.)
+      - extra_controls:   Any additional action buttons to display
+  - tabs:                 Page tabs
+  - content:              Primary page content
+  - modals:               Any pre-loaded modals
+
+Context:
+  - object: The object being viewed
+{% endcomment %}
+
+{% block page-header %}
+  <div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mt-2">
+
+    </div>
+  </div>
+  {{ block.super }}
+{% endblock page-header %}
+
+{% block title %}{% endblock %}
+
+{% block subtitle %}
+
+{% endblock subtitle %}
+
+{% block alerts %}
+  {% plugin_alerts object %}
+{% endblock alerts %}
+
+{% block content %}
+  <div class="row mb-3">
+    <div class="col col-md-6">
+      <div class="card">
+        <h4 class="card-header">Create a GNS3 Virtual-lab that models run-state (configuration and physical topology) of Arista switches present in Netbox's devices table</h5>
+        <div class="card-body">
+          <p>The <a class="reference external" href="https://menckend.github.io/netbox_ptov">netbox_ptov plugin</a> passes the values you provide in the form below to the p_to_v function of the <a class="reference external" href="https://menckend.github.io/dcnodatg">dcnodatg module</a>.  This instantiates a virtual-lab project on the GNS3 server in which the startup configurations and physical links between the Arista switches you selected are all replicated.</p>
+          <p>This is not an instantaneous process, but is several orders of magnitude faster than manually harvesting the switch's runstate data and building out a virtual-lab.  (A 14-switch lab took just under 60-seconds to fully instantiate.)</p>
+          <p>Refer to the netbox_ptov plugin <a class="reference external" href="https://menckend.github.io/netbox_ptov">documentation</a> and <a class="reference external" href="https://github.com/menckend/netbox_ptov/">repository</a> for further information.  </p>
+        </div>
+      </div>
+        <div class="card">
+        <h4 class="card-header">Populate the fields below and click the "submit" button to generate a virtual-lab</h5>
+        <div class="card-body">
+          <form action="" method="post" novalidate>
+            {% csrf_token %}
+            {{ form.as_p }}
+            <input type="submit" value="Submit">
+            </form>
+        </div>
+      </div>
+
+      {% if messages %}
+        <div class="card">
+          <h5 class="card-header">Results</h5>
+            <div class="card-body">
+              <ul class="messages">
+                  {% for message in messages %}
+                      <li>{% if 'safe' in message.tags %}{{ message|safe }}{% else %}{{ message }}{% endif %}</li>
+                  {% endfor %}
+              </ul>
+          </div>
+      {% endif %}
+    </div>
+  </div>
+{% endblock content %}
+
+{% block modals %}
+  {% include 'inc/htmx_modal.html' %}
+{% endblock modals %}

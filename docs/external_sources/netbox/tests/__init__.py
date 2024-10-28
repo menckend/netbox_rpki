@@ -1,0 +1,1 @@
+import netbox.tests.dummy_plugin

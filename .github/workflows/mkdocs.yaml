@@ -1,0 +1,55 @@
+name: Publish Docs
+
+on:
+  push:
+    branches: main # branch to trigger deployment
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  builddeploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Build Docs With Sphinx
+        shell: bash
+        run: |
+          SOURCE_ROOT='docs'
+          BUILD_ROOT='build'
+          sudo apt-get install -y graphviz
+          pip install -U sphinx
+          # Install extra dependencies if the requirements.txt file exits.
+          requirements_file="$SOURCE_ROOT/requirements.txt"
+          if [ -f "$requirements_file" ]; then
+            printf 'Install dependencies with %s ...', "$requirements_file"
+            pip install -r "$requirements_file"
+          fi
+          config_base_file="$SOURCE_ROOT/conf.py"
+          # Input & output dirs.
+          input_dir="$SOURCE_ROOT/"
+          output_dir="$BUILD_ROOT"
+          # Sphinx config file
+          config_file="$input_dir/conf.py"
+          # Build with Sphinx
+          printf "\n# Start building for %s ..\n"
+          sphinx-build -M html "$input_dir" "$output_dir"
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+      - name: Upload Pages Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '${{ github.workspace }}/build/html'
+      - name: deployment
+        id: deployment
+        uses: actions/deploy-pages@v4

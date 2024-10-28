@@ -1,0 +1,67 @@
+# See PEP 518 for the spec of this file
+# https://www.python.org/dev/peps/pep-0518/
+
+[build-system]
+requires = ["setuptools>=64", "setuptools_scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+version_file = "netbox_ptov/_version.py"
+#fallback_version = '0.0.0'
+#version_scheme : str | Callable[[ScmVersion], str]
+
+[tool.setuptools.packages.find]
+#where = ["."]
+#include = ["dcnodatg*"]
+#include = ["src*"]
+exclude = [".venv*", "tests*", "docs*", ".github*", ".gitignore", "external_sources"]
+
+[tool.black]
+line-length = 120
+target_version = ['py39', 'py310', 'py311', 'py312']
+
+[tool.setuptools.package-data]
+netbox_ptov = ["templates/**"]
+
+[project]
+name =  "netbox_ptov"
+dynamic = ["version"]
+authors = [
+    {name = "Mencken Davidson", email = "mencken@gmail.com"},
+]
+maintainers = [
+  {name = "Mencken Davidson", email = "mencken@gmail.com"}
+]
+license = {file = "LICENSE"}
+
+description = "NetBox plugin for ptov.  Uses dcnodatg project."
+readme = "README.md"
+
+classifiers=[
+    'Development Status :: 3 - Alpha',
+    'Intended Audience :: Developers',
+    'Natural Language :: English',
+    "Programming Language :: Python :: 3 :: Only",
+    'Programming Language :: Python :: 3.10',
+    'Programming Language :: Python :: 3.11',
+    'Programming Language :: Python :: 3.12',
+]
+
+dependencies = [ "dcnodatg", "build"]
+keywords = ["netbox", "plugin", "arista", "eapi", "eos", "gns3", "lab", "virtual", "ceos"]
+requires-python= ">=3.12"
+
+[project.urls]
+Documentation = "https://github.com/menckend/netbox_ptov/blob/main/README.md"
+Source = "https://github.com/menckend/netbox_ptov"
+Tracker = "https://github.com/menckend/netbox_ptov/issues"
+
+[project.optional-dependencies]
+test = [
+    "black==24.3.0",
+    "check-manifest==0.49",
+    "flake8",
+    "flake8-pyproject",
+    "pre-commit==3.7.0",
+    "pytest==8.1.1",
+]
