@@ -3,15 +3,16 @@
 from netbox.api.routers import NetBoxRouter
 
 from netbox_rpki.api.views import (
-    gns3srvViewSet, ptovjobViewSet, switchtojobViewSet, RootView
+    RpkiCertificateViewSet, RpkiOrganizationViewSet, RpkiCertificateRoaViewSet, RootView
 )
 
 app_name = 'netbox_ptov'
 
 router = NetBoxRouter()
 router.APIRootView = RootView
-router.register('gns3srv', gns3srvViewSet, basename='gns3srv')
-router.register('ptovjob', ptovjobViewSet, basename='ptovjob')
-router.register('switchtojob', switchtojobViewSet, basename='switchtojob')
+router.register('rpkicertificate', RpkiCertificateViewSet, basename='rpkicertificate')
+router.register('rpkiorganization', RpkiOrganizationViewSet, basename='rpkiorganization')
+router.register('rpkiroa', RpkiRoaViewSet, basename='rpkiroa')
+router.register('rpkiroaprefices', RpkiRoaPreficesViewSet, basename='rpkiroaprefices')
 
 urlpatterns = router.urls
