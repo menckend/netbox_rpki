@@ -2,7 +2,7 @@ from netbox.api.viewsets import NetBoxModelViewSet
 from rest_framework.routers import APIRootView
 
 from netbox_rpki.api.serializers import (
-    gns3srvSerializer, ptovjobSerializer, switchtojobSerializer
+    RpkiOrganizationSerializer, RpkiCertificateSerializer, RpkiRoaSerializer, RpkiRoaPrefices
 )
 
 from netbox_rpki import filtersets, models
@@ -10,22 +10,27 @@ from netbox_rpki import filtersets, models
 
 class RootView(APIRootView):
     def get_view_name(self):
-        return 'ptov'
+        return 'rpki'
 
 
-class ptovjobViewSet(NetBoxModelViewSet):
-    queryset = models.ptovjob.objects.all()
-    serializer_class = ptovjobSerializer
-    filterset_class = filtersets.ptovjobFilterSet
+class RpkiOrganizationViewSet(NetBoxModelViewSet):
+    queryset = models.RpkiOrganization.objects.all()
+    serializer_class = RpkiOrganizationSerializer
+    filterset_class = filtersets.RpkiOrganizationFilterSet
 
 
-class gns3srvViewSet(NetBoxModelViewSet):
-    queryset = models.gns3srv.objects.all()
-    serializer_class = gns3srvSerializer
-    filterset_class = filtersets.gns3srvFilterSet
+class RpkiCertificate(NetBoxModelViewSet):
+    queryset = models.RpkiCertificate.objects.all()
+    serializer_class = RpkiCertificateSerializer
+    filterset_class = filtersets.RpkiCertificateFilterSet
 
 
-class switchtojobViewSet(NetBoxModelViewSet):
-    queryset = models.switchtojob.objects.all()
-    serializer_class = switchtojobSerializer
-    filterset_class = filtersets.switchtojobFilterSet
+class RpkiRoaViewSet(NetBoxModelViewSet):
+    queryset = models.RpkiRoa.objects.all()
+    serializer_class = RpkiRoaSerializer
+    filterset_class = filtersets.RpkiRoaFilterSet
+
+class RpkiRoaPreficesViewSet(NetBoxModelViewSet):
+    queryset = models.RpkiRoaPrefices.objects.all()
+    serializer_class = RpkiRoaPreficesSerializer
+    filterset_class = filtersets.RpkiRoaPreficesFilterSet
