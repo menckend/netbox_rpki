@@ -14,7 +14,7 @@ class RpkiCertificateFilterSet(NetBoxModelFilterSet):
 class RpkiOrganizationFilterSet(NetBoxModelFilterSet):
     class Meta:
         model = RpkiOrganization
-        fields = ['name', ]
+        fields = ['orgName', ]
 
 
     def search(self, queryset, name, value):
@@ -34,7 +34,7 @@ class RpkiRoaFilterSet(NetBoxModelFilterSet):
 class RpkiRoaPreficesFilterSet(NetBoxModelFilterSet):
     class Meta:
         model = RpkiRoaPrefices
-        fields = ['name', ]
+        fields = ['prefix', ]
 
 
     def search(self, queryset, name, value):
