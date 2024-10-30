@@ -3,6 +3,20 @@ from django.urls import reverse
 from netbox.models import NetBoxModel
 
 
+class RpkiOrganization(NetBoxModel):
+    orgId = models.CharField(max_length=200)
+    orgName = models.CharField(max_length=200)
+
+    class Meta:
+        ordering = ("name",)
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:RpkiOrganization", args=[self.pk])
+
+
 class RpkiCertificate(NetBoxModel):
     name = models.CharField(max_length=200)
     issuer = models.CharField(max_length=200)
@@ -31,18 +45,6 @@ class RpkiCertificate(NetBoxModel):
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:RpkiCertificate", args=[self.pk])
 
-class RpkiOrganization(NetBoxModel):
-    orgId = models.CharField(max_length=200)
-    orgName = models.CharField(max_length=200)
-
-    class Meta:
-        ordering = ("name",)
-
-    def __str__(self):
-        return self.name
-
-    def get_absolute_url(self):
-        return reverse("plugins:netbox_rpki:RpkiOrganization", args=[self.pk])
 
 class RpkiRoa(NetBoxModel):
     name = models.CharField(max_length=200)
