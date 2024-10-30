@@ -1,8 +1,9 @@
 from django.urls import path
-from netbox.views.generic import ObjectChangeLogView
 from utilities.urls import get_model_urls
-from netbox_rpki import models, views
+from netbox_rpki.models import RpkiOrganization, RpkiCertificate, RpkiRoa, RpkiRoa
+from netbox_rpki import  views
 
+app_name = 'netbox_rpki'
 
 urlpatterns = (
     path("rpkicertificate/", views.RpkiCertificateListView.as_view(), name="rpkicertificate_list"),
@@ -33,6 +34,6 @@ urlpatterns = (
     path("rpkiroaprefices/<int:pk>/", views.RpkiRoaPrefices.as_view(), name="rpkiroaprefices"),
     path("rpkiroaprefices/<int:pk>/edit/", views.RpkiRoaPreficesEditView.as_view(), name="rpkiroaprefices_edit"),
     path("rpkiroaprefices/<int:pk>/delete/", views.RpkiRoaPreficesDeleteView.as_view(), name="rpkiroaprefices_delete"),
-    path('rpkiroa/<int:pk>/', include(get_model_urls('netbox_rpki', 'rpkiroa'))),
+    path('rpkiroaprefices/<int:pk>/', include(get_model_urls('netbox_rpki', 'rpkiroaprefices'))),
     
 )
