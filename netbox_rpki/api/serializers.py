@@ -1,5 +1,3 @@
-"""Django API serializer definitions for the netbox_ptov plugin"""
-
 from rest_framework.serializers import HyperlinkedIdentityField, ValidationError
 from rest_framework.relations import PrimaryKeyRelatedField
 
@@ -11,38 +9,39 @@ from tenancy.api.serializers import TenantSerializer
 from dcim.api.serializers import SiteSerializer, DeviceSerializer
 
 
-from netbox_rpki.models import gns3srv, ptovjob, switchtojob 
+from netbox_rpki.models import RpkiCertificate, RpkiOrganization, RpkiRoa, RpkiRoaPrefices 
 
-class gns3srvSerializer(NetBoxModelSerializer):
-    url = HyperlinkedIdentityField(view_name="plugins-api:netbox_ptov:gns3srv-detail")
+class RpkiCertificateSerializer(NetBoxModelSerializer):
+    url = HyperlinkedIdentityField(view_name="plugins-api:netbox_rpki:rpkicertificate-detail")
 
     class Meta:
-        model = gns3srv
+        model = RpkiCertificateSerializer
         fields = [
-            "id",
-            "tags",
             "name",
+            "issuer",
+            "subject",
+            "serial",
+            "validFrom",
+            "validTo",
+            "publicKey",
+            "privateKey",
+            "publicationUrl",
+            "caRepository",
+            "selfHosted",
+            "rpkiOrg"
         ]
-        brief_fields = ("id", "name")
+        
+        brief_fields = ("name", "issuer", "subject", "serial", "rpkiOrg")
 
 
-class ptovjobSerializer(NetBoxModelSerializer):
-    url = HyperlinkedIdentityField(view_name="plugins-api:netbox_ptov_:ptovjob-detail")
+class RpkiOrganizationSerializer(NetBoxModelSerializer):
+    url = HyperlinkedIdentityField(view_name="plugins-api:netbox_rpki_:rpkiorganization-detail")
 
     class Meta:
-        model = ptovjob
+        model = RpkiOrganization
         fields = [
-            "name", "eosuname", "gns3srv", "gns3prjname", "gns3prjid", "eospasswd"
+            "id", "orgId", "orgName"
         ]
-        brief_fields = ("name", "gns3prjname", "gns3prjid")
+        brief_fields = ("ordId", "orgName")
 
 
-class switchtojobSerializer(NetBoxModelSerializer):
-    url = HyperlinkedIdentityField(view_name="plugins-api:netbox_ptov:switchtojob-detail")
-
-    class Meta:
-        model = switchtojob
-        fields = [
-            "name", "switch", "job",
-        ]
-        brief_fields = ("name", "switch")
