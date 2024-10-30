@@ -3,7 +3,7 @@
 from netbox.api.routers import NetBoxRouter
 
 from netbox_rpki.api.views import (
-    RpkiCertificateViewSet, RpkiOrganizationViewSet, RpkiRoaViewSet, RpkiRoaSufficesViewSet, RootView
+    RpkiCertificateViewSet, RpkiOrganizationViewSet, RpkiRoaViewSet, RpkiRoaPreficesViewSet, RootView
 )
 
 app_name = 'netbox_ptov'
