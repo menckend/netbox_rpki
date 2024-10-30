@@ -2,6 +2,7 @@ from django.db import models
 from django.urls import reverse
 from netbox.models import NetBoxModel
 from ipam.models.asns import ASN
+from ipam.models.ip import Prefix
 
 
 class RpkiOrganization(NetBoxModel):
@@ -73,7 +74,7 @@ class RpkiRoa(NetBoxModel):
 
 class RpkiRoaPrefices(NetBoxModel):
     prefix = models.ForeignKey(
-        to= ipam.models.ip.Prefix,
+        to= Prefix,
         on_delete=models.CASCADE,
         related_name='roausage'
     )
