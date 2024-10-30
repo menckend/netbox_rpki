@@ -42,7 +42,7 @@ _menu_items = (
                 title="Add",
                 icon_class="mdi mdi-plus-thick",
             )
-        )
+        ),
     ),
 
     PluginMenuItem(
@@ -53,8 +53,8 @@ _menu_items = (
                 link="plugins:netbox_rpki:rpkiCertificate_add",
                 title="Add",
                 icon_class="mdi mdi-plus-thick",
-            )
-        )
+            ),
+        ),
     ),
 
     PluginMenuItem(
@@ -65,8 +65,8 @@ _menu_items = (
                 link="plugins:netbox_rpki:rpkiRoa_add",
                 title="Add",
                 icon_class="mdi mdi-plus-thick",
-            )
-        )
+            ),
+        ),
     )
 )
 plugin_settings = settings.PLUGINS_CONFIG.get('netbox_rpki', {})
