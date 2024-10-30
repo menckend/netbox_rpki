@@ -4,7 +4,7 @@ from netbox.tables import NetBoxTable, ChoiceFieldColumn
 from netbox_rpki.models import RpkiCertificate, RpkiOrganization, RpkiRoa, RpkiRoaPrefices
 
 
-class RpkiCertificateTable,(NetBoxTable):
+class RpkiCertificateTable(NetBoxTable):
     name = tables.Column(linkify=True)
 
     class Meta(NetBoxTable.Meta):
