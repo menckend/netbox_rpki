@@ -36,23 +36,39 @@ _menu_items = (
     PluginMenuItem(
         link="plugins:netbox_rpki:rpkiOrganization_list",
         link_text="RPKI Organizations",
-        buttons=rpkiOrganization_buttons,
+        buttons=(
+            PluginMenuButton(
+                link="plugins:netbox_rpki:rpkiOrganization_add",
+                title="Add",
+                icon_class="mdi mdi-plus-thick",
+            )
+        )
     ),
 
     PluginMenuItem(
         link="plugins:netbox_rpki:rpkiCertificates_list",
         link_text="RPKI Customer Certificates",
-        buttons=rpkiCertificate_buttons,
+        buttons=(
+            PluginMenuButton(
+                link="plugins:netbox_rpki:rpkiCertificate_add",
+                title="Add",
+                icon_class="mdi mdi-plus-thick",
+            )
+        )
     ),
 
     PluginMenuItem(
         link="plugins:netbox_rpki:rpkiRoa_list",
         link_text="RPKI ROAs",
-        buttons=rpkiRoa_buttons,
-    ),
-
+        buttons=(
+            PluginMenuButton(
+                link="plugins:netbox_rpki:rpkiRoa_add",
+                title="Add",
+                icon_class="mdi mdi-plus-thick",
+            )
+        )
+    )
 )
-
 plugin_settings = settings.PLUGINS_CONFIG.get('netbox_rpki', {})
 
 if plugin_settings.get('top_level_menu'):
