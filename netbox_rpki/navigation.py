@@ -12,7 +12,7 @@ _menu_items = (
                 link='plugins:netbox_rpki:rpkiOrganization_add',
                 title='Add',
                 icon_class='mdi mdi-plus-thick',
-            )
+            ),
         ),
     ),
 
