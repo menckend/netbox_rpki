@@ -5,7 +5,7 @@ from netbox_rpki import  views
 
 app_name = 'netbox_rpki'
 
-urlpatterns = (
+urlpatterns = [
     path("rpkicertificate/", views.RpkiCertificateListView.as_view(), name="rpkicertificate_list"),
     path("rpkicertificate/add/", views.RpkiCertificateEditView.as_view(), name="cpkicertificate_add"),
     path("rpkicertificate/<int:pk>/", views.RpkiCertificate.as_view(), name="RpkiCertificate"),
@@ -30,4 +30,4 @@ urlpatterns = (
     path("rpkiroaprefices/<int:pk>/edit/", views.RpkiRoaPreficesEditView.as_view(), name="rpkiroaprefices_edit"),
     path("rpkiroaprefices/<int:pk>/delete/", views.RpkiRoaPreficesDeleteView.as_view(), name="rpkiroaprefices_delete"),
     path('rpkiroaprefices/<int:pk>/', include(get_model_urls('netbox_rpki', 'rpkiroaprefices'))),
-)
+]
