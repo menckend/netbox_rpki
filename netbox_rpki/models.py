@@ -66,7 +66,7 @@ class RpkiRoa(NetBoxModel):
 
 class RpkiRoaPrefices(NetBoxModel):
     prefix = models.ForeignKey(
-        to= ipam.models.ip.Prefix
+        to= ipam.models.ip.Prefix,
         on_delete=models.CASCADE,
         related_name='roausage'
     )
