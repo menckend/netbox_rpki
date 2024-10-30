@@ -10,7 +10,7 @@ class RpkiOrganization(NetBoxModel):
     orgName = models.CharField(max_length=200)
 
     class Meta:
-        ordering = ("name",)
+        ordering = ("orgName",)
 
     def __str__(self):
         return self.name
@@ -87,7 +87,7 @@ class RpkiRoaPrefices(NetBoxModel):
 
 
     class Meta:
-        ordering = ("pk",)
+        ordering = ("prefix",)
 
     def __str__(self):
         return self.name
