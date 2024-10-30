@@ -16,21 +16,7 @@ class RpkiCertificateSerializer(NetBoxModelSerializer):
 
     class Meta:
         model = RpkiCertificateSerializer
-        fields = [
-            "name",
-            "issuer",
-            "subject",
-            "serial",
-            "validFrom",
-            "validTo",
-            "publicKey",
-            "privateKey",
-            "publicationUrl",
-            "caRepository",
-            "selfHosted",
-            "rpkiOrg"
-        ]
-        
+        fields = ["id", "name", "issuer", "subject", "serial", "validFrom", "validTo", "publicKey", "privateKey", "publicationUrl", "caRepository","selfHosted", "rpkiOrg"]
         brief_fields = ("name", "issuer", "subject", "serial", "rpkiOrg")
 
 
@@ -39,9 +25,23 @@ class RpkiOrganizationSerializer(NetBoxModelSerializer):
 
     class Meta:
         model = RpkiOrganization
-        fields = [
-            "id", "orgId", "orgName"
-        ]
+        fields = ["id", "orgId", "orgName"]
+        brief_fields = ("orgId", "orgName")
+
+
+class RpkiRoaSerializer(NetBoxModelSerializer):
+    url = HyperlinkedIdentityField(view_name="plugins-api:netbox_rpki_:rpkiroa-detail")
+
+    class Meta:
+        model = RpkiRoa
+        fields = ["id", "name", "originaAs", "validFrom", "validTo", "signedBy"]
         brief_fields = ("ordId", "orgName")
 
+class RpkiRoaPreficesSerializer(NetBoxModelSerializer):
+    url = HyperlinkedIdentityField(view_name="plugins-api:netbox_rpki_:rpkiroaprefices-detail")
+
+    class Meta:
+        model = RpkiRoaPrefices
+        fields = ["id", "prefix", "maxlength", "roaName"]
+        brief_fields = ("id", "prefix", "maxlength", "roaName")
 
