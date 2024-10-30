@@ -1,4 +1,4 @@
-from django.urls import path
+from django.urls import include, path
 from utilities.urls import get_model_urls
 from netbox_rpki.models import RpkiOrganization, RpkiCertificate, RpkiRoa, RpkiRoa
 from netbox_rpki import  views
