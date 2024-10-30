@@ -36,7 +36,7 @@ _menu_items = (
     PluginMenuItem(
         link="plugins:netbox_rpki:rpkiOrganization_list",
         link_text="RPKI Organizations",
-        buttons=rpkOrganization_buttons,
+        buttons=rpkiOrganization_buttons,
     ),
 
     PluginMenuItem(
