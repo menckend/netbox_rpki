@@ -16,7 +16,7 @@ class RpkiOrganization(NetBoxModel):
         return self.name
 
     def get_absolute_url(self):
-        return reverse("plugins:netbox_rpki:RpkiOrganization", args=[self.pk])
+        return reverse("plugins:netbox_rpki:rpkiorganization", args=[self.pk])
 
 
 class RpkiCertificate(NetBoxModel):
@@ -45,7 +45,7 @@ class RpkiCertificate(NetBoxModel):
         return self.name
 
     def get_absolute_url(self):
-        return reverse("plugins:netbox_rpki:RpkiCertificate", args=[self.pk])
+        return reverse("plugins:netbox_rpki:rpkicertificate", args=[self.pk])
 
 
 class RpkiRoa(NetBoxModel):
@@ -69,7 +69,7 @@ class RpkiRoa(NetBoxModel):
         return self.name
 
     def get_absolute_url(self):
-        return reverse("plugins:netbox_rpki:RpkiRoa", args=[self.pk])
+        return reverse("plugins:netbox_rpki:rpkiroa", args=[self.pk])
 
 
 class RpkiRoaPrefices(NetBoxModel):
@@ -93,4 +93,4 @@ class RpkiRoaPrefices(NetBoxModel):
         return self.name
 
     def get_absolute_url(self):
-        return reverse("plugins:netbox_rpki:RpkiRoaPrefices", args=[self.pk])
+        return reverse("plugins:netbox_rpki:rpkiroaprefices", args=[self.pk])
