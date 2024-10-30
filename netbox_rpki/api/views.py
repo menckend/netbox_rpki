@@ -19,7 +19,7 @@ class RpkiOrganizationViewSet(NetBoxModelViewSet):
     filterset_class = filtersets.RpkiOrganizationFilterSet
 
 
-class RpkiCertificate(NetBoxModelViewSet):
+class RpkiCertificateViewSet(NetBoxModelViewSet):
     queryset = models.RpkiCertificate.objects.all()
     serializer_class = RpkiCertificateSerializer
     filterset_class = filtersets.RpkiCertificateFilterSet
