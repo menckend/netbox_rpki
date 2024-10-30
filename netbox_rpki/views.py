@@ -11,7 +11,7 @@ import json
 class RpkiCertificateView(generic.ObjectView):
     queryset = models.RpkiCertificate.objects.all()
 
-     def get_extra_context(self, request, instance):
+    def get_extra_context(self, request, instance):
         table = tables.rpkiRoaTable(instance.signedBy.all())
         table.configure(request)
 
