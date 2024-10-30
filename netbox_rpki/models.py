@@ -87,7 +87,7 @@ class RpkiRoaPrefices(NetBoxModel):
 
 
     class Meta:
-        ordering = ("prefix",)
+        ordering = ("pk",)
 
     def __str__(self):
         return self.name
