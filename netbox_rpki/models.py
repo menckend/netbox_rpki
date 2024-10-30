@@ -48,7 +48,11 @@ class RpkiCertificate(NetBoxModel):
 
 class RpkiRoa(NetBoxModel):
     name = models.CharField(max_length=200)
-    originAs = foreignkey-ipam.asn
+    originAs = models.ForeignKey(
+        to=netbox.ipam.models.ASN
+        on_delete=models.CASCADE,
+        related_name='asns'
+    )   
     validFrom = models.DateField
     validTo =  models.DateField
     signedBy = models.ForeignKey(
