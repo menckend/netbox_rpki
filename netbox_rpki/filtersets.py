@@ -1,5 +1,5 @@
 from netbox.filtersets import NetBoxModelFilterSet
-from .models import gns3srv, ptovjob, switchtojob
+from netbox_rpki.models import RpkiCertificate, RpkiOrganization, RpkiRoa, RpkiRoaPrefices
 
 
 class RpkiCertificateFilterSet(NetBoxModelFilterSet):
