@@ -1,6 +1,7 @@
 
 import django_tables2 as tables
 from netbox.tables import NetBoxTable, ChoiceFieldColumn
+import netbox_rpki
 from netbox_rpki.models import RpkiCertificate, RpkiOrganization, RpkiRoa, RpkiRoaPrefices
 
 
