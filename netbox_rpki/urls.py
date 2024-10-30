@@ -1,55 +1,38 @@
 from django.urls import path
 from netbox.views.generic import ObjectChangeLogView
+from utilities.urls import get_model_urls
 from netbox_rpki import models, views
 
 
 urlpatterns = (
-    path("RpkiCertificate/", views.RpkiCertificateListView.as_view(), name="RpkiCertificate_list"),
-    path("RpkiCertificate/add/", views.RpkiCertificateEditView.as_view(), name="RpkiCertificate_add"),
-    path("RpkiCertificate/<int:pk>/", views.RpkiCertificate.as_view(), name="RpkiCertificate"),
-    path("RpkiCertificate/<int:pk>/edit/", views.RpkiCertificateEditView.as_view(), name="RpkiCertificate_edit"),
-    path("RpkiCertificate/<int:pk>/delete/", views.RpkiCertificateDeleteView.as_view(), name="RpkiCertificate_delete"),
-    path(
-        "RpkiCertificate/<int:pk>/changelog/",
-        ObjectChangeLogView.as_view(),
-        name="RpkiCertificate_changelog",
-        kwargs={"model": models.RpkiCertificate},
-    ),
+    path("rpkicertificate/", views.RpkiCertificateListView.as_view(), name="rpkicertificate_list"),
+    path("rpkicertificate/add/", views.RpkiCertificateEditView.as_view(), name="cpkicertificate_add"),
+    path("rpkicertificate/<int:pk>/", views.RpkiCertificate.as_view(), name="RpkiCertificate"),
+    path("rpkicertificate/<int:pk>/edit/", views.RpkiCertificateEditView.as_view(), name="RpkiCertificate_edit"),
+    path("rpkicertificate/<int:pk>/delete/", views.RpkiCertificateDeleteView.as_view(), name="RpkiCertificate_delete"),
+    path('rpkicertificate/<int:pk>/', include(get_model_urls('netbox_rpki', 'rpkicertificate'))),
 
-    path("RpkiOrganization/", views.RpkiOrganizationListView.as_view(), name="RpkiOrganization_list"),
-    path("RpkiOrganization/add/", views.RpkiOrganizationEditView.as_view(), name="RpkiOrganization_add"),
-    path("RpkiOrganization/<int:pk>/", views.RpkiOrganization.as_view(), name="RpkiOrganization"),
-    path("RpkiOrganization/<int:pk>/edit/", views.RpkiOrganizationEditView.as_view(), name="RpkiOrganization_edit"),
-    path("RpkiOrganization/<int:pk>/delete/", views.RpkiOrganizationDeleteView.as_view(), name="RpkiOrganization_delete"),
-    path(
-        "RpkiOrganization/<int:pk>/changelog/",
-        ObjectChangeLogView.as_view(),
-        name="RpkiOrganization_changelog",
-        kwargs={"model": models.RpkiOrganization},
-    ),
+    path("rpkiorganization/", views.RpkiOrganizationListView.as_view(), name="rpkiorganization_list"),
+    path("rpkiorganization/add/", views.RpkiOrganizationEditView.as_view(), name="rpkiorganization_add"),
+    path("rpkiorganization/<int:pk>/", views.RpkiOrganization.as_view(), name="rpkiorganization"),
+    path("rpkiorganization/<int:pk>/edit/", views.RpkiOrganizationEditView.as_view(), name="rpkiorganization_edit"),
+    path("rpkiorganization/<int:pk>/delete/", views.RpkiOrganizationDeleteView.as_view(), name="rpkiorganization_delete"),
+    path('rpkiorganization/<int:pk>/', include(get_model_urls('netbox_rpki', 'rpkiorganization'))),
 
-    path("RpkiRoa/", views.RpkiRoaListView.as_view(), name="RpkiRoa_list"),
-    path("RpkiRoa/add/", views.RpkiRoaEditView.as_view(), name="RpkiRoa_add"),
-    path("RpkiRoa/<int:pk>/", views.RpkiRoa.as_view(), name="RpkiRoa"),
-    path("RpkiRoa/<int:pk>/edit/", views.RpkiRoaEditView.as_view(), name="RpkiRoa_edit"),
-    path("RpkiRoa/<int:pk>/delete/", views.RpkiRoaDeleteView.as_view(), name="RpkiRoa_delete"),
-    path(
-        "RpkiRoa/<int:pk>/changelog/",
-        ObjectChangeLogView.as_view(),
-        name="RpkiRoa_changelog",
-        kwargs={"model": models.RpkiRoa},
-    ),
+    
+    path("rpkiroa/", views.RpkiRoaListView.as_view(), name="rpkiroa_list"),
+    path("rpkiroa/add/", views.RpkiRoaEditView.as_view(), name="rpkiroa_add"),
+    path("rpkiroa/<int:pk>/", views.RpkiRoa.as_view(), name="rpkiroa"),
+    path("rpkiroa/<int:pk>/edit/", views.RpkiRoaEditView.as_view(), name="rpkiroa_edit"),
+    path("rpkiroa/<int:pk>/delete/", views.RpkiRoaDeleteView.as_view(), name="rpkiroa_delete"),
+    path('rpkiroa/<int:pk>/', include(get_model_urls('netbox_rpki', 'rpkiroa'))),
 
-
-    path("RpkiRoaPrefices/", views.RpkiRoaPreficesListView.as_view(), name="RpkiRoaPrefices_list"),
-    path("RpkiRoaPrefices/add/", views.RpkiRoaPreficesEditView.as_view(), name="RpkiRoaPrefices_add"),
-    path("RpkiRoaPrefices/<int:pk>/", views.RpkiRoaPrefices.as_view(), name="RpkiRoaPrefices"),
-    path("RpkiRoaPrefices/<int:pk>/edit/", views.RpkiRoaPreficesEditView.as_view(), name="RpkiRoaPrefices_edit"),
-    path("RpkiRoaPrefices/<int:pk>/delete/", views.RpkiRoaPreficesDeleteView.as_view(), name="RpkiRoaPrefices_delete"),
-    path(
-        "RpkiRoaPrefices/<int:pk>/changelog/",
-        ObjectChangeLogView.as_view(),
-        name="RpkiRoaPrefices_changelog",
-        kwargs={"model": models.RpkiRoaPrefices},
-    )
+    
+    path("rpkiroaprefices/", views.RpkiRoaPreficesListView.as_view(), name="rpkiroaprefices_list"),
+    path("rpkiroaprefices/add/", views.RpkiRoaPreficesEditView.as_view(), name="rpkiroaprefices_add"),
+    path("rpkiroaprefices/<int:pk>/", views.RpkiRoaPrefices.as_view(), name="rpkiroaprefices"),
+    path("rpkiroaprefices/<int:pk>/edit/", views.RpkiRoaPreficesEditView.as_view(), name="rpkiroaprefices_edit"),
+    path("rpkiroaprefices/<int:pk>/delete/", views.RpkiRoaPreficesDeleteView.as_view(), name="rpkiroaprefices_delete"),
+    path('rpkiroa/<int:pk>/', include(get_model_urls('netbox_rpki', 'rpkiroa'))),
+    
 )
