@@ -1,0 +1,78 @@
+{% extends 'generic/object.html' %}
+{% load render_table from django_tables2 %}
+
+{% block content %}
+  <div class="row mb-3">
+    <div class="col col-md-6">
+      <div class="card">
+        <h5 class="card-header">RPKI Customer Certificate</h5>
+        <div class="card-body">
+          <table class="table table-hover attr-table">
+            <tr>
+              <th scope="row">Name</th>
+              <td>{{ object.name }}</td>
+            </tr>
+            <tr>
+              <th scope="row">Issuer</th>
+              <td>{{ object.issuer }}</td>
+            </tr>
+            <tr>
+              <th scope="row">Subject</th>
+              <td>{{ object.subject }}</td>
+            </tr>
+            <tr>
+              <th scope="row">Serial</th>
+              <td>{{ object.issuer }}</td>
+            </tr>
+            <tr>
+              <th scope="row">Valid From</th>
+              <td>{{ object.validFrom }}</td>
+            </tr>
+            <tr>
+              <th scope="row">Valid To</th>
+              <td>{{ object.validTo }}</td>
+            </tr>
+            <tr>
+              <th scope="row">Public Key</th>
+              <td>{{ object.publicKey }}</td>
+            </tr>
+            <tr>
+              <th scope="row">Private Key</th>
+              <td>{{ object.privateKey }}</td>
+            </tr>
+            <tr>
+              <th scope="row">Publication URL</th>
+              <td>{{ object.publicationUrl }}</td>
+            </tr>
+            <tr>
+              <th scope="row">CA Repository</th>
+              <td>{{ object.caReporitory }}</td>
+            </tr>
+            <tr>
+              <th scope="row">Self Hosted</th>
+              <td>{{ object.selfHosted }}</td>
+            </tr>
+          </table>
+        </div>
+      </div>
+      {% include 'inc/panels/custom_fields.html' %}
+    </div>
+    <div class="col col-md-6">
+      {% include 'inc/panels/tags.html' %}
+      {% include 'inc/panels/comments.html' %}
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="col col-md-12">
+      <div class="card">
+        <h5 class="card-header">ROAs</h5>
+        <div class="card-body table-responsive">
+          {% render_table roas_table %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+{% endblock content %}

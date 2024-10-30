@@ -6,14 +6,9 @@ requires = ["setuptools>=64", "setuptools_scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools_scm]
-version_file = "netbox_ptov/_version.py"
-#fallback_version = '0.0.0'
-#version_scheme : str | Callable[[ScmVersion], str]
+version_file = "netbox_rpki/_version.py"
 
 [tool.setuptools.packages.find]
-#where = ["."]
-#include = ["dcnodatg*"]
-#include = ["src*"]
 exclude = [".venv*", "tests*", "docs*", ".github*", ".gitignore", "external_sources"]
 
 [tool.black]
@@ -21,10 +16,10 @@ line-length = 120
 target_version = ['py39', 'py310', 'py311', 'py312']
 
 [tool.setuptools.package-data]
-netbox_ptov = ["templates/**"]
+netbox_rpki = ["templates/**"]
 
 [project]
-name =  "netbox_ptov"
+name =  "netbox_rpki"
 dynamic = ["version"]
 authors = [
     {name = "Mencken Davidson", email = "mencken@gmail.com"},
@@ -34,7 +29,7 @@ maintainers = [
 ]
 license = {file = "LICENSE"}
 
-description = "NetBox plugin for ptov.  Uses dcnodatg project."
+description = "NetBox plugin for BGP RPKI support."
 readme = "README.md"
 
 classifiers=[
@@ -47,14 +42,14 @@ classifiers=[
     'Programming Language :: Python :: 3.12',
 ]
 
-dependencies = [ "dcnodatg", "build"]
-keywords = ["netbox", "plugin", "arista", "eapi", "eos", "gns3", "lab", "virtual", "ceos"]
+dependencies = [ "build"]
+keywords = ["netbox", "plugin", "bgp", "rpki", "roa"]
 requires-python= ">=3.12"
 
 [project.urls]
-Documentation = "https://github.com/menckend/netbox_ptov/blob/main/README.md"
-Source = "https://github.com/menckend/netbox_ptov"
-Tracker = "https://github.com/menckend/netbox_ptov/issues"
+Documentation = "https://github.com/menckend/netbox_rpki/blob/main/README.md"
+Source = "https://github.com/menckend/netbox_rpki"
+Tracker = "https://github.com/menckend/netbox_rpki/issues"
 
 [project.optional-dependencies]
 test = [

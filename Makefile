@@ -1,4 +1,4 @@
-sources = NetBox ptov Plugin
+sources = NetBox RPKI Plugin
 
 .PHONY: test format lint unittest pre-commit clean
 test: format lint unittest

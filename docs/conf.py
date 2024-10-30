@@ -7,18 +7,13 @@ import os
 import sys
 
 sys.path.insert(0, os.path.abspath('../images/'))
-sys.path.insert(0, os.path.abspath('../netbox_ptov/'))
+sys.path.insert(0, os.path.abspath('../netbox_rpki/'))
 
-#sys.path.insert(0, os.path.abspath('./external_sources/django/'))
-#sys.path.insert(0, os.path.abspath('./external_sources/dcnodatg/'))
-#sys.path.insert(0, os.path.abspath('../images/'))
-#sys.path.insert(0, os.path.abspath('./external_sources/netbox/'))
-#sys.path.insert(0, os.path.abspath('../netbox_ptov/'))
 
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
-project = 'Netbox PtoV Plugin'
+project = 'Netbox RPKI Plugin'
 copyright = '2024, Mencken Davidson'
 author = 'Mencken Davidson'
 
@@ -51,7 +46,7 @@ extensions = [
 autodoc_typehints = "description"
 autoapi_template_dir = "_templates/autoapi"
 autoapi_own_page_level = "module"
-autoapi_dirs = ['../netbox_ptov/']
+autoapi_dirs = ['../rpki/']
 autoapi_type = "python"
 autoapi_options = [
     "members",

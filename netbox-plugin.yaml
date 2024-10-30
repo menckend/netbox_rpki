@@ -1,15 +1,6 @@
 version: 0.1
-package_name: netbox_ptov
+package_name: netbox_rpki
 compatibility:
-  - release: 0.1.31
-    netbox_min: 4.1.0
-    netbox_max: 4.1.4
-  - release: 0.1.30
-    netbox_min: 4.1.0
-    netbox_max: 4.1.4
-  - release: 0.1.29
-    netbox_min: 4.1.0
-    netbox_max: 4.1.4
-  - release: 0.1.28
+  - release: 0.1.0
     netbox_min: 4.1.0
     netbox_max: 4.1.4
