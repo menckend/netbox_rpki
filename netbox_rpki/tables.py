@@ -9,7 +9,7 @@ class RpkiCertificateTable(NetBoxTable):
     name = tables.Column(linkify=True)
 
     class Meta(NetBoxTable.Meta):
-        model = netbox_rpki.models.RpkiCertificate, 
+        model = netbox_rpki.models.RpkiCertificate
         fields = ("pk", "id", "name", "issuer", "subject", "serial", "validFrom", "validTo", "publicKey", "privateKey", "publicationURL", "caRepository", "selfHosted", "rpkiOrg")
         default_columns = ("name", "issuer", "subject", "serial", "validFrom", "validTo", "publicKey", "privateKey", "publicationURL", "caRepository", "selfHosted", "rpkiOrg")
 
