@@ -15,7 +15,7 @@ class RpkiCertificateSerializer(NetBoxModelSerializer):
     url = HyperlinkedIdentityField(view_name="plugins-api:netbox_rpki:rpkicertificate-detail")
 
     class Meta:
-        model = RpkiCertificateSerializer
+        model = RpkiCertificate
         fields = ["id", "name", "issuer", "subject", "serial", "validFrom", "validTo", "publicKey", "privateKey", "publicationUrl", "caRepository","selfHosted", "rpkiOrg"]
         brief_fields = ("name", "issuer", "subject", "serial", "rpkiOrg")
 
