@@ -46,7 +46,7 @@ extensions = [
 autodoc_typehints = "description"
 autoapi_template_dir = "_templates/autoapi"
 autoapi_own_page_level = "module"
-autoapi_dirs = ['../rpki/']
+autoapi_dirs = ['../netbox_rpki/']
 autoapi_type = "python"
 autoapi_options = [
     "members",
