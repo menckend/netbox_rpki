@@ -1,6 +1,7 @@
 from django.db import models
 from django.urls import reverse
 from netbox.models import NetBoxModel
+from netbox.models import NetBoxModel
 
 
 class RpkiOrganization(NetBoxModel):
@@ -49,7 +50,7 @@ class RpkiCertificate(NetBoxModel):
 class RpkiRoa(NetBoxModel):
     name = models.CharField(max_length=200)
     originAs = models.ForeignKey(
-        to=netbox.ipam.models.ASN,
+        to=ipam.models.ASN,
         on_delete=models.CASCADE,
         related_name='asns'
     )   
