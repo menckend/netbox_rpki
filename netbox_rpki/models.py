@@ -1,7 +1,7 @@
 from django.db import models
 from django.urls import reverse
 from netbox.models import NetBoxModel
-from netbox.models import NetBoxModel
+from ipam.models.asns import ASN
 
 
 class RpkiOrganization(NetBoxModel):
