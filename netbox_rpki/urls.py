@@ -18,12 +18,12 @@ urlpatterns = [
     #path('certificate/<int:pk>/delete/', views.CertificateDeleteView.as_view(), name='certificate_delete'),
     #path('certificate/<int:pk>/', include(get_model_urls('netbox_rpki', 'certificate'))),
     # organization
-    path('organization/', netbox_rpki.views.OrganizationListView.as_view(), name='organization_list'),
-    #path('orgs/add/', netbox_rpki.views.OrganizationEditView.as_view(), name='organization_add'),
-    #path('orgs/<int:pk>/', netbox_rpki.views.OrganizationView.as_view(), name='organization'),
-    #path('orgs/<int:pk>/edit/', netbox_rpki.views.OrganizationEditView.as_view(), name='organization_edit'),
-    #path('orgs/<int:pk>/delete/', netbox_rpki.views.OrganizationDeleteView.as_view(), name='organization_delete'),
-    #path('orgs/<int:pk>/', include(get_model_urls('netbox_rpki', 'organization'))),
+    path('orgs/', netbox_rpki.views.OrganizationListView.as_view(), name='organization_list'),
+    path('orgs/add/', netbox_rpki.views.OrganizationEditView.as_view(), name='organization_add'),
+    path('orgs/<int:pk>/', netbox_rpki.views.OrganizationView.as_view(), name='organization'),
+    path('orgs/<int:pk>/edit/', netbox_rpki.views.OrganizationEditView.as_view(), name='organization_edit'),
+    path('orgs/<int:pk>/delete/', netbox_rpki.views.OrganizationDeleteView.as_view(), name='organization_delete'),
+    path('orgs/<int:pk>/', include(get_model_urls('netbox_rpki', 'organization'))),
     # roa
     #path('roa/', views.RoaListView.as_view(), name='roa_list'),
     #path('roa/add/', views.RoaEditView.as_view(), name='roa_add'),
