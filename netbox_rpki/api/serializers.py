@@ -9,39 +9,38 @@ from tenancy.api.serializers import TenantSerializer
 from dcim.api.serializers import SiteSerializer, DeviceSerializer
 
 
-from netbox_rpki.models import RpkiCertificate, RpkiOrganization, RpkiRoa, RpkiRoaPrefices 
+from netbox_rpki.models import certificate, organization, roa, roaprefices 
 
-class RpkiCertificateSerializer(NetBoxModelSerializer):
-    url = HyperlinkedIdentityField(view_name="plugins-api:netbox_rpki:rpkicertificate-detail")
+class certificateSerializer(NetBoxModelSerializer):
+    url = HyperlinkedIdentityField(view_name="plugins-api:netbox_rpki:certificate-detail")
 
     class Meta:
-        model = RpkiCertificate
+        model = certificate
         fields = ["id", "name", "issuer", "subject", "serial", "validFrom", "validTo", "publicKey", "privateKey", "publicationUrl", "caRepository","selfHosted", "rpkiOrg"]
         brief_fields = ("name", "issuer", "subject", "serial", "rpkiOrg")
 
 
-class RpkiOrganizationSerializer(NetBoxModelSerializer):
-    url = HyperlinkedIdentityField(view_name="plugins-api:netbox_rpki_:rpkiorganization-detail")
+class organizationSerializer(NetBoxModelSerializer):
+    url = HyperlinkedIdentityField(view_name="plugins-api:netbox_rpki_:organization-detail")
 
     class Meta:
-        model = RpkiOrganization
+        model = organization
         fields = ["id", "orgId", "orgName"]
         brief_fields = ("orgId", "orgName")
 
 
-class RpkiRoaSerializer(NetBoxModelSerializer):
-    url = HyperlinkedIdentityField(view_name="plugins-api:netbox_rpki_:rpkiroa-detail")
+class roaSerializer(NetBoxModelSerializer):
+    url = HyperlinkedIdentityField(view_name="plugins-api:netbox_rpki_:roa-detail")
 
     class Meta:
-        model = RpkiRoa
+        model = roa
         fields = ["id", "name", "originaAs", "validFrom", "validTo", "signedBy"]
         brief_fields = ("ordId", "orgName")
 
-class RpkiRoaPreficesSerializer(NetBoxModelSerializer):
-    url = HyperlinkedIdentityField(view_name="plugins-api:netbox_rpki_:rpkiroaprefices-detail")
+class roapreficesSerializer(NetBoxModelSerializer):
+    url = HyperlinkedIdentityField(view_name="plugins-api:netbox_rpki_:roaprefices-detail")
 
     class Meta:
-        model = RpkiRoaPrefices
+        model = roaprefices
         fields = ["id", "prefix", "maxlength", "roaName"]
         brief_fields = ("id", "prefix", "maxlength", "roaName")
-
