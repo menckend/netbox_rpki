@@ -2,7 +2,7 @@
 
 from netbox.views import generic
 from netbox_rpki import filtersets, forms, models, tables
-from netbox_rpki.models import certificate, organization, roa, roaprefices
+from models import certificate, organization, roa, roaprefices
 from django.shortcuts import render, redirect
 from django.contrib import messages
 import json
@@ -80,7 +80,7 @@ class roaListView(generic.ObjectListView):
 
 
 class roaEditView(generic.ObjectEditView):
-    queryset = models.roa.objects.all()
+    queryset = roa.objects.all()
     form = forms.roaForm
 
 
