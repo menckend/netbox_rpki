@@ -13,7 +13,7 @@ class CertificateForm(NetBoxModelForm):
 
     class Meta:
         model = netbox_rpki.models.Certificate
-        fields = ["name", "issuer", "subject", "serial", " valid_from", "valid_to", "public_key", "private_key", "publication_url", "ca_repository", "org_id", "self_hosted"]
+#        fields = ["name", "issuer", "subject", "serial", " valid_from", "valid_to", "public_key", "private_key", "publication_url", "ca_repository", "org_id", "self_hosted"]
 
 
 class OrganizationForm(NetBoxModelForm):
@@ -22,7 +22,7 @@ class OrganizationForm(NetBoxModelForm):
 
     class Meta:
         model = netbox_rpki.models.Organization
-        fields = ["org_id", "name"]
+#        fields = ["org_id", "name"]
 
 
 class RoaForm(NetBoxModelForm):
@@ -31,7 +31,7 @@ class RoaForm(NetBoxModelForm):
 
     class Meta:
         model = netbox_rpki.models.Roa
-        fields = ["name", "origin_as", "valid_from", "valid_to", "signed_by"]
+#        fields = ["name", "origin_as", "valid_from", "valid_to", "signed_by"]
 
 
 
@@ -41,5 +41,5 @@ class RoaPrefixForm(NetBoxModelForm):
 
     class Meta:
         model = netbox_rpki.models.RoaPrefix
-        fields = ["prefix", "max_length", "roa_name"]
+#        fields = ["prefix", "max_length", "roa_name"]
         
