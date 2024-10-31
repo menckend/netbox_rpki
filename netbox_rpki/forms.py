@@ -20,20 +20,22 @@ class OrganizationForm(NetBoxModelForm):
 
     class Meta:
         model = Organization
-        fields = ['org_id', 'name']
+#        fields = ['org_id', 'name']
+        fields = ['name']
 
 
 class RoaForm(NetBoxModelForm):
 
     class Meta:
         model = Roa
-        fields = ['name', 'origin_as', 'valid_from', 'valid_to', 'signed_by']
-
+#        fields = ['name', 'origin_as', 'valid_from', 'valid_to', 'signed_by']
+        fields = ['name']
 
 
 class RoaPrefixForm(NetBoxModelForm):
 
     class Meta:
         model = RoaPrefix
-        fields = ['prefix', 'max_length', 'roa_name']
+#        fields = ['prefix', 'max_length', 'roa_name']
+        fields = ['prefix']
         
