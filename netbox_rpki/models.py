@@ -7,10 +7,10 @@ from ipam.models.ip import Prefix
 
 class organization(NetBoxModel):
     orgId = models.CharField(max_length=200)
-    orgName = models.CharField(max_length=200)
+    name = models.CharField(max_length=200)
 
     class Meta:
-        ordering = ("orgName",)
+        ordering = ("name",)
 
     def __str__(self):
         return self.name
@@ -90,7 +90,7 @@ class roaprefices(NetBoxModel):
         ordering = ("prefix",)
 
     def __str__(self):
-        return self.name
+        return self.prefix
 
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:roaprefices", args=[self.pk])
