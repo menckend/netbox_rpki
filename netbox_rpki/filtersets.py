@@ -2,18 +2,18 @@ from netbox.filtersets import NetBoxModelFilterSet
 from netbox_rpki.models import RpkiCertificate, RpkiOrganization, RpkiRoa, RpkiRoaPrefices
 
 
-class RpkiCertificateFilterSet(NetBoxModelFilterSet):
+class certificateFilterSet(NetBoxModelFilterSet):
     class Meta:
-        model = RpkiCertificate
+        model = certificate
         fields = ['name', ]
 
 
     def search(self, queryset, name, value):
         return queryset.filter(description__icontains=value)
 
-class RpkiOrganizationFilterSet(NetBoxModelFilterSet):
+class organizationFilterSet(NetBoxModelFilterSet):
     class Meta:
-        model = RpkiOrganization
+        model = organization
         fields = ['orgName', ]
 
 
@@ -21,9 +21,9 @@ class RpkiOrganizationFilterSet(NetBoxModelFilterSet):
         return queryset.filter(description__icontains=value)
 
 
-class RpkiRoaFilterSet(NetBoxModelFilterSet):
+class roaFilterSet(NetBoxModelFilterSet):
     class Meta:
-        model = RpkiRoa
+        model = roa
         fields = ['name', ]
 
 
@@ -31,9 +31,9 @@ class RpkiRoaFilterSet(NetBoxModelFilterSet):
         return queryset.filter(description__icontains=value)
 
 
-class RpkiRoaPreficesFilterSet(NetBoxModelFilterSet):
+class roapreficesFilterSet(NetBoxModelFilterSet):
     class Meta:
-        model = RpkiRoaPrefices
+        model = roaprefices
         fields = ['prefix', ]
 
 
