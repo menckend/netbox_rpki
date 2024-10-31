@@ -2,7 +2,7 @@
 
 from netbox.views import generic
 from netbox_rpki import filtersets, forms, models, tables
-from netbox_rpki.models import RpkiCertificate, RpkiOrganization, RpkiRoa, RpkiRoaPrefices
+from netbox_rpki.models import certificate, organization, roa, roaprefices
 from django.shortcuts import render, redirect
 from django.contrib import messages
 import json
