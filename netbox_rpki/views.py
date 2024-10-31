@@ -2,87 +2,87 @@
 
 from netbox.views import generic
 from netbox_rpki import filtersets, forms, models, tables
-from netbox_rpki.models import certificate, organization, roa, roaprefices
+from netbox_rpki.models import Certificate, Organization, Roa, RoaPrefix
 from django.shortcuts import render, redirect
 from django.contrib import messages
 import json
 
 
-class certificateView(generic.ObjectView):
-    queryset = models.certificate.objects.all()
+class CertificateView(generic.ObjectView):
+    queryset = models.Certificate.objects.all()
 
     def get_extra_context(self, request, instance):
-        table = tables.roaTable(instance.signedBy.all())
+        roa_table = tables.RoaTable(instance.signed_by.all())
         table.configure(request)
 
         return {
-            'roas_table': table,
+            'signed_roas_table': roa_table,
         }
 
 
-class certificateListView(generic.ObjectListView):
-    queryset = models.certificate.objects.all()
-    table = tables.certificateTable
+class CertificateListView(generic.ObjectListView):
+    queryset = models.Certificate.objects.all()
+    table = tables.CertificateTable
 
 
-class certificateEditView(generic.ObjectEditView):
-    queryset = models.certificate.objects.all()
-    form = forms.certificateForm
+class CertificateEditView(generic.ObjectEditView):
+    queryset = models.Certificate.objects.all()
+    form = forms.CertificateForm
 
 
-class certificateDeleteView(generic.ObjectDeleteView):
-    queryset = models.certificate.objects.all()
+class CertificateDeleteView(generic.ObjectDeleteView):
+    queryset = models.Certificate.objects.all()
 
 
-class organizationiew(generic.ObjectView):
-    queryset = models.organization.objects.all()
+class Organizationiew(generic.ObjectView):
+    queryset = models.Organization.objects.all()
 
 
-class organizationListView(generic.ObjectListView):
-    queryset = models.organization.objects.all()
-    table = tables.organizationTable
+class OrganizationListView(generic.ObjectListView):
+    queryset = models.Organization.objects.all()
+    table = tables.OrganizationTable
 
 
-class organizationEditView(generic.ObjectEditView):
-    queryset = models.organization.objects.all()
-    form = forms.organizationForm
+class OrganizationEditView(generic.ObjectEditView):
+    queryset = models.Organization.objects.all()
+    form = forms.OrganizationForm
 
 
-class organizationDeleteView(generic.ObjectDeleteView):
-    queryset = models.organization.objects.all()
+class OrganizationDeleteView(generic.ObjectDeleteView):
+    queryset = models.Organization.objects.all()
 
 
-class roapreficesView(generic.ObjectView):
-    queryset = models.roaprefices.objects.all()
+class RoaPrefixView(generic.ObjectView):
+    queryset = models.RoaPrefix.objects.all()
 
 
-class roapreficesListView(generic.ObjectListView):
-    queryset = models.roaprefices.objects.all()
-    table = tables.roapreficesTable
+class RoaPrefixListView(generic.ObjectListView):
+    queryset = models.RoaPrefix.objects.all()
+    table = tables.RoaPrefixTable
 
 
-class roapreficesEditView(generic.ObjectEditView):
-    queryset = models.roaprefices.objects.all()
-    form = forms.roapreficesForm
+class RoaPrefixEditView(generic.ObjectEditView):
+    queryset = models.RoaPrefix.objects.all()
+    form = forms.RoaPrefixForm
 
 
-class roapreficesDeleteView(generic.ObjectDeleteView):
-    queryset = models.roaprefices.objects.all()
+class RoaPrefixDeleteView(generic.ObjectDeleteView):
+    queryset = models.RoaPrefix.objects.all()
 
 
-class roaView(generic.ObjectView):
-    queryset = models.roa.objects.all()
+class RoaView(generic.ObjectView):
+    queryset = models.Roa.objects.all()
 
 
-class roaListView(generic.ObjectListView):
-    queryset = models.roa.objects.all()
-    table = tables.roaTable
+class RoaListView(generic.ObjectListView):
+    queryset = models.Roa.objects.all()
+    table = tables.RoaTable
 
 
-class roaEditView(generic.ObjectEditView):
-    queryset = roa.objects.all()
-    form = forms.roaForm
+class RoaEditView(generic.ObjectEditView):
+    queryset = Roa.objects.all()
+    form = forms.RoaForm
 
 
-class roaDeleteView(generic.ObjectDeleteView):
-    queryset = models.roa.objects.all()
+class RoaDeleteView(generic.ObjectDeleteView):
+    queryset = models.Roa.objects.all()
