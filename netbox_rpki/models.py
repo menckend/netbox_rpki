@@ -5,7 +5,7 @@ from ipam.models.asns import ASN
 from ipam.models.ip import Prefix
 
 
-class RpkiOrganization(NetBoxModel):
+class organization(NetBoxModel):
     orgId = models.CharField(max_length=200)
     orgName = models.CharField(max_length=200)
 
@@ -16,10 +16,10 @@ class RpkiOrganization(NetBoxModel):
         return self.name
 
     def get_absolute_url(self):
-        return reverse("plugins:netbox_rpki:rpkiorganization", args=[self.pk])
+        return reverse("plugins:netbox_rpki:organization", args=[self.pk])
 
 
-class RpkiCertificate(NetBoxModel):
+class certificate(NetBoxModel):
     name = models.CharField(max_length=200)
     issuer = models.CharField(max_length=200)
     subject = models.CharField(max_length=200)
@@ -32,7 +32,7 @@ class RpkiCertificate(NetBoxModel):
     caRepository = models.URLField
     selfHosted = models.BooleanField
     rpkiOrg = models.ForeignKey(
-        to=RpkiOrganization,
+        to=organization,
         on_delete=models.CASCADE,
         related_name='certificates'
     )
@@ -45,20 +45,20 @@ class RpkiCertificate(NetBoxModel):
         return self.name
 
     def get_absolute_url(self):
-        return reverse("plugins:netbox_rpki:rpkicertificate", args=[self.pk])
+        return reverse("plugins:netbox_rpki:certificate", args=[self.pk])
 
 
-class RpkiRoa(NetBoxModel):
+class roa(NetBoxModel):
     name = models.CharField(max_length=200)
-    originAs = models.ForeignKey(
+    originas = models.ForeignKey(
         to=ASN,
         on_delete=models.CASCADE,
         related_name='asns'
     )   
-    validFrom = models.DateField
-    validTo =  models.DateField
-    signedBy = models.ForeignKey(
-        to=RpkiCertificate,
+    validfrom = models.DateField
+    validto =  models.DateField
+    signedby = models.ForeignKey(
+        to=certificate,
         on_delete=models.CASCADE,
         related_name='roas'
     )
@@ -69,10 +69,10 @@ class RpkiRoa(NetBoxModel):
         return self.name
 
     def get_absolute_url(self):
-        return reverse("plugins:netbox_rpki:rpkiroa", args=[self.pk])
+        return reverse("plugins:netbox_rpki:roa", args=[self.pk])
 
 
-class RpkiRoaPrefices(NetBoxModel):
+class roaprefices(NetBoxModel):
     prefix = models.ForeignKey(
         to= Prefix,
         on_delete=models.CASCADE,
@@ -80,9 +80,9 @@ class RpkiRoaPrefices(NetBoxModel):
     )
     maxLength = models.IntegerField
     roaName = models.ForeignKey(
-        to=RpkiRoa,
+        to=roa,
         on_delete=models.CASCADE,
-        related_name='prefixes'
+        related_name='prefices'
     )
 
 
@@ -93,4 +93,4 @@ class RpkiRoaPrefices(NetBoxModel):
         return self.name
 
     def get_absolute_url(self):
-        return reverse("plugins:netbox_rpki:rpkiroaprefices", args=[self.pk])
+        return reverse("plugins:netbox_rpki:roaprefices", args=[self.pk])
