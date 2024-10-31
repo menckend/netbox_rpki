@@ -2,7 +2,7 @@ from netbox.api.viewsets import NetBoxModelViewSet
 from rest_framework.routers import APIRootView
 
 from netbox_rpki.api.serializers import (
-    RpkiOrganizationSerializer, RpkiCertificateSerializer, RpkiRoaSerializer, RpkiRoaPreficesSerializer
+    organizationSerializer, certificateSerializer, roaSerializer, roapreficesSerializer
 )
 
 from netbox_rpki import filtersets, models
@@ -13,24 +13,24 @@ class RootView(APIRootView):
         return 'rpki'
 
 
-class RpkiOrganizationViewSet(NetBoxModelViewSet):
-    queryset = models.RpkiOrganization.objects.all()
-    serializer_class = RpkiOrganizationSerializer
-    filterset_class = filtersets.RpkiOrganizationFilterSet
+class organizationViewSet(NetBoxModelViewSet):
+    queryset = models.organization.objects.all()
+    serializer_class = organizationSerializer
+    filterset_class = filtersets.organizationFilterSet
 
 
-class RpkiCertificateViewSet(NetBoxModelViewSet):
-    queryset = models.RpkiCertificate.objects.all()
-    serializer_class = RpkiCertificateSerializer
-    filterset_class = filtersets.RpkiCertificateFilterSet
+class certificateViewSet(NetBoxModelViewSet):
+    queryset = models.certificate.objects.all()
+    serializer_class = certificateSerializer
+    filterset_class = filtersets.certificateFilterSet
 
 
-class RpkiRoaViewSet(NetBoxModelViewSet):
-    queryset = models.RpkiRoa.objects.all()
-    serializer_class = RpkiRoaSerializer
-    filterset_class = filtersets.RpkiRoaFilterSet
+class roaViewSet(NetBoxModelViewSet):
+    queryset = models.roa.objects.all()
+    serializer_class = roaSerializer
+    filterset_class = filtersets.roaFilterSet
 
-class RpkiRoaPreficesViewSet(NetBoxModelViewSet):
-    queryset = models.RpkiRoaPrefices.objects.all()
-    serializer_class = RpkiRoaPreficesSerializer
-    filterset_class = filtersets.RpkiRoaPreficesFilterSet
+class roapreficesViewSet(NetBoxModelViewSet):
+    queryset = models.roaPprefices.objects.all()
+    serializer_class = roapreficesSerializer
+    filterset_class = filtersets.roapreficesFilterSet
