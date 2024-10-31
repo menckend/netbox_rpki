@@ -5,11 +5,11 @@ from netbox.plugins import PluginMenuButton, PluginMenuItem, PluginMenu
 
 _menu_items = (
     PluginMenuItem(
-        link='plugins:netbox_rpki:rpkiorganization_list',
+        link='plugins:netbox_rpki:organization_list',
         link_text='RPKI Organizations',
         buttons=(
             PluginMenuButton(
-                link='plugins:netbox_rpki:rpkiorganization_add',
+                link='plugins:netbox_rpki:organization_add',
                 title='Add',
                 icon_class='mdi mdi-plus-thick',
             ),
@@ -17,11 +17,11 @@ _menu_items = (
     ),
 
     PluginMenuItem(
-        link='plugins:netbox_rpki:rpkicertificate_list',
+        link='plugins:netbox_rpki:certificate_list',
         link_text='RPKI Customer Certificates',
         buttons=(
             PluginMenuButton(
-                link='plugins:netbox_rpki:rpkicertificate_add',
+                link='plugins:netbox_rpki:certificate_add',
                 title='Add',
                 icon_class='mdi mdi-plus-thick',
             ),
@@ -29,11 +29,11 @@ _menu_items = (
     ),
 
     PluginMenuItem(
-        link='plugins:netbox_rpki:rpkiroa_list',
+        link='plugins:netbox_rpki:roa_list',
         link_text='RPKI ROAs',
         buttons=(
             PluginMenuButton(
-                link='plugins:netbox_rpki:rpkiroa_add',
+                link='plugins:netbox_rpki:roa_add',
                 title='Add',
                 icon_class='mdi mdi-plus-thick',
             ),
