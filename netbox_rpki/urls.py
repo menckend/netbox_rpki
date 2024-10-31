@@ -30,7 +30,7 @@ urlpatterns = [
     # RpkiRoaPrefices
     path('roaprefices/', views.RpkiRoaPreficesListView.as_view(), name='rpkiroaprefices_list'),
     path('roarefices/add/', views.RpkiRoaPreficesEditView.as_view(), name='rpkiroaprefices_add'),
-    path('roarefices/<int:pk>/', views.RpkiRoaPreficesView.as_view(), name='rpkiroarefices'),
+    path('roarefices/<int:pk>/', views.RpkiRoaPreficesView.as_view(), name='rpkiroaprefices'),
     path('roarefices/<int:pk>/edit/', views.RpkiRoaPreficesEditView.as_view(), name='rpkiroaprefices_edit'),
     path('roarefices/<int:pk>/delete/', views.RpkiRoaPreficesDeleteView.as_view(), name='rpkiroaprefices_delete'),
     path('roarefices/<int:pk>/', include(get_model_urls('netbox_rpki', 'rpkiroaprefices'))),
