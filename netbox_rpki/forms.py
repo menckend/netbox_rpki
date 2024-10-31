@@ -4,23 +4,23 @@ from ipam.models import Prefix
 from netbox.forms import NetBoxModelForm
 from utilities.forms.fields import CommentField, DynamicModelChoiceField
 from dcim.models import devices
-from netbox_rpki.models import certificate, organization, roa, roaprefices
+from netbox_rpki.models import Certificate, Organization, Roa, RoaPrefix
 
 
 class certificateForm(NetBoxModelForm):
-    model = certificate
-    fields = ["name", "issuer", "subject", "serial", " validFrom", "validTo", "publicKey", "privateKey", "publicationUrl", "caRepository", "OrgID", "selfHosted"]
+    model = Certificate
+    fields = ["name", "issuer", "subject", "serial", " valid_from", "valid_to", "public_key", "private_key", "publication_url", "ca_repository", "org_id", "self_hosted"]
 
 
-class organizationForm(NetBoxModelForm):
-    model = organization
-    fields = ["orgId", "name"]
+class OrganizationForm(NetBoxModelForm):
+    model = Organization
+    fields = ["org_id", "name"]
 
-class roaForm(NetBoxModelForm):
-    model = roa
-    fields = ["name", "originAs", "validFrom", "validTo", "signedBy"]
+class RoaForm(NetBoxModelForm):
+    model = Roa
+    fields = ["name", "origin_as", "valid_from", "valid_to", "signed_by"]
 
 
-class roapreficesForm(NetBoxModelForm):
-    model = roaprefices
-    fields = ["prefix", "maxLength", "roaName"]
+class RoaPrefixForm(NetBoxModelForm):
+    model = RoaPrefix
+    fields = ["prefix", "max_length", "roa_name"]
