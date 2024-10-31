@@ -11,7 +11,7 @@ class CertificateForm(NetBoxModelForm):
 
     class Meta:
         model = Certificate
-        fields = ("name")
+        fields = ['name',]
 
 
 class OrganizationForm(NetBoxModelForm):
