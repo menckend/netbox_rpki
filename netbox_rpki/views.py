@@ -35,7 +35,7 @@ class CertificateDeleteView(generic.ObjectDeleteView):
     queryset = netbox_rpki.models.Certificate.objects.all()
 
 
-class Organizationiew(generic.ObjectView):
+class OrganizationView(generic.ObjectView):
     queryset = netbox_rpki.models.Organization.objects.all()
 
 
