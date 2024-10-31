@@ -1,6 +1,6 @@
 from django.urls import include, path
 from utilities.urls import get_model_urls
-from netbox_rpki.models import RpkiOrganization, RpkiCertificate, RpkiRoa, RpkiRoaPrefices
+from netbox_rpki.models import organization, certificate, roa, roaprefices
 from netbox_rpki import  views
 
 app_name = 'netbox_rpki'
