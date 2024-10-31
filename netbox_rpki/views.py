@@ -22,68 +22,68 @@ class CertificateView(generic.ObjectView):
 
 
 class CertificateListView(generic.ObjectListView):
-    queryset = netbox_rpki.models.Certificate.objects.all()
-    table = tables.CertificateTable
+    queryset = Certificate.objects.all()
+    table = CertificateTable
 
 
 class CertificateEditView(generic.ObjectEditView):
-    queryset = netbox_rpki.models.Certificate.objects.all()
-    form = netbox_rpki.forms.CertificateForm
+    queryset = Certificate.objects.all()
+    form = CertificateForm
 
 
 class CertificateDeleteView(generic.ObjectDeleteView):
-    queryset = netbox_rpki.models.Certificate.objects.all()
+    queryset = Certificate.objects.all()
 
 
 class OrganizationView(generic.ObjectView):
-    queryset = netbox_rpki.models.Organization.objects.all()
+    queryset = Organization.objects.all()
 
 
 class OrganizationListView(generic.ObjectListView):
-    queryset = netbox_rpki.models.Organization.objects.all()
-    table = netbox_rpki.tables.OrganizationTable
+    queryset = Organization.objects.all()
+    table = OrganizationTable
 
 
 class OrganizationEditView(generic.ObjectEditView):
-    queryset = netbox_rpki.models.Organization.objects.all()
-    form = netbox_rpki.forms.OrganizationForm
+    queryset = Organization.objects.all()
+    form = OrganizationForm
 
 
 class OrganizationDeleteView(generic.ObjectDeleteView):
-    queryset = netbox_rpki.models.Organization.objects.all()
+    queryset = Organization.objects.all()
 
 
 class RoaPrefixView(generic.ObjectView):
-    queryset = netbox_rpki.models.RoaPrefix.objects.all()
+    queryset = RoaPrefix.objects.all()
 
 
 class RoaPrefixListView(generic.ObjectListView):
-    queryset = netbox_rpki.models.RoaPrefix.objects.all()
-    table = netbox_rpki.tables.RoaPrefixTable
+    queryset = RoaPrefix.objects.all()
+    table = RoaPrefixTable
 
 
 class RoaPrefixEditView(generic.ObjectEditView):
-    queryset = netbox_rpki.models.RoaPrefix.objects.all()
-    form = netbox_rpki.forms.RoaPrefixForm
+    queryset = RoaPrefix.objects.all()
+    form = RoaPrefixForm
 
 
 class RoaPrefixDeleteView(generic.ObjectDeleteView):
-    queryset = netbox_rpki.models.RoaPrefix.objects.all()
+    queryset = RoaPrefix.objects.all()
 
 
 class RoaView(generic.ObjectView):
-    queryset = netbox_rpki.models.Roa.objects.all()
+    queryset = Roa.objects.all()
 
 
 class RoaListView(generic.ObjectListView):
-    queryset = netbox_rpki.models.Roa.objects.all()
-    table = netbox_rpki.tables.RoaTable
+    queryset = Roa.objects.all()
+    table = RoaTable
 
 
 class RoaEditView(generic.ObjectEditView):
-    queryset = netbox_rpki.models.Roa.objects.all()
-    form = netbox_rpki.forms.RoaForm
+    queryset = Roa.objects.all()
+    form = RoaForm
 
 
 class RoaDeleteView(generic.ObjectDeleteView):
-    queryset = netbox_rpki.models.Roa.objects.all()
+    queryset = Roa.objects.all()
