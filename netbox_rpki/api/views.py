@@ -3,7 +3,7 @@ from rest_framework.routers import APIRootView
 
 import netbox_rpki
 from netbox_rpki.api.serializers import (
-    OrganizationSerializer, CertificateSerializer, RoaSerializer, RoaprefixSerializer
+    OrganizationSerializer, CertificateSerializer, RoaSerializer, RoaPrefixSerializer
 )
 
 from netbox_rpki import filtersets, models
