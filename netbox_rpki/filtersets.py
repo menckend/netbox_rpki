@@ -33,7 +33,7 @@ class RoaFilterSet(NetBoxModelFilterSet):
 
 class RoaPrefixFilterSet(NetBoxModelFilterSet):
     class Meta:
-        model = roaprefices
+        model = RoaPrefix
         fields = ['prefix', ]
 
 
