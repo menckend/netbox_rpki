@@ -1,29 +1,19 @@
 from netbox.filtersets import NetBoxModelFilterSet
-from netbox_rpki.models import certificate, organization, roa, roaprefices
+from netbox_rpki.models import Certificate, Organization, Roa, RoaPrefix
 
 
-class certificateFilterSet(NetBoxModelFilterSet):
+class CertificateFilterSet(NetBoxModelFilterSet):
     class Meta:
-        model = certificate
+        model = Certificate
         fields = ['name', ]
 
 
     def search(self, queryset, name, value):
         return queryset.filter(description__icontains=value)
 
-class organizationFilterSet(NetBoxModelFilterSet):
+class OrganizationFilterSet(NetBoxModelFilterSet):
     class Meta:
-        model = organization
-        fields = ['name', ]
-
-
-    def search(self, queryset, name, value):
-        return queryset.filter(description__icontains=value)
-
-
-class roaFilterSet(NetBoxModelFilterSet):
-    class Meta:
-        model = roa
+        model = Organization
         fields = ['name', ]
 
 
@@ -31,7 +21,17 @@ class roaFilterSet(NetBoxModelFilterSet):
         return queryset.filter(description__icontains=value)
 
 
-class roapreficesFilterSet(NetBoxModelFilterSet):
+class RoaFilterSet(NetBoxModelFilterSet):
+    class Meta:
+        model = Roa
+        fields = ['name', ]
+
+
+    def search(self, queryset, name, value):
+        return queryset.filter(description__icontains=value)
+
+
+class RoaPrefixFilterSet(NetBoxModelFilterSet):
     class Meta:
         model = roaprefices
         fields = ['prefix', ]
