@@ -3,16 +3,16 @@
 from netbox.api.routers import NetBoxRouter
 
 from netbox_rpki.api.views import (
-    RpkiCertificateViewSet, RpkiOrganizationViewSet, RpkiRoaViewSet, RpkiRoaPreficesViewSet, RootView
+    certificateViewSet, organizationViewSet, roaViewSet, roapreficesViewSet, RootView
 )
 
 app_name = 'netbox_ptov'
 
 router = NetBoxRouter()
 router.APIRootView = RootView
-router.register('rpkicertificate', RpkiCertificateViewSet, basename='rpkicertificate')
-router.register('rpkiorganization', RpkiOrganizationViewSet, basename='rpkiorganization')
-router.register('rpkiroa', RpkiRoaViewSet, basename='rpkiroa')
-router.register('rpkiroaprefices', RpkiRoaPreficesViewSet, basename='rpkiroaprefices')
+router.register('certificate', certificateViewSet, basename='certificate')
+router.register('organization', organizationViewSet, basename='organization')
+router.register('roa', roaViewSet, basename='roa')
+router.register('roaprefices', roapreficesViewSet, basename='roaprefices')
 
 urlpatterns = router.urls
