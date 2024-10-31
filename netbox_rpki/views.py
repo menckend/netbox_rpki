@@ -8,11 +8,11 @@ from django.contrib import messages
 import json
 
 
-class RpkiCertificateView(generic.ObjectView):
-    queryset = models.RpkiCertificate.objects.all()
+class certificateView(generic.ObjectView):
+    queryset = models.certificate.objects.all()
 
     def get_extra_context(self, request, instance):
-        table = tables.rpkiRoaTable(instance.signedBy.all())
+        table = tables.roaTable(instance.signedBy.all())
         table.configure(request)
 
         return {
@@ -20,69 +20,69 @@ class RpkiCertificateView(generic.ObjectView):
         }
 
 
-class RpkiCertificateListView(generic.ObjectListView):
-    queryset = models.RpkiCertificate.objects.all()
-    table = tables.RpkiCertificateTable
+class certificateListView(generic.ObjectListView):
+    queryset = models.certificate.objects.all()
+    table = tables.certificateTable
 
 
-class RpkiCertificateEditView(generic.ObjectEditView):
-    queryset = models.RpkiCertificate.objects.all()
-    form = forms.RpkiCertificateForm
+class certificateEditView(generic.ObjectEditView):
+    queryset = models.certificate.objects.all()
+    form = forms.certificateForm
 
 
-class RpkiCertificateDeleteView(generic.ObjectDeleteView):
-    queryset = models.RpkiCertificate.objects.all()
+class certificateDeleteView(generic.ObjectDeleteView):
+    queryset = models.certificate.objects.all()
 
 
-class RpkiOrganizationiew(generic.ObjectView):
-    queryset = models.RpkiOrganization.objects.all()
+class organizationiew(generic.ObjectView):
+    queryset = models.organization.objects.all()
 
 
-class RpkiOrganizationListView(generic.ObjectListView):
-    queryset = models.RpkiOrganization.objects.all()
-    table = tables.RpkiOrganizationTable
+class organizationListView(generic.ObjectListView):
+    queryset = models.organization.objects.all()
+    table = tables.organizationTable
 
 
-class RpkiOrganizationEditView(generic.ObjectEditView):
-    queryset = models.RpkiOrganization.objects.all()
-    form = forms.RpkiOrganizationForm
+class organizationEditView(generic.ObjectEditView):
+    queryset = models.organization.objects.all()
+    form = forms.organizationForm
 
 
-class RpkiOrganizationDeleteView(generic.ObjectDeleteView):
-    queryset = models.RpkiOrganization.objects.all()
+class organizationDeleteView(generic.ObjectDeleteView):
+    queryset = models.organization.objects.all()
 
 
-class RpkiRoaPreficesView(generic.ObjectView):
-    queryset = models.RpkiRoaPrefices.objects.all()
+class roapreficesView(generic.ObjectView):
+    queryset = models.roaprefices.objects.all()
 
 
-class RpkiRoaPreficesListView(generic.ObjectListView):
-    queryset = models.RpkiRoaPrefices.objects.all()
-    table = tables.RpkiRoaPreficesTable
+class roapreficesListView(generic.ObjectListView):
+    queryset = models.roaprefices.objects.all()
+    table = tables.roapreficesTable
 
 
-class RpkiRoaPreficesEditView(generic.ObjectEditView):
-    queryset = models.RpkiRoaPrefices.objects.all()
-    form = forms.RpkiRoaPreficesForm
+class roapreficesEditView(generic.ObjectEditView):
+    queryset = models.roaprefices.objects.all()
+    form = forms.roapreficesForm
 
 
-class RpkiRoaPreficesDeleteView(generic.ObjectDeleteView):
-    queryset = models.RpkiRoaPrefices.objects.all()
+class roapreficesDeleteView(generic.ObjectDeleteView):
+    queryset = models.roaprefices.objects.all()
 
 
-class RpkiRoaView(generic.ObjectView):
-    queryset = models.RpkiRoa.objects.all()
+class roaView(generic.ObjectView):
+    queryset = models.roa.objects.all()
 
 
-class RpkiRoaListView(generic.ObjectListView):
-    queryset = models.RpkiRoa.objects.all()
-    table = tables.RpkiRoaTable
+class roaListView(generic.ObjectListView):
+    queryset = models.roa.objects.all()
+    table = tables.roaTable
 
 
-class RpkiRoaEditView(generic.ObjectEditView):
-    queryset = models.RpkiRoa.objects.all()
-    form = forms.RpkiRoaForm
+class roaEditView(generic.ObjectEditView):
+    queryset = models.roa.objects.all()
+    form = forms.roaForm
 
 
-class RpkiRoaDeleteView(generic.ObjectDeleteView):
-    queryset = models.RpkiRoa.objects.all()
+class roaDeleteView(generic.ObjectDeleteView):
+    queryset = models.roa.objects.all()
