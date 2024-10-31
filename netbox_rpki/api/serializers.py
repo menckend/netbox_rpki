@@ -9,7 +9,7 @@ from tenancy.api.serializers import TenantSerializer
 from dcim.api.serializers import SiteSerializer, DeviceSerializer
 
 import netbox_rpki
-from netbox_rpki.models import Certificate, Organization, Roa, Roaprefix
+from netbox_rpki.models import Certificate, Organization, Roa, RoaPrefix
 
 class CertificateSerializer(NetBoxModelSerializer):
     url = HyperlinkedIdentityField(view_name="plugins-api:netbox_rpki:certificate-detail")
