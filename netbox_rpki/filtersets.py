@@ -14,7 +14,7 @@ class certificateFilterSet(NetBoxModelFilterSet):
 class organizationFilterSet(NetBoxModelFilterSet):
     class Meta:
         model = organization
-        fields = ['orgName', ]
+        fields = ['name', ]
 
 
     def search(self, queryset, name, value):
