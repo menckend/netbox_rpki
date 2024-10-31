@@ -81,7 +81,7 @@ class RoaListView(generic.ObjectListView):
 
 
 class RoaEditView(generic.ObjectEditView):
-    queryset = netbox_rpki.Roa.objects.all()
+    queryset = netbox_rpki.models.Roa.objects.all()
     form = netbox_rpki.forms.RoaForm
 
 
