@@ -15,7 +15,7 @@ urlpatterns = [
     path('certificates/<int:pk>/', include(get_model_urls('netbox_rpki', 'rpkicertificate'))),
     # RpkiOrganization
     path('orgs/', views.RpkiOrganizationListView.as_view(), name='rpkiOrganization_list'),
-#    path('orgs/add/', views.RpkiOrganizationEditView.as_view(), name='rpkiOrganization_add'),
+    path('orgs/add/', views.RpkiOrganizationEditView.as_view(), name='rpkiOrganization_add'),
 #    path('orgs/<int:pk>/', views.RpkiOrganizationView.as_view(), name='rpkiOrganization'),
 #    path('orgs/<int:pk>/edit/', views.RpkiOrganizationEditView.as_view(), name='rpkiOrganization_edit'),
 #    path('orgs/<int:pk>/delete/', views.RpkiOrganizationDeleteView.as_view(), name='rpkiOrganization_delete'),
