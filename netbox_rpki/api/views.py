@@ -31,6 +31,6 @@ class roaViewSet(NetBoxModelViewSet):
     filterset_class = filtersets.roaFilterSet
 
 class roapreficesViewSet(NetBoxModelViewSet):
-    queryset = models.roaPprefices.objects.all()
+    queryset = models.roaprefices.objects.all()
     serializer_class = roapreficesSerializer
     filterset_class = filtersets.roapreficesFilterSet
