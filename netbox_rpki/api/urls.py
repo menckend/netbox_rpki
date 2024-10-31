@@ -13,6 +13,6 @@ router.APIRootView = RootView
 router.register('certificate', CertificateViewSet, basename='certificate')
 router.register('organization', OrganizationViewSet, basename='organization')
 router.register('roa', RoaViewSet, basename='roa')
-router.register('roaprefices', RoaprefixViewSet, basename='roaprefices')
+router.register('roaprefix', RoaprefixViewSet, basename='roaprefix')
 
 urlpatterns = router.urls
