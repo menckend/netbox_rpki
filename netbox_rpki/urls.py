@@ -16,7 +16,7 @@ urlpatterns = [
     # organization
     path('orgs/', views.organizationListView.as_view(), name='organization_list'),
     path('orgs/add/', views.organizationEditView.as_view(), name='organization_add'),
-    path('orgs/<int:pk>/', views.organizationView.as_view(), name='organization'),
+#    path('orgs/<int:pk>/', views.organizationView.as_view(), name='organization'),
 #    path('orgs/<int:pk>/edit/', views.organizationEditView.as_view(), name='organization_edit'),
 #    path('orgs/<int:pk>/delete/', views.organizationDeleteView.as_view(), name='organization_delete'),
 #    path('orgs/<int:pk>/', include(get_model_urls('netbox_rpki', 'organization'))),
