@@ -14,7 +14,7 @@ class certificateForm(NetBoxModelForm):
 
 class organizationForm(NetBoxModelForm):
     model = organization
-    fields = ["orgId", "orgName"]
+    fields = ["orgId", "name"]
 
 class roaForm(NetBoxModelForm):
     model = roa
