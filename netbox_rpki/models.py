@@ -32,7 +32,7 @@ class Certificate(NetBoxModel):
     ca_repository = models.URLField
     self_hosted = models.BooleanField
     rpki_org = models.ForeignKey(
-        to=organization,
+        to=Organization,
         on_delete=models.CASCADE,
         related_name='certificates'
     )
@@ -58,7 +58,7 @@ class Roa(NetBoxModel):
     valid_from = models.DateField
     valid_to =  models.DateField
     signed_by = models.ForeignKey(
-        to=certificate,
+        to=Certificate,
         on_delete=models.PROTECT,
         related_name='roas'
     )
@@ -80,7 +80,7 @@ class RoaPrefix(NetBoxModel):
     )
     max_length = models.IntegerField
     roa_name = models.ForeignKey(
-        to=roa,
+        to=Roa,
         on_delete=models.PROTECT,
         related_name='prefixes'
     )
