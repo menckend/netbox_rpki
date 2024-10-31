@@ -4,7 +4,8 @@ from ipam.models import Prefix
 from netbox.forms import NetBoxModelForm
 from utilities.forms.fields import CommentField, DynamicModelChoiceField
 from dcim.models import devices
-from netbox_rpki.models import Certificate, Organization, Roa, RoaPrefix
+#from netbox_rpki.models import Certificate, Organization, Roa, RoaPrefix
+from .models import Certificate, Organization, Roa, RoaPrefix
 
 
 class CertificateForm(NetBoxModelForm):
