@@ -6,32 +6,32 @@ from netbox_rpki import  views
 app_name = 'netbox_rpki'
 
 urlpatterns = [
-    # RpkiCertificate
-    path('certificates/', views.RpkiCertificateListView.as_view(), name='rpkicertificate_list'),
-    path('certificates/add/', views.RpkiCertificateEditView.as_view(), name='rpkicertificate_add'),
-    path('certificates/<int:pk>/', views.RpkiCertificateView.as_view(), name='rpkicertificate'),
-    path('certificates/<int:pk>/edit/', views.RpkiCertificateEditView.as_view(), name='rpkicertificate_edit'),
-    path('certificates/<int:pk>/delete/', views.RpkiCertificateDeleteView.as_view(), name='rpkicertificate_delete'),
-    path('certificates/<int:pk>/', include(get_model_urls('netbox_rpki', 'rpkicertificate'))),
-    # RpkiOrganization
-    path('orgs/', views.RpkiOrganizationListView.as_view(), name='rpkiorganization_list'),
-    path('orgs/add/', views.RpkiOrganizationEditView.as_view(), name='rpkiorganization_add'),
-#    path('orgs/<int:pk>/', views.RpkiOrganizationView.as_view(), name='rpkiorganization'),
-#    path('orgs/<int:pk>/edit/', views.RpkiOrganizationEditView.as_view(), name='rpkiorganization_edit'),
-#    path('orgs/<int:pk>/delete/', views.RpkiOrganizationDeleteView.as_view(), name='rpkiorganization_delete'),
-#    path('orgs/<int:pk>/', include(get_model_urls('netbox_rpki', 'rpkiorganization'))),
-    # RpkiRoa
-    path('roa/', views.RpkiRoaListView.as_view(), name='rpkiroa_list'),
-    path('roa/add/', views.RpkiRoaEditView.as_view(), name='rpkiroa_add'),
-#    path('roa/<int:pk>/', views.RpkiRoaView.as_view(), name='rpkiroa'),
-#    path('roa/<int:pk>/edit/', views.RpkiRoaEditView.as_view(), name='rpkiroa_edit'),
-#    path('roa/<int:pk>/delete/', views.RpkiRoaDeleteView.as_view(), name='rpkiroa_delete'),
-#    path('roa/<int:pk>/', include(get_model_urls('netbox_rpki', 'rpkiroa'))),
-    # RpkiRoaPrefices
-    path('roaprefices/', views.RpkiRoaPreficesListView.as_view(), name='rpkiroaprefices_list'),
-#    path('roarefices/add/', views.RpkiRoaPreficesEditView.as_view(), name='rpkiroaprefices_add'),
-#    path('roarefices/<int:pk>/', views.RpkiRoaPreficesView.as_view(), name='rpkiroaprefices'),
-#    path('roarefices/<int:pk>/edit/', views.RpkiRoaPreficesEditView.as_view(), name='rpkiroaprefices_edit'),
-#    path('roarefices/<int:pk>/delete/', views.RpkiRoaPreficesDeleteView.as_view(), name='rpkiroaprefices_delete'),
-#    path('roarefices/<int:pk>/', include(get_model_urls('netbox_rpki', 'rpkiroaprefices'))),
+    # certificate
+    path('certificates/', views.certificateListView.as_view(), name='certificate_list'),
+    path('certificates/add/', views.certificateEditView.as_view(), name='certificate_add'),
+    path('certificates/<int:pk>/', views.certificateView.as_view(), name='certificate'),
+    path('certificates/<int:pk>/edit/', views.certificateEditView.as_view(), name='certificate_edit'),
+    path('certificates/<int:pk>/delete/', views.certificateDeleteView.as_view(), name='certificate_delete'),
+    path('certificates/<int:pk>/', include(get_model_urls('netbox_rpki', 'certificate'))),
+    # organization
+    path('orgs/', views.organizationListView.as_view(), name='organization_list'),
+    path('orgs/add/', views.organizationEditView.as_view(), name='organization_add'),
+    path('orgs/<int:pk>/', views.organizationView.as_view(), name='organization'),
+    path('orgs/<int:pk>/edit/', views.organizationEditView.as_view(), name='organization_edit'),
+    path('orgs/<int:pk>/delete/', views.organizationDeleteView.as_view(), name='organization_delete'),
+    path('orgs/<int:pk>/', include(get_model_urls('netbox_rpki', 'organization'))),
+    # roa
+    path('roa/', views.roaListView.as_view(), name='roa_list'),
+    path('roa/add/', views.roaEditView.as_view(), name='roa_add'),
+    path('roa/<int:pk>/', views.roaView.as_view(), name='roa'),
+    path('roa/<int:pk>/edit/', views.roaEditView.as_view(), name='roa_edit'),
+    path('roa/<int:pk>/delete/', views.roaDeleteView.as_view(), name='roa_delete'),
+    path('roa/<int:pk>/', include(get_model_urls('netbox_rpki', 'roa'))),
+    # roaprefices
+    path('roaprefices/', views.roapreficesListView.as_view(), name='roaprefices_list'),
+    path('roaprefices/add/', views.RpkiRoaPreficesEditView.as_view(), name='roaprefices_add'),
+    path('roaprefices/<int:pk>/', views.RpkiRoaPreficesView.as_view(), name='roaprefices'),
+    path('roaprefices/<int:pk>/edit/', views.RpkiRoaPreficesEditView.as_view(), name='roaprefices_edit'),
+    path('roaprefices/<int:pk>/delete/', views.RpkiRoaPreficesDeleteView.as_view(), name='roaprefices_delete'),
+    path('roaprefices/<int:pk>/', include(get_model_urls('netbox_rpki', 'roaprefices'))),
 ]
