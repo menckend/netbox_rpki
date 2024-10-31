@@ -8,8 +8,8 @@ app_name = 'netbox_rpki'
 urlpatterns = [
     # certificate
     path('certificates/', views.CertificateListView.as_view(), name='certificate_list'),
-    path('certificates/add/', views.CertificateEditView.as_view(), name='certificate_add'),
-    path('certificates/<int:pk>/', views.CertificateView.as_view(), name='certificate'),
+    #path('certificates/add/', views.CertificateEditView.as_view(), name='certificate_add'),
+    #path('certificates/<int:pk>/', views.CertificateView.as_view(), name='certificate'),
     #path('certificates/<int:pk>/edit/', views.CertificateEditView.as_view(), name='certificate_edit'),
     #path('certificates/<int:pk>/delete/', views.CertificateDeleteView.as_view(), name='certificate_delete'),
     #path('certificates/<int:pk>/', include(get_model_urls('netbox_rpki', 'certificate'))),
