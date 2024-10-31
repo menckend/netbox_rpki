@@ -1,5 +1,5 @@
 from netbox.filtersets import NetBoxModelFilterSet
-from netbox_rpki.models import RpkiCertificate, RpkiOrganization, RpkiRoa, RpkiRoaPrefices
+from netbox_rpki.models import certificate, organization, roa, roaprefices
 
 
 class certificateFilterSet(NetBoxModelFilterSet):
