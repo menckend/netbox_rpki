@@ -2,7 +2,7 @@ from netbox.api.viewsets import NetBoxModelViewSet
 from rest_framework.routers import APIRootView
 
 from netbox_rpki.api.serializers import (
-    organizationSerializer, certificateSerializer, roaSerializer, roapreficesSerializer
+    OrganizationSerializer, CertificateSerializer, RoaSerializer, RoaprefixSerializer
 )
 
 from netbox_rpki import filtersets, models
@@ -14,23 +14,23 @@ class RootView(APIRootView):
 
 
 class organizationViewSet(NetBoxModelViewSet):
-    queryset = models.organization.objects.all()
-    serializer_class = organizationSerializer
-    filterset_class = filtersets.organizationFilterSet
+    queryset = models.Organization.objects.all()
+    serializer_class = OrganizationSerializer
+    filterset_class = filtersets.OrganizationFilterSet
 
 
-class certificateViewSet(NetBoxModelViewSet):
-    queryset = models.certificate.objects.all()
-    serializer_class = certificateSerializer
-    filterset_class = filtersets.certificateFilterSet
+class CertificateViewSet(NetBoxModelViewSet):
+    queryset = models.Certificate.objects.all()
+    serializer_class = CertificateSerializer
+    filterset_class = filtersets.CertificateFilterSet
 
 
 class roaViewSet(NetBoxModelViewSet):
-    queryset = models.roa.objects.all()
-    serializer_class = roaSerializer
-    filterset_class = filtersets.roaFilterSet
+    queryset = models.Roa.objects.all()
+    serializer_class = RoaSerializer
+    filterset_class = filtersets.RoaFilterSet
 
 class roapreficesViewSet(NetBoxModelViewSet):
-    queryset = models.roaprefices.objects.all()
-    serializer_class = roapreficesSerializer
-    filterset_class = filtersets.roapreficesFilterSet
+    queryset = models.RoaPrefix.objects.all()
+    serializer_class = RoaPrefixSerializer
+    filterset_class = filtersets.RoaPrefixFilterSet
