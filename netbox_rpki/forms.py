@@ -1,18 +1,19 @@
-import netbox_rpki
+#import netbox_rpki
 from django import forms
-from ipam.models import Prefix
+#from ipam.models import Prefix
 from netbox.forms import NetBoxModelForm
-from utilities.forms.fields import CommentField, DynamicModelChoiceField
-from dcim.models import devices
+#from utilities.forms.fields import CommentField, DynamicModelChoiceField
+#from dcim.models import devices
 #from netbox_rpki.models import Certificate, Organization, Roa, RoaPrefix
-from .models import Certificate, Organization, Roa, RoaPrefix
+from netbox_rpki.models import Certificate, Organization, Roa, RoaPrefix
 
 
 class CertificateForm(NetBoxModelForm):
 
     class Meta:
         model = Certificate
-        fields = ['name', 'issuer', 'subject', 'serial', 'valid_from', 'valid_to', 'public_key', 'private_key', 'publication_url', 'ca_repository', 'org_id', 'self_hosted']
+#        fields = ['name', 'issuer', 'subject', 'serial', 'valid_from', 'valid_to', 'public_key', 'private_key', 'publication_url', 'ca_repository', 'org_id', 'self_hosted']
+        fields = ['name']
 
 
 class OrganizationForm(NetBoxModelForm):
