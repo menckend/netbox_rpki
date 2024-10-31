@@ -2,38 +2,38 @@
 import django_tables2 as tables
 from netbox.tables import NetBoxTable, ChoiceFieldColumn
 import netbox_rpki
-from netbox_rpki.models import certificate, organization, roa, roaprefices
+from netbox_rpki.models import Certificate, Organization, Roa, RoaPrefix
 
 
-class certificateTable(NetBoxTable):
+class CertificateTable(NetBoxTable):
     name = tables.Column(linkify=True)
 
     class Meta(NetBoxTable.Meta):
-        model = netbox_rpki.models.certificate
-        fields = ("pk", "id", "name", "issuer", "subject", "serial", "validFrom", "validTo", "publicKey", "privateKey", "publicationURL", "caRepository", "selfHosted", "rpkiOrg")
-        default_columns = ("name", "issuer", "subject", "serial", "validFrom", "validTo", "publicKey", "privateKey", "publicationURL", "caRepository", "selfHosted", "rpkiOrg")
+        model = Certificate
+        fields = ("pk", "id", "name", "issuer", "subject", "serial", "valid_from", "valid_to", "publicKey", "private_key", "publication_url", "ca_repository", "self_hosted", "rpki_org")
+        default_columns = ("name", "issuer", "subject", "serial", "valid_from", "valid_to", "publicKey", "private_key", "publication_url;", "ca_repository", "self_hosted", "rpki_org")
 
-class organizationTable(NetBoxTable):
+class OrganizationTable(NetBoxTable):
     name = tables.Column(linkify=True)
 
     class Meta(NetBoxTable.Meta):
-        model = netbox_rpki.models.organization
-        fields = ("pk", "id", "orgId", "name")
-        default_columns = ("orgId", "name",)
+        model = Organization
+        fields = ("pk", "id", "org_id", "name")
+        default_columns = ("org_id", "name",)
 
-class roaTable(NetBoxTable):
+class RoaTable(NetBoxTable):
     name = tables.Column(linkify=True)
 
     class Meta(NetBoxTable.Meta):
-        model = netbox_rpki.models.roa
-        fields = ("pk", "id", 'name', "originAs", "validFrom", "validTo", "signedBy")
-        default_columns = ("name", "originAs", "validFrom", "validTo", "signedBy")
+        model = Roa
+        fields = ("pk", "id", 'name', "origin_as", "valid_from", "valid_to", "signed_by")
+        default_columns = ("name", "origin_as", "valid_from", "valid_to", "signed_by")
 
 
-class roapreficesTable(NetBoxTable):
+class RoaPrefixTable(NetBoxTable):
     name = tables.Column(linkify=True)
 
     class Meta(NetBoxTable.Meta):
-        model = netbox_rpki.models.roaprefices
-        fields = ("pk", "id", "prefix", "maxLength", "roaName")
-        default_columns = ("prefix", "maxLength", "roaName")
+        model = RoaPrefix
+        fields = ("pk", "id", "prefix", "max_length", "roa_name")
+        default_columns = ("prefix", "max_length", "roa_name")
