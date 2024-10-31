@@ -10,7 +10,7 @@ app_name = 'netbox_rpki'
 
 router = NetBoxRouter()
 router.APIRootView = RootView
-router.register('certificate', netbox_rpki.aapi.views.CertificateViewSet, basename='certificate')
+router.register('certificate', netbox_rpki.api.views.CertificateViewSet, basename='certificate')
 router.register('organization', netbox_rpki.api.views.OrganizationViewSet, basename='organization')
 router.register('roa', netbox_rpki.api.views.RoaViewSet, basename='roa')
 router.register('roaprefix', RoaprefixViewSet, basename='roaprefix')
