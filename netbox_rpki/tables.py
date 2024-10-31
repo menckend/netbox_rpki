@@ -18,8 +18,8 @@ class organizationTable(NetBoxTable):
 
     class Meta(NetBoxTable.Meta):
         model = netbox_rpki.models.organization
-        fields = ("pk", "id", "orgId", "orgName")
-        default_columns = ("orgName",)
+        fields = ("pk", "id", "orgId", "name")
+        default_columns = ("orgId", "name",)
 
 class roaTable(NetBoxTable):
     name = tables.Column(linkify=True)
