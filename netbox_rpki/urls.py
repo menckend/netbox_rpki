@@ -1,24 +1,28 @@
 from django.urls import include, path
 from utilities.urls import get_model_urls
-from netbox_rpki.models import Organization, Certificate, Roa, RoaPrefix
-from netbox_rpki import  views
+
+import netbox_rpki
+from netbox_rpki.models import (
+    Organization, Certificate, Roa, RoaPrefix
+)
+from netbox_rpki import views
 
 app_name = 'netbox_rpki'
 
 urlpatterns = [
     # certificate
     #path('certificate/', views.CertificateListView.as_view(), name='certificate_list'),
-    path('certificate/add/', views.CertificateEditView.as_view(), name='certificate_add'),
+    #path('certificate/add/', views.CertificateEditView.as_view(), name='certificate_add'),
     #path('certificate/<int:pk>/', views.CertificateView.as_view(), name='certificate'),
     #path('certificate/<int:pk>/edit/', views.CertificateEditView.as_view(), name='certificate_edit'),
     #path('certificate/<int:pk>/delete/', views.CertificateDeleteView.as_view(), name='certificate_delete'),
     #path('certificate/<int:pk>/', include(get_model_urls('netbox_rpki', 'certificate'))),
     # organization
-    #path('orgs/', views.OrganizationListView.as_view(), name='organization_list'),
-    #ath('orgs/add/', views.OrganizationEditView.as_view(), name='organization_add'),
-    #path('orgs/<int:pk>/', views.OrganizationView.as_view(), name='organization'),
-    #path('orgs/<int:pk>/edit/', views.OrganizationEditView.as_view(), name='organization_edit'),
-    #path('orgs/<int:pk>/delete/', views.OrganizationDeleteView.as_view(), name='organization_delete'),
+    #path('orgs/', netbox_rpki.views.OrganizationListView.as_view(), name='organization_list'),
+    #path('orgs/add/', netbox_rpki.views.OrganizationEditView.as_view(), name='organization_add'),
+    #path('orgs/<int:pk>/', netbox_rpki.views.OrganizationView.as_view(), name='organization'),
+    #path('orgs/<int:pk>/edit/', netbox_rpki.views.OrganizationEditView.as_view(), name='organization_edit'),
+    #path('orgs/<int:pk>/delete/', netbox_rpki.views.OrganizationDeleteView.as_view(), name='organization_delete'),
     #path('orgs/<int:pk>/', include(get_model_urls('netbox_rpki', 'organization'))),
     # roa
     #path('roa/', views.RoaListView.as_view(), name='roa_list'),
