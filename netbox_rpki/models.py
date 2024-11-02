@@ -20,17 +20,17 @@ class Organization(NetBoxModel):
 
 
 class Certificate(NetBoxModel):
-    name = models.CharField(max_length=200)
-    issuer = models.CharField(max_length=200)
-    subject = models.CharField(max_length=200)
-    serial = models.CharField(max_length=200)
-    valid_from = models.DateField
-    valid_to = models.DateField
-    public_key = models.CharField
-    private_key = models.CharField
-    publication_url = models.URLField
-    ca_repository = models.URLField
-    self_hosted = models.BooleanField
+    name = models.CharField(max_length=200, editable=True)
+    issuer = models.CharField(max_length=200, editable=True)
+    subject = models.CharField(max_length=200, editable=True)
+    serial = models.CharField(max_length=200, editable=True)
+    valid_from = models.DateField(editable=True)
+    valid_to = models.DateField(editable=True)
+    public_key = models.CharField(editable=True)
+    private_key = models.CharField(editable=True)
+    publication_url = models.URLField(editable=True)
+    ca_repository = models.URLField(editable=True)
+    self_hosted = models.BooleanField(editable=True)
     rpki_org = models.ForeignKey(
         to=Organization,
         on_delete=models.CASCADE,
