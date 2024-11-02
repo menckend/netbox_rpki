@@ -6,8 +6,8 @@ from ipam.models.ip import Prefix
 
 
 class Organization(NetBoxModel):
-    org_id = models.CharField(max_length=200)
-    name = models.CharField(max_length=200)
+    org_id = models.CharField(max_length=200, editable=True)
+    name = models.CharField(max_length=200, editable=True)
 
     class Meta:
         ordering = ("name",)
@@ -48,14 +48,14 @@ class Certificate(NetBoxModel):
 
 
 class Roa(NetBoxModel):
-    name = models.CharField(max_length=200)
+    name = models.CharField(max_length=200, editable=True)
     origin_as = models.ForeignKey(
         to=ASN,
         on_delete=models.CASCADE,
         related_name='roas'
     )
-    valid_from = models.DateField
-    valid_to = models.DateField
+    valid_from = models.DateField(editalbe=True)
+    valid_to = models.DateField(editable=True)
     signed_by = models.ForeignKey(
         to=Certificate,
         on_delete=models.PROTECT,
@@ -78,7 +78,7 @@ class RoaPrefix(NetBoxModel):
         on_delete=models.PROTECT,
         related_name='RoaPrefices'
     )
-    max_length = models.IntegerField
+    max_length = models.IntegerField(editable=True)
     roa_name = models.ForeignKey(
         to=Roa,
         on_delete=models.PROTECT,
