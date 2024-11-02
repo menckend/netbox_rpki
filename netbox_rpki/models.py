@@ -38,7 +38,7 @@ class Certificate(NetBoxModel):
     )
 
     class Meta:
-        ordering = ("name")
+        ordering = ("name",)
 
     def __str__(self):
         return f'{self.name}, {self.issuer}, {self.subject}, {self.serial}, {self.valid_from}, {self.valid_to}, {self.public_key}, {self.private_key}, {self.publication_url}, {self.ca_repository}, {self.self_hosted}, {self.rpki_org}'
