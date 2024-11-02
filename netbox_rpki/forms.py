@@ -27,7 +27,7 @@ class RoaForm(NetBoxModelForm):
 
     class Meta:
         model = Roa
-        fields: list[str] = ['name', 'rpki_org', 'origin_as', 'valid_from', 'valid_to', 'signed_by']
+        fields: list[str] = ['name', 'origin_as', 'valid_from', 'valid_to', 'signed_by']
 
 
 class RoaPrefixForm(NetBoxModelForm):
