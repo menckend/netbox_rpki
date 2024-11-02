@@ -1,8 +1,9 @@
 
 import django_tables2 as tables
-from netbox.tables import NetBoxTable, ChoiceFieldColumn
+from netbox.tables import NetBoxTable
+# , ChoiceFieldColumn
 import netbox_rpki
-from netbox_rpki.models import Certificate, Organization, Roa, RoaPrefix
+# from netbox_rpki.models import Certificate, Organization, Roa, RoaPrefix
 
 
 class CertificateTable(NetBoxTable):
@@ -13,6 +14,7 @@ class CertificateTable(NetBoxTable):
         fields = ("pk", "id", "name", "issuer", "subject", "serial", "valid_from", "valid_to", "publicKey", "private_key", "publication_url", "ca_repository", "self_hosted", "rpki_org")
         default_columns = ("name", "issuer", "subject", "serial", "valid_from", "valid_to", "publicKey", "private_key", "publication_url;", "ca_repository", "self_hosted", "rpki_org")
 
+
 class OrganizationTable(NetBoxTable):
     name = tables.Column(linkify=True)
 
@@ -20,6 +22,7 @@ class OrganizationTable(NetBoxTable):
         model = netbox_rpki.models.Organization
         fields = ("pk", "id", "org_id", "name")
         default_columns = ("org_id", "name",)
+
 
 class RoaTable(NetBoxTable):
     name = tables.Column(linkify=True)

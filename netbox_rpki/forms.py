@@ -1,10 +1,11 @@
-#import netbox_rpki
-from django import forms
-#from ipam.models import Prefix
+# import netbox_rpki
+# from django import forms
+# from ipam.models import Prefix
 from netbox.forms import NetBoxModelForm
-#from utilities.forms.fields import CommentField, DynamicModelChoiceField
-#from dcim.models import devices
-#from netbox_rpki.models import Certificate, Organization, Roa, RoaPrefix
+
+# from utilities.forms.fields import CommentField, DynamicModelChoiceField
+# from dcim.models import devices
+# from netbox_rpki.models import Certificate, Organization, Roa, RoaPrefix
 from netbox_rpki.models import Certificate, Organization, Roa, RoaPrefix
 
 
@@ -26,7 +27,7 @@ class RoaForm(NetBoxModelForm):
 
     class Meta:
         model = Roa
-        fields = ['name', 'origin_as', 'valid_from', 'valid_to', 'signed_by']
+        fields: list[str] = ['name', 'origin_as', 'valid_from', 'valid_to', 'signed_by']
 
 
 class RoaPrefixForm(NetBoxModelForm):

@@ -43,7 +43,7 @@ _menu_items = (
 plugin_settings = settings.PLUGINS_CONFIG.get('netbox_rpki', {})
 
 if plugin_settings.get('top_level_menu'):
-    menu = PluginMenu(  
+    menu = PluginMenu(
         label="RPKI",
         groups=(("RPKI", _menu_items),),
         icon_class="mdi mdi-bootstrap",

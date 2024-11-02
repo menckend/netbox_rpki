@@ -4,6 +4,8 @@ __email__ = "mencken@gmail.com"
 from netbox.plugins import PluginConfig
 from netbox_rpki._version import __version__
 
+import api
+
 
 class rpki_config(PluginConfig):
     name = 'netbox_rpki'

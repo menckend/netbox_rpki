@@ -1,12 +1,8 @@
-"""Defines the 'views' used by the Django apps for serving pages of the netbox_ptov plugin"""
-
 import netbox_rpki
 from netbox.views import generic
-from netbox_rpki import filtersets, forms, models, tables
 from netbox_rpki.models import Certificate, Organization, Roa, RoaPrefix
-from django.shortcuts import render, redirect
-from django.contrib import messages
-import json
+from netbox_rpki.forms import CertificateForm, OrganizationForm, RoaForm, RoaPrefixForm
+from netbox_rpki.tables import CertificateTable, OrganizationTable, RoaTable, RoaPrefixTable
 
 
 class CertificateView(generic.ObjectView):

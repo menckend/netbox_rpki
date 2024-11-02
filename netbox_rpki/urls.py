@@ -2,16 +2,16 @@ from django.urls import include, path
 from utilities.urls import get_model_urls
 
 import netbox_rpki
-from netbox_rpki.models import (
-    Organization, Certificate, Roa, RoaPrefix
-)
+# from netbox_rpki.models import (
+#    Organization, Certificate, Roa, RoaPrefix
+# )
 from netbox_rpki import views
 
 app_name = 'netbox_rpki'
 
 urlpatterns = [
     # certificate
-    path('certificate/', views.CertificateListView.as_view(), name='certificate_list'),
+    path('certificate/', netbox_rpki.views.CertificateListView.as_view(), name='certificate_list'),
     path('certificate/add/', views.CertificateEditView.as_view(), name='certificate_add'),
     path('certificate/<int:pk>/', views.CertificateView.as_view(), name='certificate'),
     path('certificate/<int:pk>/edit/', views.CertificateEditView.as_view(), name='certificate_edit'),

@@ -5,6 +5,11 @@
 requires = ["setuptools>=64", "setuptools_scm>=8"]
 build-backend = "setuptools.build_meta"
 
+#[tool.pyright]
+#root = ["netbox_rpki"]
+#include = ["netbox_rpki",  "lib/netbox/*"]
+#exclude = ["**/node_modules", "**/__pycache__"]
+
 [tool.setuptools_scm]
 version_file = "netbox_rpki/_version.py"
 
