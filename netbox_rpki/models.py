@@ -54,7 +54,7 @@ class Roa(NetBoxModel):
         on_delete=models.CASCADE,
         related_name='roas'
     )
-    valid_from = models.DateField(editalbe=True)
+    valid_from = models.DateField(editable=True)
     valid_to = models.DateField(editable=True)
     signed_by = models.ForeignKey(
         to=Certificate,
