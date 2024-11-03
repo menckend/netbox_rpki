@@ -25,8 +25,8 @@ class OrganizationSerializer(NetBoxModelSerializer):
 
     class Meta:
         model = netbox_rpki.models.Organization
-        fields = ["id", "org_id", "name"]
-        brief_fields = ("org_id", "name")
+        fields = ["id", "org_id", "name", "ext_url", "parent_rir"]
+        brief_fields = ("org_id", "name", "parent_rir")
 
 
 class RoaSerializer(NetBoxModelSerializer):
