@@ -40,7 +40,7 @@ class OrganizationView(generic.ObjectView):
         roa_table.configure(request)
 
         return {
-            'signed_roas_table': roa_table,
+            'certificates_table': mycerts_table,
         }
 
 
