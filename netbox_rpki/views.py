@@ -37,7 +37,7 @@ class OrganizationView(generic.ObjectView):
 
     def get_extra_context(self, request, instance):
         mycerts_table = netbox_rpki.tables.CertificateTable(instance.certificates.all())
-        mycerts_.configure(request)
+        mycerts_table.configure(request)
 
         return {
             'certificates_table': mycerts_table,
