@@ -9,7 +9,7 @@ from ipam.models import RIR
 class Organization(NetBoxModel):
     org_id = models.CharField(max_length=200, editable=True)
     name = models.CharField(max_length=200, editable=True)
-    ext_url: models.CharField(max_length=200, editable=True)
+    ext_url = models.CharField(max_length=200, editable=True)
     parent_rir = models.ForeignKey(
         to=RIR,
         on_delete=models.PROTECT,
