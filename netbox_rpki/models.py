@@ -28,8 +28,8 @@ class Certificate(NetBoxModel):
     valid_to = models.DateField(editable=True)
     public_key = models.CharField(editable=True)
     private_key = models.CharField(editable=True)
-    publication_url = models.URLField(editable=True)
-    ca_repository = models.URLField(editable=True)
+    publication_url = models.CharField(editable=True)
+    ca_repository = models.CharField(editable=True)
     self_hosted = models.BooleanField(editable=True)
     rpki_org = models.ForeignKey(
         to=Organization,
