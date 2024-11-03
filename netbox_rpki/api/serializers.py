@@ -16,7 +16,7 @@ class CertificateSerializer(NetBoxModelSerializer):
 
     class Meta:
         model = netbox_rpki.models.Certificate
-        fields = ("id", "name", "issuer", "subject", "serial", "valid_from", "valid_to", "public_key", "private_key", "publication_url", "ca_repository", "self_hosted", "rpki_org")
+        fields = ("id", "name", "issuer", "subject", "serial", "valid_from", "valid_to", "auto_renews", "public_key", "private_key", "publication_url", "ca_repository", "self_hosted", "rpki_org")
         brief_fields = ("name", "issuer", "subject", "serial", "rpki_org")
 
 
@@ -34,7 +34,7 @@ class RoaSerializer(NetBoxModelSerializer):
 
     class Meta:
         model = netbox_rpki.models.Roa
-        fields = ["id", "name", "origin_as", "valid_from", "valid_to", "signed_by"]
+        fields = ["id", "name", "origin_as", "valid_from", "valid_to", "auto_renews", "signed_by"]
         brief_fields = ("name", "origin_as")
 
 
