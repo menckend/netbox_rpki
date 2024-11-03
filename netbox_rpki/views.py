@@ -85,7 +85,7 @@ class RoaView(generic.ObjectView):
         roaprefix_table.configure(request)
 
         return {
-            'roaprefices_table': roaprefix_table,
+            'roaprefices_table': roaprefix_table
         }
 
 
