@@ -34,8 +34,8 @@ class RoaSerializer(NetBoxModelSerializer):
 
     class Meta:
         model = netbox_rpki.models.Roa
-        fields = ["id", "name", "origina_as", "valid_from", "valid_to", "signed_by"]
-        brief_fields = ("name", "origina_as")
+        fields = ["id", "name", "origin_as", "valid_from", "valid_to", "signed_by"]
+        brief_fields = ("name", "origin_as")
 
 
 class RoaPrefixSerializer(NetBoxModelSerializer):
