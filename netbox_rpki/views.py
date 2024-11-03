@@ -81,7 +81,7 @@ class RoaView(generic.ObjectView):
 
 
     def get_extra_context(self, request, instance):
-        myprefices_table = netbox_rpki.tables.RoaPrefixTable(instance.prefices.all())
+        roaprefix_table = netbox_rpki.tables.RoaPrefixTable(instance.prefices.all())
         roaprefix_table.configure(request)
 
         return {
