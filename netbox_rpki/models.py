@@ -3,11 +3,18 @@ from django.urls import reverse
 from netbox.models import NetBoxModel
 from ipam.models.asns import ASN
 from ipam.models.ip import Prefix
+from ipam.models import RIR
 
 
 class Organization(NetBoxModel):
     org_id = models.CharField(max_length=200, editable=True)
     name = models.CharField(max_length=200, editable=True)
+    ext_url: models.CharField(max_length=200, editable=True)
+    parent_rir = models.ForeignKey(
+        to=RIR,
+        on_delete=models.PROTECT,
+        related_name='rpki_certs'
+    )
 
     class Meta:
         ordering = ("name",)

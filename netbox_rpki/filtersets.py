@@ -17,7 +17,7 @@ class CertificateFilterSet(NetBoxModelFilterSet):
 class OrganizationFilterSet(NetBoxModelFilterSet):
     class Meta:
         model = netbox_rpki.models.Organization
-        fields = ['org_id', 'name']
+        fields = ['org_id', 'name', 'parent_rir', 'ext_url']
 
     def search(self, queryset, name, value):
         return queryset.filter(description__icontains=value)

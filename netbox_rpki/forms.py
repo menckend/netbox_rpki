@@ -20,7 +20,7 @@ class OrganizationForm(NetBoxModelForm):
 
     class Meta:
         model = Organization
-        fields = ['org_id', 'name']
+        fields = ['org_id', 'name', 'parent_rir', 'ext_url']
 
 
 class RoaForm(NetBoxModelForm):
