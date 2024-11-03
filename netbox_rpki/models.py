@@ -89,7 +89,7 @@ class RoaPrefix(NetBoxModel):
         ordering = ("prefix",)
 
     def __str__(self):
-        return self.prefix
+        return str(self.prefix)
 
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:roaprefix", args=[self.pk])
