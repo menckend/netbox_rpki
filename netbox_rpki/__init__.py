@@ -16,7 +16,7 @@ class rpki_config(PluginConfig):
     author_email = 'mencken@gmail.com'
     base_url = 'netbox_rpki'
     default_settings = {
-        'top_level_menu': False
+        'top_level_menu': True
         }
 
 
