@@ -5,7 +5,7 @@
   <div class="row mb-3">
     <div class="col col-md-6">
       <div class="card">
-        <h5 class="card-header">RPKI Rout Origination Authorization (ROA)</h5>
+        <h5 class="card-header">RPKI Route Origination Authorization (ROA)</h5>
         <div class="card-body">
           <table class="table table-hover attr-table">
             <tr>
@@ -25,6 +25,11 @@
               <td>{{ object.date_to }}</td>
             </tr>          
             <tr>
+              <th scope="row">Auto-renews</th>
+              <td>{{ object.auto_renews }}</td>
+            </tr>          
+
+            <tr>
               <th scope="row">Signing Certificate</th>
               <td>{{ object.signed_by }}</td>
             </tr>          
@@ -42,7 +47,7 @@
   <div class="row">
     <div class="col col-md-12">
       <div class="card">
-        <h5 class="card-header">Prefixes</h5>
+        <h5 class="card-header">ROA PrefiCes</h5>
         <div class="card-body table-responsive">
           {% render_table roaprefices_table %}
         </div>
