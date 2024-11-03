@@ -9,7 +9,7 @@ class CertificateView(generic.ObjectView):
     queryset = netbox_rpki.models.Certificate.objects.all()
 
     def get_extra_context(self, request, instance):
-        roa_table = netbox_rpki.tables.RoaTable(instance.signed_by.all())
+        roa_table = netbox_rpki.tables.RoaTable(instance.roas.all())
         roa_table.configure(request)
 
         return {
@@ -33,6 +33,15 @@ class CertificateDeleteView(generic.ObjectDeleteView):
 
 class OrganizationView(generic.ObjectView):
     queryset = Organization.objects.all()
+
+
+    def get_extra_context(self, request, instance):
+        mycerts_table = netbox_rpki.tables.CertificateTable(instance.certificates.all())
+        roa_table.configure(request)
+
+        return {
+            'signed_roas_table': roa_table,
+        }
 
 
 class OrganizationListView(generic.ObjectListView):
@@ -69,6 +78,15 @@ class RoaPrefixDeleteView(generic.ObjectDeleteView):
 
 class RoaView(generic.ObjectView):
     queryset = Roa.objects.all()
+
+
+    def get_extra_context(self, request, instance):
+        myprefices_table = netbox_rpki.tables.RoaPrefixTable(instance.prefices.all())
+        roaprefix_table.configure(request)
+
+        return {
+            'roaprefices_table': roaprefix_table,
+        }
 
 
 class RoaListView(generic.ObjectListView):
