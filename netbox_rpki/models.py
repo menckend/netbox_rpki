@@ -82,7 +82,7 @@ class RoaPrefix(NetBoxModel):
     roa_name = models.ForeignKey(
         to=Roa,
         on_delete=models.PROTECT,
-        related_name='prefixes'
+        related_name='prefices'
     )
 
     class Meta:
