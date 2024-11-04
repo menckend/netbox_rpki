@@ -18,7 +18,7 @@
             </tr>
             <tr>
               <th scope="row">Parent Regional Internet Registry</th>
-              <td>{{ object.parent_rir }}</td>
+              <td><a href="{{ object.parent_rir.get_absolute_url }}">{{ object.parent_rir }}</a></td>
             </tr>
             <tr>
               <th scope="row">External URL</th>
