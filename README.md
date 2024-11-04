@@ -11,25 +11,35 @@ Netbox plugin for adding BGP RPKI elements.
 
 Implements data models and forms for Resource Public Key Infrastructure (RPKI) items.  Models included are:
 
-*Regional Internet Registry ("RIR)
+_*Regional Internet Registry ("RIR)
    * Pre-xxisting model in Netbox IPAM table
-   * Used as a foreign key (parent) to the new RPKI "Organization" model (child)
+   * Used as a foreign key (parent) to the new RPKI "Organization" model (child)_
 * Organization
    * A customer/consumer of RIR services such as RPKI (and IP address and ASN allocations)
    * "Child" relationship to IPAM RIR "parent" model
    * Parent relationship to RPKI "Customer certificate" model (children)
+   * Fields
+      * org-id, name, ext_url, parent_rir
 * Customer Certificate
    * The X.509 certificate used to sign a customer's ROAs
    * May be either self-hosted/managed/published (managed by customer) or managed by the RIR (as part of a "managed" RPKI service)
    * Child relationship to a single RPKI Organization object (parent)
    * Parent relationship to RPKI ROA objects (children)
+   * Fields
+      * name, issuer, subject, serial, valid_from, valid_to, auto_renews, public_key, private_key, publication_url, ca_repository, self_hosted, rpki_org
 * Route Origination Authorization (ROA)
    * A statement that a specific AS number is authorized to originate a specific set of IP prefices.
    * Each ROA has a child->parent relationship to a single RPKI ROA object
    * Child relationship to RPKI Customer certificate object (parent)
    * Parent relationship to RPKI ROA Prefix object (children)
+   * Fields
+      * name, origin_as (foreign key to IPAM ASN model), valid_from, valid_to, auto_renews, signed_by
 * ROA prefix
    * A specific prefix that is included in the scope of a specific ROA
+   * Child relationship to RPKI ROA object (parent)
+   * Fields
+      * prefix (foreign key to IPAM Prefix model), max_length, roa_name
+
 
 ## Screencaps
 
