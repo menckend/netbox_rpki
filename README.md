@@ -11,7 +11,7 @@ Netbox plugin for adding BGP RPKI elements.
 
 Implements data models and forms for Resource Public Key Infrastructure (RPKI) items.  Models included are:
 
-_*Regional Internet Registry ("RIR)
+* _Regional Internet Registry ("RIR)
    * Pre-xxisting model in Netbox IPAM table
    * Used as a foreign key (parent) to the new RPKI "Organization" model (child)_
 * Organization
