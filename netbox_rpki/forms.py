@@ -13,7 +13,7 @@ class CertificateForm(NetBoxModelForm):
 
     class Meta:
         model = Certificate
-        fields = ['name', 'issuer', 'subject', 'serial', 'valid_from', 'valid_to', 'public_key', 'private_key', 'publication_url', 'ca_repository', 'rpki_org', 'self_hosted']
+        fields = ['name', 'issuer', 'subject', 'serial', 'valid_from', 'valid_to', "auto_renews", 'public_key', 'private_key', 'publication_url', 'ca_repository', 'rpki_org', 'self_hosted']
 
 
 class OrganizationForm(NetBoxModelForm):
@@ -27,7 +27,7 @@ class RoaForm(NetBoxModelForm):
 
     class Meta:
         model = Roa
-        fields: list[str] = ['name', 'origin_as', 'valid_from', 'valid_to', 'signed_by']
+        fields: list[str] = ['name', 'origin_as', 'valid_from', 'valid_to', "auto_renews", 'signed_by']
 
 
 class RoaPrefixForm(NetBoxModelForm):
