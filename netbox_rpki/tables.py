@@ -11,8 +11,8 @@ class CertificateTable(NetBoxTable):
 
     class Meta(NetBoxTable.Meta):
         model = netbox_rpki.models.Certificate
-        fields = ("pk", "id", "name", "issuer", "subject", "serial", "valid_from", "valid_to", "publicKey", "private_key", "publication_url", "ca_repository", "self_hosted", "rpki_org")
-        default_columns = ("name", "issuer", "subject", "serial", "valid_from", "valid_to", "publicKey", "private_key", "publication_url;", "ca_repository", "self_hosted", "rpki_org")
+        fields = ("pk", "id", "name", "issuer", "subject", "serial", "valid_from", "valid_to", "auto_renews", "publicKey", "private_key", "publication_url", "ca_repository", "self_hosted", "rpki_org")
+        default_columns = ("name", "issuer", "subject", "serial", "valid_from", "valid_to", "auto_renews", "publicKey", "private_key", "publication_url;", "ca_repository", "self_hosted", "rpki_org")
 
 
 class OrganizationTable(NetBoxTable):
@@ -29,8 +29,8 @@ class RoaTable(NetBoxTable):
 
     class Meta(NetBoxTable.Meta):
         model = netbox_rpki.models.Roa
-        fields = ("pk", "id", 'name', "origin_as", "valid_from", "valid_to", "signed_by")
-        default_columns = ("name", "origin_as", "valid_from", "valid_to", "signed_by")
+        fields = ("pk", "id", 'name', "origin_as", "valid_from", "valid_to", "auto_renews", "signed_by")
+        default_columns = ("name", "origin_as", "valid_from", "valid_to", "auto_renews", "signed_by")
 
 
 class RoaPrefixTable(NetBoxTable):
