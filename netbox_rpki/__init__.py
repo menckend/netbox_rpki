@@ -10,7 +10,7 @@ class rpki_config(PluginConfig):
     name = 'netbox_rpki'
     verbose_name = 'RPKI functionality for Netbox'
     description = 'Add RPKI data elements to Netbox.'
-    version = 0.1
+    version = __version__
     author = 'Mencken Davidson'
     author_email = 'mencken@gmail.com'
     base_url = 'netbox_rpki'
