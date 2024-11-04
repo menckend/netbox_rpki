@@ -67,7 +67,7 @@ class Roa(NetBoxModel):
         null=True
     )
     valid_from = models.DateField(editable=True, blank=True, null=True)
-    valid_to = models.DateField(editable=True, blank=True, Null=True)
+    valid_to = models.DateField(editable=True, blank=True, null=True)
     auto_renews = models.BooleanField(editable=True)
     signed_by = models.ForeignKey(
         to=Certificate,
