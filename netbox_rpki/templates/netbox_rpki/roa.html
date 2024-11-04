@@ -14,7 +14,7 @@
             </tr>
             <tr>
               <th scope="row">Origination AS Number</th>
-              <td>{{ object.origin_as }}</td>
+              <td><a href="{{ object.origin_as.get_absolute_url }}">{{ object.origin_as }}</a></td>
             </tr>
             <tr>
               <th scope="row">Date Valid From</th>
@@ -31,7 +31,7 @@
 
             <tr>
               <th scope="row">Signing Certificate</th>
-              <td>{{ object.signed_by }}</td>
+              <td><a href="{{ object.signed_by.get_absolute_url }}">{{ object.signed_by }}</a></td>
             </tr>          
           </table>
         </div>
