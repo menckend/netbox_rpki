@@ -14,7 +14,7 @@
             </tr>
             <tr>
               <th scope="row">Issuer</th>
-              <td>{{ object.issuer }}</td>
+              <td><a href="{{ object.issuer.get_absolute_url }}">{{ object.issuer }}</a></td>
             </tr>
             <tr>
               <th scope="row">Subject</th>
