@@ -33,8 +33,8 @@ class Certificate(NetBoxModel):
     issuer = models.CharField(max_length=200, editable=True, blank=True)
     subject = models.CharField(max_length=200, editable=True, blank=True)
     serial = models.CharField(max_length=200, editable=True, blank=True)
-    valid_from = models.DateField(editable=True, blank=True)
-    valid_to = models.DateField(editable=True, blank=True)
+    valid_from = models.DateField(editable=True, blank=True, null=True)
+    valid_to = models.DateField(editable=True, blank=True, null=True)
     auto_renews = models.BooleanField(editable=True)
     public_key = models.CharField(editable=True, blank=True)
     private_key = models.CharField(editable=True, blank=True)
@@ -62,10 +62,12 @@ class Roa(NetBoxModel):
     origin_as = models.ForeignKey(
         to=ASN,
         on_delete=models.CASCADE,
-        related_name='roas'
+        related_name='roas',
+        blank=True,
+        null=True
     )
-    valid_from = models.DateField(editable=True, blank=True)
-    valid_to = models.DateField(editable=True, blank=True)
+    valid_from = models.DateField(editable=True, blank=True, null=True)
+    valid_to = models.DateField(editable=True, blank=True, Null=True)
     auto_renews = models.BooleanField(editable=True)
     signed_by = models.ForeignKey(
         to=Certificate,
