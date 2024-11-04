@@ -9,7 +9,7 @@ from ipam.models import RIR
 class Organization(NetBoxModel):
     org_id = models.CharField(max_length=200, editable=True)
     name = models.CharField(max_length=200, editable=True)
-    ext_url = models.CharField(max_length=200, editable=True)
+    ext_url = models.CharField(max_length=200, editable=True, blank=True)
     parent_rir = models.ForeignKey(
         to=RIR,
         on_delete=models.PROTECT,
@@ -28,15 +28,16 @@ class Organization(NetBoxModel):
 
 class Certificate(NetBoxModel):
     name = models.CharField(max_length=200, editable=True)
-    issuer = models.CharField(max_length=200, editable=True)
-    subject = models.CharField(max_length=200, editable=True)
-    serial = models.CharField(max_length=200, editable=True)
-    valid_from = models.DateField(editable=True)
-    valid_to = models.DateField(editable=True)
-    public_key = models.CharField(editable=True)
-    private_key = models.CharField(editable=True)
-    publication_url = models.CharField(editable=True)
-    ca_repository = models.CharField(editable=True)
+    issuer = models.CharField(max_length=200, editable=True, blank=True)
+    subject = models.CharField(max_length=200, editable=True, blank=True)
+    serial = models.CharField(max_length=200, editable=True, blank=True)
+    valid_from = models.DateField(editable=True, blank=True)
+    valid_to = models.DateField(editable=True, blank=True)
+    auto_renews = models.BooleanField(editable=True)
+    public_key = models.CharField(editable=True, blank=True)
+    private_key = models.CharField(editable=True, blank=True)
+    publication_url = models.CharField(editable=True, blank=True)
+    ca_repository = models.CharField(editable=True, blank=True)
     self_hosted = models.BooleanField(editable=True)
     rpki_org = models.ForeignKey(
         to=Organization,
@@ -61,8 +62,9 @@ class Roa(NetBoxModel):
         on_delete=models.CASCADE,
         related_name='roas'
     )
-    valid_from = models.DateField(editable=True)
-    valid_to = models.DateField(editable=True)
+    valid_from = models.DateField(editable=True, blank=True)
+    valid_to = models.DateField(editable=True, blank=True)
+    auto_renews = models.BooleanField(editable=True)
     signed_by = models.ForeignKey(
         to=Certificate,
         on_delete=models.PROTECT,
