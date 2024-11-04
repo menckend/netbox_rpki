@@ -1,6 +1,9 @@
 version: 0.1
 package_name: netbox_rpki
 compatibility:
-  - release: 0.1.0
+  - release: 0.0.1
     netbox_min: 4.1.0
-    netbox_max: 4.1.4
+    netbox_max: 4.1.6
+- release: 0.0.2
+    netbox_min: 4.1.0
+    netbox_max: 4.1.6
