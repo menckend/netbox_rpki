@@ -13,7 +13,9 @@ class Organization(NetBoxModel):
     parent_rir = models.ForeignKey(
         to=RIR,
         on_delete=models.PROTECT,
-        related_name='rpki_certs'
+        related_name='rpki_certs',
+        null=True,
+        blank=True
     )
 
     class Meta:
