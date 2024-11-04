@@ -34,7 +34,7 @@ class RoaTable(NetBoxTable):
 
 
 class RoaPrefixTable(NetBoxTable):
-    prefix = tables.Column(linkify=True)
+    pk = tables.Column(linkify=True)
 
     class Meta(NetBoxTable.Meta):
         model = netbox_rpki.models.RoaPrefix
