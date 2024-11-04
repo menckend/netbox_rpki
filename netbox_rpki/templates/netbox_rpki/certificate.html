@@ -14,7 +14,7 @@
             </tr>
             <tr>
               <th scope="row">Issuer</th>
-              <td><a href="{{ object.issuer.get_absolute_url }}">{{ object.issuer }}</a></td>
+              <td>{{ object.issuer }}</td>
             </tr>
             <tr>
               <th scope="row">Subject</th>
@@ -56,6 +56,10 @@
               <th scope="row">Self Hosted</th>
               <td>{{ object.self_hosted }}</td>
             </tr>
+            <tr>
+              <th scope="row">Parent RPKI customer/org</th>
+              <td><a href="{{ object.rpki_org.get_absolute_url }}">{{ object.rpki_org }}</a></td>
+            </tr>            
           </table>
         </div>
       </div>
