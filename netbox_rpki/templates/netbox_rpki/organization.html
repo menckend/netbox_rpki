@@ -22,7 +22,7 @@
             </tr>
             <tr>
               <th scope="row">External URL</th>
-              <td><a href="{{ object.ext_url|urlencode }}">{{ object.ext_url }}</a></td>
+              <td><a href="{% url object.ext_url %}">{{ object.ext_url }}</a></td>
             </tr>
           </table>
         </div>
