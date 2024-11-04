@@ -10,24 +10,28 @@ Netbox plugin for adding BGP RPKI elements.
 ## Features
 
 Implements data models and forms for Resource Public Key Infrastructure (RPKI) items.  Models included are:
+
 *Regional Internet Registry ("RIR)
-   * Existing model in Netbox IPAM table
-   * Used as a foreign key (parent) to the RPKI "Organization" model
+   * Pre-xxisting model in Netbox IPAM table
+   * Used as a foreign key (parent) to the new RPKI "Organization" model (child)
 * Organization
    * A customer/consumer of RIR services such as RPKI (and IP address and ASN allocations)
-   * "Child" relationship to IPAM RIR "parent" model 
-   * Parent relationship to "Customer certificate" model
+   * "Child" relationship to IPAM RIR "parent" model
+   * Parent relationship to RPKI "Customer certificate" model (children)
 * Customer Certificate
    * The X.509 certificate used to sign a customer's ROAs
-   * May be either self-hosted or managed by the RIR (as part of a "managed" RPKI service)
-   * Each customer certificate has a child->parent relationship to a single RPKI Organization object
+   * May be either self-hosted/managed/published (managed by customer) or managed by the RIR (as part of a "managed" RPKI service)
+   * Child relationship to a single RPKI Organization object (parent)
+   * Parent relationship to RPKI ROA objects (children)
 * Route Origination Authorization (ROA)
    * A statement that a specific AS number is authorized to originate a specific set of IP prefices.
    * Each ROA has a child->parent relationship to a single RPKI ROA object
+   * Child relationship to RPKI Customer certificate object (parent)
+   * Parent relationship to RPKI ROA Prefix object (children)
 * ROA prefix
    * A specific prefix that is included in the scope of a specific ROA
 
-* RPKI stuf....
+## Screencaps
 
 
 
