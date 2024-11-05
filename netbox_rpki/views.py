@@ -3,6 +3,7 @@ from netbox.views import generic
 from netbox_rpki.models import Certificate, Organization, Roa, RoaPrefix
 from netbox_rpki.forms import CertificateForm, OrganizationForm, RoaForm, RoaPrefixForm
 from netbox_rpki.tables import CertificateTable, OrganizationTable, RoaTable, RoaPrefixTable
+from netbox_rpki import filtersets, forms, tables
 
 
 class CertificateView(generic.ObjectView):
@@ -19,9 +20,9 @@ class CertificateView(generic.ObjectView):
 
 class CertificateListView(generic.ObjectListView):
     queryset = Certificate.objects.all()
-    filterset = netbox_rpki.filtersets.CertificateFilterSet
-    filterset_form = netbox_rpki.forms.CertificateFilterForm
-    table = netbox_rpki.tables.CertificateTable
+    filterset = filtersets.CertificateFilterSet
+    filterset_form = forms.CertificateFilterForm
+    table = tables.CertificateTable
 
 
 class CertificateEditView(generic.ObjectEditView):
@@ -38,7 +39,7 @@ class OrganizationView(generic.ObjectView):
 
 
     def get_extra_context(self, request, instance):
-        mycerts_table = netbox_rpki.tables.CertificateTable(instance.certificates.all())
+        mycerts_table = tables.CertificateTable(instance.certificates.all())
         mycerts_table.configure(request)
 
         return {
