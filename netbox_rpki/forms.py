@@ -15,7 +15,7 @@ class CertificateForm(NetBoxModelForm):
 
     class Meta:
         model = Certificate
-        fields = ['name', 'issuer', 'subject', 'serial', 'valid_from', 'valid_to', "auto_renews", 'public_key', 'private_key', 'publication_url', 'ca_repository', 'rpki_org', 'self_hosted', "tenant']
+        fields = ['name', 'issuer', 'subject', 'serial', 'valid_from', 'valid_to', "auto_renews", 'public_key', 'private_key', 'publication_url', 'ca_repository', 'rpki_org', 'self_hosted', 'tenant']
 
 
 class OrganizationForm(NetBoxModelForm):
