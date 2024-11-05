@@ -17,6 +17,12 @@ class Organization(NetBoxModel):
         null=True,
         blank=True
     )
+    tenant = models.ForeignKey(
+        to='tenancy.Tenant',
+        on_delete=models.PROTECT,
+        blank=True,
+        null=True
+    )
 
     class Meta:
         ordering = ("name",)
@@ -46,6 +52,12 @@ class Certificate(NetBoxModel):
         on_delete=models.CASCADE,
         related_name='certificates'
     )
+    tenant = models.ForeignKey(
+        to='tenancy.Tenant',
+        on_delete=models.PROTECT,
+        blank=True,
+        null=True
+    )
 
     class Meta:
         ordering = ("name",)
@@ -74,6 +86,12 @@ class Roa(NetBoxModel):
         on_delete=models.PROTECT,
         related_name='roas'
     )
+    tenant = models.ForeignKey(
+        to='tenancy.Tenant',
+        on_delete=models.PROTECT,
+        blank=True,
+        null=True
+    )
 
     class Meta:
         ordering = ("name",)
@@ -96,6 +114,12 @@ class RoaPrefix(NetBoxModel):
         to=Roa,
         on_delete=models.PROTECT,
         related_name='prefices'
+    )
+    tenant = models.ForeignKey(
+        to='tenancy.Tenant',
+        on_delete=models.PROTECT,
+        blank=True,
+        null=True
     )
 
     class Meta:
