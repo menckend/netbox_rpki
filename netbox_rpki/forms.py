@@ -46,6 +46,18 @@ class CertificateForm(NetBoxModelForm):
         fields = ['name', 'issuer', 'subject', 'serial', 'valid_from', 'valid_to', "auto_renews", 'public_key', 'private_key', 'publication_url', 'ca_repository', 'rpki_org', 'self_hosted', 'tenant']
 
 
+class CertificateFilterForm(NetBoxModelFilterSetForm):
+    q = forms.CharField(required=False, label="Search")
+    tenant = DynamicModelChoiceField(queryset=Tenant.objects.all(), required=False)
+    status = forms.MultipleChoiceField(
+        choices=CertificateStatusChoices,
+        required=False,
+    )
+    tag = TagFilterField(Certificate)
+
+    model = Certificate
+
+
 class OrganizationForm(NetBoxModelForm):
     tenant = DynamicModelChoiceField(queryset=Tenant.objects.all(), required=False)
     comments = CommentField()
