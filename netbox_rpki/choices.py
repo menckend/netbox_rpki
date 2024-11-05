@@ -1,12 +1,12 @@
 from utilities.choices import ChoiceSet
 
 
-class CommunityStatusChoices(ChoiceSet):
-    key = "Community.status"
+class CertificateStatusChoices(ChoiceSet):
+    key = "Certificate.status"
 
-    STATUS_ACTIVE = 'active'
-    STATUS_RESERVED = 'reserved'
-    STATUS_DEPRECATED = 'deprecated'
+    STATUS_VALID = 'valid'
+    STATUS_PLANNED = 'planned'
+    STATUS_REVOKED = 'revoked'
 
     CHOICES = [
         (STATUS_ACTIVE, 'Active', 'blue'),
