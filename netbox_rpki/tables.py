@@ -4,9 +4,8 @@ from django.utils.safestring import mark_safe
 from django_tables2.utils import A
 
 from netbox.tables import NetBoxTable
-# , ChoiceFieldColumn
+from netbox.tables.columns import ChoiceFieldColumn, TagColumn
 import netbox_rpki
-# from netbox_rpki.models import Certificate, Organization, Roa, RoaPrefix
 
 AVAILABLE_LABEL = mark_safe('<span class="label label-success">Available</span>')
 COL_TENANT = """
