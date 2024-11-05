@@ -34,7 +34,7 @@ class CertificateTable(NetBoxTable):
 
 class OrganizationTable(NetBoxTable):
     name = tables.Column(linkify=True)
-   tenant = tables.TemplateColumn(
+    tenant = tables.TemplateColumn(
         template_code=COL_TENANT
     )
     tags = TagColumn(
@@ -49,7 +49,7 @@ class OrganizationTable(NetBoxTable):
 
 class RoaTable(NetBoxTable):
     name = tables.Column(linkify=True)
-   tenant = tables.TemplateColumn(
+    tenant = tables.TemplateColumn(
         template_code=COL_TENANT
     )
     tags = TagColumn(
@@ -64,7 +64,7 @@ class RoaTable(NetBoxTable):
 
 class RoaPrefixTable(NetBoxTable):
     pk = tables.Column(linkify=True)
-   tenant = tables.TemplateColumn(
+    tenant = tables.TemplateColumn(
         template_code=COL_TENANT
     )
     tags = TagColumn(
