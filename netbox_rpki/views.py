@@ -20,7 +20,7 @@ class CertificateView(generic.ObjectView):
 class CertificateListView(generic.ObjectListView):
     queryset = Certificate.objects.all()
     filterset = netbox_rpki.filtersets.CertificateFilterSet
-    filterset_form = forms.CertificateFilterForm
+    filterset_form = netbox_rpki.forms.CertificateFilterForm
     table = CertificateTable
 
 
