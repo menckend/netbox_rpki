@@ -49,10 +49,6 @@ class CertificateForm(NetBoxModelForm):
 class CertificateFilterForm(NetBoxModelFilterSetForm):
     q = forms.CharField(required=False, label="Search")
     tenant = DynamicModelChoiceField(queryset=Tenant.objects.all(), required=False)
-    status = forms.MultipleChoiceField(
-        choices=CertificateStatusChoices,
-        required=False,
-    )
     tag = TagFilterField(Certificate)
 
     model = Certificate
