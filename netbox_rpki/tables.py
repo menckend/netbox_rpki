@@ -1,14 +1,31 @@
 
 import django_tables2 as tables
+from django.utils.safestring import mark_safe
+from django_tables2.utils import A
+
 from netbox.tables import NetBoxTable
 # , ChoiceFieldColumn
 import netbox_rpki
 # from netbox_rpki.models import Certificate, Organization, Roa, RoaPrefix
 
+AVAILABLE_LABEL = mark_safe('<span class="label label-success">Available</span>')
+COL_TENANT = """
+ {% if record.tenant %}
+     <a href="{{ record.tenant.get_absolute_url }}" title="{{ record.tenant.description }}">{{ record.tenant }}</a>
+ {% else %}
+     &mdash;
+ {% endif %}
+ """
+
 
 class CertificateTable(NetBoxTable):
     name = tables.Column(linkify=True)
-
+    tenant = tables.TemplateColumn(
+        template_code=COL_TENANT
+    )
+    tags = TagColumn(
+        url_name='plugins:netbox_rpki:certificate_list'
+    )
     class Meta(NetBoxTable.Meta):
         model = netbox_rpki.models.Certificate
         fields = ("pk", "id", "name", "issuer", "subject", "serial", "valid_from", "valid_to", "auto_renews", "publicKey", "private_key", "publication_url", "ca_repository", "self_hosted", "rpki_org")
@@ -17,6 +34,12 @@ class CertificateTable(NetBoxTable):
 
 class OrganizationTable(NetBoxTable):
     name = tables.Column(linkify=True)
+   tenant = tables.TemplateColumn(
+        template_code=COL_TENANT
+    )
+    tags = TagColumn(
+        url_name='plugins:netbox_rpki:organization_list'
+    )
 
     class Meta(NetBoxTable.Meta):
         model = netbox_rpki.models.Organization
@@ -26,6 +49,12 @@ class OrganizationTable(NetBoxTable):
 
 class RoaTable(NetBoxTable):
     name = tables.Column(linkify=True)
+   tenant = tables.TemplateColumn(
+        template_code=COL_TENANT
+    )
+    tags = TagColumn(
+        url_name='plugins:netbox_rpki:roa_list'
+    )
 
     class Meta(NetBoxTable.Meta):
         model = netbox_rpki.models.Roa
@@ -35,6 +64,12 @@ class RoaTable(NetBoxTable):
 
 class RoaPrefixTable(NetBoxTable):
     pk = tables.Column(linkify=True)
+   tenant = tables.TemplateColumn(
+        template_code=COL_TENANT
+    )
+    tags = TagColumn(
+        url_name='plugins:netbox_rpki:roaprefix_list'
+    )
 
     class Meta(NetBoxTable.Meta):
         model = netbox_rpki.models.RoaPrefix
