@@ -8,7 +8,7 @@
 <div class="pull-right noprint">
     {% if perms.netbox_rpki.change_certificate %}
     <a href="{% url 'plugins:netbox_rpki:roa_add' %}?rpki_org={{ object.pk }}" class="btn btn-success">
-        <span class="mdi mdi-plus-thick" aria-hidden="true"></span> Rule
+        <span class="mdi mdi-plus-thick" aria-hidden="true"></span> ROA
     </a>
     {% endif %}
 </div>
