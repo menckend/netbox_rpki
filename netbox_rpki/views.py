@@ -15,13 +15,13 @@ class CertificateView(generic.ObjectView):
         return {
             'signed_roas_table': roa_table,
         }
-
+    
 
 class CertificateListView(generic.ObjectListView):
     queryset = Certificate.objects.all()
     filterset = netbox_rpki.filtersets.CertificateFilterSet
     filterset_form = netbox_rpki.forms.CertificateFilterForm
-    table = CertificateTable
+    table = netbox_rpki.tables.CertificateTable
 
 
 class CertificateEditView(generic.ObjectEditView):
