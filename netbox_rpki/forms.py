@@ -27,19 +27,7 @@ from netbox.forms import (
     NetBoxModelFilterSetForm,
     NetBoxModelImportForm,
 )
-
-from .models import (
-    Community,
-    BGPSession,
-    RoutingPolicy,
-    BGPPeerGroup,
-    RoutingPolicyRule,
-    PrefixList,
-    PrefixListRule,
-    CommunityList,
-    CommunityListRule,
-)
-
+import netbox_rpki
 # from .choices import (
 #    SessionStatusChoices,
 #    CommunityStatusChoices,
