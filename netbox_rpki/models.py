@@ -156,7 +156,7 @@ class CertificatePrefix(NetBoxModel):
     certificate_name = models.ForeignKey(
         to=Certificate,
         on_delete=models.PROTECT,
-        related_name='prefices'
+        related_name='prefices2'
     )
     tenant = models.ForeignKey(
         to='tenancy.Tenant',
@@ -187,7 +187,7 @@ class CertificateAsn(NetBoxModel):
     certificate_name2 = models.ForeignKey(
         to=Certificate,
         on_delete=models.PROTECT,
-        related_name='prefices'
+        related_name='asns'
     )
     tenant = models.ForeignKey(
         to='tenancy.Tenant',
