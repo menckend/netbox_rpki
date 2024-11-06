@@ -59,5 +59,5 @@ class CertificateAsnSerializer(NetBoxModelSerializer):
 
     class Meta:
         model = netbox_rpki.models.CertificateAsn
-        fields = ["id", "asn", "certificate_name"]
-        brief_fields = ("id", "asn", "certificate_name")
+        fields = ["id", "asn", "certificate_name2"]
+        brief_fields = ("id", "asn", "certificate_name2")
