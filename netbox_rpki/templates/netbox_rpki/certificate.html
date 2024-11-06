@@ -93,7 +93,24 @@
       {% include 'inc/panels/comments.html' %}
     </div>
   </div>
-
+  <div class="row">
+    <div class="col col-md-12">
+      <div class="card">
+        <h5 class="card-header">Assigned IP Netblock Resources</h5>
+        <div class="card-body table-responsive">
+          {% render_table certificateprefices_table %}
+        </div>
+      </div>
+    </div>
+    <div class="col col-md-12">
+      <div class="card">
+        <h5 class="card-header">Assigned ASN Resources</h5>
+        <div class="card-body table-responsive">
+          {% render_table certificateasns_table %}
+        </div>
+      </div>
+    </div>
+  </div>
   <div class="row">
     <div class="col col-md-12">
       <div class="card">
