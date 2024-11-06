@@ -34,7 +34,7 @@ import netbox_rpki
 #    IPAddressFamilyChoices,
 # )
 
-from netbox_rpki.models import Certificate, Organization, Roa, RoaPrefix
+from netbox_rpki.models import Certificate, Organization, Roa, RoaPrefix, CertificatePrefix, CertificateAsn
 
 
 class CertificateForm(NetBoxModelForm):
