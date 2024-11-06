@@ -6,7 +6,7 @@ from netbox.plugins import PluginMenuButton, PluginMenuItem, PluginMenu
 _menu_items = (
     PluginMenuItem(
         link='plugins:netbox_rpki:organization_list',
-        link_text='Organizations',
+        link_text='RIR Customer Orgs',
         buttons=(
             PluginMenuButton(
                 link='plugins:netbox_rpki:organization_add',
@@ -18,7 +18,7 @@ _menu_items = (
 
     PluginMenuItem(
         link='plugins:netbox_rpki:certificate_list',
-        link_text='Customer Certificates',
+        link_text='Resource Certificates',
         buttons=(
             PluginMenuButton(
                 link='plugins:netbox_rpki:certificate_add',
@@ -27,7 +27,6 @@ _menu_items = (
             ),
         ),
     ),
-
     PluginMenuItem(
         link='plugins:netbox_rpki:roa_list',
         link_text='ROAs',
@@ -45,6 +44,28 @@ _menu_items = (
         buttons=(
             PluginMenuButton(
                 link='plugins:netbox_rpki:roaprefix_add',
+                title='Add',
+                icon_class='mdi mdi-plus-thick',
+            ),
+        ),
+    ),
+    PluginMenuItem(
+        link='plugins:netbox_rpki:certificateprefix_list',
+        link_text='Assigned Prefices',
+        buttons=(
+            PluginMenuButton(
+                link='plugins:netbox_rpki:certificateprefix_add',
+                title='Add',
+                icon_class='mdi mdi-plus-thick',
+            ),
+        ),
+    ),
+    PluginMenuItem(
+        link='plugins:netbox_rpki:certificateasn_list',
+        link_text='Assigned ASNs ',
+        buttons=(
+            PluginMenuButton(
+                link='plugins:netbox_rpki:certificateasn_add',
                 title='Add',
                 icon_class='mdi mdi-plus-thick',
             ),
