@@ -1,8 +1,8 @@
 import netbox_rpki
 from netbox.views import generic
-from netbox_rpki.models import Certificate, Organization, Roa, RoaPrefix
-from netbox_rpki.forms import CertificateForm, OrganizationForm, RoaForm, RoaPrefixForm
-from netbox_rpki.tables import CertificateTable, OrganizationTable, RoaTable, RoaPrefixTable
+from netbox_rpki.models import Certificate, Organization, Roa, RoaPrefix, CertificatePrefix, CertificateAsn
+from netbox_rpki.forms import CertificateForm, OrganizationForm, RoaForm, RoaPrefixForm, CertificatePrefixForm, CertificateAsnForm
+from netbox_rpki.tables import CertificateTable, OrganizationTable, RoaTable, RoaPrefixTable, CertificatePrefixTable, CertificateAsnTable
 from netbox_rpki import filtersets, forms, tables
 
 
@@ -104,3 +104,98 @@ class RoaEditView(generic.ObjectEditView):
 
 class RoaDeleteView(generic.ObjectDeleteView):
     queryset = Roa.objects.all()
+
+
+class CertificatePrefixView(generic.ObjectView):
+    queryset = CertificatePrefix.objects.all()
+
+
+class CertificatePrefixListView(generic.ObjectListView):
+    queryset = CertificatePrefix.objects.all()
+    table = CertificatePrefixTable
+
+
+class CertificatePrefixEditView(generic.ObjectEditView):
+    queryset = CertificatePrefix.objects.all()
+    form = CertificatePrefixForm
+
+
+class CertificatePrefixDeleteView(generic.ObjectDeleteView):
+    queryset = CertificatePrefix.objects.all()
+
+
+class RoaView(generic.ObjectView):
+    queryset = Roa.objects.all()
+
+
+    def get_extra_context(self, request, instance):
+        certificateprefix_table = netbox_rpki.tables.CertificatePrefixTable(instance.prefices.all())
+        certificateprefix_table.configure(request)
+
+        return {
+            'certificateprefices_table': certificateprefix_table
+        }
+
+
+
+class CertificateAsnView(generic.ObjectView):
+    queryset = CertificateAsn.objects.all()
+
+
+class CertificateAsnListView(generic.ObjectListView):
+    queryset = CertificateAsn.objects.all()
+    table = CertificateAsnTable
+
+
+class CertificateAsnEditView(generic.ObjectEditView):
+    queryset = CertificateAsn.objects.all()
+    form = CertificateAsnForm
+
+
+class CertificateAsnDeleteView(generic.ObjectDeleteView):
+    queryset = CertificateAsn.objects.all()
+
+
+class CertificateAsn(generic.ObjectView):
+    queryset = Certificate.objects.all()
+
+
+    def get_extra_context(self, request, instance):
+        certificateasn_table = netbox_rpki.tables.CertificateAsnTable(instance.asn.all())
+        certificatasn_table.configure(request)
+
+        return {
+            'certificateasn_table': certificateasn_table
+        }
+
+
+
+class CertificatePrefixView(generic.ObjectView):
+    queryset = CertificatePrefix.objects.all()
+
+
+class CertificateAsnListView(generic.ObjectListView):
+    queryset = CertificatePrefix.objects.all()
+    table = CertificatePrefixTable
+
+
+class CertificatePrefixEditView(generic.ObjectEditView):
+    queryset = CertificatePrefix.objects.all()
+    form = CertificatePrefixForm
+
+
+class CertificateAsnDeleteView(generic.ObjectDeleteView):
+    queryset = CertificatePrefix.objects.all()
+
+
+class CertificatePrefix(generic.ObjectView):
+    queryset = Certificate.objects.all()
+
+
+    def get_extra_context(self, request, instance):
+        certificateprefix_table = netbox_rpki.tables.CertificatePrefixTable(instance.prefix.all())
+        certificateprefix_table.configure(request)
+
+        return {
+            'certificateprefix_table': certificateprefix_table
+        }
