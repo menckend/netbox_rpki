@@ -200,7 +200,7 @@ class CertificateAsn(NetBoxModel):
         ordering = ("asn",)
 
     def __str__(self):
-        return str(self.prefix)
+        return str(self.asn)
 
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:certificateasn", args=[self.pk])
