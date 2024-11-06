@@ -8,7 +8,7 @@ import netbox_rpki
 class CertificateFilterSet(NetBoxModelFilterSet, TenancyFilterSet):
     class Meta:
         model = netbox_rpki.models.Certificate
-        fields = ['name', 'issuer', 'subject', 'serial', 'valid_from', 'valid_to', 'public_key', 'private_key', 'publication_url', 'ca_repository', 'rpki_org', 'self_hosted', 'tenant']
+        fields = ['name', 'issuer', 'subject', 'serial', 'valid_from', 'valid_to', 'public_key', 'private_key', 'publication_url', 'ca_repository', 'rpki_org', 'self_hosted', 'tenant', 'comment']
 
     def search(self, queryset, name, value):
         """Perform the filtered search."""
@@ -23,7 +23,7 @@ class CertificateFilterSet(NetBoxModelFilterSet, TenancyFilterSet):
 class OrganizationFilterSet(NetBoxModelFilterSet, TenancyFilterSet):
     class Meta:
         model = netbox_rpki.models.Organization
-        fields = ['org_id', 'name', 'parent_rir', 'ext_url', 'tenant']
+        fields = ['org_id', 'name', 'parent_rir', 'ext_url', 'tenant', 'comment']
 
     def search(self, queryset, name, value):
         """Perform the filtered search."""
@@ -38,7 +38,7 @@ class OrganizationFilterSet(NetBoxModelFilterSet, TenancyFilterSet):
 class RoaFilterSet(NetBoxModelFilterSet, TenancyFilterSet):
     class Meta:
         model = netbox_rpki.models.Roa
-        fields = ['name', 'origin_as', 'valid_from', 'valid_to', 'signed_by', 'tenant']
+        fields = ['name', 'origin_as', 'valid_from', 'valid_to', 'signed_by', 'tenant', 'comment']
 
     def search(self, queryset, name, value):
         """Perform the filtered search."""
@@ -53,7 +53,7 @@ class RoaFilterSet(NetBoxModelFilterSet, TenancyFilterSet):
 class RoaPrefixFilterSet(NetBoxModelFilterSet, TenancyFilterSet):
     class Meta:
         model = netbox_rpki.models.RoaPrefix
-        fields = ['prefix', 'max_length', 'roa_name', 'tenant']
+        fields = ['prefix', 'max_length', 'roa_name', 'tenant', 'comment']
 
     def search(self, queryset, name, value):
         """Perform the filtered search."""
