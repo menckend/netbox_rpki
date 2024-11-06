@@ -38,4 +38,18 @@ urlpatterns = [
     path('roaprefices/<int:pk>/edit/', views.RoaPrefixEditView.as_view(), name='roaprefix_edit'),
     path('roaprefices/<int:pk>/delete/', views.RoaPrefixDeleteView.as_view(), name='roaprefix_delete'),
     path('roaprefices/<int:pk>/', include(get_model_urls('netbox_rpki', 'roaprefix'))),
+    # certificateprefix
+    path('certificateprefices/', views.CertificatePrefixListView.as_view(), name='certificateprefix_list'),
+    path('certificateprefices/add/', views.CertificatePrefixEditView.as_view(), name='certificateprefix_add'),
+    path('certificateprefices/<int:pk>/', views.CertificatePrefixView.as_view(), name='certificateprefix'),
+    path('certificateprefices/<int:pk>/edit/', views.CertificatePrefixEditView.as_view(), name='certificateprefix_edit'),
+    path('certificateprefices/<int:pk>/delete/', views.CertificatePrefixDeleteView.as_view(), name='certificateprefix_delete'),
+    path('certificateprefices/<int:pk>/', include(get_model_urls('netbox_rpki', 'certificateprefix'))),
+    # certificateasn
+    path('certificateasns/', views.CertificateAsnListView.as_view(), name='certificateasn_list'),
+    path('certificateasns/add/', views.CertificateAsnEditView.as_view(), name='certificateasn_add'),
+    path('certificateasns/<int:pk>/', views.CertificateAsnView.as_view(), name='certificateasn'),
+    path('certificateasns/<int:pk>/edit/', views.CertificateAsnEditView.as_view(), name='certificateasn_edit'),
+    path('certificateasns/<int:pk>/delete/', views.CertificateAsnDeleteView.as_view(), name='certificateasn_delete'),
+    path('certificateasns/<int:pk>/', include(get_model_urls('netbox_rpki', 'certificateasn'))),
 ]
