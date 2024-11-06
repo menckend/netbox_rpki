@@ -11,5 +11,7 @@ router.register('certificate', CertificateViewSet, basename='certificate')
 router.register('organization', OrganizationViewSet, basename='organization')
 router.register('roa', RoaViewSet, basename='roa')
 router.register('roaprefix', RoaPrefixViewSet, basename='roaprefix')
+router.register('certificateprefix', CertificatePrefixViewSet, basename='certificateprefix')
+router.register('certificateasn', CertificateAsnViewSet, basename='certificateasn')
 
 urlpatterns = router.urls
