@@ -16,6 +16,16 @@
               <th scope="row">Prefix</th>
               <td><a href="{{ object.prefix.get_absolute_url }}">{{ object.prefix }}</a></td>
             </tr>
+             <tr>
+                    <td>Tenant</td>
+                    <td>
+                        {% if object.tenant %}
+                        <a href="{{ object.tenant.get_absolute_url }}">{{ object.tenant }}</a>
+                        {% else %}
+                        <span class="text-muted">None</span>
+                        {% endif %}
+                    </td>
+                </tr>
             <tr>
               <th scope="row">Maximum Prefix Length</th>
               <td>{{ object.max_length }}</td>
