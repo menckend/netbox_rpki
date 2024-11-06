@@ -1,7 +1,7 @@
 """Django API url router definitions for the netbox_ptov plugin"""
 
 from netbox.api.routers import NetBoxRouter
-from netbox_rpki.api.views import CertificateViewSet, OrganizationViewSet, RoaViewSet, RoaPrefixViewSet, RootView
+from netbox_rpki.api.views import CertificateViewSet, OrganizationViewSet, RoaViewSet, RoaPrefixViewSet, CertificatePrefixViewSet, CertificateAsnViewSet,RootView
 
 app_name = 'netbox_rpki'
 
