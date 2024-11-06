@@ -197,7 +197,7 @@ class CertificateAsn(NetBoxModel):
     )
 
     class Meta:
-        ordering = ("prefix",)
+        ordering = ("asn",)
 
     def __str__(self):
         return str(self.prefix)
