@@ -64,3 +64,35 @@ class RoaPrefixFilterSet(NetBoxModelFilterSet, TenancyFilterSet):
                 | Q(description__icontains=value)
         )
         return queryset.filter(qs_filter)
+
+
+class CertificatePrefixFilterSet(NetBoxModelFilterSet, TenancyFilterSet):
+    class Meta:
+        model = netbox_rpki.models.CertificatePrefix
+        fields = ['prefix', 'certificate_name', 'tenant']
+
+    def search(self, queryset, name, value):
+        """Perform the filtered search."""
+        if not value.strip():
+            return queryset
+        qs_filter = (
+                Q(value__icontains=value)
+                | Q(description__icontains=value)
+        )
+        return queryset.filter(qs_filter)
+
+class CertificateAsnFilterSet(NetBoxModelFilterSet, TenancyFilterSet):
+    class Meta:
+        model = netbox_rpki.models.CertificateAsn
+        fields = ['asn', 'certificate_name', 'tenant']
+
+    def search(self, queryset, name, value):
+        """Perform the filtered search."""
+        if not value.strip():
+            return queryset
+        qs_filter = (
+                Q(value__icontains=value)
+                | Q(description__icontains=value)
+        )
+        return queryset.filter(qs_filter)
+
