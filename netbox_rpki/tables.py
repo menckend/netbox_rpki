@@ -79,7 +79,7 @@ class RoaPrefixTable(NetBoxTable):
 
 class CertificatePrefixTable(NetBoxTable):
     pk = tables.Column(linkify=True)
-    prefix = tables.column
+    prefix = tables.Column
     tenant = tables.TemplateColumn(
         template_code=COL_TENANT
     )
