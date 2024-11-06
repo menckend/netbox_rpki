@@ -10,17 +10,17 @@ class CertificateView(generic.ObjectView):
     queryset = netbox_rpki.models.Certificate.objects.all()
 
     def get_extra_context(self, request, instance):
-        certificateprefix_table = netbox_rpki.tables.CertificatePrefixTable(instance.prefix.all())
-        certificateprefix_table.configure(request)
-        certificateasn_table = netbox_rpki.tables.CertificateAsnTable(instance.asn.all())
-        certificateasn_table.configure(request)
+#        certificateprefix_table = netbox_rpki.tables.CertificatePrefixTable(instance.prefix.all())
+#        certificateprefix_table.configure(request)
+#        certificateasn_table = netbox_rpki.tables.CertificateAsnTable(instance.asn.all())
+#        certificateasn_table.configure(request)
         roa_table = netbox_rpki.tables.RoaTable(instance.roas.all())
         roa_table.configure(request)
         
         return {
             'signed_roas_table': roa_table,
-            'certificateasn_table': certificateasn_table,
-            'certificateprefix_table': certificateprefix_table
+ #           'certificateasn_table': certificateasn_table,
+ #           'certificateprefix_table': certificateprefix_table
         }
 
 
