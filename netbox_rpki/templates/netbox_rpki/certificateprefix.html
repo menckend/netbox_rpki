@@ -1,0 +1,44 @@
+{% extends 'generic/object.html' %}
+{% load render_table from django_tables2 %}
+
+{% block breadcrumbs %}
+<li class="breadcrumb-item"><a href="{% url 'plugins:netbox_rpki:certificateprefix_list' %}">RPKI Assigned IP Net-block resources</a></li>
+{% endblock breadcrumbs %}
+
+{% block content %}
+  <div class="row mb-3">
+    <div class="col col-md-6">
+      <div class="card">
+        <h5 class="card-header">RPKI assigned IP netblocks</h5>
+        <div class="card-body">
+          <table class="table table-hover attr-table">
+            <tr>
+              <th scope="row">Prefix</th>
+              <td><a href="{{ object.prefix.get_absolute_url }}">{{ object.prefix }}</a></td>
+            </tr>
+             <tr>
+                    <td>Tenant</td>
+                    <td>
+                        {% if object.tenant %}
+                        <a href="{{ object.tenant.get_absolute_url }}">{{ object.tenant }}</a>
+                        {% else %}
+                        <span class="text-muted">None</span>
+                        {% endif %}
+                    </td>
+                </tr>
+            <tr>
+              <th scope="row">Resource Certificate Name</th>
+              <td><a href="{{ object.roa_name.get_absolute_url }}">{{ object.certificate_name }}</a></td>
+            </tr>
+          </table>
+        </div>
+      </div>
+      {% include 'inc/panels/custom_fields.html' %}
+    </div>
+    <div class="col col-md-6">
+      {% include 'inc/panels/tags.html' %}
+      {% include 'inc/panels/comments.html' %}
+    </div>
+  </div>
+  </div>
+{% endblock content %}
