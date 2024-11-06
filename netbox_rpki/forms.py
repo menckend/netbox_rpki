@@ -77,3 +77,18 @@ class RoaPrefixForm(NetBoxModelForm):
     class Meta:
         model = RoaPrefix
         fields = ['prefix', 'max_length', 'roa_name', 'tenant', 'comments', 'tags']
+
+
+class CertificatePrefixForm(NetBoxModelForm):
+    tenant = DynamicModelChoiceField(queryset=Tenant.objects.all(), required=False)
+    comments = CommentField()
+    class Meta:
+        model = CertificatePrefix
+        fields = ['prefix', 'certificate_name', 'tenant', 'comments', 'tags']
+
+class CertificateAsnForm(NetBoxModelForm):
+    tenant = DynamicModelChoiceField(queryset=Tenant.objects.all(), required=False)
+    comments = CommentField()
+    class Meta:
+        model = CertificateAsn
+        fields = ['asn', 'certificate_name', 'tenant', 'comments', 'tags']
