@@ -1,6 +1,6 @@
 from rest_framework.routers import APIRootView
 from netbox.api.viewsets import NetBoxModelViewSet
-from netbox_rpki.api.serializers import OrganizationSerializer, CertificateSerializer, RoaSerializer, RoaPrefixSerializer
+from netbox_rpki.api.serializers import OrganizationSerializer, CertificateSerializer, RoaSerializer, RoaPrefixSerializer, CertificatePrefixSerializer, CertificateAsnSerializer
 from netbox_rpki import filtersets, models
 
 
