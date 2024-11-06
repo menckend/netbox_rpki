@@ -9,6 +9,9 @@ from ipam.models import RIR
 class Organization(NetBoxModel):
     org_id = models.CharField(max_length=200, editable=True)
     name = models.CharField(max_length=200, editable=True)
+    comments = models.TextField(
+        blank=True
+    )
     ext_url = models.CharField(max_length=200, editable=True, blank=True)
     parent_rir = models.ForeignKey(
         to=RIR,
@@ -36,6 +39,9 @@ class Organization(NetBoxModel):
 
 class Certificate(NetBoxModel):
     name = models.CharField(max_length=200, editable=True)
+    comments = models.TextField(
+        blank=True
+    )
     issuer = models.CharField(max_length=200, editable=True, blank=True)
     subject = models.CharField(max_length=200, editable=True, blank=True)
     serial = models.CharField(max_length=200, editable=True, blank=True)
@@ -71,6 +77,9 @@ class Certificate(NetBoxModel):
 
 class Roa(NetBoxModel):
     name = models.CharField(max_length=200, editable=True)
+    comments = models.TextField(
+        blank=True
+    )
     origin_as = models.ForeignKey(
         to=ASN,
         on_delete=models.CASCADE,
@@ -108,6 +117,9 @@ class RoaPrefix(NetBoxModel):
         to=Prefix,
         on_delete=models.PROTECT,
         related_name='RoaPrefices'
+    )
+    comments = models.TextField(
+        blank=True
     )
     max_length = models.IntegerField(editable=True)
     roa_name = models.ForeignKey(
