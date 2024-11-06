@@ -26,7 +26,17 @@
               <th scope="row">Name</th>
               <td>{{ object.name }}</td>
             </tr>
-            <tr>
+             <tr>
+                    <td>Tenant</td>
+                    <td>
+                        {% if object.tenant %}
+                        <a href="{{ object.tenant.get_absolute_url }}">{{ object.tenant }}</a>
+                        {% else %}
+                        <span class="text-muted">None</span>
+                        {% endif %}
+                    </td>
+                </tr>
+          <tr>
               <th scope="row">Origination AS Number</th>
               <td><a href="{{ object.origin_as.get_absolute_url }}">{{ object.origin_as }}</a></td>
             </tr>
