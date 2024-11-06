@@ -102,6 +102,6 @@ class CertificateAsnTable(NetBoxTable):
 
     class Meta(NetBoxTable.Meta):
         model = netbox_rpki.models.CertificateAsn
-        fields = ("pk", "id", "asn", "certificate_name", "comments", "tenant", "tags")
-        default_columns = ("asn", "certificate_name", "comments", "tenant", "tags")
+        fields = ("pk", "id", "asn", "certificate_name2", "comments", "tenant", "tags")
+        default_columns = ("asn", "certificate_name2", "comments", "tenant", "tags")
 
