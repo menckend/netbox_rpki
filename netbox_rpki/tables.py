@@ -74,3 +74,34 @@ class RoaPrefixTable(NetBoxTable):
         model = netbox_rpki.models.RoaPrefix
         fields = ("pk", "id", "prefix", "max_length", "roa_name", "comments", "tenant", "tags")
         default_columns = ("prefix", "max_length", "roa_name", "comments", "tenant", "tags")
+
+
+class CertificatePrefixTable(NetBoxTable):
+    pk = tables.Column(linkify=True)
+    tenant = tables.TemplateColumn(
+        template_code=COL_TENANT
+    )
+    tags = TagColumn(
+        url_name='plugins:netbox_rpki:certificateprefix_list'
+    )
+
+    class Meta(NetBoxTable.Meta):
+        model = netbox_rpki.models.CertificatePrefix
+        fields = ("pk", "id", "prefix", "certificate_name", "comments", "tenant", "tags")
+        default_columns = ("prefix", "certificate_name", "comments", "tenant", "tags")
+
+
+class CertificateAsnTable(NetBoxTable):
+    pk = tables.Column(linkify=True)
+    tenant = tables.TemplateColumn(
+        template_code=COL_TENANT
+    )
+    tags = TagColumn(
+        url_name='plugins:netbox_rpki:certificateasn_list'
+    )
+
+    class Meta(NetBoxTable.Meta):
+        model = netbox_rpki.models.CertificateAsn
+        fields = ("pk", "id", "asn", "certificate_name", "comments", "tenant", "tags")
+        default_columns = ("asn", "certificate_name", "comments", "tenant", "tags")
+
