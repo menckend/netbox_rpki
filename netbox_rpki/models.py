@@ -142,3 +142,66 @@ class RoaPrefix(NetBoxModel):
 
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:roaprefix", args=[self.pk])
+
+
+class CertificatePrefix(NetBoxModel):
+    prefix = models.ForeignKey(
+        to=Prefix,
+        on_delete=models.PROTECT,
+        related_name='CertificatePrefices'
+    )
+    comments = models.TextField(
+        blank=True
+    )
+    certificate_name = models.ForeignKey(
+        to=Certificate,
+        on_delete=models.PROTECT,
+        related_name='prefices'
+    )
+    tenant = models.ForeignKey(
+        to='tenancy.Tenant',
+        on_delete=models.PROTECT,
+        blank=True,
+        null=True
+    )
+
+    class Meta:
+        ordering = ("prefix",)
+
+    def __str__(self):
+        return str(self.prefix)
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:certificateprefix", args=[self.pk])
+
+
+
+class CertificateAsn(NetBoxModel):
+    prefix = models.ForeignKey(
+        to=ASN,
+        on_delete=models.PROTECT,
+        related_name='CertificateASNs'
+    )
+    comments = models.TextField(
+        blank=True
+    )
+    certificate_name = models.ForeignKey(
+        to=Certificate,
+        on_delete=models.PROTECT,
+        related_name='prefices'
+    )
+    tenant = models.ForeignKey(
+        to='tenancy.Tenant',
+        on_delete=models.PROTECT,
+        blank=True,
+        null=True
+    )
+
+    class Meta:
+        ordering = ("prefix",)
+
+    def __str__(self):
+        return str(self.prefix)
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:certificateasn", args=[self.pk])
