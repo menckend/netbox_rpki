@@ -1,21 +1,20 @@
-__author__ = """H.L. Mencken Davidson"""
-__email__ = "netbox_rpki@toomanydavidsons.com"
-
 from netbox.plugins import PluginConfig
 from netbox_rpki._version import __version__
 
 # import api
 
-class rpki_config(PluginConfig):
+class RpkiConfig(PluginConfig):
     name = 'netbox_rpki'
-    verbose_name = 'RPKI functionality for Netbox'
-    description = 'Add RPKI data elements to Netbox.'
+    verbose_name = 'Netbox RPKI'
+    description = 'RPKI objects for Netbox'
     version = __version__
     author = 'Mencken Davidson'
     author_email = 'mencken@gmail.com'
     base_url = 'netbox_rpki'
+    min_verserion = '4.1.0'
+    required_settings = []
     default_settings = {
         'top_level_menu': True
         }
 
-config = rpki_config
+config = RpkiConfig
