@@ -45,3 +45,19 @@ class RoaPrefixSerializer(NetBoxModelSerializer):
         model = netbox_rpki.models.RoaPrefix
         fields = ["id", "prefix", "max_length", "roa_name"]
         brief_fields = ("id", "prefix", "max_length", "roa_name")
+
+class CertificatePrefixSerializer(NetBoxModelSerializer):
+    url = HyperlinkedIdentityField(view_name="plugins-api:netbox_rpki_:certificateprefix-detail")
+
+    class Meta:
+        model = netbox_rpki.models.CertificatePrefix
+        fields = ["id", "prefix", "certificate_name"]
+        brief_fields = ("id", "prefix", "certificate_name")
+
+class CertificateAsnSerializer(NetBoxModelSerializer):
+    url = HyperlinkedIdentityField(view_name="plugins-api:netbox_rpki_:certificateasn-detail")
+
+    class Meta:
+        model = netbox_rpki.models.CertificateAsn
+        fields = ["id", "asn", "certificate_name"]
+        brief_fields = ("id", "asn", "certificate_name")
