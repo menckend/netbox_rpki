@@ -175,9 +175,8 @@ class CertificatePrefix(NetBoxModel):
         return reverse("plugins:netbox_rpki:certificateprefix", args=[self.pk])
 
 
-
 class CertificateAsn(NetBoxModel):
-    prefix = models.ForeignKey(
+    asn = models.ForeignKey(
         to=ASN,
         on_delete=models.PROTECT,
         related_name='CertificateASNs'
