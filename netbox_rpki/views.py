@@ -171,7 +171,7 @@ class CertificatePrefixView(generic.ObjectView):
     queryset = CertificatePrefix.objects.all()
 
 
-class CertificateAsnListView(generic.ObjectListView):
+class CertificatePrefixListView(generic.ObjectListView):
     queryset = CertificatePrefix.objects.all()
     table = CertificatePrefixTable
 
@@ -181,7 +181,7 @@ class CertificatePrefixEditView(generic.ObjectEditView):
     form = CertificatePrefixForm
 
 
-class CertificateAsnDeleteView(generic.ObjectDeleteView):
+class CertificatePrefixDeleteView(generic.ObjectDeleteView):
     queryset = CertificatePrefix.objects.all()
 
 
