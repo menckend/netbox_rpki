@@ -13,7 +13,7 @@ organization_menu_item = PluginMenuItem(
     buttons=(
         PluginMenuButton(
             'plugins:netbox_rpki:organization_add',
-            _("Add"),
+            title='Add',
             "mdi mdi-plus-thick",
             permissions=["netbox_rpki.add_view"],
         ),
@@ -27,7 +27,7 @@ certificate_menu_item = PluginMenuItem(
     buttons=(
         PluginMenuButton(
             'plugins:netbox_rpki:certificate_add',
-            _("Add"),
+            title='Add',
             "mdi mdi-plus-thick",
             permissions=["netbox_rpki.add_view"],
         ),
@@ -41,7 +41,7 @@ certprefix_menu_item = PluginMenuItem(
     buttons=(
         PluginMenuButton(
             'plugins:netbox_rpki:certificateprefix_add',
-            _("Add"),
+            title='Add',
             "mdi mdi-plus-thick",
             permissions=["netbox_rpki.add_view"],
         ),
@@ -55,7 +55,7 @@ certasn_menu_item = PluginMenuItem(
     buttons=(
         PluginMenuButton(
             'plugins:netbox_rpki:certificateasn_add',
-            _("Add"),
+            title='Add',
             "mdi mdi-plus-thick",
             permissions=["netbox_rpki.add_view"],
         ),
@@ -69,7 +69,7 @@ roa_menu_item = PluginMenuItem(
     buttons=(
         PluginMenuButton(
             'plugins:netbox_rpki:roa_add',
-            _("Add"),
+            title='Add',
             "mdi mdi-plus-thick",
             permissions=["netbox_rpki.add_view"],
         ),
@@ -83,7 +83,7 @@ roaprefix_menu_item = PluginMenuItem(
     buttons=(
         PluginMenuButton(
             'plugins:netbox_rpki:roaprefix_add',
-            _("Add"),
+            title='Add',
             "mdi mdi-plus-thick",
             permissions=["netbox_rpki.add_view"],
         ),
