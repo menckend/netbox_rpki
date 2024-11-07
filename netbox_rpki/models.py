@@ -114,7 +114,7 @@ class Roa(NetBoxModel):
 
 class RoaPrefix(NetBoxModel):
     prefix = models.ForeignKey(
-        to=Prefix,
+        to=ipam.models.ip.Prefix,
         on_delete=models.PROTECT,
         related_name='RoaPrefices'
     )
