@@ -117,7 +117,7 @@ class RoaPrefix(NetBoxModel):
     prefix = models.ForeignKey(
         to=ipam.models.ip.Prefix,
         on_delete=models.PROTECT,
-        related_name='PrefixToROoaTable'
+        related_name='PrefixToRoaTable'
     )
     comments = models.TextField(
         blank=True
