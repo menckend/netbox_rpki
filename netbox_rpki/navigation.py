@@ -13,8 +13,8 @@ organization_menu_item = PluginMenuItem(
             _("Add"),
             "mdi mdi-plus-thick",
             permissions=["netbox_rpki.add_view"],
-        )
-    )
+        ),
+    ),
 )
 
 certificate_menu_item = PluginMenuItem(
@@ -27,8 +27,8 @@ certificate_menu_item = PluginMenuItem(
             _("Add"),
             "mdi mdi-plus-thick",
             permissions=["netbox_rpki.add_view"],
-        )
-    )
+        ),
+    ),
 )
 
 certprefix_menu_item = PluginMenuItem(
@@ -41,8 +41,8 @@ certprefix_menu_item = PluginMenuItem(
             _("Add"),
             "mdi mdi-plus-thick",
             permissions=["netbox_rpki.add_view"],
-        )
-    )
+        ),
+    ),
 )
 
 certasn_menu_item = PluginMenuItem(
@@ -55,8 +55,8 @@ certasn_menu_item = PluginMenuItem(
             _("Add"),
             "mdi mdi-plus-thick",
             permissions=["netbox_rpki.add_view"],
-        )
-    )
+        ),
+    ),
 )
 
 roa_menu_item = PluginMenuItem(
@@ -69,8 +69,8 @@ roa_menu_item = PluginMenuItem(
             _("Add"),
             "mdi mdi-plus-thick",
             permissions=["netbox_rpki.add_view"],
-        )
-    )
+        ),
+    ),
 )
 
 roaprefix_menu_item = PluginMenuItem(
@@ -83,8 +83,9 @@ roaprefix_menu_item = PluginMenuItem(
             _("Add"),
             "mdi mdi-plus-thick",
             permissions=["netbox_rpki.add_view"],
-        )
-    )
+        ),
+    ),
+)
 
 plugin_settings = settings.PLUGINS_CONFIG.get('netbox_rpki', {})
 
