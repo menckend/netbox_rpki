@@ -91,4 +91,4 @@ class CertificateAsnForm(NetBoxModelForm):
     comments = CommentField()
     class Meta:
         model = CertificateAsn
-        fields = ['asn', 'certificate_name', 'tenant', 'comments', 'tags']
+        fields = ['asn', 'certificate_name2', 'tenant', 'comments', 'tags']
