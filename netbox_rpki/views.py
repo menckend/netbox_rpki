@@ -87,7 +87,7 @@ class RoaView(generic.ObjectView):
 
 
     def get_extra_context(self, request, instance):
-        myroaprefix_table = tables.RoaPrefixTable(instance.prefices.all())
+        myroaprefix_table = tables.RoaPrefixTable(instance.prefix.all())
         myroaprefix_table.configure(request)
 
         return {
