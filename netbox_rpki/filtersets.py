@@ -84,7 +84,7 @@ class CertificatePrefixFilterSet(NetBoxModelFilterSet, TenancyFilterSet):
 class CertificateAsnFilterSet(NetBoxModelFilterSet, TenancyFilterSet):
     class Meta:
         model = netbox_rpki.models.CertificateAsn
-        fields = ['asn', 'certificate_name2', 'tenant']
+        fields = ['asn', 'certificate_name', 'tenant']
 
     def search(self, queryset, name, value):
         """Perform the filtered search."""
