@@ -1,13 +1,10 @@
 import netbox_rpki
 from netbox.views import generic
-#from netbox_rpki.models import Certificate, Organization, Roa, RoaPrefix, CertificatePrefix, CertificateAsn
-#from netbox_rpki.forms import CertificateForm, OrganizationForm, RoaForm, RoaPrefixForm, CertificatePrefixForm, CertificateAsnForm
-#from netbox_rpki.tables import CertificateTable, OrganizationTable, RoaTable, RoaPrefixTable, CertificatePrefixTable, CertificateAsnTable
-from netbox_rpki import filtersets, forms, tables
+from netbox_rpki import models, forms, tables, filtersets
 
 
 class CertificateView(generic.ObjectView):
-    queryset = netbox_rpki.models.Certificate.objects.all()
+    queryset = models.Certificate.objects.all()
 
     def get_extra_context(self, request, instance):
         certificateprefix_table = tables.CertificatePrefixTable(instance.prefix.all())
@@ -25,23 +22,23 @@ class CertificateView(generic.ObjectView):
 
 
 class CertificateListView(generic.ObjectListView):
-    queryset = Certificate.objects.all()
+    queryset = models.Certificate.objects.all()
     filterset = filtersets.CertificateFilterSet
     filterset_form = forms.CertificateFilterForm
     table = tables.CertificateTable
 
 
 class CertificateEditView(generic.ObjectEditView):
-    queryset = Certificate.objects.all()
-    form = CertificateForm
+    queryset = models.Certificate.objects.all()
+    form = forms.CertificateForm
 
 
 class CertificateDeleteView(generic.ObjectDeleteView):
-    queryset = Certificate.objects.all()
+    queryset = models.Certificate.objects.all()
 
 
 class OrganizationView(generic.ObjectView):
-    queryset = Organization.objects.all()
+    queryset = models.Organization.objects.all()
 
 
     def get_extra_context(self, request, instance):
@@ -54,43 +51,43 @@ class OrganizationView(generic.ObjectView):
 
 
 class OrganizationListView(generic.ObjectListView):
-    queryset = Organization.objects.all()
-    table = OrganizationTable
+    queryset = models.Organization.objects.all()
+    table = tables.OrganizationTable
 
 
 class OrganizationEditView(generic.ObjectEditView):
-    queryset = Organization.objects.all()
-    form = OrganizationForm
+    queryset = models.Organization.objects.all()
+    form = forms.OrganizationForm
 
 
 class OrganizationDeleteView(generic.ObjectDeleteView):
-    queryset = Organization.objects.all()
+    queryset = models.Organization.objects.all()
 
 
 class RoaPrefixView(generic.ObjectView):
-    queryset = RoaPrefix.objects.all()
+    queryset = models.RoaPrefix.objects.all()
 
 
 class RoaPrefixListView(generic.ObjectListView):
-    queryset = RoaPrefix.objects.all()
-    table = RoaPrefixTable
+    queryset = models.RoaPrefix.objects.all()
+    table = tables.RoaPrefixTable
 
 
 class RoaPrefixEditView(generic.ObjectEditView):
-    queryset = RoaPrefix.objects.all()
-    form = RoaPrefixForm
+    queryset = models.RoaPrefix.objects.all()
+    form = forms.RoaPrefixForm
 
 
 class RoaPrefixDeleteView(generic.ObjectDeleteView):
-    queryset = RoaPrefix.objects.all()
+    queryset = models.RoaPrefix.objects.all()
 
 
 class RoaView(generic.ObjectView):
-    queryset = Roa.objects.all()
+    queryset = models.Roa.objects.all()
 
 
     def get_extra_context(self, request, instance):
-        myroaprefix_table = netbox_rpki.tables.RoaPrefixTable(instance.prefices.all())
+        myroaprefix_table = tables.RoaPrefixTable(instance.prefices.all())
         myroaprefix_table.configure(request)
 
         return {
@@ -99,43 +96,43 @@ class RoaView(generic.ObjectView):
 
 
 class RoaListView(generic.ObjectListView):
-    queryset = Roa.objects.all()
-    table = RoaTable
+    queryset = models.Roa.objects.all()
+    table = tables.RoaTable
 
 
 class RoaEditView(generic.ObjectEditView):
-    queryset = Roa.objects.all()
-    form = RoaForm
+    queryset = models.Roa.objects.all()
+    form = forms.RoaForm
 
 
 class RoaDeleteView(generic.ObjectDeleteView):
-    queryset = Roa.objects.all()
+    queryset = models.Roa.objects.all()
 
 
 class CertificatePrefixView(generic.ObjectView):
-    queryset = CertificatePrefix.objects.all()
+    queryset = models.CertificatePrefix.objects.all()
 
 
 class CertificatePrefixListView(generic.ObjectListView):
-    queryset = CertificatePrefix.objects.all()
-    table = CertificatePrefixTable
+    queryset = models.CertificatePrefix.objects.all()
+    table = tables.CertificatePrefixTable
 
 
 class CertificatePrefixEditView(generic.ObjectEditView):
-    queryset = CertificatePrefix.objects.all()
-    form = CertificatePrefixForm
+    queryset = models.CertificatePrefix.objects.all()
+    form = forms.CertificatePrefixForm
 
 
 class CertificatePrefixDeleteView(generic.ObjectDeleteView):
-    queryset = CertificatePrefix.objects.all()
+    queryset = models.CertificatePrefix.objects.all()
 
 
 class RoaView(generic.ObjectView):
-    queryset = Roa.objects.all()
+    queryset = models.Roa.objects.all()
 
 
     def get_extra_context(self, request, instance):
-        certificateprefix_table = netbox_rpki.tables.CertificatePrefixTable(instance.prefices.all())
+        certificateprefix_table = tables.CertificatePrefixTable(instance.prefices.all())
         certificateprefix_table.configure(request)
 
         return {
@@ -145,64 +142,45 @@ class RoaView(generic.ObjectView):
 
 
 class CertificateAsnView(generic.ObjectView):
-    queryset = CertificateAsn.objects.all()
+    queryset = models.CertificateAsn.objects.all()
 
 
 class CertificateAsnListView(generic.ObjectListView):
-    queryset = CertificateAsn.objects.all()
-    table = CertificateAsnTable
+    queryset = models.CertificateAsn.objects.all()
+    table = tables.CertificateAsnTable
 
 
 class CertificateAsnEditView(generic.ObjectEditView):
-    queryset = CertificateAsn.objects.all()
-    form = CertificateAsnForm
+    queryset = models.CertificateAsn.objects.all()
+    form = form.CertificateAsnForm
 
 
 class CertificateAsnDeleteView(generic.ObjectDeleteView):
-    queryset = CertificateAsn.objects.all()
+    queryset = models.CertificateAsn.objects.all()
 
 
 class CertificateAsn(generic.ObjectView):
-    queryset = Certificate.objects.all()
+    queryset = models.Certificate.objects.all()
 
 
 
 class CertificatePrefixView(generic.ObjectView):
-    queryset = CertificatePrefix.objects.all()
+    queryset = models.CertificatePrefix.objects.all()
 
 
 class CertificatePrefixListView(generic.ObjectListView):
-    queryset = CertificatePrefix.objects.all()
-    table = CertificatePrefixTable
+    queryset = models.CertificatePrefix.objects.all()
+    table = tables.CertificatePrefixTable
 
 
 class CertificatePrefixEditView(generic.ObjectEditView):
-    queryset = CertificatePrefix.objects.all()
-    form = CertificatePrefixForm
+    queryset = models.CertificatePrefix.objects.all()
+    form = forms.CertificatePrefixForm
 
 
 class CertificatePrefixDeleteView(generic.ObjectDeleteView):
-    queryset = CertificatePrefix.objects.all()
+    queryset = models.CertificatePrefix.objects.all()
 
 
 class CertificatePrefix(generic.ObjectView):
-    queryset = Certificate.objects.all()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    queryset = models.Certificate.objects.all()
