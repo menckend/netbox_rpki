@@ -83,7 +83,7 @@ class Roa(NetBoxModel):
     )
     origin_as = models.ForeignKey(
         to=ASN,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name='roas',
         blank=True,
         null=True
