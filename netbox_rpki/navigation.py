@@ -3,13 +3,16 @@ from netbox.plugins import PluginMenuButton, PluginMenuItem, PluginMenu
 from netbox.plugins.utils import get_plugin_config
 
 
+menu_name = "RPKI"
+top_level_menu = get_plugin_config("netbox_rpki", "top_level_menu")
+
 organization_menu_item = PluginMenuItem(
     link='plugins:netbox_rpki:organization_list',
     link_text='RIR Customer Orgs',
     permissions=["netbox_rpki.view_view"],
     buttons=(
         PluginMenuButton(
-            link='plugins:netbox_rpki:organization_add',
+            'plugins:netbox_rpki:organization_add',
             _("Add"),
             "mdi mdi-plus-thick",
             permissions=["netbox_rpki.add_view"],
@@ -23,7 +26,7 @@ certificate_menu_item = PluginMenuItem(
     permissions=["netbox_rpki.view_view"],
     buttons=(
         PluginMenuButton(
-            link='plugins:netbox_rpki:certificate_add',
+            'plugins:netbox_rpki:certificate_add',
             _("Add"),
             "mdi mdi-plus-thick",
             permissions=["netbox_rpki.add_view"],
@@ -37,7 +40,7 @@ certprefix_menu_item = PluginMenuItem(
     permissions=["netbox_rpki.view_view"],
     buttons=(
         PluginMenuButton(
-            link='plugins:netbox_rpki:certificateprefix_add',
+            'plugins:netbox_rpki:certificateprefix_add',
             _("Add"),
             "mdi mdi-plus-thick",
             permissions=["netbox_rpki.add_view"],
@@ -51,7 +54,7 @@ certasn_menu_item = PluginMenuItem(
     permissions=["netbox_rpki.view_view"],
     buttons=(
         PluginMenuButton(
-            link='plugins:netbox_rpki:certificateasn_add',
+            'plugins:netbox_rpki:certificateasn_add',
             _("Add"),
             "mdi mdi-plus-thick",
             permissions=["netbox_rpki.add_view"],
@@ -65,7 +68,7 @@ roa_menu_item = PluginMenuItem(
     permissions=["netbox_rpki.view_view"],
     buttons=(
         PluginMenuButton(
-            link='plugins:netbox_rpki:roa_add',
+            'plugins:netbox_rpki:roa_add',
             _("Add"),
             "mdi mdi-plus-thick",
             permissions=["netbox_rpki.add_view"],
@@ -79,7 +82,7 @@ roaprefix_menu_item = PluginMenuItem(
     permissions=["netbox_rpki.view_view"],
     buttons=(
         PluginMenuButton(
-            link='plugins:netbox_rpki:roaprefix_add',
+            'plugins:netbox_rpki:roaprefix_add',
             _("Add"),
             "mdi mdi-plus-thick",
             permissions=["netbox_rpki.add_view"],
