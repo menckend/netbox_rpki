@@ -132,7 +132,7 @@ class RoaView(generic.ObjectView):
 
 
     def get_extra_context(self, request, instance):
-        certificateprefix_table = tables.CertificatePrefixTable(instance.prefices.all())
+        certificateprefix_table = tables.CertificatePrefixTable(instance.prefix.all())
         certificateprefix_table.configure(request)
 
         return {
