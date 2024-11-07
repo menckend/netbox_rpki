@@ -94,9 +94,8 @@ if plugin_settings.get('top_level_menu'):
             ("Resources", resource_menu_items),
         ),
             ("ROAs", roa_menu_items),
-        ),
-        icon_class="mdi mdi-bootstrap",
-    )
+        )
+        icon_class="mdi mdi-bootstrap"
 else:
     menu_items = (
         resource_menu_items,
