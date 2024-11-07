@@ -152,7 +152,7 @@ class CertificateAsnListView(generic.ObjectListView):
 
 class CertificateAsnEditView(generic.ObjectEditView):
     queryset = models.CertificateAsn.objects.all()
-    form = form.CertificateAsnForm
+    form = forms.CertificateAsnForm
 
 
 class CertificateAsnDeleteView(generic.ObjectDeleteView):
