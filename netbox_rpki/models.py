@@ -117,7 +117,7 @@ class RoaPrefix(NetBoxModel):
     prefix = models.ForeignKey(
         to=ipam.models.ip.Prefix,
         on_delete=models.PROTECT,
-        related_name='RoaPrefices'
+        related_name='PrefixToROoaTable'
     )
     comments = models.TextField(
         blank=True
@@ -126,7 +126,7 @@ class RoaPrefix(NetBoxModel):
     roa_name = models.ForeignKey(
         to=Roa,
         on_delete=models.PROTECT,
-        related_name='prefices'
+        related_name='RoaToPrefixTable'
     )
     tenant = models.ForeignKey(
         to='tenancy.Tenant',
@@ -149,7 +149,7 @@ class CertificatePrefix(NetBoxModel):
     prefix = models.ForeignKey(
         to=Prefix,
         on_delete=models.PROTECT,
-        related_name='CertificatePrefices'
+        related_name='PrefixToCertificateTable'
     )
     comments = models.TextField(
         blank=True
@@ -157,7 +157,7 @@ class CertificatePrefix(NetBoxModel):
     certificate_name = models.ForeignKey(
         to=Certificate,
         on_delete=models.PROTECT,
-        related_name='prefices2'
+        related_name='CertificateToPrefixTable'
     )
     tenant = models.ForeignKey(
         to='tenancy.Tenant',
@@ -180,15 +180,15 @@ class CertificateAsn(NetBoxModel):
     asn = models.ForeignKey(
         to=ASN,
         on_delete=models.PROTECT,
-        related_name='CertificateASNs'
+        related_name='ASNtoCertificateTable'
     )
     comments = models.TextField(
         blank=True
     )
-    certificate_name2 = models.ForeignKey(
+    certificate_name = models.ForeignKey(
         to=Certificate,
         on_delete=models.PROTECT,
-        related_name='asns'
+        related_name='CertificatetoASNTable'
     )
     tenant = models.ForeignKey(
         to='tenancy.Tenant',
