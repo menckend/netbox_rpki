@@ -7,9 +7,9 @@ class CertificateView(generic.ObjectView):
     queryset = models.Certificate.objects.all()
 
     def get_extra_context(self, request, instance):
-        certificateprefix_table = tables.CertificatePrefixTable(instance.prefix.all())
+        certificateprefix_table = tables.CertificatePrefixTable(instance.PrefixToCertificateTable.all())
         certificateprefix_table.configure(request)
-        certificateasn_table = tables.CertificateAsnTable(instance.asn.all())
+        certificateasn_table = tables.CertificateAsnTable(instance.ASNtoCertificateTable.all())
         certificateasn_table.configure(request)
         roa_table = tables.RoaTable(instance.roas.all())
         roa_table.configure(request)
@@ -87,7 +87,7 @@ class RoaView(generic.ObjectView):
 
 
     def get_extra_context(self, request, instance):
-        roaprefix_table = tables.RoaPrefixTable(instance.roas.all())
+        roaprefix_table = tables.RoaPrefixTable(instance.PrefixToROoaTable.all())
         roaprefix_table.configure(request)
 
         return {
