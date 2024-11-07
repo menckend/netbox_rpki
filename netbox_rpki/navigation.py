@@ -20,7 +20,6 @@ resource_menu_items = (
             ),
         ),
     ),
-
     PluginMenuItem(
         link='plugins:netbox_rpki:certificate_list',
         link_text='Resource Certificates',
@@ -32,7 +31,6 @@ resource_menu_items = (
             ),
         ),
     ),
-
     PluginMenuItem(
         link='plugins:netbox_rpki:certificateprefix_list',
         link_text='Assigned Prefices',
@@ -56,7 +54,6 @@ resource_menu_items = (
         ),
     ),
 )
-
 roa_menu_items = (
     PluginMenuItem(
         link='plugins:netbox_rpki:roa_list',
@@ -80,16 +77,12 @@ roa_menu_items = (
             ),
         ),
     ),
-
 )
-
-
 plugin_settings = settings.PLUGINS_CONFIG.get('netbox_rpki', {})
 
 if plugin_settings.get('top_level_menu'):
     menu = PluginMenu(
         label="RPKI",
-        
         groups=(
             ("Resources", resource_menu_items),
         ),
@@ -98,7 +91,5 @@ if plugin_settings.get('top_level_menu'):
         icon_class="mdi mdi-bootstrap"
 else:
     menu_items = (
-        resource_menu_items,
-        roa_menu_items
+        resource_menu_items + roa_menu_items
     )
-
