@@ -185,7 +185,7 @@ class CertificateAsn(NetBoxModel):
     comments = models.TextField(
         blank=True
     )
-    certificate_name = models.ForeignKey(
+    certificate_name2 = models.ForeignKey(
         to=Certificate,
         on_delete=models.PROTECT,
         related_name='CertificatetoASNTable'
