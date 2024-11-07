@@ -1,8 +1,8 @@
 import netbox_rpki
 from netbox.views import generic
-from netbox_rpki.models import Certificate, Organization, Roa, RoaPrefix, CertificatePrefix, CertificateAsn
-from netbox_rpki.forms import CertificateForm, OrganizationForm, RoaForm, RoaPrefixForm, CertificatePrefixForm, CertificateAsnForm
-from netbox_rpki.tables import CertificateTable, OrganizationTable, RoaTable, RoaPrefixTable, CertificatePrefixTable, CertificateAsnTable
+#from netbox_rpki.models import Certificate, Organization, Roa, RoaPrefix, CertificatePrefix, CertificateAsn
+#from netbox_rpki.forms import CertificateForm, OrganizationForm, RoaForm, RoaPrefixForm, CertificatePrefixForm, CertificateAsnForm
+#from netbox_rpki.tables import CertificateTable, OrganizationTable, RoaTable, RoaPrefixTable, CertificatePrefixTable, CertificateAsnTable
 from netbox_rpki import filtersets, forms, tables
 
 
@@ -10,11 +10,11 @@ class CertificateView(generic.ObjectView):
     queryset = netbox_rpki.models.Certificate.objects.all()
 
     def get_extra_context(self, request, instance):
-        certificateprefix_table = netbox_rpki.tables.CertificatePrefixTable(instance.prefix.all())
+        certificateprefix_table = tables.CertificatePrefixTable(instance.prefix.all())
         certificateprefix_table.configure(request)
-        certificateasn_table = netbox_rpki.tables.CertificateAsnTable(instance.asn.all())
+        certificateasn_table = tables.CertificateAsnTable(instance.asn.all())
         certificateasn_table.configure(request)
-        roa_table = netbox_rpki.tables.RoaTable(instance.roas.all())
+        roa_table = tables.RoaTable(instance.roas.all())
         roa_table.configure(request)
         
         return {
