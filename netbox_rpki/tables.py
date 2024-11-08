@@ -58,7 +58,7 @@ class RoaTable(NetBoxTable):
     class Meta(NetBoxTable.Meta):
         model = netbox_rpki.models.Roa
         fields = ("pk", "id", 'name', "origin_as", "valid_from", "valid_to", "auto_renews", "signed_by", "comments", "tenant", "tags")
-        default_columns = ("name", "origin_as", "valid_from", "valid_to", "auto_renews", "signed_by", "comments", "tenant", "tags")
+        default_columns = ("name", "origin_as", "valid_from", "valid_to", "auto_renews", "comments", "tenant", "tags")
 
 
 class RoaPrefixTable(NetBoxTable):
@@ -88,7 +88,7 @@ class CertificatePrefixTable(NetBoxTable):
     class Meta(NetBoxTable.Meta):
         model = netbox_rpki.models.CertificatePrefix
         fields = ("pk", "id", "prefix", "certificate_name", "comments", "tenant", "tags")
-        default_columns = ("prefix", "certificate_name", "comments", "tenant", "tags")
+        default_columns = ("prefix", "comments", "tenant", "tags")
 
 
 class CertificateAsnTable(NetBoxTable):
@@ -103,5 +103,5 @@ class CertificateAsnTable(NetBoxTable):
     class Meta(NetBoxTable.Meta):
         model = netbox_rpki.models.CertificateAsn
         fields = ("pk", "id", "asn", "certificate_name2", "comments", "tenant", "tags")
-        default_columns = ("asn", "certificate_name2", "comments", "tenant", "tags")
+        default_columns = ("asn", "comments", "tenant", "tags")
 
