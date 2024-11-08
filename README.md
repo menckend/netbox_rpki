@@ -50,7 +50,7 @@ Implements data models and forms for Resource Public Key Infrastructure (RPKI) i
 
 ## Compatibility
 
-[netbox-plugin.yaml](https://menckend.github.io/netbox_rpki/netbox-plugin.yaml)
+[netbox-plugin.yaml](netbox-plugin.yaml)
 
 
 ## Installing
