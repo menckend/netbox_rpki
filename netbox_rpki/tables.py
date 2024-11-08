@@ -28,7 +28,7 @@ class CertificateTable(NetBoxTable):
     class Meta(NetBoxTable.Meta):
         model = netbox_rpki.models.Certificate
         fields = ("pk", "id", "name", "issuer", "subject", "serial", "valid_from", "valid_to", "auto_renews", "publicKey", "private_key", "publication_url", "ca_repository", "self_hosted", "rpki_org", "comments", "tenant", "tags")
-        default_columns = ("name", "issuer", "subject", "serial", "valid_from", "valid_to", "auto_renews", "publicKey", "private_key", "publication_url;", "ca_repository", "self_hosted", "rpki_org", "comments", "tenant", "tags")
+        default_columns = ("name", "valid_from", "valid_to", "auto_renews",  "self_hosted", "rpki_org", "comments", "tenant", "tags")
 
 
 class OrganizationTable(NetBoxTable):
