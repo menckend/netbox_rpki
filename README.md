@@ -40,13 +40,13 @@ Implements data models and forms for Resource Public Key Infrastructure (RPKI) i
 
 ## Screencaps
 
-![image](./images/rpki-org-detail.png)
+![image](/images/rpki-org-detail.png)
 
-![image](./images/rpki-cert-detail.png)
+![image](/images/rpki-cert-detail.png)
 
-![image](./images/rpki-roa-detail.png)
+![image](/images/rpki-roa-detail.png)
 
-![image](./images/rpki-roaprefix-detail.png)
+![image](/images/rpki-roaprefix-detail.png)
 
 ## Compatibility
 
