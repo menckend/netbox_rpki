@@ -1,5 +1,5 @@
 from netbox.plugins import PluginConfig
-from netbox_rpki._version import __version__
+from netbox_rpki.version import __version__
 
 # import api
 
