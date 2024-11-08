@@ -17,7 +17,7 @@ Implements data models and forms for Resource Public Key Infrastructure (RPKI) i
    * Parent relationship to RPKI "Customer certificate" model (children)
    * Fields
       * org-id, name, ext_url, parent_rir (foreign key to IPAM ASN)
-* Customer Certificate
+* Resource Certificate
    * The X.509 certificate used to sign a customer's ROAs
    * May be either self-hosted/managed/published (managed by customer) or managed by the RIR (as part of a "managed" RPKI service)
    * Child relationship to a single RPKI Organization object (parent)
