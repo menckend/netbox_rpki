@@ -4,7 +4,7 @@ from netbox.graphql.filter_mixins import autotype_decorator, BaseFilterMixin
 from netbox_rpki.models import (
     Certificate,
     CertificatePrefix,
-    CertificateASN,
+    CertificateAsn,
     Roa,
     Organization,
     RoaPrefix
