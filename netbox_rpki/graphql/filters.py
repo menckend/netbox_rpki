@@ -39,7 +39,7 @@ class CertificateFilter(BaseFilterMixin):
 class CertificatePrefixFilter(BaseFilterMixin):
     pass
 
-@strawberry_django.filter(CertificateAs n, lookups=True)
+@strawberry_django.filter(CertificateAsn, lookups=True)
 @autotype_decorator(CertificateAsnFilterSet)
 class CertificateASsnFilter(BaseFilterMixin):
     pass
