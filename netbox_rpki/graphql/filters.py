@@ -13,7 +13,7 @@ from netbox_rpki.models import (
 from netbox_rpki.filtersets import (
     CertificateFilterSet,
     CertificatePrefixFilterSet,
-    CertificateASNFilterSet,
+    CertificateAsnFilterSet,
     RoaFilterSet,
     OrganizationFilterSet,
     RoaPrefixFilterSet,
@@ -23,7 +23,7 @@ from netbox_rpki.filtersets import (
 __all__ = (
     CertificateFilter,
     CertificatePrefixFilter,
-    CertificateASNFilter,
+    CertificateAsnFilter,
     RoaFilter,
     OrganizationFilter,
     RoaPrefixFilter,
@@ -39,9 +39,9 @@ class CertificateFilter(BaseFilterMixin):
 class CertificatePrefixFilter(BaseFilterMixin):
     pass
 
-@strawberry_django.filter(CertificateASN, lookups=True)
-@autotype_decorator(CertificateASNFilterSet)
-class CertificateASNFilter(BaseFilterMixin):
+@strawberry_django.filter(CertificateAs n, lookups=True)
+@autotype_decorator(CertificateAsnFilterSet)
+class CertificateASsnFilter(BaseFilterMixin):
     pass
 
 @strawberry_django.filter(Roa, lookups=True)
