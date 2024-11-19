@@ -1,10 +1,16 @@
 import netbox_rpki
 from netbox.views import generic
 from netbox_rpki import models, forms, tables, filtersets
+from django.shortcuts import get_object_or_404
 
 
 class CertificateView(generic.ObjectView):
     queryset = models.Certificate.objects.all()
+
+    def get(self, request, *args, **kwargs):
+        instance = get_object_or_404(self.queryset, pk=kwargs.get('pk'))
+        context = self.get_extra_context(request, instance)
+        return self.render_to_response(context)
 
     def get_extra_context(self, request, instance):
         certificateprefix_table = tables.CertificatePrefixTable(instance.CertificateToPrefixTable.all())
