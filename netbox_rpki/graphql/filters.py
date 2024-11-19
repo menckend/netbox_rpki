@@ -7,6 +7,7 @@ from netbox_rpki.models import (
     CertificateToASN,
     Roa,
     Organization,
+    RoaPrefix
 )
 
 from netbox_rpki.filtersets import (
