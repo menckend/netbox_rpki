@@ -1,4 +1,3 @@
-import netbox_rpki
 from netbox.views import generic
 from netbox_rpki import models, forms, tables, filtersets
 from django.shortcuts import get_object_or_404
@@ -46,7 +45,6 @@ class CertificateDeleteView(generic.ObjectDeleteView):
 class OrganizationView(generic.ObjectView):
     queryset = models.Organization.objects.all()
 
-
     def get_extra_context(self, request, instance):
         mycerts_table = tables.CertificateTable(instance.certificates.all())
         mycerts_table.configure(request)
@@ -91,7 +89,6 @@ class RoaPrefixDeleteView(generic.ObjectDeleteView):
 class RoaView(generic.ObjectView):
     queryset = models.Roa.objects.all()
 
-
     def get_extra_context(self, request, instance):
         roaprefix_table = tables.RoaPrefixTable(instance.RoaToPrefixTable.all())
         roaprefix_table.configure(request)
@@ -133,10 +130,6 @@ class CertificatePrefixDeleteView(generic.ObjectDeleteView):
     queryset = models.CertificatePrefix.objects.all()
 
 
-class CertificatePrefixView(generic.ObjectView):
-    queryset = models.CertificatePrefix.objects.all()
-
-
 class CertificateAsnView(generic.ObjectView):
     queryset = models.CertificateAsn.objects.all()
 
@@ -153,30 +146,3 @@ class CertificateAsnEditView(generic.ObjectEditView):
 
 class CertificateAsnDeleteView(generic.ObjectDeleteView):
     queryset = models.CertificateAsn.objects.all()
-
-
-class CertificateAsn(generic.ObjectView):
-    queryset = models.Certificate.objects.all()
-
-
-
-class CertificatePrefixView(generic.ObjectView):
-    queryset = models.CertificatePrefix.objects.all()
-
-
-class CertificatePrefixListView(generic.ObjectListView):
-    queryset = models.CertificatePrefix.objects.all()
-    table = tables.CertificatePrefixTable
-
-
-class CertificatePrefixEditView(generic.ObjectEditView):
-    queryset = models.CertificatePrefix.objects.all()
-    form = forms.CertificatePrefixForm
-
-
-class CertificatePrefixDeleteView(generic.ObjectDeleteView):
-    queryset = models.CertificatePrefix.objects.all()
-
-
-class CertificatePrefix(generic.ObjectView):
-    queryset = models.Certificate.objects.all()
