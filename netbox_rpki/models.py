@@ -49,14 +49,14 @@ class Certificate(NetBoxModel):
     valid_from = models.DateField(editable=True, blank=True, null=True)
     valid_to = models.DateField(editable=True, blank=True, null=True)
     auto_renews = models.BooleanField(editable=True)
-    public_key = models.CharField(editable=True, blank=True)
-    private_key = models.CharField(editable=True, blank=True)
-    publication_url = models.CharField(editable=True, blank=True)
-    ca_repository = models.CharField(editable=True, blank=True)
-    self_hosted = models.BooleanField(editable=True)
+    public_key = models.CharField(max_length=200, editable=True, blank=True)
+    private_key = models.CharField(max_length=200, editable=True, blank=True)
+    publication_url = models.CharField(max_length=200, editable=True, blank=True)
+    ca_repository = models.CharField(max_length=200, editable=True, blank=True)
+    self_hosted = models.BooleanField(max_length=200, editable=True)
     rpki_org = models.ForeignKey(
         to=Organization,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name='certificates'
     )
     tenant = models.ForeignKey(
