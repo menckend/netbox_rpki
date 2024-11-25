@@ -1,7 +1,6 @@
 from netbox.plugins import PluginConfig
 from netbox_rpki.version import __version__
 
-# import api
 
 class RpkiConfig(PluginConfig):
     name = 'netbox_rpki'
@@ -17,5 +16,6 @@ class RpkiConfig(PluginConfig):
     default_settings = {
         'top_level_menu': True
         }
+
 
 config = RpkiConfig

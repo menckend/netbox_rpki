@@ -3,11 +3,6 @@ from netbox.plugins import PluginMenuButton, PluginMenuItem, PluginMenu
 from netbox.plugins.utils import get_plugin_config
 
 
-from django.conf import settings
-
-from netbox.plugins import PluginMenuButton, PluginMenuItem, PluginMenu
-
-
 resource_menu_items = (
     PluginMenuItem(
         link='plugins:netbox_rpki:organization_list',

@@ -1,7 +1,7 @@
 
 import django_tables2 as tables
 from django.utils.safestring import mark_safe
-from django_tables2.utils import A
+# from django_tables2.utils import A
 
 from netbox.tables import NetBoxTable
 from netbox.tables.columns import ChoiceFieldColumn, TagColumn
@@ -25,6 +25,7 @@ class CertificateTable(NetBoxTable):
     tags = TagColumn(
         url_name='plugins:netbox_rpki:certificate_list'
     )
+
     class Meta(NetBoxTable.Meta):
         model = netbox_rpki.models.Certificate
         fields = ("pk", "id", "name", "issuer", "subject", "serial", "valid_from", "valid_to", "auto_renews", "publicKey", "private_key", "publication_url", "ca_repository", "self_hosted", "rpki_org", "comments", "tenant", "tags")
@@ -43,7 +44,7 @@ class OrganizationTable(NetBoxTable):
     class Meta(NetBoxTable.Meta):
         model = netbox_rpki.models.Organization
         fields = ("pk", "id", "org_id", "name", "parent_rir", "ext_url", "comments", "tenant", "tags")
-        default_columns = ("org_id", "name","parent_rir", "ext_url", "comments", "tenant", "tags")
+        default_columns = ("org_id", "name", "parent_rir", "ext_url", "comments", "tenant", "tags")
 
 
 class RoaTable(NetBoxTable):
@@ -104,4 +105,3 @@ class CertificateAsnTable(NetBoxTable):
         model = netbox_rpki.models.CertificateAsn
         fields = ("pk", "id", "asn", "certificate_name2", "comments", "tenant", "tags")
         default_columns = ("asn", "comments", "tenant", "tags")
-

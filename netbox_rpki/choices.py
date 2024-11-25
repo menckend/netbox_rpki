@@ -9,8 +9,7 @@ class CertificateStatusChoices(ChoiceSet):
     STATUS_REVOKED = 'revoked'
 
     CHOICES = [
-        (STATUS_ACTIVE, 'Active', 'blue'),
-        (STATUS_RESERVED, 'Reserved', 'cyan'),
-        (STATUS_DEPRECATED, 'Deprecated', 'red'),
+        (STATUS_VALID, 'valid', 'blue'),
+        (STATUS_PLANNED, 'planned', 'cyan'),
+        (STATUS_REVOKED, 'revoked', 'red'),
     ]
-

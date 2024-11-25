@@ -20,6 +20,7 @@ class CertificateFilterSet(NetBoxModelFilterSet, TenancyFilterSet):
         )
         return queryset.filter(qs_filter)
 
+
 class OrganizationFilterSet(NetBoxModelFilterSet, TenancyFilterSet):
     class Meta:
         model = netbox_rpki.models.Organization
@@ -35,6 +36,7 @@ class OrganizationFilterSet(NetBoxModelFilterSet, TenancyFilterSet):
         )
         return queryset.filter(qs_filter)
 
+
 class RoaFilterSet(NetBoxModelFilterSet, TenancyFilterSet):
     class Meta:
         model = netbox_rpki.models.Roa
@@ -49,6 +51,7 @@ class RoaFilterSet(NetBoxModelFilterSet, TenancyFilterSet):
                 | Q(description__icontains=value)
         )
         return queryset.filter(qs_filter)
+
 
 class RoaPrefixFilterSet(NetBoxModelFilterSet, TenancyFilterSet):
     class Meta:
@@ -81,6 +84,7 @@ class CertificatePrefixFilterSet(NetBoxModelFilterSet, TenancyFilterSet):
         )
         return queryset.filter(qs_filter)
 
+
 class CertificateAsnFilterSet(NetBoxModelFilterSet, TenancyFilterSet):
     class Meta:
         model = netbox_rpki.models.CertificateAsn
@@ -96,3 +100,5 @@ class CertificateAsnFilterSet(NetBoxModelFilterSet, TenancyFilterSet):
         )
         return queryset.filter(qs_filter)
 
+#    def search(self, queryset, name, value):
+#        """Perform the filtered search."""

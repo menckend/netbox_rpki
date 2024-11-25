@@ -57,7 +57,7 @@ class CertificateFilterForm(NetBoxModelFilterSetForm):
 class OrganizationForm(NetBoxModelForm):
     tenant = DynamicModelChoiceField(queryset=Tenant.objects.all(), required=False)
     comments = CommentField()
-    
+
     class Meta:
         model = Organization
         fields = ['org_id', 'name', 'parent_rir', 'ext_url', 'tenant', 'comments', 'tags']
@@ -66,6 +66,7 @@ class OrganizationForm(NetBoxModelForm):
 class RoaForm(NetBoxModelForm):
     tenant = DynamicModelChoiceField(queryset=Tenant.objects.all(), required=False)
     comments = CommentField()
+
     class Meta:
         model = Roa
         fields: list[str] = ['name', 'origin_as', 'valid_from', 'valid_to', "auto_renews", 'signed_by', 'tenant', 'comments', 'tags']
@@ -74,6 +75,7 @@ class RoaForm(NetBoxModelForm):
 class RoaPrefixForm(NetBoxModelForm):
     tenant = DynamicModelChoiceField(queryset=Tenant.objects.all(), required=False)
     comments = CommentField()
+
     class Meta:
         model = RoaPrefix
         fields = ['prefix', 'max_length', 'roa_name', 'tenant', 'comments', 'tags']
@@ -82,6 +84,7 @@ class RoaPrefixForm(NetBoxModelForm):
 class CertificatePrefixForm(NetBoxModelForm):
     tenant = DynamicModelChoiceField(queryset=Tenant.objects.all(), required=False)
     comments = CommentField()
+
     class Meta:
         model = CertificatePrefix
         fields = ['prefix', 'certificate_name', 'tenant', 'comments', 'tags']
@@ -89,6 +92,7 @@ class CertificatePrefixForm(NetBoxModelForm):
 class CertificateAsnForm(NetBoxModelForm):
     tenant = DynamicModelChoiceField(queryset=Tenant.objects.all(), required=False)
     comments = CommentField()
+
     class Meta:
         model = CertificateAsn
         fields = ['asn', 'certificate_name2', 'tenant', 'comments', 'tags']
