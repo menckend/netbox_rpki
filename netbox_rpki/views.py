@@ -13,7 +13,7 @@ class CertificateView(generic.ObjectView):
         certificateasn_table.configure(request)
         roa_table = tables.RoaTable(instance.roas.all())
         roa_table.configure(request)
-        
+
         return {
             'signed_roas_table': roa_table,
             'assigned_asns_table': certificateasn_table,
