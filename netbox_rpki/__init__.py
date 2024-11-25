@@ -11,7 +11,8 @@ class RpkiConfig(PluginConfig):
     author = 'Mencken Davidson'
     author_email = 'mencken@gmail.com'
     base_url = 'netbox_rpki'
-    min_verserion = '4.1.0'
+    min_version = '4.1.0'
+    max_version = '4.1.7'
     required_settings = []
     default_settings = {
         'top_level_menu': True
