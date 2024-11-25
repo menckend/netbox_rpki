@@ -20,6 +20,48 @@ from netbox_rpki.filtersets import (
 )
 
 
+
+@strawberry_django.filter(Certificate, lookups=True)
+@autotype_decorator(CertificateFilterSet)
+
+class CertificateFilter(BaseFilterMixin):
+    pass
+
+
+@strawberry_django.filter(CertificatePrefix, lookups=True)
+@autotype_decorator(CertificatePrefixFilterSet)
+
+class CertificatePrefixFilter(BaseFilterMixin):
+    pass
+
+
+@strawberry_django.filter(CertificateAsn, lookups=True)
+@autotype_decorator(CertificateAsnFilterSet)
+
+class CertificateAsnFilter(BaseFilterMixin):
+    pass
+
+
+@strawberry_django.filter(Roa, lookups=True)
+@autotype_decorator(RoaFilterSet)
+
+class RoaFilter(BaseFilterMixin):
+    pass
+
+
+@strawberry_django.filter(Organization, lookups=True)
+@autotype_decorator(OrganizationFilterSet)
+
+class OrganizationFilter(BaseFilterMixin):
+    pass
+
+
+@strawberry_django.filter(RoaPrefix, lookups=True)
+@autotype_decorator(RoaPrefixFilterSet)
+
+class RoaPrefixFilter(BaseFilterMixin):
+    pass
+
 __all__ = (
     CertificateFilter,
     CertificatePrefixFilter,
@@ -28,34 +70,3 @@ __all__ = (
     OrganizationFilter,
     RoaPrefixFilter,
 )
-
-@strawberry_django.filter(Certificate, lookups=True)
-@autotype_decorator(CertificateFilterSet)
-class CertificateFilter(BaseFilterMixin):
-    pass
-
-@strawberry_django.filter(CertificatePrefix, lookups=True)
-@autotype_decorator(CertificatePrefixFilterSet)
-class CertificatePrefixFilter(BaseFilterMixin):
-    pass
-
-@strawberry_django.filter(CertificateAsn, lookups=True)
-@autotype_decorator(CertificateAsnFilterSet)
-class CertificateAsnFilter(BaseFilterMixin):
-    pass
-
-@strawberry_django.filter(Roa, lookups=True)
-@autotype_decorator(RoaFilterSet)
-class RoaFilter(BaseFilterMixin):
-    pass
-
-@strawberry_django.filter(Organization, lookups=True)
-@autotype_decorator(OrganizationFilterSet)
-class OrganizationFilter(BaseFilterMixin):
-    pass
-
-@strawberry_django.filter(RoaPrefix, lookups=True)
-@autotype_decorator(RoaPrefixFilterSet)
-class RoaPrefixFilter(BaseFilterMixin):
-    pass
-

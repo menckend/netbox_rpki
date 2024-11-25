@@ -1,5 +1,10 @@
 # https://github.com/github/gitignore/blob/main/Global/macOS.gitignore
 
+# Netbox dev instance
+devrun/
+devrun
+
+
 # General
 .DS_Store
 .AppleDouble
