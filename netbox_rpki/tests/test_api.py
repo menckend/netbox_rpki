@@ -52,3 +52,4 @@ class OrganizationAPITestCase(
             Organization(org_id="rpki-testorg3", name="rpki-testorg3"),
         )
         Organization.objects.bulk_create(organizations)
+
