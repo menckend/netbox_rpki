@@ -28,7 +28,7 @@ resource_menu_items = (
     ),
     PluginMenuItem(
         link='plugins:netbox_rpki:certificateprefix_list',
-        link_text='Assigned Prefices',
+        link_text='Assigned Prefixes',
         buttons=(
             PluginMenuButton(
                 link='plugins:netbox_rpki:certificateprefix_add',
@@ -63,7 +63,7 @@ roa_menu_items = (
     ),
     PluginMenuItem(
         link='plugins:netbox_rpki:roaprefix_list',
-        link_text='ROA Prefices',
+        link_text='ROA prefixes',
         buttons=(
             PluginMenuButton(
                 link='plugins:netbox_rpki:roaprefix_add',
