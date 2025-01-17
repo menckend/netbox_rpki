@@ -9,33 +9,31 @@ Netbox plugin for adding BGP RPKI elements.
 
 ## Features
 
-Implements data models and forms for Resource Public Key Infrastructure (RPKI) items.  Models included are:
+Implements data models and forms for Resource Public Key Infrastructure (RPKI) items.  
 
-* Organization
-   * A customer/consumer of RIR services such as RPKI (and IP address and ASN allocations)
-   * "Child" relationship to IPAM RIR "parent" model
-   * Parent relationship to RPKI "Customer certificate" model (children)
-   * Fields
-      * org-id, name, ext_url, parent_rir (foreign key to IPAM ASN)
-* Resource Certificate
-   * The X.509 certificate used to sign a customer's ROAs
-   * May be either self-hosted/managed/published (managed by customer) or managed by the RIR (as part of a "managed" RPKI service)
-   * Child relationship to a single RPKI Organization object (parent)
-   * Parent relationship to RPKI ROA objects (children)
-   * Fields
-      * name, issuer, subject, serial, valid_from, valid_to, auto_renews, public_key, private_key, publication_url, ca_repository, self_hosted, rpki_org (foreign key to rpki organization)
-* Route Origination Authorization (ROA)
-   * A statement that a specific AS number is authorized to originate a specific set of IP prefices.
-   * Each ROA has a child->parent relationship to a single RPKI ROA object
-   * Child relationship to RPKI Customer certificate object (parent)
-   * Parent relationship to RPKI ROA Prefix object (children)
-   * Fields
-      * name, origin_as (foreign key to IPAM ASN model), valid_from, valid_to, auto_renews, signed_by (foreign key to rpki customer certificate)
-* ROA prefix
-   * A specific prefix that is included in the scope of a specific ROA
-   * Child relationship to RPKI ROA object (parent)
-   * Fields
-      * prefix (foreign key to IPAM Prefix model), max_length, roa_name (foreing key to rpki roa)
+### Models
+
+#### Organization
+   - A customer/consumer of Regional Internet Registrar (RIR) services such as RPKI (and IP address and ASN allocations)
+   - Fields
+      - org-id, name, ext_url, parent_rir (foreign key to IPAM ASN)
+
+#### Resource Certificate
+   - The X.509 certificate used to sign a customer's ROAs
+   - May be either self-hosted/managed/published (managed by customer) or managed by the RIR (as part of a "managed" RPKI service)
+   - Fields
+      - name, issuer, subject, serial, valid_from, valid_to, auto_renews, public_key, private_key, publication_url, ca_repository, self_hosted, rpki_org (foreign key to rpki organization)
+
+#### Route Origination Authorization (ROA)
+   - A statement that a specific AS number is authorized to originate a specific set of IP prefices.
+   - Each ROA has a child->parent relationship to a single RPKI ROA object
+   - Fields
+      - name, origin_as (foreign key to IPAM ASN model), valid_from, valid_to, auto_renews, signed_by (foreign key to rpki customer certificate)
+
+#### ROA prefix
+   - A specific prefix that is included in the scope of a specific ROA
+   - Fields
+      - prefix (foreign key to IPAM Prefix model), max_length, roa_name (foreing key to rpki roa)
 
 
 ## Screencaps
@@ -93,3 +91,5 @@ PLUGINS_CONFIG = {
     "netbox_rpki": {'top_level_menu': False},
 }
 ```
+
+Run  `python -m manage.py migrate` from the .../netbox/netbox/ directory in your netbox installation. (or include the manag.py migrate command in Dockerfile-Plugins if using netbox-docker.)
