@@ -2,14 +2,14 @@
 {% load render_table from django_tables2 %}
 
 {% block breadcrumbs %}
-<li class="breadcrumb-item"><a href="{% url 'plugins:netbox_rpki:certificateasn_list' %}">RPKI Assigned Autonomous System (AS) number resources</a></li>
+<li class="breadcrumb-item"><a href="{% url 'plugins:netbox_rpki:certificateasn_list' %}">RPKI Attested Autonomous System (AS) number resources</a></li>
 {% endblock breadcrumbs %}
 
 {% block content %}
   <div class="row mb-3">
     <div class="col col-md-6">
       <div class="card">
-        <h5 class="card-header">RPKI assigned ASNs</h5>
+        <h5 class="card-header">RPKI attested ASNs</h5>
         <div class="card-body">
           <table class="table table-hover attr-table">
             <tr>

@@ -26,28 +26,28 @@ resource_menu_items = (
             ),
         ),
     ),
-    PluginMenuItem(
-        link='plugins:netbox_rpki:certificateprefix_list',
-        link_text='Assigned Prefixes',
-        buttons=(
-            PluginMenuButton(
-                link='plugins:netbox_rpki:certificateprefix_add',
-                title='Add',
-                icon_class='mdi mdi-plus-thick',
-            ),
-        ),
-    ),
-    PluginMenuItem(
-        link='plugins:netbox_rpki:certificateasn_list',
-        link_text='Assigned ASNs ',
-        buttons=(
-            PluginMenuButton(
-                link='plugins:netbox_rpki:certificateasn_add',
-                title='Add',
-                icon_class='mdi mdi-plus-thick',
-            ),
-        ),
-    ),
+#    PluginMenuItem(
+#        link='plugins:netbox_rpki:certificateprefix_list',
+#        link_text='Attested Prefixes',
+#        buttons=(
+#            PluginMenuButton(
+#                link='plugins:netbox_rpki:certificateprefix_add',
+#                title='Add',
+#                icon_class='mdi mdi-plus-thick',
+#            ),
+#        ),
+#    ),
+#    PluginMenuItem(
+#        link='plugins:netbox_rpki:certificateasn_list',
+#        link_text='Attested ASNs ',
+#        buttons=(
+#            PluginMenuButton(
+#                link='plugins:netbox_rpki:certificateasn_add',
+#                title='Add',
+#                icon_class='mdi mdi-plus-thick',
+#            ),
+#        ),
+#    ),
 )
 roa_menu_items = (
     PluginMenuItem(
@@ -61,17 +61,17 @@ roa_menu_items = (
             ),
         ),
     ),
-    PluginMenuItem(
-        link='plugins:netbox_rpki:roaprefix_list',
-        link_text='ROA prefixes',
-        buttons=(
-            PluginMenuButton(
-                link='plugins:netbox_rpki:roaprefix_add',
-                title='Add',
-                icon_class='mdi mdi-plus-thick',
-            ),
-        ),
-    ),
+#    PluginMenuItem(
+#        link='plugins:netbox_rpki:roaprefix_list',
+#        link_text='ROA prefixes',
+#        buttons=(
+#            PluginMenuButton(
+#                link='plugins:netbox_rpki:roaprefix_add',
+#                title='Add',
+#                icon_class='mdi mdi-plus-thick',
+#            ),
+#        ),
+#    ),
 )
 plugin_settings = settings.PLUGINS_CONFIG.get('netbox_rpki', {})
 
