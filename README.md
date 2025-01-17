@@ -9,31 +9,53 @@ Netbox plugin for adding BGP RPKI elements.
 
 ## Features
 
-Implements data models and forms for Resource Public Key Infrastructure (RPKI) items.  
+Implements data models and forms for modeling Resource Public Key Infrastructure (RPKI) items.  On organization the publishes ROAs (either self-hosted, or through a RIR's hosted-RPKI service) can use this plugin to create a self-hosted record of the critical RPKI elements such as resource certificates and ROAs 
 
-### Models
+### Models / DB tables
 
 #### Organization
-   - A customer/consumer of Regional Internet Registrar (RIR) services such as RPKI (and IP address and ASN allocations)
+   - Represents a customer/consumer of Regional Internet Registrar (RIR) RPKI services
    - Fields
       - org-id, name, ext_url, parent_rir (foreign key to IPAM ASN)
 
 #### Resource Certificate
-   - The X.509 certificate used to sign a customer's ROAs
+   - Represents the "Resource Certificate" element of the RPKI architecture
+     - An X.509 certificate with RFC3779-style extensions for IPs/ASNs
+     - Signed by an RIR's RPKI trust-anchor certificate
+     - Attests to authority for at least one ASN and at least one IP netblock
+     - Used to sign the RPKI End Entity (EE) certificates which are used to sign individual ROAs
    - May be either self-hosted/managed/published (managed by customer) or managed by the RIR (as part of a "managed" RPKI service)
    - Fields
       - name, issuer, subject, serial, valid_from, valid_to, auto_renews, public_key, private_key, publication_url, ca_repository, self_hosted, rpki_org (foreign key to rpki organization)
 
 #### Route Origination Authorization (ROA)
-   - A statement that a specific AS number is authorized to originate a specific set of IP prefices.
-   - Each ROA has a child->parent relationship to a single RPKI ROA object
+   - Represents the RPKI Route Origination Authorization (ROA) object
+   - An artifact attesting that a specific ASN is authorized to originate a specific set of IP prefixes into BGP on the Internet
+   - Is signed by an ephemeral "EE" certificate, which was signed by a more durable resource certificate.
+   - When a non-zero ASN value is specified, the ROA is interpreted as authorizing origination
+   - When an ASN of zero is specified, the ROA is interpreted as indicating that there is NO ASN that is authorized to originate routes for the specified prefix
+     - Netbox does not permit an ASN value of zero, though -- I suggest earmarking AS 99999999 and commenting it as a place-holder for ASN 0
    - Fields
       - name, origin_as (foreign key to IPAM ASN model), valid_from, valid_to, auto_renews, signed_by (foreign key to rpki customer certificate)
 
 #### ROA prefix
-   - A specific prefix that is included in the scope of a specific ROA
-   - Fields
-      - prefix (foreign key to IPAM Prefix model), max_length, roa_name (foreing key to rpki roa)
+   - Represents the attestion relationship between an ROA and a prefix.
+   - This model/table is not explicitly accessible via the UI menu
+
+#### ROA ASN
+   - Represents the attestion relationship between an ROA and an ASN.
+   - This model/table is not explicitly accessible via the UI menu
+
+#### Certificate prefix
+   - Represents the attestion relationship between an ROA and a prefix.
+   - This model/table is not explicitly accessible via the UI menu
+
+#### Certificate ASN
+   - Represents the attestion relationship between an ROA's EE certificate and an ASN.
+   - This model/table is not explicitly accessible via the UI menu
+
+
+
 
 
 ## Screencaps
@@ -92,4 +114,4 @@ PLUGINS_CONFIG = {
 }
 ```
 
-Run  `python -m manage.py migrate` from the .../netbox/netbox/ directory in your netbox installation. (or include the manag.py migrate command in Dockerfile-Plugins if using netbox-docker.)
+Run  `python -m manage.py migrate` from the .../netbox/netbox/ directory in your netbox installation. (or include the manage.py migrate command in Dockerfile-Plugins if using netbox-docker.)

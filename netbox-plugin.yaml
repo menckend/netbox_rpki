@@ -1,4 +1,4 @@
-version: 0.1.0.0
+version: 0.1.4
 package_name: netbox_rpki
 compatibility:
 - release: 0.0.2.21
