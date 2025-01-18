@@ -31,7 +31,7 @@ html_static_path = ['_static']
 # -- Extensions to use ---------------------------------------------------
 extensions = [
     'sphinx.ext.viewcode',  # Add a link to the Python source code for classes, functions etc.
-    'sphinx.ext.inheritance_diagram'
+    'sphinx.ext.inheritance_diagram',
     'autoapi.extension',
     'myst_parser',
     'sphinx.ext.autodoc',  # Core Sphinx library for auto html doc generation from docstrings
