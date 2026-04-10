@@ -32,7 +32,8 @@ class Organization(NetBoxModel):
         ordering = ("name",)
 
     def __str__(self):
-        return f'{self.name}, {self.org_id}'
+#        return f'{self.name}, {self.org_id}'
+        return self.name
 
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:organization", args=[self.pk])
@@ -70,8 +71,8 @@ class Certificate(NetBoxModel):
         ordering = ("name",)
 
     def __str__(self):
-        return f'{self.name}, {self.issuer}'
-
+  #      return f'{self.name}, {self.issuer}'
+        return self.name
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:certificate", args=[self.pk])
 

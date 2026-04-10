@@ -17,7 +17,7 @@ class CertificateView(generic.ObjectView):
         return {
             'signed_roas_table': roa_table,
             'assigned_asns_table': certificateasn_table,
-            'assigned_prefices_table': certificateprefix_table
+            'assigned_prefixes_table': certificateprefix_table
         }
 
 
@@ -89,7 +89,7 @@ class RoaView(generic.ObjectView):
         roaprefix_table.configure(request)
 
         return {
-            'myroaprefices_table': roaprefix_table
+            'myroaprefixes_table': roaprefix_table
         }
 
 
