@@ -478,3 +478,254 @@ That means:
 4. keep everything else stable
 
 That gives a real structural win without trying to refactor the whole plugin in one jump.
+
+## Post-Implementation Addendum
+
+This section documents what was actually implemented after the original plan was written, and how future section 9 work should build on it.
+
+The short version is that the plugin now has a real metadata-driven extension pattern for standard non-model surfaces. A follow-on developer or agent should not reintroduce hand-wired duplication for new standards-based RPKI object families unless there is a specific reason a surface cannot fit the shared pattern.
+
+## What Was Actually Implemented
+
+The following parts of the refactor are complete:
+
+- explicit spec dataclasses in `netbox_rpki/object_specs.py`
+- a canonical registry in `netbox_rpki/object_registry.py`
+- generated API serializers, viewsets, and router registration
+- generated forms, filter forms, filtersets, and tables
+- generated navigation
+- generated standard CRUD UI views and most UI route registration
+- metadata-driven GraphQL filters, types, and query registration
+- a shared detail-view metadata layer in `netbox_rpki/detail_specs.py`
+- a shared detail template in `netbox_rpki/templates/netbox_rpki/object_detail.html`
+- registry-driven and scenario-driven smoke tests across most repeated surfaces
+
+The Django model layer and migrations remain explicit by design.
+
+## Canonical Files And Their Roles
+
+Use these files as the architectural source of truth when adding new object families.
+
+### `netbox_rpki/object_specs.py`
+
+This file defines the spec contract. It is no longer a proposal. It is the active interface for metadata-driven generation.
+
+Key responsibilities:
+
+- label metadata
+- route metadata
+- API metadata
+- form and filter metadata
+- GraphQL metadata
+- table metadata
+- view metadata
+
+If a new standard surface needs repeatable configuration, add it to the spec layer instead of scattering one-off constants around the codebase.
+
+### `netbox_rpki/object_registry.py`
+
+This is the canonical registry of object families. Existing plugin families are declared here and the registry exports filtered subsets for the surfaces that generate code from it.
+
+Important implementation lesson:
+
+- preserve explicit public names here rather than deriving everything from model names
+
+That includes serializer class names, viewset class names, GraphQL class names, GraphQL query field names, UI class names, and menu labels. Stable external names matter more than deduplication purity.
+
+### `netbox_rpki/detail_specs.py`
+
+This file is the canonical metadata layer for richer detail pages. It is currently used for top-level objects whose detail views need curated field ordering, related tables, and prefilled add actions.
+
+Current pattern:
+
+- richer top-level objects use explicit `DetailSpec` entries
+- simpler objects use the lightweight generated detail path from the registry view metadata
+
+Future section 9 objects should follow that same split. Do not force every object into the rich detail system if a simple generated detail page is enough.
+
+### Generated surface modules
+
+The following modules now consume the registry and should continue to do so:
+
+- `netbox_rpki/api/serializers.py`
+- `netbox_rpki/api/views.py`
+- `netbox_rpki/api/urls.py`
+- `netbox_rpki/forms.py`
+- `netbox_rpki/filtersets.py`
+- `netbox_rpki/tables.py`
+- `netbox_rpki/views.py`
+- `netbox_rpki/urls.py`
+- `netbox_rpki/navigation.py`
+- `netbox_rpki/graphql/filters.py`
+- `netbox_rpki/graphql/types.py`
+- `netbox_rpki/graphql/schema.py`
+
+When a new object family is added, the default expectation is that these modules pick it up from registry metadata rather than requiring hand-authored class declarations.
+
+### Shared tests
+
+The following test files now encode the reusable verification pattern:
+
+- `netbox_rpki/tests/registry_scenarios.py`
+- `netbox_rpki/tests/test_api.py`
+- `netbox_rpki/tests/test_forms.py`
+- `netbox_rpki/tests/test_filtersets.py`
+- `netbox_rpki/tests/test_tables.py`
+- `netbox_rpki/tests/test_views.py`
+- `netbox_rpki/tests/test_navigation.py`
+- `netbox_rpki/tests/test_graphql.py`
+- `netbox_rpki/tests/test_urls.py`
+
+Add new object families to the shared scenarios and loops where they fit. Keep tests explicit only where the new object has genuinely object-specific behavior.
+
+## Rules For Adding New Section 9 Objects
+
+The extension rule is now:
+
+1. add explicit Django models and migrations
+2. add one `ObjectSpec` entry per object family that should participate in the standard generated surfaces
+3. add `DetailSpec` entries only for objects that need richer curated detail pages
+4. add or extend shared registry-driven tests
+5. keep object-specific business logic explicit and local
+
+This is the intended split:
+
+- models, migrations, and real business logic stay explicit
+- repeated UI/API/GraphQL/list/filter/table plumbing should be metadata-driven
+
+Do not dynamically generate Django models.
+
+Do not let new standards-based objects bypass the registry unless they are truly exceptional.
+
+## Current Architectural Boundaries
+
+Another developer or agent should assume these boundaries unless there is a compelling reason to change them.
+
+### Keep explicit
+
+- Django models
+- migrations
+- complex object-specific validation
+- complex detail-page composition when it cannot be expressed cleanly in metadata
+- provider sync, reconciliation, linting, simulation, and similar domain logic
+
+### Keep registry-driven
+
+- serializer class generation
+- API viewset generation
+- API router registration
+- forms
+- filter forms
+- filtersets
+- tables
+- navigation
+- standard list, edit, and delete views
+- standard URL registration
+- GraphQL filters, types, and query fields
+- smoke-style repeated tests
+
+## Lessons Learned From The Refactor
+
+These are the practical rules that should guide future work.
+
+### Preserve stable public names
+
+The registry should store explicit names for generated classes and GraphQL fields. This is not accidental duplication. It protects compatibility and makes generated output inspectable.
+
+### Favor inspectable generation over clever metaprogramming
+
+The factories should stay boring. The successful pattern here was to generate plain classes with stable names and expose module-level maps such as serializer, viewset, GraphQL filter, and GraphQL type maps for tests and debugging.
+
+### Use the rich detail system sparingly
+
+Not every object needs a custom-feeling detail page. Reserve `detail_specs.py` for top-level objects where field ordering, related tables, and prefilled add actions matter. Simpler objects can keep the generic detail behavior.
+
+### Keep compatibility shims intentional and small
+
+The refactor preserved exact legacy UI path prefixes in `urls.py` through a focused compatibility map. That was a deliberate compromise to keep routes stable while moving other metadata into the registry.
+
+If a future cleanup moves path metadata into the registry, do it deliberately and with tests. Do not silently change public URLs while adding new section 9 models.
+
+### Parameterize tests where behavior is actually shared
+
+The test suite now has a clear split:
+
+- common smoke and structure checks are shared and registry-driven
+- truly object-specific behavior remains explicit
+
+Do not collapse meaningful behavior tests into generic loops just for neatness.
+
+### Use non-interactive test commands only
+
+For this repo, test runs should use the NetBox 4.5.7 environment and non-interactive flags. The known-good full-suite command is:
+
+```bash
+cd /home/mencken/src/netbox-v4.5.7/netbox
+NETBOX_RPKI_ENABLE=1 /home/mencken/.virtualenvs/netbox-4.5.7/bin/python manage.py test --keepdb --noinput netbox_rpki.tests
+```
+
+Interactive `manage.py test` prompts caused avoidable friction earlier in the work and should not be used for normal verification.
+
+## How Section 9 Work Should Start Now
+
+The original implementation objective was to begin adding the missing standards-based RPKI architecture elements from section 9 of `netbox_rpki_enhancement_backlog.md`, starting with:
+
+- Trust Anchors
+- TALs
+- trust-anchor rollover artifacts
+
+That work should now proceed in this order.
+
+### Step 1: design the explicit model layer first
+
+For the first slice, define the models and migrations explicitly. Do not try to force a generic standards supermodel prematurely at the Django model layer.
+
+For example, the initial slice can reasonably introduce explicit models for:
+
+- `TrustAnchor`
+- `TrustAnchorLocator`
+- `TrustAnchorKey`
+
+Potential shared abstractions can be extracted later if they become obvious.
+
+### Step 2: decide which of those models belong in the standard generated surfaces
+
+For each new model, ask:
+
+- does it need a normal list/add/edit/delete/API/GraphQL surface now?
+- does it need a curated rich detail page now?
+- is it a supporting relation object better handled with simpler generated views?
+
+If the answer is yes to standard CRUD surfaces, add an `ObjectSpec` entry immediately.
+
+If the answer is yes to a curated detail view, add a `DetailSpec` entry.
+
+### Step 3: preserve stable naming from the first commit
+
+Do not rely on implicit naming conventions for new standards-based objects if those names might later leak into public URLs, GraphQL fields, or serializer class names. Put the intended stable names into the metadata up front.
+
+### Step 4: extend the shared test scenarios at the same time
+
+Any new object that uses the standard generated surfaces should also be added to the registry-driven smoke and scenario coverage in the same implementation slice.
+
+### Step 5: keep domain logic out of surface metadata
+
+Validation of TAL format, trust-anchor rollover semantics, artifact linkage, publication behavior, and future reconciliation logic should stay in explicit model or service-layer code. The registry is for surface metadata, not business rules.
+
+## Practical Starting Pattern For Trust Anchor Work
+
+If another developer or agent picks up the original section 9 objective, the practical first implementation slice should look like this:
+
+1. add explicit models and migrations for `TrustAnchor`, `TrustAnchorLocator`, and `TrustAnchorKey`
+2. add matching registry entries for any of those that need standard CRUD, API, navigation, and GraphQL surfaces
+3. add a rich `DetailSpec` only for whichever top-level trust-anchor object actually benefits from curated related-table rendering
+4. extend shared tests and scenario definitions for every registry-participating object
+5. run the full non-interactive NetBox plugin test suite
+
+That is the intended continuation path.
+
+## Bottom Line
+
+Before this addendum, the implemented pattern was only partially documented: the original plan described the intended architecture, and the code embodied the final result, but there was not a single explicit prose handoff connecting the two.
+
+After this addendum, `netbox_rpki_metadata_refactor_plan.md` should be treated as that handoff document for continuing section 9 work on top of the new registry-driven architecture.
