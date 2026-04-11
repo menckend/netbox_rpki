@@ -42,15 +42,14 @@ classifiers=[
     'Intended Audience :: Developers',
     'Natural Language :: English',
     "Programming Language :: Python :: 3 :: Only",
-    'Programming Language :: Python :: 3.6',
-    'Programming Language :: Python :: 3.10',
-    'Programming Language :: Python :: 3.11',
     'Programming Language :: Python :: 3.12',
+    'Programming Language :: Python :: 3.13',
+    'Programming Language :: Python :: 3.14',
 ]
 
 dependencies = [ "build"]
 keywords = ["netbox", "plugin", "bgp", "rpki", "roa"]
-requires-python= ">=3.6.8"
+requires-python= ">=3.12"
 
 [project.urls]
 Documentation = "https://github.com/menckend/netbox_rpki/blob/main/README.md"

@@ -1,3 +1,5 @@
+from django.db.models import Q
+
 from netbox.filtersets import NetBoxModelFilterSet
 from tenancy.filtersets import TenancyFilterSet
 import netbox_rpki
@@ -15,8 +17,11 @@ class CertificateFilterSet(NetBoxModelFilterSet, TenancyFilterSet):
         if not value.strip():
             return queryset
         qs_filter = (
-                Q(value__icontains=value)
-                | Q(description__icontains=value)
+                Q(name__icontains=value)
+                | Q(issuer__icontains=value)
+                | Q(subject__icontains=value)
+                | Q(serial__icontains=value)
+                | Q(comments__icontains=value)
         )
         return queryset.filter(qs_filter)
 
@@ -31,8 +36,10 @@ class OrganizationFilterSet(NetBoxModelFilterSet, TenancyFilterSet):
         if not value.strip():
             return queryset
         qs_filter = (
-                Q(value__icontains=value)
-                | Q(description__icontains=value)
+                Q(org_id__icontains=value)
+                | Q(name__icontains=value)
+                | Q(ext_url__icontains=value)
+                | Q(comments__icontains=value)
         )
         return queryset.filter(qs_filter)
 
@@ -47,8 +54,8 @@ class RoaFilterSet(NetBoxModelFilterSet, TenancyFilterSet):
         if not value.strip():
             return queryset
         qs_filter = (
-                Q(value__icontains=value)
-                | Q(description__icontains=value)
+                Q(name__icontains=value)
+                | Q(comments__icontains=value)
         )
         return queryset.filter(qs_filter)
 
@@ -63,8 +70,8 @@ class RoaPrefixFilterSet(NetBoxModelFilterSet, TenancyFilterSet):
         if not value.strip():
             return queryset
         qs_filter = (
-                Q(value__icontains=value)
-                | Q(description__icontains=value)
+                Q(prefix__prefix__icontains=value)
+                | Q(comments__icontains=value)
         )
         return queryset.filter(qs_filter)
 
@@ -79,8 +86,8 @@ class CertificatePrefixFilterSet(NetBoxModelFilterSet, TenancyFilterSet):
         if not value.strip():
             return queryset
         qs_filter = (
-                Q(value__icontains=value)
-                | Q(description__icontains=value)
+                Q(prefix__prefix__icontains=value)
+                | Q(comments__icontains=value)
         )
         return queryset.filter(qs_filter)
 
@@ -95,8 +102,8 @@ class CertificateAsnFilterSet(NetBoxModelFilterSet, TenancyFilterSet):
         if not value.strip():
             return queryset
         qs_filter = (
-                Q(value__icontains=value)
-                | Q(description__icontains=value)
+                Q(certificate_name2__name__icontains=value)
+                | Q(comments__icontains=value)
         )
         return queryset.filter(qs_filter)
 

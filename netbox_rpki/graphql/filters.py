@@ -1,5 +1,8 @@
 import strawberry_django
-from netbox.graphql.filter_mixins import autotype_decorator, BaseFilterMixin
+from strawberry.scalars import ID
+from strawberry_django import FilterLookup, StrFilterLookup
+
+from netbox.graphql.filters import NetBoxModelFilter
 
 from netbox_rpki.models import (
     Certificate,
@@ -10,57 +13,49 @@ from netbox_rpki.models import (
     RoaPrefix
 )
 
-from netbox_rpki.filtersets import (
-    CertificateFilterSet,
-    CertificatePrefixFilterSet,
-    CertificateAsnFilterSet,
-    RoaFilterSet,
-    OrganizationFilterSet,
-    RoaPrefixFilterSet,
-)
+@strawberry_django.filter_type(Certificate, lookups=True)
+class CertificateFilter(NetBoxModelFilter):
+    name: StrFilterLookup[str] | None = strawberry_django.filter_field()
+    issuer: StrFilterLookup[str] | None = strawberry_django.filter_field()
+    subject: StrFilterLookup[str] | None = strawberry_django.filter_field()
+    serial: StrFilterLookup[str] | None = strawberry_django.filter_field()
+    auto_renews: FilterLookup[bool] | None = strawberry_django.filter_field()
+    self_hosted: FilterLookup[bool] | None = strawberry_django.filter_field()
+    rpki_org_id: ID | None = strawberry_django.filter_field()
 
 
-
-@strawberry_django.filter(Certificate, lookups=True)
-@autotype_decorator(CertificateFilterSet)
-
-class CertificateFilter(BaseFilterMixin):
-    pass
+@strawberry_django.filter_type(CertificatePrefix, lookups=True)
+class CertificatePrefixFilter(NetBoxModelFilter):
+    prefix_id: ID | None = strawberry_django.filter_field()
+    certificate_name_id: ID | None = strawberry_django.filter_field()
 
 
-@strawberry_django.filter(CertificatePrefix, lookups=True)
-@autotype_decorator(CertificatePrefixFilterSet)
-
-class CertificatePrefixFilter(BaseFilterMixin):
-    pass
-
-
-@strawberry_django.filter(CertificateAsn, lookups=True)
-@autotype_decorator(CertificateAsnFilterSet)
-
-class CertificateAsnFilter(BaseFilterMixin):
-    pass
+@strawberry_django.filter_type(CertificateAsn, lookups=True)
+class CertificateAsnFilter(NetBoxModelFilter):
+    asn_id: ID | None = strawberry_django.filter_field()
+    certificate_name2_id: ID | None = strawberry_django.filter_field()
 
 
-@strawberry_django.filter(Roa, lookups=True)
-@autotype_decorator(RoaFilterSet)
-
-class RoaFilter(BaseFilterMixin):
-    pass
-
-
-@strawberry_django.filter(Organization, lookups=True)
-@autotype_decorator(OrganizationFilterSet)
-
-class OrganizationFilter(BaseFilterMixin):
-    pass
+@strawberry_django.filter_type(Roa, lookups=True)
+class RoaFilter(NetBoxModelFilter):
+    name: StrFilterLookup[str] | None = strawberry_django.filter_field()
+    auto_renews: FilterLookup[bool] | None = strawberry_django.filter_field()
+    origin_as_id: ID | None = strawberry_django.filter_field()
+    signed_by_id: ID | None = strawberry_django.filter_field()
 
 
-@strawberry_django.filter(RoaPrefix, lookups=True)
-@autotype_decorator(RoaPrefixFilterSet)
+@strawberry_django.filter_type(Organization, lookups=True)
+class OrganizationFilter(NetBoxModelFilter):
+    org_id: StrFilterLookup[str] | None = strawberry_django.filter_field()
+    name: StrFilterLookup[str] | None = strawberry_django.filter_field()
+    ext_url: StrFilterLookup[str] | None = strawberry_django.filter_field()
+    parent_rir_id: ID | None = strawberry_django.filter_field()
 
-class RoaPrefixFilter(BaseFilterMixin):
-    pass
+
+@strawberry_django.filter_type(RoaPrefix, lookups=True)
+class RoaPrefixFilter(NetBoxModelFilter):
+    prefix_id: ID | None = strawberry_django.filter_field()
+    roa_name_id: ID | None = strawberry_django.filter_field()
 
 __all__ = (
     CertificateFilter,

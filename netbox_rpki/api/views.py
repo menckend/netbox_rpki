@@ -22,23 +22,23 @@ class CertificateViewSet(NetBoxModelViewSet):
 
 
 class RoaViewSet(NetBoxModelViewSet):
-    queryset: models.Roa.objects.all()
+    queryset = models.Roa.objects.all()
     serializer_class = RoaSerializer
     filterset_class = filtersets.RoaFilterSet
 
 
 class RoaPrefixViewSet(NetBoxModelViewSet):
-    queryset: models.RoaPrefix.objects.all()
+    queryset = models.RoaPrefix.objects.all()
     serializer_class = RoaPrefixSerializer
     filterset_class = filtersets.RoaPrefixFilterSet
 
 
 class CertificatePrefixViewSet(NetBoxModelViewSet):
-    queryset: models.CertificatePrefix.objects.all()
+    queryset = models.CertificatePrefix.objects.all()
     serializer_class = CertificatePrefixSerializer
     filterset_class = filtersets.CertificatePrefixFilterSet
 
 class CertificateAsnViewSet(NetBoxModelViewSet):
-    queryset: models.CertificateAsn.objects.all()
+    queryset = models.CertificateAsn.objects.all()
     serializer_class = CertificateAsnSerializer
     filterset_class = filtersets.CertificateAsnFilterSet

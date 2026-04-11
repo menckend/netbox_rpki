@@ -12,52 +12,52 @@ import netbox_rpki
 
 
 class CertificateSerializer(NetBoxModelSerializer):
-    url = HyperlinkedIdentityField(view_name="plugins-api:netbox_rpki:certificate-detail")
+    url = HyperlinkedIdentityField(view_name="plugins-api:netbox_rpki-api:certificate-detail")
 
     class Meta:
         model = netbox_rpki.models.Certificate
-        fields = ("id", "name", "issuer", "subject", "serial", "valid_from", "valid_to", "auto_renews", "public_key", "private_key", "publication_url", "ca_repository", "self_hosted", "rpki_org")
+        fields = ("id", "url", "name", "issuer", "subject", "serial", "valid_from", "valid_to", "auto_renews", "public_key", "private_key", "publication_url", "ca_repository", "self_hosted", "rpki_org")
         brief_fields = ("name", "issuer", "subject", "serial", "rpki_org")
 
 
 class OrganizationSerializer(NetBoxModelSerializer):
-    url = HyperlinkedIdentityField(view_name="plugins-api:netbox_rpki_:organization-detail")
+    url = HyperlinkedIdentityField(view_name="plugins-api:netbox_rpki-api:organization-detail")
 
     class Meta:
         model = netbox_rpki.models.Organization
-        fields = ["id", "org_id", "name", "ext_url", "parent_rir"]
+        fields = ["id", "url", "org_id", "name", "ext_url", "parent_rir"]
         brief_fields = ("org_id", "name", "parent_rir")
 
 
 class RoaSerializer(NetBoxModelSerializer):
-    url = HyperlinkedIdentityField(view_name="plugins-api:netbox_rpki_:roa-detail")
+    url = HyperlinkedIdentityField(view_name="plugins-api:netbox_rpki-api:roa-detail")
 
     class Meta:
         model = netbox_rpki.models.Roa
-        fields = ["id", "name", "origin_as", "valid_from", "valid_to", "auto_renews", "signed_by"]
+        fields = ["id", "url", "name", "origin_as", "valid_from", "valid_to", "auto_renews", "signed_by"]
         brief_fields = ("name", "origin_as")
 
 
 class RoaPrefixSerializer(NetBoxModelSerializer):
-    url = HyperlinkedIdentityField(view_name="plugins-api:netbox_rpki_:roaprefix-detail")
+    url = HyperlinkedIdentityField(view_name="plugins-api:netbox_rpki-api:roaprefix-detail")
 
     class Meta:
         model = netbox_rpki.models.RoaPrefix
-        fields = ["id", "prefix", "max_length", "roa_name"]
+        fields = ["id", "url", "prefix", "max_length", "roa_name"]
         brief_fields = ("id", "prefix", "max_length", "roa_name")
 
 class CertificatePrefixSerializer(NetBoxModelSerializer):
-    url = HyperlinkedIdentityField(view_name="plugins-api:netbox_rpki_:certificateprefix-detail")
+    url = HyperlinkedIdentityField(view_name="plugins-api:netbox_rpki-api:certificateprefix-detail")
 
     class Meta:
         model = netbox_rpki.models.CertificatePrefix
-        fields = ["id", "prefix", "certificate_name"]
+        fields = ["id", "url", "prefix", "certificate_name"]
         brief_fields = ("id", "prefix", "certificate_name")
 
 class CertificateAsnSerializer(NetBoxModelSerializer):
-    url = HyperlinkedIdentityField(view_name="plugins-api:netbox_rpki_:certificateasn-detail")
+    url = HyperlinkedIdentityField(view_name="plugins-api:netbox_rpki-api:certificateasn-detail")
 
     class Meta:
         model = netbox_rpki.models.CertificateAsn
-        fields = ["id", "asn", "certificate_name2"]
+        fields = ["id", "url", "asn", "certificate_name2"]
         brief_fields = ("id", "asn", "certificate_name2")

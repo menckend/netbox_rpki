@@ -115,3 +115,15 @@ PLUGINS_CONFIG = {
 ```
 
 Run  `python -m manage.py migrate` from the .../netbox/netbox/ directory in your netbox installation. (or include the manage.py migrate command in Dockerfile-Plugins if using netbox-docker.)
+
+## Browser E2E Tests
+
+The repo includes a minimal Playwright suite under `tests/e2e/` for real plugin Web UI CRUD coverage.
+
+- It targets a running local NetBox dev instance, defaulting to `http://127.0.0.1:8000`
+- It logs in as the local `admin` user created by `devrun/dev.sh start`
+- It prepares only the core NetBox prerequisites the plugin forms depend on and cleans up prior E2E-marked plugin objects
+- It does not require `dev.sh seed`, though seeded data remains compatible with the suite
+- The recommended entry point in WSL is `cd devrun && ./dev.sh e2e`
+
+See `tests/e2e/README.md` for setup, environment variables, and exact commands.

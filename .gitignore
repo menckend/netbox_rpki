@@ -1,8 +1,14 @@
 # https://github.com/github/gitignore/blob/main/Global/macOS.gitignore
 
-# Netbox dev instance
-devrun/
-devrun
+# NetBox dev runtime
+devrun/.env
+devrun/*.log
+devrun/.state/
+node_modules/
+playwright-report/
+test-results/
+tests/e2e/.auth/
+tests/e2e/.state/
 
 
 # General
@@ -160,7 +166,7 @@ share/python-wheels/
 *.egg
 MANIFEST
 .devcontainer/
-./vscode
+.vscode/
 
 # PyInstaller
 #  Usually these files are written by a python script from a template

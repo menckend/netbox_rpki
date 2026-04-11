@@ -41,3 +41,8 @@ class NetBoxRpkiQuery:
 
     netbox_rpki_roa_prefix: RoaPrefixType = strawberry_django.field()
     netbox_rpki_roa_prefix_list: List[RoaPrefixType] = strawberry_django.field()
+
+
+schema = [
+    NetBoxRpkiQuery,
+]
