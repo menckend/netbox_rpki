@@ -1,0 +1,84 @@
+{% extends 'generic/object.html' %}
+{% load render_table from django_tables2 %}
+
+{% block breadcrumbs %}
+<li class="breadcrumb-item"><a href="{% url detail_spec.list_url_name %}">{{ detail_spec.breadcrumb_label }}</a></li>
+{% endblock breadcrumbs %}
+
+{% block extra_controls %}
+  {% for button in detail_action_buttons %}
+    <a href="{{ button.url }}" class="btn btn-success">
+      <span class="mdi mdi-plus-thick" aria-hidden="true"></span> {{ button.label }}
+    </a>
+  {% endfor %}
+{% endblock extra_controls %}
+
+{% block content %}
+  <div class="row mb-3">
+    <div class="col col-md-6">
+      <div class="card">
+        <h5 class="card-header">{{ detail_spec.card_title }}</h5>
+        <div class="card-body">
+          <table class="table table-hover attr-table">
+            {% for row in detail_fields %}
+              <tr>
+                {% if row.use_header %}
+                  <th scope="row">{{ row.label }}</th>
+                {% else %}
+                  <td>{{ row.label }}</td>
+                {% endif %}
+                <td>
+                  {% if row.kind == 'link' %}
+                    {% if row.url %}
+                      <a href="{{ row.url }}">{{ row.value }}</a>
+                    {% elif row.is_empty and row.empty_text %}
+                      <span class="text-muted">{{ row.empty_text }}</span>
+                    {% else %}
+                      {{ row.value }}
+                    {% endif %}
+                  {% elif row.kind == 'url' %}
+                    {% if row.url %}
+                      <a href="{{ row.url|escape }}">{{ row.value }}</a>
+                    {% else %}
+                      {{ row.value }}
+                    {% endif %}
+                  {% elif row.is_empty and row.empty_text %}
+                    <span class="text-muted">{{ row.empty_text }}</span>
+                  {% else %}
+                    {{ row.value }}
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </table>
+        </div>
+      </div>
+      {% include 'inc/panels/custom_fields.html' %}
+    </div>
+    <div class="col col-md-6">
+      {% include 'inc/panels/tags.html' %}
+      {% include 'inc/panels/comments.html' %}
+      {% for section in detail_side_sections %}
+        <div class="card">
+          <h5 class="card-header">{{ section.title }}</h5>
+          <div class="card-body table-responsive">
+            {% render_table section.table %}
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  {% for section in detail_bottom_sections %}
+    <div class="row">
+      <div class="col col-md-12">
+        <div class="card">
+          <h5 class="card-header">{{ section.title }}</h5>
+          <div class="card-body table-responsive">
+            {% render_table section.table %}
+          </div>
+        </div>
+      </div>
+    </div>
+  {% endfor %}
+{% endblock content %}

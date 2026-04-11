@@ -1,49 +1,35 @@
-from typing import Annotated, List
-
-import strawberry
 import strawberry_django
 
 from netbox.graphql.types import NetBoxObjectType
-from netbox.graphql.scalars import BigInt
 
-from netbox_rpki.models import (
-    Certificate,
-    CertificateAsn,
-    CertificatePrefix,
-    Organization,
-    Roa,
-    RoaPrefix
-)
-from .filters import (
-    CertificateFilter,
-    CertificatePrefixFilter,
-    CertificateAsnFilter,
-    RoaFilter,
-    OrganizationFilter,
-    RoaPrefixFilter,
-)
+from netbox_rpki.object_registry import GRAPHQL_OBJECT_SPECS
+from netbox_rpki.object_specs import ObjectSpec
+
+from .filters import GRAPHQL_FILTER_CLASS_MAP
 
 
-@strawberry_django.type(Organization, fields="__all__", filters=OrganizationFilter)
-class OrganizationType(NetBoxObjectType):
-    pass
+def build_graphql_type_class(spec: ObjectSpec) -> type[NetBoxObjectType]:
+    type_class = type(
+        spec.graphql.type.class_name,
+        (NetBoxObjectType,),
+        {
+            "__module__": __name__,
+            "__doc__": f"Generated GraphQL type for {spec.model.__name__}.",
+            "__object_spec__": spec,
+        },
+    )
+    return strawberry_django.type(
+        spec.model,
+        fields=spec.graphql.type.fields,
+        filters=GRAPHQL_FILTER_CLASS_MAP[spec.key],
+    )(type_class)
 
-@strawberry_django.type(Certificate, fields="__all__", filters=CertificateFilter)
-class CertificateType(NetBoxObjectType):
-    pass
 
-@strawberry_django.type(CertificatePrefix, fields="__all__", filters=CertificatePrefixFilter)
-class CertificatePrefixType(NetBoxObjectType):
-    pass
+GRAPHQL_TYPE_CLASS_MAP = {}
+for object_spec in GRAPHQL_OBJECT_SPECS:
+    type_class = build_graphql_type_class(object_spec)
+    GRAPHQL_TYPE_CLASS_MAP[object_spec.key] = type_class
+    globals()[object_spec.graphql.type.class_name] = type_class
 
-@strawberry_django.type(CertificateAsn, fields="__all__", filters=CertificateAsnFilter)
-class CertificateAsnType(NetBoxObjectType):
-    pass
 
-@strawberry_django.type(Roa, fields="__all__", filters=RoaFilter)
-class RoaType(NetBoxObjectType):
-    pass
-
-@strawberry_django.type(RoaPrefix, fields="__all__", filters=RoaPrefixFilter)
-class RoaPrefixType(NetBoxObjectType):
-    pass
+__all__ = tuple(spec.graphql.type.class_name for spec in GRAPHQL_OBJECT_SPECS)

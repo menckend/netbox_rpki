@@ -90,7 +90,7 @@ Validation completed against real development installs of:
 - NetBox 4.5.0
 - NetBox 4.5.7
 
-Validation evidence for both versions includes successful plugin bootstrap and `manage.py check` with the plugin enabled, plus the full Python test suite passing (`193` tests). Browser smoke coverage was also run successfully against the NetBox 4.5.0 environment (`7` Playwright specs passed).
+Validation evidence for both versions includes successful plugin bootstrap and `manage.py check` with the plugin enabled, plus the full Python test suite passing (`185` tests). Browser smoke coverage was also run successfully against the NetBox 4.5.0 environment (`7` Playwright specs passed).
 
 
 ## Installing

@@ -28,6 +28,8 @@ from netbox.forms import (
     NetBoxModelImportForm,
 )
 import netbox_rpki
+from netbox_rpki.object_registry import FILTER_FORM_OBJECT_SPECS, FORM_OBJECT_SPECS
+from netbox_rpki.object_specs import ObjectSpec
 # from .choices import (
 #    SessionStatusChoices,
 #    CommunityStatusChoices,
@@ -37,62 +39,45 @@ import netbox_rpki
 from netbox_rpki.models import Certificate, Organization, Roa, RoaPrefix, CertificatePrefix, CertificateAsn
 
 
-class CertificateForm(NetBoxModelForm):
-    tenant = DynamicModelChoiceField(queryset=Tenant.objects.all(), required=False)
-    comments = CommentField()
+def build_model_form_class(spec: ObjectSpec) -> type[NetBoxModelForm]:
+    meta_class = type(
+        'Meta',
+        (),
+        {
+            'model': spec.model,
+            'fields': spec.form.fields,
+        },
+    )
 
-    class Meta:
-        model = Certificate
-        fields = ['name', 'issuer', 'subject', 'serial', 'valid_from', 'valid_to', "auto_renews", 'public_key', 'private_key', 'publication_url', 'ca_repository', 'rpki_org', 'self_hosted', 'tenant', 'comments', 'tags']
-
-
-class CertificateFilterForm(NetBoxModelFilterSetForm):
-    q = forms.CharField(required=False, label="Search")
-    tenant = DynamicModelChoiceField(queryset=Tenant.objects.all(), required=False)
-    tag = TagFilterField(Certificate)
-
-    model = Certificate
-
-
-class OrganizationForm(NetBoxModelForm):
-    tenant = DynamicModelChoiceField(queryset=Tenant.objects.all(), required=False)
-    comments = CommentField()
-
-    class Meta:
-        model = Organization
-        fields = ['org_id', 'name', 'parent_rir', 'ext_url', 'tenant', 'comments', 'tags']
+    return type(
+        spec.form.class_name,
+        (NetBoxModelForm,),
+        {
+            '__module__': __name__,
+            'tenant': DynamicModelChoiceField(queryset=Tenant.objects.all(), required=False),
+            'comments': CommentField(),
+            'Meta': meta_class,
+        },
+    )
 
 
-class RoaForm(NetBoxModelForm):
-    tenant = DynamicModelChoiceField(queryset=Tenant.objects.all(), required=False)
-    comments = CommentField()
-
-    class Meta:
-        model = Roa
-        fields: list[str] = ['name', 'origin_as', 'valid_from', 'valid_to', "auto_renews", 'signed_by', 'tenant', 'comments', 'tags']
+for object_spec in FORM_OBJECT_SPECS:
+    globals()[object_spec.form.class_name] = build_model_form_class(object_spec)
 
 
-class RoaPrefixForm(NetBoxModelForm):
-    tenant = DynamicModelChoiceField(queryset=Tenant.objects.all(), required=False)
-    comments = CommentField()
+def build_filter_form_class(spec: ObjectSpec) -> type[NetBoxModelFilterSetForm]:
+    return type(
+        spec.filter_form.class_name,
+        (NetBoxModelFilterSetForm,),
+        {
+            '__module__': __name__,
+            'q': forms.CharField(required=False, label='Search'),
+            'tenant': DynamicModelChoiceField(queryset=Tenant.objects.all(), required=False),
+            'tag': TagFilterField(spec.model),
+            'model': spec.model,
+        },
+    )
 
-    class Meta:
-        model = RoaPrefix
-        fields = ['prefix', 'max_length', 'roa_name', 'tenant', 'comments', 'tags']
 
-
-class CertificatePrefixForm(NetBoxModelForm):
-    tenant = DynamicModelChoiceField(queryset=Tenant.objects.all(), required=False)
-    comments = CommentField()
-
-    class Meta:
-        model = CertificatePrefix
-        fields = ['prefix', 'certificate_name', 'tenant', 'comments', 'tags']
-
-class CertificateAsnForm(NetBoxModelForm):
-    tenant = DynamicModelChoiceField(queryset=Tenant.objects.all(), required=False)
-    comments = CommentField()
-
-    class Meta:
-        model = CertificateAsn
-        fields = ['asn', 'certificate_name2', 'tenant', 'comments', 'tags']
+for object_spec in FILTER_FORM_OBJECT_SPECS:
+    globals()[object_spec.filter_form.class_name] = build_filter_form_class(object_spec)

@@ -1,44 +1,36 @@
 from rest_framework.routers import APIRootView
+
 from netbox.api.viewsets import NetBoxModelViewSet
-from netbox_rpki.api.serializers import OrganizationSerializer, CertificateSerializer, RoaSerializer, RoaPrefixSerializer, CertificatePrefixSerializer, CertificateAsnSerializer
-from netbox_rpki import filtersets, models
+
+from netbox_rpki import filtersets as filterset_module
+from netbox_rpki.api.serializers import SERIALIZER_CLASS_MAP
+from netbox_rpki.object_registry import API_OBJECT_SPECS
+from netbox_rpki.object_specs import ObjectSpec
 
 
 class RootView(APIRootView):
     def get_view_name(self):
-        return 'rpki'
+        return "rpki"
 
 
-class OrganizationViewSet(NetBoxModelViewSet):
-    queryset = models.Organization.objects.all()
-    serializer_class = OrganizationSerializer
-    filterset_class = filtersets.OrganizationFilterSet
+def build_viewset_class(spec: ObjectSpec) -> type[NetBoxModelViewSet]:
+    return type(
+        spec.api.viewset_name,
+        (NetBoxModelViewSet,),
+        {
+            "__module__": __name__,
+            "queryset": spec.model.objects.all(),
+            "serializer_class": SERIALIZER_CLASS_MAP[spec.key],
+            "filterset_class": getattr(filterset_module, spec.filterset.class_name),
+        },
+    )
 
 
-class CertificateViewSet(NetBoxModelViewSet):
-    queryset = models.Certificate.objects.all()
-    serializer_class = CertificateSerializer
-    filterset_class = filtersets.CertificateFilterSet
+VIEWSET_CLASS_MAP = {}
+for object_spec in API_OBJECT_SPECS:
+    viewset_class = build_viewset_class(object_spec)
+    VIEWSET_CLASS_MAP[object_spec.key] = viewset_class
+    globals()[object_spec.api.viewset_name] = viewset_class
 
 
-class RoaViewSet(NetBoxModelViewSet):
-    queryset = models.Roa.objects.all()
-    serializer_class = RoaSerializer
-    filterset_class = filtersets.RoaFilterSet
-
-
-class RoaPrefixViewSet(NetBoxModelViewSet):
-    queryset = models.RoaPrefix.objects.all()
-    serializer_class = RoaPrefixSerializer
-    filterset_class = filtersets.RoaPrefixFilterSet
-
-
-class CertificatePrefixViewSet(NetBoxModelViewSet):
-    queryset = models.CertificatePrefix.objects.all()
-    serializer_class = CertificatePrefixSerializer
-    filterset_class = filtersets.CertificatePrefixFilterSet
-
-class CertificateAsnViewSet(NetBoxModelViewSet):
-    queryset = models.CertificateAsn.objects.all()
-    serializer_class = CertificateAsnSerializer
-    filterset_class = filtersets.CertificateAsnFilterSet
+__all__ = ("RootView",) + tuple(spec.api.viewset_name for spec in API_OBJECT_SPECS)

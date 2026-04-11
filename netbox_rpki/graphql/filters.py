@@ -9,64 +9,50 @@ except ImportError:
 
 from netbox.graphql.filters import NetBoxModelFilter
 
-from netbox_rpki.models import (
-    Certificate,
-    CertificatePrefix,
-    CertificateAsn,
-    Roa,
-    Organization,
-    RoaPrefix
-)
-
-@strawberry_django.filter_type(Certificate, lookups=True)
-class CertificateFilter(NetBoxModelFilter):
-    name: StrFilterLookup[str] | None = strawberry_django.filter_field()
-    issuer: StrFilterLookup[str] | None = strawberry_django.filter_field()
-    subject: StrFilterLookup[str] | None = strawberry_django.filter_field()
-    serial: StrFilterLookup[str] | None = strawberry_django.filter_field()
-    auto_renews: FilterLookup[bool] | None = strawberry_django.filter_field()
-    self_hosted: FilterLookup[bool] | None = strawberry_django.filter_field()
-    rpki_org_id: ID | None = strawberry_django.filter_field()
+from netbox_rpki.object_registry import GRAPHQL_OBJECT_SPECS
+from netbox_rpki.object_specs import GraphQLFilterFieldSpec, ObjectSpec
 
 
-@strawberry_django.filter_type(CertificatePrefix, lookups=True)
-class CertificatePrefixFilter(NetBoxModelFilter):
-    prefix_id: ID | None = strawberry_django.filter_field()
-    certificate_name_id: ID | None = strawberry_django.filter_field()
+def build_filter_annotation(field_spec: GraphQLFilterFieldSpec):
+    if field_spec.filter_kind == "str":
+        return StrFilterLookup[str] | None
+    if field_spec.filter_kind == "bool":
+        return FilterLookup[bool] | None
+    if field_spec.filter_kind == "id":
+        return ID | None
+    raise ValueError(f"Unsupported GraphQL filter kind: {field_spec.filter_kind}")
 
 
-@strawberry_django.filter_type(CertificateAsn, lookups=True)
-class CertificateAsnFilter(NetBoxModelFilter):
-    asn_id: ID | None = strawberry_django.filter_field()
-    certificate_name2_id: ID | None = strawberry_django.filter_field()
+def build_filter_namespace(spec: ObjectSpec) -> dict[str, object]:
+    annotations = {}
+    namespace: dict[str, object] = {
+        "__module__": __name__,
+        "__doc__": f"Generated GraphQL filter for {spec.model.__name__}.",
+        "__object_spec__": spec,
+    }
+
+    for field_spec in spec.graphql.filter.fields:
+        annotations[field_spec.field_name] = build_filter_annotation(field_spec)
+        namespace[field_spec.field_name] = strawberry_django.filter_field()
+
+    namespace["__annotations__"] = annotations
+    return namespace
 
 
-@strawberry_django.filter_type(Roa, lookups=True)
-class RoaFilter(NetBoxModelFilter):
-    name: StrFilterLookup[str] | None = strawberry_django.filter_field()
-    auto_renews: FilterLookup[bool] | None = strawberry_django.filter_field()
-    origin_as_id: ID | None = strawberry_django.filter_field()
-    signed_by_id: ID | None = strawberry_django.filter_field()
+def build_graphql_filter_class(spec: ObjectSpec) -> type[NetBoxModelFilter]:
+    filter_class = type(
+        spec.graphql.filter.class_name,
+        (NetBoxModelFilter,),
+        build_filter_namespace(spec),
+    )
+    return strawberry_django.filter_type(spec.model, lookups=True)(filter_class)
 
 
-@strawberry_django.filter_type(Organization, lookups=True)
-class OrganizationFilter(NetBoxModelFilter):
-    org_id: StrFilterLookup[str] | None = strawberry_django.filter_field()
-    name: StrFilterLookup[str] | None = strawberry_django.filter_field()
-    ext_url: StrFilterLookup[str] | None = strawberry_django.filter_field()
-    parent_rir_id: ID | None = strawberry_django.filter_field()
+GRAPHQL_FILTER_CLASS_MAP = {}
+for object_spec in GRAPHQL_OBJECT_SPECS:
+    filter_class = build_graphql_filter_class(object_spec)
+    GRAPHQL_FILTER_CLASS_MAP[object_spec.key] = filter_class
+    globals()[object_spec.graphql.filter.class_name] = filter_class
 
 
-@strawberry_django.filter_type(RoaPrefix, lookups=True)
-class RoaPrefixFilter(NetBoxModelFilter):
-    prefix_id: ID | None = strawberry_django.filter_field()
-    roa_name_id: ID | None = strawberry_django.filter_field()
-
-__all__ = (
-    CertificateFilter,
-    CertificatePrefixFilter,
-    CertificateAsnFilter,
-    RoaFilter,
-    OrganizationFilter,
-    RoaPrefixFilter,
-)
+__all__ = tuple(spec.graphql.filter.class_name for spec in GRAPHQL_OBJECT_SPECS)

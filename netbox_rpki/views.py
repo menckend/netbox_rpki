@@ -1,143 +1,162 @@
+from urllib.parse import urlencode
+
+from django.urls import reverse
 from netbox.views import generic
+
 from netbox_rpki import models, forms, tables, filtersets
-from django.shortcuts import get_object_or_404
+from netbox_rpki.detail_specs import CERTIFICATE_DETAIL_SPEC, ORGANIZATION_DETAIL_SPEC, ROA_DETAIL_SPEC
+from netbox_rpki.object_registry import SIMPLE_DETAIL_VIEW_OBJECT_SPECS, VIEW_OBJECT_SPECS
+from netbox_rpki.object_specs import ObjectSpec
 
 
-class CertificateView(generic.ObjectView):
-    queryset = models.Certificate.objects.all()
+class MetadataDrivenDetailView(generic.ObjectView):
+    template_name = 'netbox_rpki/object_detail.html'
+    detail_spec = None
 
-    def get_extra_context(self, request, instance):
-        certificateprefix_table = tables.CertificatePrefixTable(instance.CertificateToPrefixTable.all())
-        certificateprefix_table.configure(request)
-        certificateasn_table = tables.CertificateAsnTable(instance.CertificatetoASNTable.all())
-        certificateasn_table.configure(request)
-        roa_table = tables.RoaTable(instance.roas.all())
-        roa_table.configure(request)
+    def get_detail_spec(self):
+        if self.detail_spec is None:
+            raise AttributeError(f'{self.__class__.__name__} must define detail_spec')
+        return self.detail_spec
+
+    def build_detail_field(self, field_spec, instance):
+        value = field_spec.value(instance)
+        url = self.resolve_detail_field_url(field_spec, instance, value)
 
         return {
-            'signed_roas_table': roa_table,
-            'assigned_asns_table': certificateasn_table,
-            'assigned_prefixes_table': certificateprefix_table
+            'kind': field_spec.kind,
+            'label': field_spec.label,
+            'value': value,
+            'url': url,
+            'use_header': field_spec.use_header,
+            'empty_text': field_spec.empty_text,
+            'is_empty': value in (None, ''),
+        }
+
+    def resolve_detail_field_url(self, field_spec, instance, value):
+        if field_spec.kind == 'url':
+            return field_spec.url(instance) if field_spec.url else value
+
+        if field_spec.url is not None:
+            return field_spec.url(instance)
+
+        get_absolute_url = getattr(value, 'get_absolute_url', None)
+        if callable(get_absolute_url):
+            return get_absolute_url()
+
+        return None
+
+    def build_detail_action_button(self, action_spec, instance):
+        query_string = urlencode({action_spec.query_param: action_spec.value(instance)})
+        return {
+            'label': action_spec.label,
+            'url': f'{reverse(action_spec.url_name)}?{query_string}',
+        }
+
+    def build_detail_table_section(self, request, table_spec, instance):
+        table_class = getattr(tables, table_spec.table_class_name)
+        table = table_class(table_spec.queryset(instance))
+        table.configure(request)
+
+        return {
+            'title': table_spec.title,
+            'table': table,
+        }
+
+    def build_detail_table_sections(self, request, table_specs, instance):
+        sections = []
+
+        for table_spec in table_specs:
+            section = self.build_detail_table_section(request, table_spec, instance)
+            sections.append(section)
+
+        return sections
+
+    def get_extra_context(self, request, instance):
+        detail_spec = self.get_detail_spec()
+        side_sections = self.build_detail_table_sections(request, detail_spec.side_tables, instance)
+        bottom_sections = self.build_detail_table_sections(request, detail_spec.bottom_tables, instance)
+
+        return {
+            'detail_spec': detail_spec,
+            'detail_fields': [self.build_detail_field(field_spec, instance) for field_spec in detail_spec.fields],
+            'detail_action_buttons': [
+                self.build_detail_action_button(action_spec, instance)
+                for action_spec in detail_spec.actions
+                if request.user.has_perm(action_spec.permission)
+            ],
+            'detail_side_sections': side_sections,
+            'detail_bottom_sections': bottom_sections,
         }
 
 
-class CertificateListView(generic.ObjectListView):
+class CertificateView(MetadataDrivenDetailView):
     queryset = models.Certificate.objects.all()
-    filterset = filtersets.CertificateFilterSet
-    filterset_form = forms.CertificateFilterForm
-    table = tables.CertificateTable
+    detail_spec = CERTIFICATE_DETAIL_SPEC
 
 
-class CertificateEditView(generic.ObjectEditView):
-    queryset = models.Certificate.objects.all()
-    form = forms.CertificateForm
-
-
-class CertificateDeleteView(generic.ObjectDeleteView):
-    queryset = models.Certificate.objects.all()
-
-
-class OrganizationView(generic.ObjectView):
+class OrganizationView(MetadataDrivenDetailView):
     queryset = models.Organization.objects.all()
-
-    def get_extra_context(self, request, instance):
-        mycerts_table = tables.CertificateTable(instance.certificates.all())
-        mycerts_table.configure(request)
-
-        return {
-            'certificates_table': mycerts_table,
-        }
+    detail_spec = ORGANIZATION_DETAIL_SPEC
 
 
-class OrganizationListView(generic.ObjectListView):
-    queryset = models.Organization.objects.all()
-    table = tables.OrganizationTable
-
-
-class OrganizationEditView(generic.ObjectEditView):
-    queryset = models.Organization.objects.all()
-    form = forms.OrganizationForm
-
-
-class OrganizationDeleteView(generic.ObjectDeleteView):
-    queryset = models.Organization.objects.all()
-
-
-class RoaPrefixView(generic.ObjectView):
-    queryset = models.RoaPrefix.objects.all()
-
-
-class RoaPrefixListView(generic.ObjectListView):
-    queryset = models.RoaPrefix.objects.all()
-    table = tables.RoaPrefixTable
-
-
-class RoaPrefixEditView(generic.ObjectEditView):
-    queryset = models.RoaPrefix.objects.all()
-    form = forms.RoaPrefixForm
-
-
-class RoaPrefixDeleteView(generic.ObjectDeleteView):
-    queryset = models.RoaPrefix.objects.all()
-
-
-class RoaView(generic.ObjectView):
+class RoaView(MetadataDrivenDetailView):
     queryset = models.Roa.objects.all()
-
-    def get_extra_context(self, request, instance):
-        roaprefix_table = tables.RoaPrefixTable(instance.RoaToPrefixTable.all())
-        roaprefix_table.configure(request)
-
-        return {
-            'myroaprefixes_table': roaprefix_table
-        }
+    detail_spec = ROA_DETAIL_SPEC
 
 
-class RoaListView(generic.ObjectListView):
-    queryset = models.Roa.objects.all()
-    table = tables.RoaTable
+def build_list_view_class(spec: ObjectSpec) -> type[generic.ObjectListView]:
+    return type(
+        spec.view.list_class_name,
+        (generic.ObjectListView,),
+        {
+            '__module__': __name__,
+            'queryset': spec.model.objects.all(),
+            'filterset': getattr(filtersets, spec.filterset.class_name),
+            'filterset_form': getattr(forms, spec.filter_form.class_name),
+            'table': getattr(tables, spec.table.class_name),
+        },
+    )
 
 
-class RoaEditView(generic.ObjectEditView):
-    queryset = models.Roa.objects.all()
-    form = forms.RoaForm
+def build_detail_view_class(spec: ObjectSpec) -> type[generic.ObjectView]:
+    return type(
+        spec.view.detail_class_name,
+        (generic.ObjectView,),
+        {
+            '__module__': __name__,
+            'queryset': spec.model.objects.all(),
+        },
+    )
 
 
-class RoaDeleteView(generic.ObjectDeleteView):
-    queryset = models.Roa.objects.all()
+def build_edit_view_class(spec: ObjectSpec) -> type[generic.ObjectEditView]:
+    return type(
+        spec.view.edit_class_name,
+        (generic.ObjectEditView,),
+        {
+            '__module__': __name__,
+            'queryset': spec.model.objects.all(),
+            'form': getattr(forms, spec.form.class_name),
+        },
+    )
 
 
-class CertificatePrefixView(generic.ObjectView):
-    queryset = models.CertificatePrefix.objects.all()
+def build_delete_view_class(spec: ObjectSpec) -> type[generic.ObjectDeleteView]:
+    return type(
+        spec.view.delete_class_name,
+        (generic.ObjectDeleteView,),
+        {
+            '__module__': __name__,
+            'queryset': spec.model.objects.all(),
+        },
+    )
 
 
-class CertificatePrefixListView(generic.ObjectListView):
-    queryset = models.CertificatePrefix.objects.all()
-    table = tables.CertificatePrefixTable
+for object_spec in VIEW_OBJECT_SPECS:
+    globals()[object_spec.view.list_class_name] = build_list_view_class(object_spec)
+    globals()[object_spec.view.edit_class_name] = build_edit_view_class(object_spec)
+    globals()[object_spec.view.delete_class_name] = build_delete_view_class(object_spec)
 
 
-class CertificatePrefixEditView(generic.ObjectEditView):
-    queryset = models.CertificatePrefix.objects.all()
-    form = forms.CertificatePrefixForm
-
-
-class CertificatePrefixDeleteView(generic.ObjectDeleteView):
-    queryset = models.CertificatePrefix.objects.all()
-
-
-class CertificateAsnView(generic.ObjectView):
-    queryset = models.CertificateAsn.objects.all()
-
-
-class CertificateAsnListView(generic.ObjectListView):
-    queryset = models.CertificateAsn.objects.all()
-    table = tables.CertificateAsnTable
-
-
-class CertificateAsnEditView(generic.ObjectEditView):
-    queryset = models.CertificateAsn.objects.all()
-    form = forms.CertificateAsnForm
-
-
-class CertificateAsnDeleteView(generic.ObjectDeleteView):
-    queryset = models.CertificateAsn.objects.all()
+for object_spec in SIMPLE_DETAIL_VIEW_OBJECT_SPECS:
+    globals()[object_spec.view.detail_class_name] = build_detail_view_class(object_spec)

@@ -1,111 +1,42 @@
 from django.test import RequestFactory, TestCase
 
-from netbox_rpki.models import Certificate, CertificateAsn, CertificatePrefix, Organization, Roa, RoaPrefix
-from netbox_rpki.tables import (
-    CertificateAsnTable,
-    CertificatePrefixTable,
-    CertificateTable,
-    OrganizationTable,
-    RoaPrefixTable,
-    RoaTable,
-)
-from netbox_rpki.tests.utils import (
-    create_test_asn,
-    create_test_certificate,
-    create_test_certificate_asn,
-    create_test_certificate_prefix,
-    create_test_organization,
-    create_test_prefix,
-    create_test_roa,
-    create_test_roa_prefix,
+from netbox_rpki import tables
+from netbox_rpki.object_registry import TABLE_OBJECT_SPECS
+from netbox_rpki.object_registry import get_object_spec
+from netbox_rpki.tests.registry_scenarios import (
+    EXPECTED_TABLE_CLASS_NAMES,
+    TABLE_SCENARIOS,
+    get_spec_values,
 )
 
 
-class TableRenderingTestMixin:
-    table = None
-    queryset = None
+class TableRegistrySmokeTestCase(TestCase):
+    def test_all_objects_expose_table_specs(self):
+        self.assertEqual(
+            get_spec_values(TABLE_OBJECT_SPECS, 'table', 'class_name'),
+            EXPECTED_TABLE_CLASS_NAMES,
+        )
 
+
+class GeneratedTableRenderingTestCase(TestCase):
     def test_every_orderable_field_does_not_throw_exception(self):
         disallowed = {'actions'}
-        orderable_columns = [
-            name
-            for name, column in self.table.base_columns.items()
-            if getattr(column, 'orderable', False) and name not in disallowed
-        ]
         fake_request = RequestFactory().get('/')
 
-        for col in orderable_columns:
-            for direction in ('', '-'):
-                table = self.table(self.queryset)
-                table.order_by = f'{direction}{col}'
-                table.as_html(fake_request)
+        for scenario in TABLE_SCENARIOS:
+            object_spec = get_object_spec(scenario.object_key)
+            scenario.build_rows()
+            table_class = getattr(tables, object_spec.table.class_name)
+            queryset = object_spec.model.objects.all()
+            orderable_columns = [
+                name
+                for name, column in table_class.base_columns.items()
+                if getattr(column, 'orderable', False) and name not in disallowed
+            ]
 
-
-class OrganizationTableTestCase(TableRenderingTestMixin, TestCase):
-    table = OrganizationTable
-    queryset = Organization.objects.all()
-
-    @classmethod
-    def setUpTestData(cls):
-        create_test_organization(org_id='table-org-a', name='Table Organization A')
-        create_test_organization(org_id='table-org-b', name='Table Organization B')
-
-
-class CertificateTableTestCase(TableRenderingTestMixin, TestCase):
-    table = CertificateTable
-    queryset = Certificate.objects.all()
-
-    @classmethod
-    def setUpTestData(cls):
-        organization = create_test_organization(org_id='table-cert-org', name='Table Certificate Org')
-        create_test_certificate(name='Table Certificate A', issuer='Issuer A', rpki_org=organization)
-        create_test_certificate(name='Table Certificate B', issuer='Issuer B', rpki_org=organization)
-
-
-class RoaTableTestCase(TableRenderingTestMixin, TestCase):
-    table = RoaTable
-    queryset = Roa.objects.all()
-
-    @classmethod
-    def setUpTestData(cls):
-        organization = create_test_organization(org_id='table-roa-org', name='Table ROA Org')
-        certificate = create_test_certificate(name='Table ROA Certificate', rpki_org=organization)
-        create_test_roa(name='Table ROA A', origin_as=create_test_asn(65401), signed_by=certificate)
-        create_test_roa(name='Table ROA B', origin_as=create_test_asn(65402), signed_by=certificate)
-
-
-class RoaPrefixTableTestCase(TableRenderingTestMixin, TestCase):
-    table = RoaPrefixTable
-    queryset = RoaPrefix.objects.all()
-
-    @classmethod
-    def setUpTestData(cls):
-        organization = create_test_organization(org_id='table-roa-prefix-org', name='Table ROA Prefix Org')
-        certificate = create_test_certificate(name='Table ROA Prefix Certificate', rpki_org=organization)
-        roa = create_test_roa(name='Table ROA Prefix Parent', signed_by=certificate)
-        create_test_roa_prefix(prefix=create_test_prefix('10.240.1.0/24'), roa=roa, max_length=24)
-        create_test_roa_prefix(prefix=create_test_prefix('10.240.2.0/24'), roa=roa, max_length=25)
-
-
-class CertificatePrefixTableTestCase(TableRenderingTestMixin, TestCase):
-    table = CertificatePrefixTable
-    queryset = CertificatePrefix.objects.all()
-
-    @classmethod
-    def setUpTestData(cls):
-        organization = create_test_organization(org_id='table-certificate-prefix-org', name='Table Certificate Prefix Org')
-        certificate = create_test_certificate(name='Table Certificate Prefix Parent', rpki_org=organization)
-        create_test_certificate_prefix(prefix=create_test_prefix('10.250.1.0/24'), certificate=certificate)
-        create_test_certificate_prefix(prefix=create_test_prefix('10.250.2.0/24'), certificate=certificate)
-
-
-class CertificateAsnTableTestCase(TableRenderingTestMixin, TestCase):
-    table = CertificateAsnTable
-    queryset = CertificateAsn.objects.all()
-
-    @classmethod
-    def setUpTestData(cls):
-        organization = create_test_organization(org_id='table-certificate-asn-org', name='Table Certificate ASN Org')
-        certificate = create_test_certificate(name='Table Certificate ASN Parent', rpki_org=organization)
-        create_test_certificate_asn(asn=create_test_asn(65501), certificate=certificate)
-        create_test_certificate_asn(asn=create_test_asn(65502), certificate=certificate)
+            for column_name in orderable_columns:
+                for direction in ('', '-'):
+                    with self.subTest(object_key=scenario.object_key, column_name=f'{direction}{column_name}'):
+                        table = table_class(queryset)
+                        table.order_by = f'{direction}{column_name}'
+                        table.as_html(fake_request)

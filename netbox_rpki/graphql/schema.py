@@ -1,46 +1,51 @@
-from typing import List
-
 import strawberry
 import strawberry_django
 
-from netbox_rpki.models import (
-    Certificate,
-    CertificateAsn,
-    CertificatePrefix,
-    Organization,
-    Roa,
-    RoaPrefix
-)
-from .types import (
-    CertificateType,
-    CertificateAsnType,
-    CertificatePrefixType,
-    OrganizationType,
-    RoaType,
-    RoaPrefixType
-)
+from netbox_rpki.object_registry import GRAPHQL_OBJECT_SPECS
+from netbox_rpki.object_specs import ObjectSpec
+
+from . import types as graphql_types
 
 
-@strawberry.type(name="Query")
-class NetBoxRpkiQuery:
+def get_graphql_type_class(spec: ObjectSpec) -> type:
+    return getattr(graphql_types, spec.graphql.type.class_name)
 
-    netbox_rpki_certificate: CertificateType = strawberry_django.field()
-    netbox_rpki_certificate_list: List[CertificateType] = strawberry_django.field()
-    
-    netbox_rpki_certificate_asn: CertificateAsnType = strawberry_django.field()
-    netbox_rpki_certificate_asn_list: List[CertificateAsnType] = strawberry_django.field()
-    
-    netbox_rpki_certificate_prefix: CertificatePrefixType = strawberry_django.field()
-    netbox_rpki_certificate_prefix_list: List[CertificatePrefixType] = strawberry_django.field()
-    
-    netbox_rpki_organization: OrganizationType = strawberry_django.field()
-    netbox_rpki_organization_list: List[OrganizationType] = strawberry_django.field()
 
-    netbox_rpki_roa: RoaType = strawberry_django.field()
-    netbox_rpki_roa_list: List[RoaType] = strawberry_django.field()
+def get_graphql_field_names(spec: ObjectSpec) -> tuple[str, str]:
+    return spec.graphql.detail_field_name, spec.graphql.list_field_name
 
-    netbox_rpki_roa_prefix: RoaPrefixType = strawberry_django.field()
-    netbox_rpki_roa_prefix_list: List[RoaPrefixType] = strawberry_django.field()
+
+GRAPHQL_TYPE_CLASS_MAP = {
+    spec.key: get_graphql_type_class(spec)
+    for spec in GRAPHQL_OBJECT_SPECS
+}
+
+GRAPHQL_FIELD_NAME_MAP = {
+    spec.key: get_graphql_field_names(spec)
+    for spec in GRAPHQL_OBJECT_SPECS
+}
+
+
+def build_query_type() -> type:
+    annotations = {}
+    namespace = {
+        "__module__": __name__,
+    }
+
+    for spec in GRAPHQL_OBJECT_SPECS:
+        type_class = GRAPHQL_TYPE_CLASS_MAP[spec.key]
+        detail_field_name, list_field_name = GRAPHQL_FIELD_NAME_MAP[spec.key]
+        annotations[detail_field_name] = type_class
+        annotations[list_field_name] = list[type_class]
+        namespace[detail_field_name] = strawberry_django.field()
+        namespace[list_field_name] = strawberry_django.field()
+
+    namespace["__annotations__"] = annotations
+    query_class = type("NetBoxRpkiQuery", (), namespace)
+    return strawberry.type(query_class, name="Query")
+
+
+NetBoxRpkiQuery = build_query_type()
 
 
 schema = [

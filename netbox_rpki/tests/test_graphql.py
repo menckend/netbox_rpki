@@ -19,6 +19,8 @@ from netbox_rpki.models import (
     Roa,
     RoaPrefix,
 )
+from netbox_rpki.object_registry import GRAPHQL_OBJECT_SPECS
+from netbox_rpki.tests.registry_scenarios import EXPECTED_GRAPHQL_FIELD_NAMES_BY_KEY, EXPECTED_GRAPHQL_FIELD_ORDER
 from netbox_rpki.tests.utils import (
     create_test_asn,
     create_test_certificate,
@@ -39,25 +41,53 @@ class GraphQLSchemaRegistrationTestCase(SimpleTestCase):
     def test_schema_exports_plugin_query_list(self):
         self.assertEqual(plugin_graphql_schema.schema, [NetBoxRpkiQuery])
 
+    def test_schema_uses_registry_object_set(self):
+        self.assertTupleEqual(
+            tuple(plugin_graphql_schema.GRAPHQL_TYPE_CLASS_MAP),
+            tuple(spec.key for spec in GRAPHQL_OBJECT_SPECS),
+        )
+        self.assertDictEqual(
+            plugin_graphql_schema.GRAPHQL_FIELD_NAME_MAP,
+            {
+                spec.key: (spec.graphql.detail_field_name, spec.graphql.list_field_name)
+                for spec in GRAPHQL_OBJECT_SPECS
+            },
+        )
+
+    def test_registry_pins_stable_graphql_field_names(self):
+        self.assertDictEqual(
+            {
+                spec.key: (spec.graphql.detail_field_name, spec.graphql.list_field_name)
+                for spec in GRAPHQL_OBJECT_SPECS
+            },
+            EXPECTED_GRAPHQL_FIELD_NAMES_BY_KEY,
+        )
+
     def test_query_exposes_all_plugin_fields(self):
         expected_fields = {
-            'netbox_rpki_certificate',
-            'netbox_rpki_certificate_asn',
-            'netbox_rpki_certificate_asn_list',
-            'netbox_rpki_certificate_list',
-            'netbox_rpki_certificate_prefix',
-            'netbox_rpki_certificate_prefix_list',
-            'netbox_rpki_organization',
-            'netbox_rpki_organization_list',
-            'netbox_rpki_roa',
-            'netbox_rpki_roa_list',
-            'netbox_rpki_roa_prefix',
-            'netbox_rpki_roa_prefix_list',
+            field_name
+            for field_names in EXPECTED_GRAPHQL_FIELD_NAMES_BY_KEY.values()
+            for field_name in field_names
         }
 
         actual_fields = {field.name for field in NetBoxRpkiQuery.__strawberry_definition__.fields}
 
         self.assertSetEqual(actual_fields, expected_fields)
+
+    def test_query_field_order_matches_registry_order(self):
+        actual_field_order = [field.name for field in NetBoxRpkiQuery.__strawberry_definition__.fields]
+
+        self.assertListEqual(actual_field_order, list(EXPECTED_GRAPHQL_FIELD_ORDER))
+
+    def test_type_map_uses_existing_graphql_types(self):
+        graphql_types = import_module('netbox_rpki.graphql.types')
+
+        for spec in GRAPHQL_OBJECT_SPECS:
+            with self.subTest(object_key=spec.key):
+                self.assertIs(
+                    plugin_graphql_schema.GRAPHQL_TYPE_CLASS_MAP[spec.key],
+                    getattr(graphql_types, f'{spec.model.__name__}Type'),
+                )
 
     def test_plugin_query_is_registered_with_netbox_schema(self):
         self.assertIn(NetBoxRpkiQuery, registry['plugins']['graphql_schemas'])

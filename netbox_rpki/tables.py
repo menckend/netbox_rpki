@@ -5,7 +5,8 @@ from django.utils.safestring import mark_safe
 
 from netbox.tables import NetBoxTable
 from netbox.tables.columns import ChoiceFieldColumn, TagColumn
-import netbox_rpki
+from netbox_rpki.object_registry import TABLE_OBJECT_SPECS
+from netbox_rpki.object_specs import ObjectSpec
 
 AVAILABLE_LABEL = mark_safe('<span class="label label-success">Available</span>')
 COL_TENANT = """
@@ -17,91 +18,29 @@ COL_TENANT = """
  """
 
 
-class CertificateTable(NetBoxTable):
-    name = tables.Column(linkify=True)
-    tenant = tables.TemplateColumn(
-        template_code=COL_TENANT
-    )
-    tags = TagColumn(
-        url_name='plugins:netbox_rpki:certificate_list'
-    )
-
-    class Meta(NetBoxTable.Meta):
-        model = netbox_rpki.models.Certificate
-        fields = ("pk", "id", "name", "issuer", "subject", "serial", "valid_from", "valid_to", "auto_renews", "public_key", "private_key", "publication_url", "ca_repository", "self_hosted", "rpki_org", "comments", "tenant", "tags")
-        default_columns = ("name", "valid_from", "valid_to", "auto_renews",  "self_hosted", "rpki_org", "comments", "tenant", "tags")
-
-
-class OrganizationTable(NetBoxTable):
-    name = tables.Column(linkify=True)
-    tenant = tables.TemplateColumn(
-        template_code=COL_TENANT
-    )
-    tags = TagColumn(
-        url_name='plugins:netbox_rpki:organization_list'
+def build_table_class(spec: ObjectSpec) -> type[NetBoxTable]:
+    meta_class = type(
+        'Meta',
+        (NetBoxTable.Meta,),
+        {
+            'model': spec.model,
+            'fields': spec.table.fields,
+            'default_columns': spec.table.default_columns,
+        },
     )
 
-    class Meta(NetBoxTable.Meta):
-        model = netbox_rpki.models.Organization
-        fields = ("pk", "id", "org_id", "name", "parent_rir", "ext_url", "comments", "tenant", "tags")
-        default_columns = ("org_id", "name", "parent_rir", "ext_url", "comments", "tenant", "tags")
-
-
-class RoaTable(NetBoxTable):
-    name = tables.Column(linkify=True)
-    tenant = tables.TemplateColumn(
-        template_code=COL_TENANT
-    )
-    tags = TagColumn(
-        url_name='plugins:netbox_rpki:roa_list'
+    return type(
+        spec.table.class_name,
+        (NetBoxTable,),
+        {
+            '__module__': __name__,
+            spec.table.linkify_field: tables.Column(linkify=True),
+            'tenant': tables.TemplateColumn(template_code=COL_TENANT),
+            'tags': TagColumn(url_name=spec.list_url_name),
+            'Meta': meta_class,
+        },
     )
 
-    class Meta(NetBoxTable.Meta):
-        model = netbox_rpki.models.Roa
-        fields = ("pk", "id", 'name', "origin_as", "valid_from", "valid_to", "auto_renews", "signed_by", "comments", "tenant", "tags")
-        default_columns = ("name", "origin_as", "valid_from", "valid_to", "auto_renews", "comments", "tenant", "tags")
 
-
-class RoaPrefixTable(NetBoxTable):
-    pk = tables.Column(linkify=True)
-    tenant = tables.TemplateColumn(
-        template_code=COL_TENANT
-    )
-    tags = TagColumn(
-        url_name='plugins:netbox_rpki:roaprefix_list'
-    )
-
-    class Meta(NetBoxTable.Meta):
-        model = netbox_rpki.models.RoaPrefix
-        fields = ("pk", "id", "prefix", "max_length", "roa_name", "comments", "tenant", "tags")
-        default_columns = ("prefix", "max_length", "roa_name", "comments", "tenant", "tags")
-
-
-class CertificatePrefixTable(NetBoxTable):
-    pk = tables.Column(linkify=True)
-    tenant = tables.TemplateColumn(
-        template_code=COL_TENANT
-    )
-    tags = TagColumn(
-        url_name='plugins:netbox_rpki:certificateprefix_list'
-    )
-
-    class Meta(NetBoxTable.Meta):
-        model = netbox_rpki.models.CertificatePrefix
-        fields = ("pk", "id", "prefix", "certificate_name", "comments", "tenant", "tags")
-        default_columns = ("prefix", "comments", "tenant", "tags")
-
-
-class CertificateAsnTable(NetBoxTable):
-    pk = tables.Column(linkify=True)
-    tenant = tables.TemplateColumn(
-        template_code=COL_TENANT
-    )
-    tags = TagColumn(
-        url_name='plugins:netbox_rpki:certificateasn_list'
-    )
-
-    class Meta(NetBoxTable.Meta):
-        model = netbox_rpki.models.CertificateAsn
-        fields = ("pk", "id", "asn", "certificate_name2", "comments", "tenant", "tags")
-        default_columns = ("asn", "comments", "tenant", "tags")
+for object_spec in TABLE_OBJECT_SPECS:
+    globals()[object_spec.table.class_name] = build_table_class(object_spec)
