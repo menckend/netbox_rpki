@@ -11,6 +11,7 @@ build-backend = "setuptools.build_meta"
 #exclude = ["**/node_modules", "**/__pycache__"]
 
 [tool.setuptools_scm]
+local_scheme = "no-local-version"
 
 [tool.setuptools.packages.find]
 exclude = [".venv*", "tests*", "docs*", ".github*", ".gitignore", "external_sources"]
