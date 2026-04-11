@@ -1,6 +1,11 @@
 import strawberry_django
 from strawberry.scalars import ID
-from strawberry_django import FilterLookup, StrFilterLookup
+from strawberry_django import FilterLookup
+
+try:
+    from strawberry_django import StrFilterLookup
+except ImportError:
+    StrFilterLookup = FilterLookup
 
 from netbox.graphql.filters import NetBoxModelFilter
 

@@ -83,6 +83,15 @@ Implements data models and forms for modeling Resource Public Key Infrastructure
 
 [netbox-plugin.yaml](netbox-plugin.yaml)
 
+The plugin currently declares NetBox compatibility for the 4.5.x release line.
+
+Validation completed against real development installs of:
+
+- NetBox 4.5.0
+- NetBox 4.5.7
+
+Validation evidence for both versions includes successful plugin bootstrap and `manage.py check` with the plugin enabled, plus the full Python test suite passing (`193` tests). Browser smoke coverage was also run successfully against the NetBox 4.5.0 environment (`7` Playwright specs passed).
+
 
 ## Installing
 
