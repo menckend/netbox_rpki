@@ -23,7 +23,7 @@ We love your input! We want to make contributing to this project as easy and tra
 
 ### Report Bugs
 
-Report bugs at https://github.com/menckend/netbox-ptov-plugin/issues.
+Report bugs at https://github.com/menckend/netbox_rpki/issues.
 
 If you are reporting a bug, please include:
 
@@ -43,13 +43,13 @@ and "help wanted" is open to whoever wants to implement it.
 
 ### Write Documentation
 
-NetBox ptov Plugin could always use more documentation, whether as part of the
-official NetBox ptov Plugin docs, in docstrings, or even on the web in blog posts,
+NetBox RPKI Plugin could always use more documentation, whether as part of the
+official NetBox RPKI Plugin docs, in docstrings, or even on the web in blog posts,
 articles, and such.
 
 ### Submit Feedback
 
-The best way to send feedback is to file an issue at https://github.com/menckend/netbox-ptov-plugin/issues.
+The best way to send feedback is to file an issue at https://github.com/menckend/netbox_rpki/issues.
 
 If you are proposing a feature:
 
@@ -60,13 +60,13 @@ If you are proposing a feature:
 
 ## Get Started!
 
-Ready to contribute? Here's how to set up `netbox-ptov-plugin` for local development.
+Ready to contribute? Here's how to set up `netbox_rpki` for local development.
 
-1. Fork the `netbox_ptov` repo on GitHub.
+1. Fork the `netbox_rpki` repo on GitHub.
 2. Clone your fork locally
 
     ```
-    $ git clone git@github.com:your_name_here/netbox-ptov-plugin.git
+    $ git clone git@github.com:your_name_here/netbox_rpki.git
     ```
 
 3. Activate the NetBox virtual environment (see the NetBox documentation under [Setting up a Development Environment](https://docs.netbox.dev/en/stable/development/getting-started/)):
@@ -77,10 +77,10 @@ Ready to contribute? Here's how to set up `netbox-ptov-plugin` for local develop
 
 4. Add the plugin to NetBox virtual environment in Develop mode (see [Plugins Development](https://docs.netbox.dev/en/stable/plugins/development/)):
 
-    To ease development, it is recommended to go ahead and install the plugin at this point using setuptools' develop mode. This will create symbolic links within your Python environment to the plugin development directory. Call setup.py from the plugin's root directory with the develop argument (instead of install):
+    To ease development, install the plugin in editable mode from the plugin root directory:
 
     ```
-    $ python setup.py develop
+    $ python -m pip install -e .
     ```
 
 5. Create a branch for local development:
@@ -109,13 +109,17 @@ Before you submit a pull request, check that it meets these guidelines:
 2. If the pull request adds functionality, the docs should be updated. Put
    your new functionality into a function with a docstring, and add the
    feature to the list in README.md.
-3. The pull request should work for Python 3.8, 3.9, 3.10 and 3.11. Check
-   https://github.com/menckend/netbox-ptov-plugin/actions
+3. The pull request should work for Python 3.12, 3.13 and 3.14. Check
+    https://github.com/menckend/netbox_rpki/actions
    and make sure that the tests pass for all supported Python versions.
 
 
 ## Deploying
 
 A reminder for the maintainers on how to deploy.
-Make sure all your changes are committed (including an entry in CHANGELOG.md) and that all tests pass.
-Then in the github project go to `Releases` and create a new release with a new tag.  This will automatically upload the release to pypi:
+
+Make sure all your changes are committed, the changelog is updated, and the docs build and test suite pass.
+
+1. Push changes to `main` to publish the Sphinx documentation site to GitHub Pages.
+2. Create and push a release tag such as `v0.1.6` to build the package, publish it to PyPI, sign the artifacts, and create the GitHub release.
+3. Use the manual `Publish Release Artifacts` workflow with the `testpypi` target when you want a TestPyPI dry run before cutting a release tag.

@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.abspath('../netbox_rpki/'))
 project = 'Netbox RPKI Plugin'
 copyright = '2024, Mencken Davidson'
 author = 'Mencken Davidson'
+html_baseurl = 'https://menckend.github.io/netbox_rpki/'
 
 # -- General configuration ---------------------------------------------------
 source_suffix = [".rst",  ".md"]
@@ -96,7 +97,7 @@ def linkcode_resolve(domain, info):
     if not info['module']:
         return None
     filename = info['module'].replace('.', '/')
-    return "https://github.com/netbox-community/netbox/%s.py" % filename
+    return "https://github.com/menckend/netbox_rpki/blob/main/%s.py" % filename
 
 
 

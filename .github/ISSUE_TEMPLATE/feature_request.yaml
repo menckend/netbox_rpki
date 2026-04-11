@@ -1,27 +1,27 @@
 ---
 name: ✨ Feature Request
-description: Propose a new NetBox ptov Plugin feature or enhancement
+description: Propose a new NetBox RPKI Plugin feature or enhancement
 labels: ["type: feature"]
 body:
   - type: markdown
     attributes:
       value: >
         **NOTE:** This form is only for submitting well-formed proposals to extend or modify
-        NetBox ptov Plugin in some way. If you're trying to solve a problem but can't figure out how, or if
+        NetBox RPKI Plugin in some way. If you're trying to solve a problem but can't figure out how, or if
         you still need time to work on the details of a proposed new feature, please start a
-        [discussion](https://github.com/netbox-community/pynetbox/discussions) instead.
+        [discussion](https://github.com/menckend/netbox_rpki/discussions) instead.
   - type: input
     attributes:
-      label: NetBox ptov Plugin version
-      description: What version of NetBox ptov Plugin are you currently running?
-      placeholder: v0.1.0
+      label: NetBox RPKI Plugin version
+      description: What version of NetBox RPKI Plugin are you currently running?
+      placeholder: v0.1.5
     validations:
       required: true
   - type: input
     attributes:
       label: NetBox version
       description: What version of NetBox are you currently running?
-      placeholder: v3.6.0
+      placeholder: v4.5.7
     validations:
       required: true
   - type: dropdown
@@ -47,7 +47,7 @@ body:
     attributes:
       label: Use case
       description: >
-        Explain how adding this functionality would benefit NetBox ptov Plugin users. What need does it address?
+        Explain how adding this functionality would benefit NetBox RPKI Plugin users. What need does it address?
     validations:
       required: true
   - type: textarea

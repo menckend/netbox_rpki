@@ -11,7 +11,6 @@ build-backend = "setuptools.build_meta"
 #exclude = ["**/node_modules", "**/__pycache__"]
 
 [tool.setuptools_scm]
-version_file = "netbox_rpki/version.py"
 
 [tool.setuptools.packages.find]
 exclude = [".venv*", "tests*", "docs*", ".github*", ".gitignore", "external_sources"]
@@ -52,7 +51,7 @@ keywords = ["netbox", "plugin", "bgp", "rpki", "roa"]
 requires-python= ">=3.12"
 
 [project.urls]
-Documentation = "https://github.com/menckend/netbox_rpki/blob/main/README.md"
+Documentation = "https://menckend.github.io/netbox_rpki/"
 Source = "https://github.com/menckend/netbox_rpki"
 Tracker = "https://github.com/menckend/netbox_rpki/issues"
 

@@ -1,5 +1,11 @@
+from importlib.metadata import PackageNotFoundError, version
+
 from netbox.plugins import PluginConfig
-from netbox_rpki.version import __version__
+
+try:
+    __version__ = version('netbox_rpki')
+except PackageNotFoundError:
+    __version__ = '0+unknown'
 
 
 class RpkiConfig(PluginConfig):

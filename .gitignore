@@ -17,6 +17,7 @@ tests/e2e/.state/
 .LSOverride
 .venv/
 netbox_rpki.code-workspace
+netbox_rpki/version.py
 
 # Icon must end with two \r
 Icon
