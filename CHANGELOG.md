@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.1.6.1 (2026-04-11)
+
+* Dev/test fixtures: seed the devrun NetBox database and fixture-backed test helpers with at least a dozen rows across core NetBox dependency tables and plugin tables.
+* Tests: add regression coverage asserting the shared sample dataset populates every targeted table at the expected minimum volume.
+* Release metadata: align package-facing release notes and plugin manifest with the `0.1.6.1` patch release.
+
 ## 0.1.6 (2026-04-11)
 
 * Refactor: move plugin UI, API, GraphQL, navigation, and standard test surfaces to a metadata-driven object registry.

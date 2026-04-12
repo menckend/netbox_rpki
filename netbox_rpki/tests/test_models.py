@@ -6,8 +6,10 @@ from django.urls import reverse
 from netbox_rpki import models as rpki_models
 from netbox_rpki.models import Certificate, CertificateAsn, CertificatePrefix, Organization, Roa, RoaPrefix
 from netbox_rpki.object_registry import VIEW_OBJECT_SPECS
+from netbox_rpki.sample_data import SEED_TARGET_MODELS
 from netbox_rpki.tests.registry_scenarios import SECTION_9_MODEL_SCENARIOS, SECTION_9_SUPPORT_MODEL_SCENARIOS
 from netbox_rpki.tests.utils import (
+    count_test_sample_dataset,
     create_test_asn,
     create_test_certificate,
     create_test_certificate_asn,
@@ -30,6 +32,7 @@ from netbox_rpki.tests.utils import (
     create_test_roa_prefix,
     create_test_routing_intent_profile,
     create_test_routing_intent_rule,
+    create_test_sample_dataset,
 )
 
 
@@ -302,3 +305,35 @@ class PriorityOneModelBehaviorTestCase(TestCase):
                     reconciliation_run=self.reconciliation_run,
                     roa=self.roa,
                 )
+
+
+class SampleDataFixtureTestCase(TestCase):
+    marker = 'Managed by netbox_rpki.tests.sample-data'
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.dataset = create_test_sample_dataset(
+            item_count=12,
+            label_prefix='Test Sample Fixture',
+            marker=cls.marker,
+        )
+        cls.counts = count_test_sample_dataset(marker=cls.marker)
+
+    def test_sample_dataset_populates_each_target_table_with_at_least_twelve_rows(self):
+        for model in SEED_TARGET_MODELS:
+            with self.subTest(model=model.__name__):
+                self.assertGreaterEqual(self.counts[model.__name__], 12)
+
+    def test_sample_dataset_returns_expected_primary_collections(self):
+        expected_keys = (
+            'organizations',
+            'certificates',
+            'roas',
+            'repositories',
+            'routing_intent_profiles',
+            'roa_intents',
+            'reconciliation_runs',
+        )
+        for key in expected_keys:
+            with self.subTest(key=key):
+                self.assertEqual(len(self.dataset[key]), 12)

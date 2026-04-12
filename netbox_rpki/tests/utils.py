@@ -4,6 +4,7 @@ from netaddr import IPNetwork
 from ipam.models import ASN, Prefix, RIR
 
 from netbox_rpki import models as rpki_models
+from netbox_rpki.sample_data import count_seed_sample_data, seed_sample_data
 
 
 def create_test_rir(name='RIR 1', slug=None, is_private=True):
@@ -1035,3 +1036,16 @@ def create_test_published_roa_result(
         computed_at=computed_at,
         **kwargs,
     )
+
+
+def create_test_sample_dataset(item_count=12, label_prefix='Test Fixture Seed', marker='Managed by netbox_rpki.tests.utils'):
+    return seed_sample_data(
+        item_count=item_count,
+        label_prefix=label_prefix,
+        marker=marker,
+        cleanup=False,
+    )
+
+
+def count_test_sample_dataset(marker='Managed by netbox_rpki.tests.utils'):
+    return count_seed_sample_data(marker)
