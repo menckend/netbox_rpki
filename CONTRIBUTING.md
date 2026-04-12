@@ -472,6 +472,44 @@ That usually means adding or extending:
 
 If the object has special behavior, keep the special tests explicit. Do not bury meaningful behavior inside generic loops just to make the test file shorter.
 
+#### Step 9a: avoid cross-test data collisions in shared builders
+
+This plugin now relies heavily on shared builders in `netbox_rpki/tests/utils.py` and `netbox_rpki/tests/registry_scenarios.py`. That makes it easy to add coverage quickly, but it also creates a specific failure mode: a builder that looks correct in one focused test can still collide with rows created elsewhere in the full suite.
+
+The most common pattern is:
+
+- a read-only or reporting object builder returns a fixed `name`
+- the generated filterset tests use `q` with a `name__icontains` search field
+- another builder or scenario creates the same or nearly the same name
+- the focused test passes in isolation, but the full suite fails because the filter returns multiple rows
+
+Treat this as a real contract issue, not as random test flakiness.
+
+Rules:
+
+- Any shared builder used by registry-driven tests must generate unique values for every field that can participate in search or filtering.
+- If a builder creates nested workflow objects, the nested object names must also be unique. It is not enough for only the top-level object to have a unique name.
+- Prefer `unique_token(...)`, `uuid4()`, or explicit token parameters threaded through helper functions over hard-coded names such as `Provider Plan`, `Provider Snapshot`, or `Imported Authorization`.
+- Pay special attention to `_READONLY_INSTANCE_BUILDERS` in `netbox_rpki/tests/registry_scenarios.py`. Those builders are exercised broadly by generic list, filterset, API, and GraphQL tests.
+- Pay special attention to helpers that manufacture multi-row scenarios such as reconciliation matrices, change-plan matrices, and imported-provider fixture sets. These often create several related rows with repeated labels and are the easiest place to introduce collisions.
+- Do not assume a focused test run is sufficient. A builder change is only safe once the full plugin suite is green.
+
+Recommended design pattern:
+
+- Let every shared test helper accept a name or token override.
+- Derive child-object names from that same token.
+- Keep search-visible fields deterministic but unique enough that unrelated tests will not match them accidentally.
+
+When a collision does happen, debug it in this order:
+
+1. Identify which `object_key` and filter case failed.
+2. Check the failing object's `search_fields` in `netbox_rpki/object_registry.py`.
+3. Inspect the corresponding shared builder in `netbox_rpki/tests/registry_scenarios.py`.
+4. Inspect any nested helper in `netbox_rpki/tests/utils.py` that the builder calls.
+5. Make names and other search-visible values tokenized all the way down, not just at the top level.
+6. Re-run the focused failing test.
+7. Re-run the full plugin suite.
+
 #### Step 10: update documentation
 
 If the object changes user-facing functionality, update the relevant docs at the same time.

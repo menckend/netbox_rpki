@@ -1042,6 +1042,94 @@ def create_test_provider_sync_run(
     )
 
 
+def create_test_provider_snapshot_diff(
+    name='Provider Snapshot Diff 1',
+    organization=None,
+    provider_account=None,
+    base_snapshot=None,
+    comparison_snapshot=None,
+    status=None,
+    compared_at=None,
+    error='',
+    summary_json=None,
+    **kwargs,
+):
+    if organization is None:
+        organization = create_test_organization()
+    if provider_account is None:
+        provider_account = create_test_provider_account(organization=organization)
+    if base_snapshot is None:
+        base_snapshot = create_test_provider_snapshot(
+            name=f'{name} Base Snapshot',
+            organization=organization,
+            provider_account=provider_account,
+        )
+    if comparison_snapshot is None:
+        comparison_snapshot = create_test_provider_snapshot(
+            name=f'{name} Comparison Snapshot',
+            organization=organization,
+            provider_account=provider_account,
+        )
+    return rpki_models.ProviderSnapshotDiff.objects.create(
+        name=name,
+        organization=organization,
+        provider_account=provider_account,
+        base_snapshot=base_snapshot,
+        comparison_snapshot=comparison_snapshot,
+        status=status or rpki_models.ValidationRunStatus.COMPLETED,
+        compared_at=compared_at,
+        error=error,
+        summary_json=summary_json or {},
+        **kwargs,
+    )
+
+
+def create_test_provider_snapshot_diff_item(
+    name='Provider Snapshot Diff Item 1',
+    snapshot_diff=None,
+    object_family=None,
+    change_type=None,
+    external_reference=None,
+    provider_identity='provider-identity-1',
+    external_object_id='external-object-1',
+    before_state_json=None,
+    after_state_json=None,
+    prefix_cidr_text='',
+    origin_asn_value=None,
+    customer_as_value=None,
+    provider_as_value=None,
+    related_handle='',
+    certificate_identifier='',
+    publication_uri='',
+    signed_object_uri='',
+    is_stale=False,
+    **kwargs,
+):
+    if snapshot_diff is None:
+        snapshot_diff = create_test_provider_snapshot_diff()
+    return rpki_models.ProviderSnapshotDiffItem.objects.create(
+        name=name,
+        snapshot_diff=snapshot_diff,
+        object_family=object_family or rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS,
+        change_type=change_type or rpki_models.ProviderSnapshotDiffChangeType.CHANGED,
+        external_reference=external_reference,
+        provider_identity=provider_identity,
+        external_object_id=external_object_id,
+        before_state_json=before_state_json or {},
+        after_state_json=after_state_json or {},
+        prefix_cidr_text=prefix_cidr_text,
+        origin_asn_value=origin_asn_value,
+        customer_as_value=customer_as_value,
+        provider_as_value=provider_as_value,
+        related_handle=related_handle,
+        certificate_identifier=certificate_identifier,
+        publication_uri=publication_uri,
+        signed_object_uri=signed_object_uri,
+        is_stale=is_stale,
+        **kwargs,
+    )
+
+
 def create_test_external_object_reference(
     name='External Object Reference 1',
     organization=None,
@@ -1704,30 +1792,57 @@ def create_test_roa_change_plan_matrix(
     intent_profile=None,
     provider_account=None,
     provider_snapshot=None,
-    selected_prefix_cidrs=('10.210.1.0/24', '10.210.2.0/24'),
-    orphan_prefix_cidr='10.210.99.0/24',
+    selected_prefix_cidrs=None,
+    orphan_prefix_cidr=None,
     active_origin_asn=66110,
     replacement_origin_asn=66111,
     orphan_origin_asn=66112,
     replacement_max_length=26,
     provider_name='Krill',
+    name_token=None,
 ) -> RoaChangePlanMatrixScenario:
     from netbox_rpki.services import create_roa_change_plan, derive_roa_intents, reconcile_roa_intents
 
+    matrix_label = 'ROA Plan Matrix'
+    matrix_slug = 'roa-plan-matrix'
+    if name_token:
+        token_slug = slugify(name_token) or uuid4().hex[:8]
+        matrix_label = f'ROA Plan Matrix {name_token}'
+        matrix_slug = f'roa-plan-matrix-{token_slug}'
+
+    if selected_prefix_cidrs is None:
+        if name_token:
+            second_octet = (int(uuid4().hex[:4], 16) % 180) + 20
+            third_octet = int(uuid4().hex[4:6], 16) % 250
+            selected_prefix_cidrs = (
+                f'10.{second_octet}.{third_octet}.0/24',
+                f'10.{second_octet}.{(third_octet + 1) % 250}.0/24',
+            )
+        else:
+            selected_prefix_cidrs = ('10.210.1.0/24', '10.210.2.0/24')
+
+    if orphan_prefix_cidr is None:
+        if name_token:
+            second_octet = int(selected_prefix_cidrs[0].split('.')[1])
+            third_octet = (int(selected_prefix_cidrs[0].split('.')[2]) + 99) % 250
+            orphan_prefix_cidr = f'10.{second_octet}.{third_octet}.0/24'
+        else:
+            orphan_prefix_cidr = '10.210.99.0/24'
+
     if organization is None:
-        organization = create_test_organization(org_id='roa-plan-matrix-org', name='ROA Plan Matrix Org')
+        organization = create_test_organization(org_id=f'{matrix_slug}-org', name=f'{matrix_label} Org')
     if tenant is None:
         tenant_suffix = uuid4().hex[:8]
         tenant = Tenant.objects.create(
-            name=f'ROA Plan Matrix Tenant {tenant_suffix}',
-            slug=f'roa-plan-matrix-tenant-{tenant_suffix}',
+            name=f'{matrix_label} Tenant {tenant_suffix}',
+            slug=f'{matrix_slug}-tenant-{tenant_suffix}',
         )
     active_asn = create_test_asn(active_origin_asn)
     replacement_asn = create_test_asn(replacement_origin_asn)
     orphan_asn = create_test_asn(orphan_origin_asn)
     if intent_profile is None:
         intent_profile = create_test_routing_intent_profile(
-            name='ROA Plan Matrix Profile',
+            name=f'{matrix_label} Profile',
             organization=organization,
             status=rpki_models.RoutingIntentProfileStatus.ACTIVE,
             selector_mode=rpki_models.RoutingIntentSelectorMode.FILTERED,
@@ -1743,27 +1858,27 @@ def create_test_roa_change_plan_matrix(
 
     derivation_run = derive_roa_intents(intent_profile)
 
-    local_certificate = create_test_certificate(name='ROA Plan Matrix Local Cert', rpki_org=organization)
-    replacement_roa = create_test_roa(name='ROA Plan Matrix Replacement ROA', signed_by=local_certificate, origin_as=replacement_asn)
+    local_certificate = create_test_certificate(name=f'{matrix_label} Local Cert', rpki_org=organization)
+    replacement_roa = create_test_roa(name=f'{matrix_label} Replacement ROA', signed_by=local_certificate, origin_as=replacement_asn)
     create_test_roa_prefix(prefix=selected_prefixes[0], roa=replacement_roa, max_length=replacement_max_length)
-    orphan_roa = create_test_roa(name='ROA Plan Matrix Orphan ROA', signed_by=local_certificate, origin_as=orphan_asn)
+    orphan_roa = create_test_roa(name=f'{matrix_label} Orphan ROA', signed_by=local_certificate, origin_as=orphan_asn)
     create_test_roa_prefix(prefix=orphan_prefix, roa=orphan_roa, max_length=24)
 
     local_reconciliation_run = reconcile_roa_intents(derivation_run)
-    local_plan = create_roa_change_plan(local_reconciliation_run, name='ROA Plan Matrix Local Plan')
+    local_plan = create_roa_change_plan(local_reconciliation_run, name=f'{matrix_label} Local Plan')
 
     if provider_account is None:
         provider_account = create_test_provider_account(
-            name='ROA Plan Matrix Provider Account',
+            name=f'{matrix_label} Provider Account',
             organization=organization,
             provider_type=rpki_models.ProviderType.KRILL,
-            org_handle='ORG-ROA-PLAN-MATRIX',
-            ca_handle='ca-roa-plan-matrix',
+            org_handle=f'ORG-{matrix_slug.upper()}',
+            ca_handle=f'{matrix_slug}-ca',
             api_base_url='https://krill.example.invalid',
         )
     if provider_snapshot is None:
         provider_snapshot = create_test_provider_snapshot(
-            name='ROA Plan Matrix Provider Snapshot',
+            name=f'{matrix_label} Provider Snapshot',
             organization=organization,
             provider_account=provider_account,
             provider_name=provider_name,
@@ -1771,7 +1886,7 @@ def create_test_roa_change_plan_matrix(
         )
 
     replacement_imported_authorization = create_test_imported_roa_authorization(
-        name='ROA Plan Matrix Replacement Imported Authorization',
+        name=f'{matrix_label} Replacement Imported Authorization',
         provider_snapshot=provider_snapshot,
         organization=organization,
         prefix=selected_prefixes[0],
@@ -1780,7 +1895,7 @@ def create_test_roa_change_plan_matrix(
         payload_json={'comment': 'replacement target'},
     )
     orphan_imported_authorization = create_test_imported_roa_authorization(
-        name='ROA Plan Matrix Orphan Imported Authorization',
+        name=f'{matrix_label} Orphan Imported Authorization',
         provider_snapshot=provider_snapshot,
         organization=organization,
         prefix=orphan_prefix,
@@ -1794,7 +1909,7 @@ def create_test_roa_change_plan_matrix(
         comparison_scope=rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
         provider_snapshot=provider_snapshot,
     )
-    provider_plan = create_roa_change_plan(provider_reconciliation_run, name='ROA Plan Matrix Provider Plan')
+    provider_plan = create_roa_change_plan(provider_reconciliation_run, name=f'{matrix_label} Provider Plan')
 
     return RoaChangePlanMatrixScenario(
         organization=organization,

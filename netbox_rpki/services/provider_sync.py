@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import json
-import ssl
 from dataclasses import dataclass
 from typing import Iterable
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from xml.etree import ElementTree
 
@@ -16,6 +14,9 @@ from ipam.models.asns import ASN
 from ipam.models.ip import Prefix
 
 from netbox_rpki import models as rpki_models
+from . import provider_sync_krill
+from .provider_sync_contract import build_family_summary, build_provider_sync_summary
+from .provider_sync_diff import build_latest_provider_snapshot_diff
 
 
 class ProviderSyncError(Exception):
@@ -46,44 +47,6 @@ class ArinRoaRecord:
         if self.ip_version == 6:
             return rpki_models.AddressFamily.IPV6
         return rpki_models.AddressFamily.IPV4
-
-
-@dataclass(frozen=True)
-class KrillRouteAuthorizationRecord:
-    asn: int | None
-    prefix: str
-    max_length: int | None
-    comment: str | None
-    roa_objects: list[dict]
-
-    @property
-    def address_family(self) -> str:
-        return rpki_models.AddressFamily.IPV6 if ':' in self.prefix else rpki_models.AddressFamily.IPV4
-
-    @property
-    def external_object_id(self) -> str:
-        max_length = self.max_length if self.max_length is not None else ''
-        asn = self.asn if self.asn is not None else ''
-        return f'{self.prefix}|{max_length}|{asn}'
-
-
-@dataclass(frozen=True)
-class KrillAspaProviderRecord:
-    raw_provider_text: str
-    provider_as_value: int | None
-    address_family: str
-
-
-@dataclass(frozen=True)
-class KrillAspaRecord:
-    customer_as_value: int | None
-    providers: list[KrillAspaProviderRecord]
-
-    @property
-    def external_object_id(self) -> str:
-        if self.customer_as_value is None:
-            return ''
-        return f'AS{self.customer_as_value}'
 
 
 def _strip_namespace(tag: str) -> str:
@@ -180,151 +143,32 @@ def _fetch_arin_roa_xml(provider_account: rpki_models.RpkiProviderAccount) -> st
         return response.read().decode('utf-8')
 
 
-def _krill_routes_url(provider_account: rpki_models.RpkiProviderAccount) -> str:
-    base_url = provider_account.api_base_url.rstrip('/')
-    ca_handle = provider_account.sync_target_handle
-    return f'{base_url}/api/v1/cas/{ca_handle}/routes'
-
-
 def _krill_ssl_context(provider_account: rpki_models.RpkiProviderAccount):
-    parsed_url = urlparse(provider_account.api_base_url)
-    if parsed_url.hostname in {'localhost', '127.0.0.1', '::1'}:
-        return ssl._create_unverified_context()
-    return None
+    return provider_sync_krill.krill_ssl_context(provider_account)
 
 
-def _fetch_krill_routes_json(provider_account: rpki_models.RpkiProviderAccount) -> list[dict]:
-    request = Request(
-        _krill_routes_url(provider_account),
-        headers={
-            'Accept': 'application/json',
-            'Authorization': f'Bearer {provider_account.api_key}',
-        },
-        method='GET',
-    )
-    urlopen_kwargs = {'timeout': 30}
-    ssl_context = _krill_ssl_context(provider_account)
-    if ssl_context is not None:
-        urlopen_kwargs['context'] = ssl_context
-    with urlopen(request, **urlopen_kwargs) as response:
-        payload = json.loads(response.read().decode('utf-8'))
-    if not isinstance(payload, list):
-        raise ProviderSyncError('Krill routes response must be a JSON list.')
-    return payload
+def _krill_routes_url(provider_account: rpki_models.RpkiProviderAccount) -> str:
+    return provider_sync_krill.krill_routes_url(provider_account)
 
 
 def _krill_aspas_url(provider_account: rpki_models.RpkiProviderAccount) -> str:
-    base_url = provider_account.api_base_url.rstrip('/')
-    ca_handle = provider_account.sync_target_handle
-    return f'{base_url}/api/v1/cas/{ca_handle}/aspas'
+    return provider_sync_krill.krill_aspas_url(provider_account)
+
+
+def _fetch_krill_routes_json(provider_account: rpki_models.RpkiProviderAccount) -> list[dict]:
+    return provider_sync_krill.fetch_krill_routes_json(provider_account)
 
 
 def _fetch_krill_aspas_json(provider_account: rpki_models.RpkiProviderAccount) -> list[dict]:
-    request = Request(
-        _krill_aspas_url(provider_account),
-        headers={
-            'Accept': 'application/json',
-            'Authorization': f'Bearer {provider_account.api_key}',
-        },
-        method='GET',
-    )
-    urlopen_kwargs = {'timeout': 30}
-    ssl_context = _krill_ssl_context(provider_account)
-    if ssl_context is not None:
-        urlopen_kwargs['context'] = ssl_context
-    with urlopen(request, **urlopen_kwargs) as response:
-        payload = json.loads(response.read().decode('utf-8'))
-    if not isinstance(payload, list):
-        raise ProviderSyncError('Krill ASPAs response must be a JSON list.')
-    return payload
+    return provider_sync_krill.fetch_krill_aspas_json(provider_account)
 
 
-def _parse_krill_route_records(route_payload: list[dict]) -> list[KrillRouteAuthorizationRecord]:
-    records = []
-    for route in route_payload:
-        if not isinstance(route, dict):
-            continue
-        prefix = str(route.get('prefix') or '').strip()
-        if not prefix:
-            continue
-        asn_value = route.get('asn')
-        try:
-            origin_asn_value = int(asn_value) if asn_value is not None else None
-        except (TypeError, ValueError):
-            origin_asn_value = None
-        max_length = route.get('max_length')
-        try:
-            max_length_value = int(max_length) if max_length is not None else None
-        except (TypeError, ValueError):
-            max_length_value = None
-        comment = route.get('comment')
-        records.append(
-            KrillRouteAuthorizationRecord(
-                asn=origin_asn_value,
-                prefix=prefix,
-                max_length=max_length_value,
-                comment=comment.strip() if isinstance(comment, str) else None,
-                roa_objects=list(route.get('roa_objects') or []),
-            )
-        )
-    return records
+def _parse_krill_route_records(route_payload: list[dict]) -> list[provider_sync_krill.KrillRouteAuthorizationRecord]:
+    return provider_sync_krill.parse_krill_route_records(route_payload)
 
 
-def _parse_asn_token(value) -> int | None:
-    if value is None:
-        return None
-    if isinstance(value, int):
-        return value
-    text = str(value).strip().upper()
-    if not text:
-        return None
-    if text.startswith('AS'):
-        text = text[2:]
-    try:
-        return int(text)
-    except (TypeError, ValueError):
-        return None
-
-
-def _parse_krill_aspa_provider(provider_value) -> KrillAspaProviderRecord | None:
-    raw_text = str(provider_value or '').strip()
-    if not raw_text or raw_text == '<none>':
-        return None
-
-    address_family = ''
-    normalized = raw_text
-    if raw_text.endswith('(v4)'):
-        address_family = rpki_models.AddressFamily.IPV4
-        normalized = raw_text[:-4]
-    elif raw_text.endswith('(v6)'):
-        address_family = rpki_models.AddressFamily.IPV6
-        normalized = raw_text[:-4]
-
-    return KrillAspaProviderRecord(
-        raw_provider_text=raw_text,
-        provider_as_value=_parse_asn_token(normalized),
-        address_family=address_family,
-    )
-
-
-def _parse_krill_aspa_records(aspa_payload: list[dict]) -> list[KrillAspaRecord]:
-    records = []
-    for aspa in aspa_payload:
-        if not isinstance(aspa, dict):
-            continue
-        customer_as_value = _parse_asn_token(aspa.get('customer'))
-        providers = []
-        for provider in list(aspa.get('providers') or []):
-            parsed_provider = _parse_krill_aspa_provider(provider)
-            if parsed_provider is not None:
-                providers.append(parsed_provider)
-        records.append(
-            KrillAspaRecord(
-                customer_as_value=customer_as_value,
-                providers=providers,
-            )
-        )
-    return records
+def _parse_krill_aspa_records(aspa_payload: list[dict]) -> list[provider_sync_krill.KrillAspaRecord]:
+    return provider_sync_krill.parse_krill_aspa_records(aspa_payload)
 
 
 def _resolve_prefix(prefix_cidr_text: str):
@@ -351,38 +195,6 @@ def _build_import_name(provider_account: rpki_models.RpkiProviderAccount, record
     label = record.roa_name or record.roa_handle or record.prefix_cidr_text
     asn_value = f'AS{record.origin_asn_value}' if record.origin_asn_value is not None else 'AS?'
     return f'{provider_account.org_handle} {label} {record.prefix_cidr_text} {asn_value}'
-
-
-def _build_krill_import_name(
-    provider_account: rpki_models.RpkiProviderAccount,
-    record: KrillRouteAuthorizationRecord,
-) -> str:
-    label = record.comment or record.prefix
-    asn_value = f'AS{record.asn}' if record.asn is not None else 'AS?'
-    return f'{provider_account.sync_target_handle} {label} {record.prefix} {asn_value}'
-
-
-def _build_krill_aspa_import_name(
-    provider_account: rpki_models.RpkiProviderAccount,
-    record: KrillAspaRecord,
-) -> str:
-    customer = f'AS{record.customer_as_value}' if record.customer_as_value is not None else 'AS?'
-    return f'{provider_account.sync_target_handle} ASPA {customer}'
-
-
-def _build_snapshot_summary(provider_account: rpki_models.RpkiProviderAccount) -> dict:
-    summary = {
-        'provider_account_id': provider_account.pk,
-        'provider_type': provider_account.provider_type,
-        'transport': provider_account.transport,
-    }
-    if provider_account.org_handle:
-        summary['org_handle'] = provider_account.org_handle
-    if provider_account.ca_handle:
-        summary['ca_handle'] = provider_account.ca_handle
-    if provider_account.api_base_url:
-        summary['api_base_url'] = provider_account.api_base_url
-    return summary
 
 
 def _build_roa_external_reference_identity(
@@ -499,7 +311,7 @@ def _bind_aspa_external_reference(
 def _import_arin_records(
     provider_account: rpki_models.RpkiProviderAccount,
     snapshot: rpki_models.ProviderSnapshot,
-) -> tuple[int, int]:
+) -> dict[str, dict[str, object]]:
     xml_text = _fetch_arin_roa_xml(provider_account)
     records = _parse_arin_roa_records(xml_text)
 
@@ -548,13 +360,22 @@ def _import_arin_records(
                 imported_authorization=imported_authorization,
             )
             imported_count += 1
-    return len(records), imported_count
+    return {
+        rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS: build_family_summary(
+            rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS,
+            status=rpki_models.ProviderSyncFamilyStatus.COMPLETED,
+            counts={
+                'records_fetched': len(records),
+                'records_imported': imported_count,
+            },
+        )
+    }
 
 
 def _import_krill_records(
     provider_account: rpki_models.RpkiProviderAccount,
     snapshot: rpki_models.ProviderSnapshot,
-) -> tuple[int, int, int, int]:
+) -> dict[str, dict[str, object]]:
     route_payload = _fetch_krill_routes_json(provider_account)
     records = _parse_krill_route_records(route_payload)
     aspa_payload = _fetch_krill_aspas_json(provider_account)
@@ -574,7 +395,7 @@ def _import_krill_records(
                 external_object_id=record.external_object_id,
             )
             imported_authorization = rpki_models.ImportedRoaAuthorization.objects.create(
-                name=_build_krill_import_name(provider_account, record),
+                name=provider_sync_krill.build_krill_import_name(provider_account, record),
                 provider_snapshot=snapshot,
                 organization=provider_account.organization,
                 authorization_key=authorization_key,
@@ -606,7 +427,7 @@ def _import_krill_records(
                 external_object_id=record.external_object_id,
             )
             imported_aspa = rpki_models.ImportedAspa.objects.create(
-                name=_build_krill_aspa_import_name(provider_account, record),
+                name=provider_sync_krill.build_krill_aspa_import_name(provider_account, record),
                 provider_snapshot=snapshot,
                 organization=provider_account.organization,
                 authorization_key=authorization_key,
@@ -633,7 +454,24 @@ def _import_krill_records(
                     raw_provider_text=provider.raw_provider_text,
                 )
             imported_aspa_count += 1
-    return len(records), imported_count, len(aspa_records), imported_aspa_count
+    return {
+        rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS: build_family_summary(
+            rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS,
+            status=rpki_models.ProviderSyncFamilyStatus.COMPLETED,
+            counts={
+                'records_fetched': len(records),
+                'records_imported': imported_count,
+            },
+        ),
+        rpki_models.ProviderSyncFamily.ASPAS: build_family_summary(
+            rpki_models.ProviderSyncFamily.ASPAS,
+            status=rpki_models.ProviderSyncFamilyStatus.COMPLETED,
+            counts={
+                'records_fetched': len(aspa_records),
+                'records_imported': imported_aspa_count,
+            },
+        ),
+    }
 
 
 def sync_provider_account(
@@ -668,42 +506,42 @@ def sync_provider_account(
         provider_name=provider_account.get_provider_type_display(),
         status=rpki_models.ValidationRunStatus.RUNNING,
         fetched_at=now,
-        summary_json=_build_snapshot_summary(provider_account),
+        summary_json=build_provider_sync_summary(
+            provider_account,
+            status=rpki_models.ValidationRunStatus.RUNNING,
+            default_supported_status=rpki_models.ProviderSyncFamilyStatus.PENDING,
+        ),
     )
     sync_run.provider_snapshot = snapshot
     sync_run.save(update_fields=('provider_snapshot',))
 
     try:
-        route_fetched = route_imported = aspa_fetched = aspa_imported = 0
         if provider_account.provider_type == rpki_models.ProviderType.KRILL:
-            route_fetched, route_imported, aspa_fetched, aspa_imported = _import_krill_records(provider_account, snapshot)
-            fetched_count = route_fetched + aspa_fetched
-            imported_count = route_imported + aspa_imported
+            family_summaries = _import_krill_records(provider_account, snapshot)
         else:
-            fetched_count, imported_count = _import_arin_records(provider_account, snapshot)
+            family_summaries = _import_arin_records(provider_account, snapshot)
 
         completed_at = timezone.now()
-        summary = _build_snapshot_summary(provider_account)
-        summary.update({
-            'records_fetched': fetched_count,
-            'records_imported': imported_count,
-        })
-        if provider_account.provider_type == rpki_models.ProviderType.KRILL:
-            summary.update({
-                'route_records_fetched': route_fetched,
-                'route_records_imported': route_imported,
-                'aspa_records_fetched': aspa_fetched,
-                'aspa_records_imported': aspa_imported,
-            })
+        summary = build_provider_sync_summary(
+            provider_account,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+            family_summaries=family_summaries,
+        )
         snapshot.status = rpki_models.ValidationRunStatus.COMPLETED
         snapshot.completed_at = completed_at
         snapshot.summary_json = summary
         snapshot.save(update_fields=('status', 'completed_at', 'summary_json'))
 
+        snapshot_diff = build_latest_provider_snapshot_diff(snapshot)
+        if snapshot_diff is not None:
+            summary['latest_diff_id'] = snapshot_diff.pk
+            snapshot.summary_json = summary
+            snapshot.save(update_fields=('summary_json',))
+
         sync_run.status = rpki_models.ValidationRunStatus.COMPLETED
         sync_run.completed_at = completed_at
-        sync_run.records_fetched = fetched_count
-        sync_run.records_imported = imported_count
+        sync_run.records_fetched = summary['records_fetched']
+        sync_run.records_imported = summary['records_imported']
         sync_run.summary_json = summary
         sync_run.save(
             update_fields=('status', 'completed_at', 'records_fetched', 'records_imported', 'summary_json')
@@ -719,8 +557,12 @@ def sync_provider_account(
     except Exception as exc:
         completed_at = timezone.now()
         error_text = str(exc)
-        error_summary = _build_snapshot_summary(provider_account)
-        error_summary['error'] = error_text
+        error_summary = build_provider_sync_summary(
+            provider_account,
+            status=rpki_models.ValidationRunStatus.FAILED,
+            error=error_text,
+            default_supported_status=rpki_models.ProviderSyncFamilyStatus.FAILED,
+        )
         snapshot.status = rpki_models.ValidationRunStatus.FAILED
         snapshot.completed_at = completed_at
         snapshot.summary_json = error_summary

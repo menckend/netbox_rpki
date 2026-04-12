@@ -199,9 +199,46 @@ class ProviderSyncHealth(models.TextChoices):
     HEALTHY = "healthy", "Healthy"
 
 
+class ProviderSyncFamily(models.TextChoices):
+    ROA_AUTHORIZATIONS = "roa_authorizations", "ROA Authorizations"
+    ASPAS = "aspas", "ASPAs"
+    CA_METADATA = "ca_metadata", "CA Metadata"
+    PARENT_LINKS = "parent_links", "Parent Links"
+    CHILD_LINKS = "child_links", "Child Links"
+    RESOURCE_ENTITLEMENTS = "resource_entitlements", "Resource Entitlements"
+    PUBLICATION_POINTS = "publication_points", "Publication Points"
+    CERTIFICATE_INVENTORY = "certificate_inventory", "Certificate Inventory"
+    SIGNED_OBJECT_INVENTORY = "signed_object_inventory", "Signed Object Inventory"
+
+
+class ProviderSyncFamilyStatus(models.TextChoices):
+    PENDING = "pending", "Pending"
+    RUNNING = "running", "Running"
+    COMPLETED = "completed", "Completed"
+    FAILED = "failed", "Failed"
+    SKIPPED = "skipped", "Skipped"
+    NOT_IMPLEMENTED = "not_implemented", "Not Implemented"
+
+
 class ExternalObjectType(models.TextChoices):
     ROA_AUTHORIZATION = "roa_authorization", "ROA Authorization"
     ASPA = "aspa", "ASPA"
+    CA_METADATA = "ca_metadata", "CA Metadata"
+    PARENT_LINK = "parent_link", "Parent Link"
+    CHILD_LINK = "child_link", "Child Link"
+    RESOURCE_ENTITLEMENT = "resource_entitlement", "Resource Entitlement"
+    PUBLICATION_POINT = "publication_point", "Publication Point"
+    CERTIFICATE = "certificate", "Certificate"
+    SIGNED_OBJECT = "signed_object", "Signed Object"
+
+
+class ProviderSnapshotDiffChangeType(models.TextChoices):
+    ADDED = "added", "Added"
+    REMOVED = "removed", "Removed"
+    CHANGED = "changed", "Changed"
+    UNCHANGED = "unchanged", "Unchanged"
+    REAPPEARED = "reappeared", "Reappeared"
+    STALE = "stale", "Stale"
 
 
 class ReconciliationSeverity(models.TextChoices):
@@ -1892,6 +1929,99 @@ class ProviderSnapshot(NamedRpkiStandardModel):
 
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:providersnapshot", args=[self.pk])
+
+
+class ProviderSnapshotDiff(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='provider_snapshot_diffs'
+    )
+    provider_account = models.ForeignKey(
+        to='RpkiProviderAccount',
+        on_delete=models.PROTECT,
+        related_name='snapshot_diffs'
+    )
+    base_snapshot = models.ForeignKey(
+        to='ProviderSnapshot',
+        on_delete=models.PROTECT,
+        related_name='diffs_as_base'
+    )
+    comparison_snapshot = models.ForeignKey(
+        to='ProviderSnapshot',
+        on_delete=models.PROTECT,
+        related_name='diffs_as_comparison'
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=ValidationRunStatus.choices,
+        default=ValidationRunStatus.PENDING,
+    )
+    compared_at = models.DateTimeField(blank=True, null=True)
+    error = models.TextField(blank=True)
+    summary_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("-compared_at", "name")
+        constraints = (
+            models.UniqueConstraint(
+                fields=("base_snapshot", "comparison_snapshot"),
+                name="netbox_rpki_providersnapshotdiff_snapshot_pair_unique",
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:providersnapshotdiff", args=[self.pk])
+
+
+class ProviderSnapshotDiffItem(NamedRpkiStandardModel):
+    snapshot_diff = models.ForeignKey(
+        to='ProviderSnapshotDiff',
+        on_delete=models.PROTECT,
+        related_name='items'
+    )
+    object_family = models.CharField(
+        max_length=64,
+        choices=ProviderSyncFamily.choices,
+        default=ProviderSyncFamily.ROA_AUTHORIZATIONS,
+    )
+    change_type = models.CharField(
+        max_length=32,
+        choices=ProviderSnapshotDiffChangeType.choices,
+        default=ProviderSnapshotDiffChangeType.CHANGED,
+    )
+    external_reference = models.ForeignKey(
+        to='ExternalObjectReference',
+        on_delete=models.SET_NULL,
+        related_name='snapshot_diff_items',
+        blank=True,
+        null=True,
+    )
+    provider_identity = models.CharField(max_length=512, blank=True)
+    external_object_id = models.CharField(max_length=200, blank=True)
+    before_state_json = models.JSONField(default=dict, blank=True)
+    after_state_json = models.JSONField(default=dict, blank=True)
+    prefix_cidr_text = models.CharField(max_length=64, blank=True)
+    origin_asn_value = models.PositiveBigIntegerField(blank=True, null=True)
+    customer_as_value = models.PositiveBigIntegerField(blank=True, null=True)
+    provider_as_value = models.PositiveBigIntegerField(blank=True, null=True)
+    related_handle = models.CharField(max_length=200, blank=True)
+    certificate_identifier = models.CharField(max_length=200, blank=True)
+    publication_uri = models.CharField(max_length=500, blank=True)
+    signed_object_uri = models.CharField(max_length=500, blank=True)
+    is_stale = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ("object_family", "change_type", "provider_identity", "name")
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:providersnapshotdiffitem", args=[self.pk])
 
 
 class ExternalObjectReference(NamedRpkiStandardModel):

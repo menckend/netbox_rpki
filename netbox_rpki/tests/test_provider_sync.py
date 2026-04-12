@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from netbox_rpki import models as rpki_models
 from netbox_rpki.services import ProviderSyncError, sync_provider_account
+from netbox_rpki.services.provider_sync_contract import PROVIDER_SYNC_SUMMARY_SCHEMA_VERSION
 from netbox_rpki.tests.base import PluginAPITestCase
 from netbox_rpki.tests.utils import (
     create_test_asn,
@@ -196,6 +197,17 @@ class ProviderSyncServiceTestCase(TestCase):
         self.assertEqual(imported_aspas[1].customer_as, customer_as)
         self.assertEqual(imported_aspas[1].provider_authorizations.count(), 0)
         provider_account.refresh_from_db()
+        self.assertEqual(snapshot.summary_json['summary_schema_version'], PROVIDER_SYNC_SUMMARY_SCHEMA_VERSION)
+        self.assertEqual(
+            snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS]['label'],
+            'ROA Authorizations',
+        )
+        self.assertEqual(
+            snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.ASPAS]['records_imported'],
+            2,
+        )
+        self.assertEqual(snapshot.summary_json['records_imported'], 4)
+        self.assertEqual(snapshot.summary_json['route_records_imported'], 2)
         self.assertEqual(provider_account.last_sync_summary_json['ca_handle'], 'netbox-rpki-dev')
         self.assertEqual(provider_account.last_sync_summary_json['aspa_records_imported'], 2)
 
@@ -244,6 +256,72 @@ class ProviderSyncServiceTestCase(TestCase):
         first_aspa_reference.refresh_from_db()
         self.assertEqual(first_aspa_reference.last_seen_provider_snapshot, second_snapshot)
         self.assertEqual(first_aspa_reference.last_seen_imported_aspa, second_aspa_import)
+        snapshot_diff = rpki_models.ProviderSnapshotDiff.objects.get(
+            base_snapshot=first_snapshot,
+            comparison_snapshot=second_snapshot,
+        )
+        self.assertEqual(snapshot_diff.status, rpki_models.ValidationRunStatus.COMPLETED)
+        self.assertEqual(
+            snapshot_diff.summary_json['totals']['records_unchanged'],
+            4,
+        )
+        self.assertEqual(snapshot_diff.items.count(), 0)
+        self.assertEqual(second_snapshot.summary_json['latest_diff_id'], snapshot_diff.pk)
+
+    def test_sync_provider_account_generates_changed_snapshot_diff_items(self):
+        provider_account = create_test_provider_account(
+            name='Krill Diff Account',
+            organization=self.organization,
+            provider_type=rpki_models.ProviderType.KRILL,
+            ca_handle='netbox-rpki-dev',
+            api_base_url='https://localhost:3001',
+            api_key='krill-token',
+            org_handle='ORG-KRILL-DIFF',
+        )
+        create_test_prefix('10.10.0.0/24')
+        create_test_prefix('2001:db8:100::/48')
+        create_test_asn(65000)
+        create_test_asn(65001)
+        create_test_asn(65002)
+        create_test_asn(65003)
+        create_test_asn(65010)
+
+        with patch('netbox_rpki.services.provider_sync._fetch_krill_routes_json', return_value=KRILL_ROUTES_JSON), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_aspas_json',
+            return_value=KRILL_ASPAS_JSON,
+        ):
+            _, first_snapshot = sync_provider_account(provider_account)
+
+        changed_routes = [dict(row) for row in KRILL_ROUTES_JSON]
+        changed_routes[0] = dict(changed_routes[0])
+        changed_routes[0]['comment'] = 'netbox_rpki sample IPv4 ROA changed'
+        changed_aspas = [dict(row) for row in KRILL_ASPAS_JSON[:-1]]
+
+        with patch('netbox_rpki.services.provider_sync._fetch_krill_routes_json', return_value=changed_routes), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_aspas_json',
+            return_value=changed_aspas,
+        ):
+            _, second_snapshot = sync_provider_account(provider_account)
+
+        snapshot_diff = rpki_models.ProviderSnapshotDiff.objects.get(
+            base_snapshot=first_snapshot,
+            comparison_snapshot=second_snapshot,
+        )
+        self.assertEqual(
+            snapshot_diff.summary_json['families'][rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS]['records_changed'],
+            1,
+        )
+        self.assertEqual(
+            snapshot_diff.summary_json['families'][rpki_models.ProviderSyncFamily.ASPAS]['records_removed'],
+            1,
+        )
+        self.assertEqual(
+            set(snapshot_diff.items.values_list('change_type', flat=True)),
+            {
+                rpki_models.ProviderSnapshotDiffChangeType.CHANGED,
+                rpki_models.ProviderSnapshotDiffChangeType.REMOVED,
+            },
+        )
 
     def test_sync_provider_account_requires_krill_ca_handle(self):
         provider_account = create_test_provider_account(

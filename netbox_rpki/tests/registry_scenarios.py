@@ -41,6 +41,8 @@ from netbox_rpki.tests.utils import (
     create_test_model,
     create_test_prefix,
     create_test_provider_account,
+    create_test_provider_snapshot_diff,
+    create_test_provider_snapshot_diff_item,
     create_test_approval_record,
     create_test_imported_aspa,
     create_test_imported_aspa_provider,
@@ -569,6 +571,12 @@ def _register_scenario_builders() -> None:
                 org_handle=f"ORG{unique_token('orghandle')}",
             ),
             "providersnapshot": lambda: create_test_provider_snapshot(name=f"Provider Snapshot {unique_token('provider-snapshot')}"),
+            "providersnapshotdiff": lambda: create_test_provider_snapshot_diff(
+                name=f"Provider Snapshot Diff {unique_token('provider-snapshot-diff')}"
+            ),
+            "providersnapshotdiffitem": lambda: create_test_provider_snapshot_diff_item(
+                name=f"Provider Snapshot Diff Item {unique_token('provider-snapshot-diff-item')}"
+            ),
             "providersyncrun": lambda: create_test_provider_sync_run(name=f"Provider Sync Run {unique_token('provider-sync-run')}"),
             "providerwriteexecution": lambda: create_test_provider_write_execution(
                 name=f"Provider Write Execution {unique_token('provider-write-execution')}"
@@ -931,12 +939,13 @@ def build_certificate_asn_table_rows() -> None:
 
 
 def build_roa_change_plan_matrix_instance():
-    return create_test_roa_change_plan_matrix().provider_plan
+    return create_test_roa_change_plan_matrix(name_token=unique_token('roa-change-plan-matrix')).provider_plan
 
 
 def build_roa_change_plan_matrix_item_instance():
-    scenario = create_test_roa_change_plan_matrix()
-    return scenario.provider_plan.items.order_by('pk').first()
+    return create_test_roa_change_plan_item(
+        name=f"ROA Change Plan Item {unique_token('roa-change-plan-item')}",
+    )
 
 
 _register_scenario_builders()

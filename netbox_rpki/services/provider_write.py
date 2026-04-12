@@ -7,11 +7,8 @@ from django.db import transaction
 from django.utils import timezone
 
 from netbox_rpki import models as rpki_models
-from netbox_rpki.services.provider_sync import (
-    _krill_routes_url,
-    _krill_ssl_context,
-    sync_provider_account,
-)
+from netbox_rpki.services.provider_sync import sync_provider_account
+from netbox_rpki.services.provider_sync_krill import krill_routes_url, krill_ssl_context
 
 
 class ProviderWriteError(ValueError):
@@ -248,7 +245,7 @@ def _submit_krill_route_delta(
     delta: dict[str, list[dict]],
 ) -> dict:
     request = Request(
-        _krill_routes_url(provider_account),
+        krill_routes_url(provider_account),
         data=json.dumps(delta).encode('utf-8'),
         headers={
             'Accept': 'application/json',
@@ -258,7 +255,7 @@ def _submit_krill_route_delta(
         method='POST',
     )
     urlopen_kwargs = {'timeout': 30}
-    ssl_context = _krill_ssl_context(provider_account)
+    ssl_context = krill_ssl_context(provider_account)
     if ssl_context is not None:
         urlopen_kwargs['context'] = ssl_context
 
