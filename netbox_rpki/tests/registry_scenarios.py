@@ -53,6 +53,11 @@ from netbox_rpki.tests.utils import (
     create_test_published_aspa_result,
     create_test_provider_sync_run,
     create_test_provider_snapshot,
+    create_test_imported_ca_metadata,
+    create_test_imported_parent_link,
+    create_test_imported_child_link,
+    create_test_imported_resource_entitlement,
+    create_test_imported_publication_point,
     create_test_repository,
     create_test_rir,
     create_test_revoked_certificate,
@@ -592,6 +597,21 @@ def _register_scenario_builders() -> None:
             "importedaspa": lambda: create_test_imported_aspa(
                 name=f"Imported ASPA {unique_token('imported-aspa')}",
                 customer_as=create_unique_asn(),
+            ),
+            "importedcametadata": lambda: create_test_imported_ca_metadata(
+                name=f"Imported CA Metadata {unique_token('imported-ca-metadata')}"
+            ),
+            "importedparentlink": lambda: create_test_imported_parent_link(
+                name=f"Imported Parent Link {unique_token('imported-parent-link')}"
+            ),
+            "importedchildlink": lambda: create_test_imported_child_link(
+                name=f"Imported Child Link {unique_token('imported-child-link')}"
+            ),
+            "importedresourceentitlement": lambda: create_test_imported_resource_entitlement(
+                name=f"Imported Resource Entitlement {unique_token('imported-resource-entitlement')}"
+            ),
+            "importedpublicationpoint": lambda: create_test_imported_publication_point(
+                name=f"Imported Publication Point {unique_token('imported-publication-point')}"
             ),
             "roachangeplan": lambda: build_roa_change_plan_matrix_instance(),
             "roachangeplanitem": lambda: build_roa_change_plan_matrix_item_instance(),

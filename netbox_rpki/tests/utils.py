@@ -1284,6 +1284,243 @@ def create_test_imported_aspa_provider(
     )
 
 
+def create_test_imported_ca_metadata(
+    name='Imported CA Metadata 1',
+    provider_snapshot=None,
+    organization=None,
+    metadata_key='',
+    ca_handle='netbox-rpki-dev',
+    id_cert_hash='krill-ca-id-cert-sha256',
+    publication_uri='rsync://testbed.krill.cloud/repo/netbox-rpki-dev/',
+    rrdp_notification_uri='https://testbed.krill.cloud/rrdp/notification.xml',
+    parent_count=1,
+    child_count=1,
+    suspended_child_count=0,
+    resource_class_count=1,
+    external_object_id='',
+    external_reference=None,
+    is_stale=False,
+    payload_json=None,
+    **kwargs,
+):
+    if organization is None:
+        organization = create_test_organization()
+    if provider_snapshot is None:
+        provider_snapshot = create_test_provider_snapshot(organization=organization)
+    if not metadata_key:
+        metadata_key = rpki_models.ImportedCaMetadata.build_metadata_key(
+            ca_handle=ca_handle,
+            external_object_id=external_object_id,
+        )
+    return rpki_models.ImportedCaMetadata.objects.create(
+        name=name,
+        provider_snapshot=provider_snapshot,
+        organization=organization,
+        metadata_key=metadata_key,
+        ca_handle=ca_handle,
+        id_cert_hash=id_cert_hash,
+        publication_uri=publication_uri,
+        rrdp_notification_uri=rrdp_notification_uri,
+        parent_count=parent_count,
+        child_count=child_count,
+        suspended_child_count=suspended_child_count,
+        resource_class_count=resource_class_count,
+        external_object_id=external_object_id,
+        external_reference=external_reference,
+        is_stale=is_stale,
+        payload_json=payload_json or {},
+        **kwargs,
+    )
+
+
+def create_test_imported_parent_link(
+    name='Imported Parent Link 1',
+    provider_snapshot=None,
+    organization=None,
+    link_key='',
+    parent_handle='testbed',
+    relationship_type='rfc6492',
+    service_uri='https://testbed.krill.cloud/rfc6492/testbed/',
+    last_exchange_at=None,
+    last_exchange_result='Success',
+    last_success_at=None,
+    external_object_id='',
+    external_reference=None,
+    is_stale=False,
+    payload_json=None,
+    **kwargs,
+):
+    if organization is None:
+        organization = create_test_organization()
+    if provider_snapshot is None:
+        provider_snapshot = create_test_provider_snapshot(organization=organization)
+    if not link_key:
+        link_key = rpki_models.ImportedParentLink.build_link_key(
+            parent_handle=parent_handle,
+            external_object_id=external_object_id,
+        )
+    return rpki_models.ImportedParentLink.objects.create(
+        name=name,
+        provider_snapshot=provider_snapshot,
+        organization=organization,
+        link_key=link_key,
+        parent_handle=parent_handle,
+        relationship_type=relationship_type,
+        service_uri=service_uri,
+        last_exchange_at=last_exchange_at,
+        last_exchange_result=last_exchange_result,
+        last_success_at=last_success_at,
+        external_object_id=external_object_id,
+        external_reference=external_reference,
+        is_stale=is_stale,
+        payload_json=payload_json or {},
+        **kwargs,
+    )
+
+
+def create_test_imported_child_link(
+    name='Imported Child Link 1',
+    provider_snapshot=None,
+    organization=None,
+    link_key='',
+    child_handle='edge-customer-01',
+    state='active',
+    id_cert_hash='krill-child-id-cert-sha256',
+    user_agent='krill/0.16.0',
+    last_exchange_at=None,
+    last_exchange_result='Success',
+    external_object_id='',
+    external_reference=None,
+    is_stale=False,
+    payload_json=None,
+    **kwargs,
+):
+    if organization is None:
+        organization = create_test_organization()
+    if provider_snapshot is None:
+        provider_snapshot = create_test_provider_snapshot(organization=organization)
+    if not link_key:
+        link_key = rpki_models.ImportedChildLink.build_link_key(
+            child_handle=child_handle,
+            external_object_id=external_object_id,
+        )
+    return rpki_models.ImportedChildLink.objects.create(
+        name=name,
+        provider_snapshot=provider_snapshot,
+        organization=organization,
+        link_key=link_key,
+        child_handle=child_handle,
+        state=state,
+        id_cert_hash=id_cert_hash,
+        user_agent=user_agent,
+        last_exchange_at=last_exchange_at,
+        last_exchange_result=last_exchange_result,
+        external_object_id=external_object_id,
+        external_reference=external_reference,
+        is_stale=is_stale,
+        payload_json=payload_json or {},
+        **kwargs,
+    )
+
+
+def create_test_imported_resource_entitlement(
+    name='Imported Resource Entitlement 1',
+    provider_snapshot=None,
+    organization=None,
+    entitlement_key='',
+    entitlement_source=None,
+    related_handle='',
+    class_name='',
+    asn_resources='AS65000-AS65010',
+    ipv4_resources='10.10.0.0/24',
+    ipv6_resources='',
+    not_after=None,
+    external_object_id='',
+    external_reference=None,
+    is_stale=False,
+    payload_json=None,
+    **kwargs,
+):
+    if organization is None:
+        organization = create_test_organization()
+    if provider_snapshot is None:
+        provider_snapshot = create_test_provider_snapshot(organization=organization)
+    resolved_source = entitlement_source or rpki_models.ImportedResourceEntitlementSource.CA
+    if not entitlement_key:
+        entitlement_key = rpki_models.ImportedResourceEntitlement.build_entitlement_key(
+            entitlement_source=resolved_source,
+            related_handle=related_handle,
+            class_name=class_name,
+            external_object_id=external_object_id,
+        )
+    return rpki_models.ImportedResourceEntitlement.objects.create(
+        name=name,
+        provider_snapshot=provider_snapshot,
+        organization=organization,
+        entitlement_key=entitlement_key,
+        entitlement_source=resolved_source,
+        related_handle=related_handle,
+        class_name=class_name,
+        asn_resources=asn_resources,
+        ipv4_resources=ipv4_resources,
+        ipv6_resources=ipv6_resources,
+        not_after=not_after,
+        external_object_id=external_object_id,
+        external_reference=external_reference,
+        is_stale=is_stale,
+        payload_json=payload_json or {},
+        **kwargs,
+    )
+
+
+def create_test_imported_publication_point(
+    name='Imported Publication Point 1',
+    provider_snapshot=None,
+    organization=None,
+    publication_key='',
+    service_uri='https://testbed.krill.cloud/rfc8181/netbox-rpki-dev/',
+    publication_uri='rsync://testbed.krill.cloud/repo/netbox-rpki-dev/',
+    rrdp_notification_uri='https://testbed.krill.cloud/rrdp/notification.xml',
+    last_exchange_at=None,
+    last_exchange_result='Success',
+    next_exchange_before=None,
+    published_object_count=2,
+    external_object_id='',
+    external_reference=None,
+    is_stale=False,
+    payload_json=None,
+    **kwargs,
+):
+    if organization is None:
+        organization = create_test_organization()
+    if provider_snapshot is None:
+        provider_snapshot = create_test_provider_snapshot(organization=organization)
+    if not publication_key:
+        publication_key = rpki_models.ImportedPublicationPoint.build_publication_key(
+            service_uri=service_uri,
+            publication_uri=publication_uri,
+            external_object_id=external_object_id,
+        )
+    return rpki_models.ImportedPublicationPoint.objects.create(
+        name=name,
+        provider_snapshot=provider_snapshot,
+        organization=organization,
+        publication_key=publication_key,
+        service_uri=service_uri,
+        publication_uri=publication_uri,
+        rrdp_notification_uri=rrdp_notification_uri,
+        last_exchange_at=last_exchange_at,
+        last_exchange_result=last_exchange_result,
+        next_exchange_before=next_exchange_before,
+        published_object_count=published_object_count,
+        external_object_id=external_object_id,
+        external_reference=external_reference,
+        is_stale=is_stale,
+        payload_json=payload_json or {},
+        **kwargs,
+    )
+
+
 def create_test_aspa_intent_match(
     name='ASPA Intent Match 1',
     aspa_intent=None,

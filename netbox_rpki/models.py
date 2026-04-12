@@ -232,6 +232,13 @@ class ExternalObjectType(models.TextChoices):
     SIGNED_OBJECT = "signed_object", "Signed Object"
 
 
+class ImportedResourceEntitlementSource(models.TextChoices):
+    CA = "ca", "CA"
+    PARENT = "parent", "Parent"
+    PARENT_CLASS = "parent_class", "Parent Class"
+    CHILD = "child", "Child"
+
+
 class ProviderSnapshotDiffChangeType(models.TextChoices):
     ADDED = "added", "Added"
     REMOVED = "removed", "Removed"
@@ -2078,6 +2085,11 @@ class ExternalObjectReference(NamedRpkiStandardModel):
         return self.name
 
 
+def _build_import_key(*values: object) -> str:
+    normalized = "|".join("" if value is None else str(value) for value in values)
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
 class ImportedRoaAuthorization(NamedRpkiStandardModel):
     provider_snapshot = models.ForeignKey(
         to='ProviderSnapshot',
@@ -2254,6 +2266,294 @@ class ImportedAspaProvider(RpkiStandardModel):
         if self.provider_as_value is not None:
             return f'AS{self.provider_as_value}'
         return self.name if hasattr(self, 'name') else 'Imported ASPA Provider'
+
+
+class ImportedCaMetadata(NamedRpkiStandardModel):
+    provider_snapshot = models.ForeignKey(
+        to='ProviderSnapshot',
+        on_delete=models.PROTECT,
+        related_name='imported_ca_metadata_records'
+    )
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='imported_ca_metadata_records'
+    )
+    metadata_key = models.CharField(max_length=64)
+    ca_handle = models.CharField(max_length=100)
+    id_cert_hash = models.CharField(max_length=255, blank=True)
+    publication_uri = models.CharField(max_length=500, blank=True)
+    rrdp_notification_uri = models.CharField(max_length=500, blank=True)
+    parent_count = models.PositiveIntegerField(default=0)
+    child_count = models.PositiveIntegerField(default=0)
+    suspended_child_count = models.PositiveIntegerField(default=0)
+    resource_class_count = models.PositiveIntegerField(default=0)
+    external_object_id = models.CharField(max_length=200, blank=True)
+    external_reference = models.ForeignKey(
+        to='ExternalObjectReference',
+        on_delete=models.PROTECT,
+        related_name='imported_ca_metadata_records',
+        blank=True,
+        null=True,
+    )
+    is_stale = models.BooleanField(default=False)
+    payload_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("name",)
+        constraints = (
+            models.UniqueConstraint(
+                fields=("provider_snapshot", "metadata_key"),
+                name="nb_rpki_impcameta_snap_key_uniq",
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:importedcametadata", args=[self.pk])
+
+    @classmethod
+    def build_metadata_key(
+        cls,
+        *,
+        ca_handle: str,
+        external_object_id: str = '',
+    ) -> str:
+        return _build_import_key(ca_handle.strip().lower(), external_object_id.strip())
+
+
+class ImportedParentLink(NamedRpkiStandardModel):
+    provider_snapshot = models.ForeignKey(
+        to='ProviderSnapshot',
+        on_delete=models.PROTECT,
+        related_name='imported_parent_links'
+    )
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='imported_parent_links'
+    )
+    link_key = models.CharField(max_length=64)
+    parent_handle = models.CharField(max_length=100)
+    relationship_type = models.CharField(max_length=64, blank=True)
+    service_uri = models.CharField(max_length=500, blank=True)
+    last_exchange_at = models.DateTimeField(blank=True, null=True)
+    last_exchange_result = models.CharField(max_length=64, blank=True)
+    last_success_at = models.DateTimeField(blank=True, null=True)
+    external_object_id = models.CharField(max_length=200, blank=True)
+    external_reference = models.ForeignKey(
+        to='ExternalObjectReference',
+        on_delete=models.PROTECT,
+        related_name='imported_parent_links',
+        blank=True,
+        null=True,
+    )
+    is_stale = models.BooleanField(default=False)
+    payload_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("name",)
+        constraints = (
+            models.UniqueConstraint(
+                fields=("provider_snapshot", "link_key"),
+                name="nb_rpki_impparlink_snap_key_uniq",
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:importedparentlink", args=[self.pk])
+
+    @classmethod
+    def build_link_key(
+        cls,
+        *,
+        parent_handle: str,
+        external_object_id: str = '',
+    ) -> str:
+        return _build_import_key(parent_handle.strip().lower(), external_object_id.strip())
+
+
+class ImportedChildLink(NamedRpkiStandardModel):
+    provider_snapshot = models.ForeignKey(
+        to='ProviderSnapshot',
+        on_delete=models.PROTECT,
+        related_name='imported_child_links'
+    )
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='imported_child_links'
+    )
+    link_key = models.CharField(max_length=64)
+    child_handle = models.CharField(max_length=100)
+    state = models.CharField(max_length=64, blank=True)
+    id_cert_hash = models.CharField(max_length=255, blank=True)
+    user_agent = models.CharField(max_length=255, blank=True)
+    last_exchange_at = models.DateTimeField(blank=True, null=True)
+    last_exchange_result = models.CharField(max_length=64, blank=True)
+    external_object_id = models.CharField(max_length=200, blank=True)
+    external_reference = models.ForeignKey(
+        to='ExternalObjectReference',
+        on_delete=models.PROTECT,
+        related_name='imported_child_links',
+        blank=True,
+        null=True,
+    )
+    is_stale = models.BooleanField(default=False)
+    payload_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("name",)
+        constraints = (
+            models.UniqueConstraint(
+                fields=("provider_snapshot", "link_key"),
+                name="nb_rpki_impchildlink_snap_key_uniq",
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:importedchildlink", args=[self.pk])
+
+    @classmethod
+    def build_link_key(
+        cls,
+        *,
+        child_handle: str,
+        external_object_id: str = '',
+    ) -> str:
+        return _build_import_key(child_handle.strip().lower(), external_object_id.strip())
+
+
+class ImportedResourceEntitlement(NamedRpkiStandardModel):
+    provider_snapshot = models.ForeignKey(
+        to='ProviderSnapshot',
+        on_delete=models.PROTECT,
+        related_name='imported_resource_entitlements'
+    )
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='imported_resource_entitlements'
+    )
+    entitlement_key = models.CharField(max_length=64)
+    entitlement_source = models.CharField(
+        max_length=32,
+        choices=ImportedResourceEntitlementSource.choices,
+        default=ImportedResourceEntitlementSource.CA,
+    )
+    related_handle = models.CharField(max_length=100, blank=True)
+    class_name = models.CharField(max_length=100, blank=True)
+    asn_resources = models.CharField(max_length=500, blank=True)
+    ipv4_resources = models.CharField(max_length=500, blank=True)
+    ipv6_resources = models.CharField(max_length=500, blank=True)
+    not_after = models.DateTimeField(blank=True, null=True)
+    external_object_id = models.CharField(max_length=200, blank=True)
+    external_reference = models.ForeignKey(
+        to='ExternalObjectReference',
+        on_delete=models.PROTECT,
+        related_name='imported_resource_entitlements',
+        blank=True,
+        null=True,
+    )
+    is_stale = models.BooleanField(default=False)
+    payload_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("name",)
+        constraints = (
+            models.UniqueConstraint(
+                fields=("provider_snapshot", "entitlement_key"),
+                name="nb_rpki_impresent_snap_key_uniq",
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:importedresourceentitlement", args=[self.pk])
+
+    @classmethod
+    def build_entitlement_key(
+        cls,
+        *,
+        entitlement_source: str,
+        related_handle: str = '',
+        class_name: str = '',
+        external_object_id: str = '',
+    ) -> str:
+        return _build_import_key(
+            entitlement_source,
+            related_handle.strip().lower(),
+            class_name.strip(),
+            external_object_id.strip(),
+        )
+
+
+class ImportedPublicationPoint(NamedRpkiStandardModel):
+    provider_snapshot = models.ForeignKey(
+        to='ProviderSnapshot',
+        on_delete=models.PROTECT,
+        related_name='imported_publication_points'
+    )
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='imported_publication_points'
+    )
+    publication_key = models.CharField(max_length=64)
+    service_uri = models.CharField(max_length=500, blank=True)
+    publication_uri = models.CharField(max_length=500, blank=True)
+    rrdp_notification_uri = models.CharField(max_length=500, blank=True)
+    last_exchange_at = models.DateTimeField(blank=True, null=True)
+    last_exchange_result = models.CharField(max_length=64, blank=True)
+    next_exchange_before = models.DateTimeField(blank=True, null=True)
+    published_object_count = models.PositiveIntegerField(default=0)
+    external_object_id = models.CharField(max_length=200, blank=True)
+    external_reference = models.ForeignKey(
+        to='ExternalObjectReference',
+        on_delete=models.PROTECT,
+        related_name='imported_publication_points',
+        blank=True,
+        null=True,
+    )
+    is_stale = models.BooleanField(default=False)
+    payload_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("name",)
+        constraints = (
+            models.UniqueConstraint(
+                fields=("provider_snapshot", "publication_key"),
+                name="nb_rpki_imppubpoint_snap_key_uniq",
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:importedpublicationpoint", args=[self.pk])
+
+    @classmethod
+    def build_publication_key(
+        cls,
+        *,
+        service_uri: str = '',
+        publication_uri: str = '',
+        external_object_id: str = '',
+    ) -> str:
+        primary_identity = service_uri.strip() or publication_uri.strip() or external_object_id.strip()
+        secondary_identity = publication_uri.strip() if primary_identity != publication_uri.strip() else ''
+        return _build_import_key(primary_identity, secondary_identity)
 
 
 class ASPAIntent(NamedRpkiStandardModel):

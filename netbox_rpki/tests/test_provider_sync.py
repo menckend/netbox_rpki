@@ -11,6 +11,7 @@ from netbox_rpki import models as rpki_models
 from netbox_rpki.services import ProviderSyncError, sync_provider_account
 from netbox_rpki.services.provider_sync_contract import PROVIDER_SYNC_SUMMARY_SCHEMA_VERSION
 from netbox_rpki.tests.base import PluginAPITestCase
+from netbox_rpki.tests.krill_payloads import KRILL_ASPAS_JSON, KRILL_ROUTES_JSON
 from netbox_rpki.tests.utils import (
     create_test_asn,
     create_test_imported_roa_authorization,
@@ -51,60 +52,6 @@ ARIN_ROA_XML = """
   </roaSpec>
 </roaSpecs>
 """.strip()
-
-
-KRILL_ROUTES_JSON = [
-    {
-        'asn': 65000,
-        'prefix': '10.10.0.0/24',
-        'max_length': 24,
-        'comment': 'netbox_rpki sample IPv4 ROA',
-        'roa_objects': [
-            {
-                'authorizations': ['10.10.0.0/24-24 => 65000'],
-                'validity': {
-                    'not_before': '2026-04-12T10:00:00Z',
-                    'not_after': '2027-04-12T10:00:00Z',
-                },
-                'serial': '111',
-                'uri': 'rsync://testbed.krill.cloud/repo/netbox-rpki-dev/0/v4.roa',
-                'base64': 'AAA',
-                'hash': 'hash-v4',
-            }
-        ],
-    },
-    {
-        'asn': 65000,
-        'prefix': '2001:db8:100::/48',
-        'max_length': 48,
-        'comment': 'netbox_rpki sample IPv6 ROA',
-        'roa_objects': [
-            {
-                'authorizations': ['2001:db8:100::/48-48 => 65000'],
-                'validity': {
-                    'not_before': '2026-04-12T10:00:00Z',
-                    'not_after': '2027-04-12T10:00:00Z',
-                },
-                'serial': '222',
-                'uri': 'rsync://testbed.krill.cloud/repo/netbox-rpki-dev/0/v6.roa',
-                'base64': 'BBB',
-                'hash': 'hash-v6',
-            }
-        ],
-    },
-]
-
-
-KRILL_ASPAS_JSON = [
-    {
-        'customer': 'AS65000',
-        'providers': ['AS65001', 'AS65002(v4)', 'AS65003(v6)'],
-    },
-    {
-        'customer': 'AS65010',
-        'providers': [],
-    },
-]
 
 
 class ProviderSyncServiceTestCase(TestCase):
