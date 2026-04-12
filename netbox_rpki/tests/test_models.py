@@ -17,6 +17,10 @@ from netbox_rpki.tests.utils import (
     create_test_approval_record,
     create_test_asn,
     create_test_aspa,
+    create_test_aspa_intent,
+    create_test_aspa_intent_match,
+    create_test_aspa_intent_result,
+    create_test_aspa_reconciliation_run,
     create_test_certificate,
     create_test_certificate_asn,
     create_test_certificate_prefix,
@@ -24,6 +28,7 @@ from netbox_rpki.tests.utils import (
     create_test_intent_derivation_run,
     create_test_organization,
     create_test_aspa_provider,
+    create_test_imported_aspa,
     create_test_manifest_entry,
     create_test_prefix,
     create_test_provider_account,
@@ -31,6 +36,7 @@ from netbox_rpki.tests.utils import (
     create_test_provider_sync_run,
     create_test_provider_write_execution,
     create_test_published_roa_result,
+    create_test_published_aspa_result,
     create_test_revoked_certificate,
     create_test_roa_change_plan,
     create_test_roa_change_plan_item,
@@ -173,6 +179,133 @@ class ASPAProviderModelValidationTestCase(TestCase):
             context.exception.message_dict,
             {'provider_as': ['Provider ASN must differ from the ASPA customer ASN.']},
         )
+
+
+class ASPAModelValidationTestCase(TestCase):
+    def test_aspa_intent_build_intent_key_is_deterministic(self):
+        key_a = rpki_models.ASPAIntent.build_intent_key(customer_asn_value=65123, provider_asn_value=65234)
+        key_b = rpki_models.ASPAIntent.build_intent_key(customer_asn_value=65123, provider_asn_value=65234)
+        key_c = rpki_models.ASPAIntent.build_intent_key(customer_asn_value=65123, provider_asn_value=65235)
+
+        self.assertEqual(key_a, key_b)
+        self.assertNotEqual(key_a, key_c)
+
+    def test_aspa_intent_enforces_unique_customer_provider_pair(self):
+        aspa_intent = create_test_aspa_intent()
+
+        with transaction.atomic():
+            with self.assertRaises(IntegrityError):
+                create_test_aspa_intent(
+                    organization=aspa_intent.organization,
+                    customer_as=aspa_intent.customer_as,
+                    provider_as=aspa_intent.provider_as,
+                    intent_key=aspa_intent.intent_key,
+                )
+
+    def test_aspa_intent_rejects_customer_as_as_provider_as(self):
+        customer_as = create_test_asn(65220)
+        aspa_intent = rpki_models.ASPAIntent(
+            name='Invalid ASPA Intent',
+            organization=create_test_organization(),
+            intent_key=rpki_models.ASPAIntent.build_intent_key(
+                customer_asn_value=customer_as.asn,
+                provider_asn_value=customer_as.asn,
+            ),
+            customer_as=customer_as,
+            provider_as=customer_as,
+        )
+
+        with self.assertRaises(ValidationError) as context:
+            aspa_intent.full_clean()
+
+        self.assertEqual(
+            context.exception.message_dict,
+            {'provider_as': ['Provider ASN must differ from the ASPA customer ASN.']},
+        )
+
+    def test_aspa_reconciliation_run_requires_provider_snapshot_for_provider_imported_scope(self):
+        run = rpki_models.ASPAReconciliationRun(
+            name='Invalid ASPA Reconciliation Run',
+            organization=create_test_organization(),
+            comparison_scope=rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
+        )
+
+        with self.assertRaises(ValidationError) as context:
+            run.full_clean()
+
+        self.assertEqual(
+            context.exception.message_dict,
+            {'provider_snapshot': ['Provider snapshot is required for provider-imported ASPA reconciliation runs.']},
+        )
+
+    def test_aspa_result_models_enforce_single_row_per_subject(self):
+        intent = create_test_aspa_intent()
+        run = create_test_aspa_reconciliation_run(organization=intent.organization)
+        aspa = create_test_aspa(customer_as=intent.customer_as)
+        imported_aspa = create_test_imported_aspa(customer_as=intent.customer_as)
+
+        create_test_aspa_intent_result(
+            reconciliation_run=run,
+            aspa_intent=intent,
+            best_aspa=aspa,
+        )
+        create_test_published_aspa_result(
+            reconciliation_run=run,
+            aspa=aspa,
+        )
+
+        with transaction.atomic():
+            with self.assertRaises(IntegrityError):
+                create_test_aspa_intent_result(
+                    reconciliation_run=run,
+                    aspa_intent=intent,
+                    best_aspa=aspa,
+                )
+        with transaction.atomic():
+            with self.assertRaises(IntegrityError):
+                create_test_published_aspa_result(
+                    reconciliation_run=run,
+                    aspa=aspa,
+                )
+
+        imported_run = create_test_aspa_reconciliation_run(
+            organization=intent.organization,
+            comparison_scope=rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
+        )
+        imported_result = create_test_published_aspa_result(
+            reconciliation_run=imported_run,
+            imported_aspa=imported_aspa,
+        )
+
+        self.assertEqual(imported_result.imported_aspa, imported_aspa)
+        self.assertIsNone(imported_result.aspa)
+
+    def test_aspa_intent_match_enforces_single_source(self):
+        intent = create_test_aspa_intent()
+        aspa = create_test_aspa(customer_as=intent.customer_as)
+        imported_aspa = create_test_imported_aspa(customer_as=intent.customer_as)
+
+        create_test_aspa_intent_match(
+            aspa_intent=intent,
+            aspa=aspa,
+        )
+
+        with transaction.atomic():
+            with self.assertRaises(IntegrityError):
+                create_test_aspa_intent_match(
+                    aspa_intent=intent,
+                    aspa=aspa,
+                )
+
+        match = rpki_models.ASPAIntentMatch(
+            name='Invalid ASPA Intent Match',
+            aspa_intent=intent,
+            aspa=aspa,
+            imported_aspa=imported_aspa,
+        )
+
+        with self.assertRaises(ValidationError):
+            match.full_clean()
 
 
 class PriorityOneModelBehaviorTestCase(TestCase):
@@ -504,6 +637,11 @@ class SampleDataFixtureTestCase(TestCase):
             'routing_intent_profiles',
             'roa_intents',
             'reconciliation_runs',
+            'aspa_intents',
+            'aspa_intent_matches',
+            'aspa_reconciliation_runs',
+            'aspa_intent_results',
+            'published_aspa_results',
         )
         for key in expected_keys:
             with self.subTest(key=key):

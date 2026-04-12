@@ -91,12 +91,27 @@ ORGANIZATION_DETAIL_SPEC = DetailSpec(
             url_name='plugins:netbox_rpki:certificate_add',
             query_param='rpki_org',
         ),
+        DetailActionSpec(
+            permission='netbox_rpki.change_organization',
+            label='Run ASPA Reconciliation',
+            direct_url=lambda obj: reverse('plugins:netbox_rpki:organization_run_aspa_reconciliation', kwargs={'pk': obj.pk}),
+        ),
     ),
     bottom_tables=(
         DetailTableSpec(
             title='Certificates',
             table_class_name='CertificateTable',
             queryset=lambda obj: obj.certificates.all(),
+        ),
+        DetailTableSpec(
+            title='ASPA Intents',
+            table_class_name='ASPAIntentTable',
+            queryset=lambda obj: obj.aspa_intents.all(),
+        ),
+        DetailTableSpec(
+            title='ASPA Reconciliation Runs',
+            table_class_name='ASPAReconciliationRunTable',
+            queryset=lambda obj: obj.aspa_reconciliation_runs.all(),
         ),
     ),
 )
@@ -132,6 +147,18 @@ def get_result_details(result: models.ROAIntentResult) -> str | None:
     return get_pretty_json(result.details_json)
 
 
+def get_aspa_run_result_summary(run: models.ASPAReconciliationRun) -> str | None:
+    return get_pretty_json(run.result_summary_json)
+
+
+def get_aspa_result_details(result: models.ASPAIntentResult) -> str | None:
+    return get_pretty_json(result.details_json)
+
+
+def get_aspa_published_result_details(result: models.PublishedASPAResult) -> str | None:
+    return get_pretty_json(result.details_json)
+
+
 def get_published_result_details(result: models.PublishedROAResult) -> str | None:
     return get_pretty_json(result.details_json)
 
@@ -162,6 +189,22 @@ def get_result_best_roa_max_lengths(result: models.ROAIntentResult) -> str | Non
 
 def get_plan_summary(plan: models.ROAChangePlan) -> str | None:
     return get_pretty_json(plan.summary_json)
+
+
+def get_lint_run_summary(run: models.ROALintRun) -> str | None:
+    return get_pretty_json(run.summary_json)
+
+
+def get_lint_finding_details(finding: models.ROALintFinding) -> str | None:
+    return get_pretty_json(finding.details_json)
+
+
+def get_simulation_run_summary(run: models.ROAValidationSimulationRun) -> str | None:
+    return get_pretty_json(run.summary_json)
+
+
+def get_simulation_result_details(result: models.ROAValidationSimulationResult) -> str | None:
+    return get_pretty_json(result.details_json)
 
 
 def get_plan_provider_capability(plan: models.ROAChangePlan) -> str | None:
@@ -367,6 +410,16 @@ ROA_CHANGE_PLAN_DETAIL_SPEC = DetailSpec(
             table_class_name='ProviderWriteExecutionTable',
             queryset=lambda obj: obj.provider_write_executions.all(),
         ),
+        DetailTableSpec(
+            title='ROA Lint Runs',
+            table_class_name='ROALintRunTable',
+            queryset=lambda obj: obj.lint_runs.all(),
+        ),
+        DetailTableSpec(
+            title='ROA Validation Simulation Runs',
+            table_class_name='ROAValidationSimulationRunTable',
+            queryset=lambda obj: obj.simulation_runs.all(),
+        ),
     ),
 )
 
@@ -516,6 +569,7 @@ ROA_RECONCILIATION_RUN_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(label='Intent Count', value=lambda obj: obj.intent_count),
         DetailFieldSpec(label='Intent Results', value=get_related_count('intent_results')),
         DetailFieldSpec(label='Published ROA Results', value=get_related_count('published_roa_results')),
+        DetailFieldSpec(label='Lint Runs', value=get_related_count('lint_runs')),
         DetailFieldSpec(
             label='Result Summary',
             value=get_run_result_summary,
@@ -533,6 +587,11 @@ ROA_RECONCILIATION_RUN_DETAIL_SPEC = DetailSpec(
             title='Published ROA Results',
             table_class_name='PublishedROAResultTable',
             queryset=lambda obj: obj.published_roa_results.all(),
+        ),
+        DetailTableSpec(
+            title='ROA Lint Runs',
+            table_class_name='ROALintRunTable',
+            queryset=lambda obj: obj.lint_runs.all(),
         ),
     ),
 )
@@ -615,6 +674,106 @@ PUBLISHED_ROA_RESULT_DETAIL_SPEC = DetailSpec(
 )
 
 
+ASPA_RECONCILIATION_RUN_DETAIL_SPEC = DetailSpec(
+    model=models.ASPAReconciliationRun,
+    list_url_name='plugins:netbox_rpki:aspareconciliationrun_list',
+    breadcrumb_label='ASPA Reconciliation Runs',
+    card_title='ASPA Reconciliation Run',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Organization', value=lambda obj: obj.organization, kind='link'),
+        DetailFieldSpec(label='Provider Snapshot', value=lambda obj: obj.provider_snapshot, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Comparison Scope', value=lambda obj: obj.comparison_scope),
+        DetailFieldSpec(label='Status', value=lambda obj: obj.status),
+        DetailFieldSpec(label='Started At', value=lambda obj: obj.started_at, empty_text='None'),
+        DetailFieldSpec(label='Completed At', value=lambda obj: obj.completed_at, empty_text='None'),
+        DetailFieldSpec(label='Intent Count', value=lambda obj: obj.intent_count),
+        DetailFieldSpec(label='Published ASPA Count', value=lambda obj: obj.published_aspa_count),
+        DetailFieldSpec(
+            label='Result Summary',
+            value=get_aspa_run_result_summary,
+            kind='code',
+            empty_text='None',
+        ),
+    ),
+    bottom_tables=(
+        DetailTableSpec(
+            title='ASPA Intent Results',
+            table_class_name='ASPAIntentResultTable',
+            queryset=lambda obj: obj.intent_results.all(),
+        ),
+        DetailTableSpec(
+            title='Published ASPA Results',
+            table_class_name='PublishedASPAResultTable',
+            queryset=lambda obj: obj.published_aspa_results.all(),
+        ),
+    ),
+)
+
+
+ASPA_INTENT_RESULT_DETAIL_SPEC = DetailSpec(
+    model=models.ASPAIntentResult,
+    list_url_name='plugins:netbox_rpki:aspaintentresult_list',
+    breadcrumb_label='ASPA Intent Results',
+    card_title='ASPA Intent Result Diff',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Reconciliation Run', value=lambda obj: obj.reconciliation_run, kind='link'),
+        DetailFieldSpec(label='ASPA Intent', value=lambda obj: obj.aspa_intent, kind='link'),
+        DetailFieldSpec(label='Result Type', value=lambda obj: obj.result_type),
+        DetailFieldSpec(label='Severity', value=lambda obj: obj.severity),
+        DetailFieldSpec(label='Match Count', value=lambda obj: obj.match_count),
+        DetailFieldSpec(label='Best Published ASPA', value=lambda obj: obj.best_aspa, kind='link', empty_text='None'),
+        DetailFieldSpec(
+            label='Best Imported ASPA',
+            value=lambda obj: obj.best_imported_aspa,
+            kind='link',
+            empty_text='None',
+        ),
+        DetailFieldSpec(label='Computed At', value=lambda obj: obj.computed_at, empty_text='None'),
+        DetailFieldSpec(label='Customer ASN', value=lambda obj: obj.aspa_intent.customer_as, kind='link'),
+        DetailFieldSpec(label='Expected Provider ASN', value=lambda obj: obj.aspa_intent.provider_as, kind='link'),
+        DetailFieldSpec(
+            label='Diff Details',
+            value=get_aspa_result_details,
+            kind='code',
+            empty_text='None',
+        ),
+    ),
+    bottom_tables=(
+        DetailTableSpec(
+            title='Candidate Matches',
+            table_class_name='ASPAIntentMatchTable',
+            queryset=lambda obj: obj.aspa_intent.candidate_matches.all(),
+        ),
+    ),
+)
+
+
+PUBLISHED_ASPA_RESULT_DETAIL_SPEC = DetailSpec(
+    model=models.PublishedASPAResult,
+    list_url_name='plugins:netbox_rpki:publishedasparesult_list',
+    breadcrumb_label='Published ASPA Results',
+    card_title='Published ASPA Result Diff',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Reconciliation Run', value=lambda obj: obj.reconciliation_run, kind='link'),
+        DetailFieldSpec(label='Published ASPA', value=lambda obj: obj.aspa, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Imported ASPA', value=lambda obj: obj.imported_aspa, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Result Type', value=lambda obj: obj.result_type),
+        DetailFieldSpec(label='Severity', value=lambda obj: obj.severity),
+        DetailFieldSpec(label='Matched Intent Count', value=lambda obj: obj.matched_intent_count),
+        DetailFieldSpec(label='Computed At', value=lambda obj: obj.computed_at, empty_text='None'),
+        DetailFieldSpec(
+            label='Diff Details',
+            value=get_aspa_published_result_details,
+            kind='code',
+            empty_text='None',
+        ),
+    ),
+)
+
+
 ROA_CHANGE_PLAN_ITEM_DETAIL_SPEC = DetailSpec(
     model=models.ROAChangePlanItem,
     list_url_name='plugins:netbox_rpki:roachangeplanitem_list',
@@ -624,6 +783,7 @@ ROA_CHANGE_PLAN_ITEM_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(label='Name', value=lambda obj: obj.name),
         DetailFieldSpec(label='Change Plan', value=lambda obj: obj.change_plan, kind='link'),
         DetailFieldSpec(label='Action Type', value=lambda obj: obj.action_type),
+        DetailFieldSpec(label='Plan Semantic', value=lambda obj: obj.plan_semantic, empty_text='None'),
         DetailFieldSpec(label='ROA Intent', value=lambda obj: obj.roa_intent, kind='link', empty_text='None'),
         DetailFieldSpec(label='Published ROA', value=lambda obj: obj.roa, kind='link', empty_text='None'),
         DetailFieldSpec(
@@ -652,6 +812,102 @@ ROA_CHANGE_PLAN_ITEM_DETAIL_SPEC = DetailSpec(
             kind='code',
             empty_text='None',
         ),
+    ),
+)
+
+
+ROA_LINT_RUN_DETAIL_SPEC = DetailSpec(
+    model=models.ROALintRun,
+    list_url_name='plugins:netbox_rpki:roalintrun_list',
+    breadcrumb_label='ROA Lint Runs',
+    card_title='ROA Lint Run',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Reconciliation Run', value=lambda obj: obj.reconciliation_run, kind='link'),
+        DetailFieldSpec(label='Change Plan', value=lambda obj: obj.change_plan, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Status', value=lambda obj: obj.status),
+        DetailFieldSpec(label='Started At', value=lambda obj: obj.started_at, empty_text='None'),
+        DetailFieldSpec(label='Completed At', value=lambda obj: obj.completed_at, empty_text='None'),
+        DetailFieldSpec(label='Finding Count', value=lambda obj: obj.finding_count),
+        DetailFieldSpec(label='Info Count', value=lambda obj: obj.info_count),
+        DetailFieldSpec(label='Warning Count', value=lambda obj: obj.warning_count),
+        DetailFieldSpec(label='Error Count', value=lambda obj: obj.error_count),
+        DetailFieldSpec(label='Critical Count', value=lambda obj: obj.critical_count),
+        DetailFieldSpec(label='Summary', value=get_lint_run_summary, kind='code', empty_text='None'),
+    ),
+    bottom_tables=(
+        DetailTableSpec(
+            title='ROA Lint Findings',
+            table_class_name='ROALintFindingTable',
+            queryset=lambda obj: obj.findings.all(),
+        ),
+    ),
+)
+
+
+ROA_LINT_FINDING_DETAIL_SPEC = DetailSpec(
+    model=models.ROALintFinding,
+    list_url_name='plugins:netbox_rpki:roalintfinding_list',
+    breadcrumb_label='ROA Lint Findings',
+    card_title='ROA Lint Finding',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Lint Run', value=lambda obj: obj.lint_run, kind='link'),
+        DetailFieldSpec(label='ROA Intent Result', value=lambda obj: obj.roa_intent_result, kind='link', empty_text='None'),
+        DetailFieldSpec(
+            label='Published ROA Result',
+            value=lambda obj: obj.published_roa_result,
+            kind='link',
+            empty_text='None',
+        ),
+        DetailFieldSpec(label='Change Plan Item', value=lambda obj: obj.change_plan_item, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Finding Code', value=lambda obj: obj.finding_code),
+        DetailFieldSpec(label='Severity', value=lambda obj: obj.severity),
+        DetailFieldSpec(label='Computed At', value=lambda obj: obj.computed_at, empty_text='None'),
+        DetailFieldSpec(label='Details', value=get_lint_finding_details, kind='code', empty_text='None'),
+    ),
+)
+
+
+ROA_VALIDATION_SIMULATION_RUN_DETAIL_SPEC = DetailSpec(
+    model=models.ROAValidationSimulationRun,
+    list_url_name='plugins:netbox_rpki:roavalidationsimulationrun_list',
+    breadcrumb_label='ROA Validation Simulation Runs',
+    card_title='ROA Validation Simulation Run',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Change Plan', value=lambda obj: obj.change_plan, kind='link'),
+        DetailFieldSpec(label='Status', value=lambda obj: obj.status),
+        DetailFieldSpec(label='Started At', value=lambda obj: obj.started_at, empty_text='None'),
+        DetailFieldSpec(label='Completed At', value=lambda obj: obj.completed_at, empty_text='None'),
+        DetailFieldSpec(label='Result Count', value=lambda obj: obj.result_count),
+        DetailFieldSpec(label='Predicted Valid Count', value=lambda obj: obj.predicted_valid_count),
+        DetailFieldSpec(label='Predicted Invalid Count', value=lambda obj: obj.predicted_invalid_count),
+        DetailFieldSpec(label='Predicted Not Found Count', value=lambda obj: obj.predicted_not_found_count),
+        DetailFieldSpec(label='Summary', value=get_simulation_run_summary, kind='code', empty_text='None'),
+    ),
+    bottom_tables=(
+        DetailTableSpec(
+            title='ROA Validation Simulation Results',
+            table_class_name='ROAValidationSimulationResultTable',
+            queryset=lambda obj: obj.results.all(),
+        ),
+    ),
+)
+
+
+ROA_VALIDATION_SIMULATION_RESULT_DETAIL_SPEC = DetailSpec(
+    model=models.ROAValidationSimulationResult,
+    list_url_name='plugins:netbox_rpki:roavalidationsimulationresult_list',
+    breadcrumb_label='ROA Validation Simulation Results',
+    card_title='ROA Validation Simulation Result',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Simulation Run', value=lambda obj: obj.simulation_run, kind='link'),
+        DetailFieldSpec(label='Change Plan Item', value=lambda obj: obj.change_plan_item, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Outcome Type', value=lambda obj: obj.outcome_type),
+        DetailFieldSpec(label='Computed At', value=lambda obj: obj.computed_at, empty_text='None'),
+        DetailFieldSpec(label='Details', value=get_simulation_result_details, kind='code', empty_text='None'),
     ),
 )
 
@@ -836,10 +1092,17 @@ DETAIL_SPEC_BY_MODEL = {
     models.ImportedAspa: IMPORTED_ASPA_DETAIL_SPEC,
     models.RpkiProviderAccount: PROVIDER_ACCOUNT_DETAIL_SPEC,
     models.RoutingIntentProfile: ROUTING_INTENT_PROFILE_DETAIL_SPEC,
+    models.ASPAReconciliationRun: ASPA_RECONCILIATION_RUN_DETAIL_SPEC,
+    models.ASPAIntentResult: ASPA_INTENT_RESULT_DETAIL_SPEC,
+    models.PublishedASPAResult: PUBLISHED_ASPA_RESULT_DETAIL_SPEC,
     models.ROAReconciliationRun: ROA_RECONCILIATION_RUN_DETAIL_SPEC,
+    models.ROALintRun: ROA_LINT_RUN_DETAIL_SPEC,
     models.ROAChangePlan: ROA_CHANGE_PLAN_DETAIL_SPEC,
+    models.ROALintFinding: ROA_LINT_FINDING_DETAIL_SPEC,
     models.ROAIntentResult: ROA_INTENT_RESULT_DETAIL_SPEC,
     models.PublishedROAResult: PUBLISHED_ROA_RESULT_DETAIL_SPEC,
     models.ROAChangePlanItem: ROA_CHANGE_PLAN_ITEM_DETAIL_SPEC,
+    models.ROAValidationSimulationRun: ROA_VALIDATION_SIMULATION_RUN_DETAIL_SPEC,
+    models.ROAValidationSimulationResult: ROA_VALIDATION_SIMULATION_RESULT_DETAIL_SPEC,
     models.ProviderWriteExecution: PROVIDER_WRITE_EXECUTION_DETAIL_SPEC,
 }

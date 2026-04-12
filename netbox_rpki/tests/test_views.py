@@ -14,6 +14,7 @@ from netbox_rpki.tests.base import PluginViewTestCase
 from netbox_rpki.tests.utils import (
     create_test_asn,
     create_test_aspa,
+    create_test_aspa_intent,
     create_test_aspa_provider,
     create_test_certificate,
     create_test_certificate_asn,
@@ -25,6 +26,7 @@ from netbox_rpki.tests.utils import (
     create_test_published_roa_result,
     create_test_rir,
     create_test_roa,
+    create_test_roa_change_plan_matrix,
     create_test_roa_intent,
     create_test_roa_intent_match,
     create_test_roa_intent_override,
@@ -246,6 +248,74 @@ class ProviderAccountSyncViewTestCase(PluginViewTestCase):
         self.assertContains(response, 'Stale')
 
 
+class OrganizationAspaReconciliationViewTestCase(PluginViewTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='organization-aspa-ui', name='Organization ASPA UI')
+        cls.customer_as = create_test_asn(65410)
+        cls.provider_as = create_test_asn(65411)
+        create_test_aspa_intent(
+            name='Organization ASPA Intent',
+            organization=cls.organization,
+            customer_as=cls.customer_as,
+            provider_as=cls.provider_as,
+        )
+
+    def test_organization_detail_shows_aspa_sections_and_action(self):
+        self.add_permissions(
+            'netbox_rpki.view_organization',
+            'netbox_rpki.view_aspaintent',
+            'netbox_rpki.view_aspareconciliationrun',
+            'netbox_rpki.change_organization',
+        )
+
+        response = self.client.get(self.organization.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'Run ASPA Reconciliation')
+        self.assertContains(
+            response,
+            reverse('plugins:netbox_rpki:organization_run_aspa_reconciliation', kwargs={'pk': self.organization.pk}),
+        )
+        self.assertContains(response, 'ASPA Intents')
+        self.assertContains(response, 'ASPA Reconciliation Runs')
+        self.assertContains(response, 'Organization ASPA Intent')
+
+    def test_organization_aspa_reconciliation_view_renders_confirmation(self):
+        self.add_permissions('netbox_rpki.view_organization', 'netbox_rpki.change_organization')
+
+        response = self.client.get(
+            reverse('plugins:netbox_rpki:organization_run_aspa_reconciliation', kwargs={'pk': self.organization.pk})
+        )
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'Run ASPA Reconciliation')
+        self.assertContains(response, self.organization.name)
+
+    def test_organization_aspa_reconciliation_view_enqueues_job(self):
+        self.add_permissions('netbox_rpki.view_organization', 'netbox_rpki.change_organization')
+
+        class StubJob:
+            pk = 882
+            status = 'queued'
+
+            @staticmethod
+            def get_absolute_url():
+                return '/core/jobs/882/'
+
+        with patch(
+            'netbox_rpki.views.RunAspaReconciliationJob.enqueue_for_organization',
+            return_value=(StubJob(), True),
+        ) as enqueue_mock:
+            response = self.client.post(
+                reverse('plugins:netbox_rpki:organization_run_aspa_reconciliation', kwargs={'pk': self.organization.pk}),
+                {'confirm': True},
+            )
+
+        self.assertRedirects(response, self.organization.get_absolute_url())
+        enqueue_mock.assert_called_once_with(self.organization, user=self.user)
+
+
 class AspaDetailViewTestCase(PluginViewTestCase):
     @classmethod
     def setUpTestData(cls):
@@ -348,6 +418,19 @@ class RoutingIntentReplacementViewTestCase(PluginViewTestCase):
         self.assertContains(response, 'view replacement')
         self.assertContains(response, 'wrong origin ASN and an overbroad maxLength')
 
+    def test_change_plan_detail_view_shows_lint_and_simulation_tables(self):
+        self.add_permissions(
+            'netbox_rpki.view_roachangeplan',
+            'netbox_rpki.view_roalintrun',
+            'netbox_rpki.view_roavalidationsimulationrun',
+        )
+
+        response = self.client.get(self.plan.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'ROA Lint Runs')
+        self.assertContains(response, 'ROA Validation Simulation Runs')
+
 
 class OperationsDashboardViewTestCase(PluginViewTestCase):
     @classmethod
@@ -406,7 +489,10 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
             'netbox_rpki.view_rpkiprovideraccount',
             'netbox_rpki.view_roa',
             'netbox_rpki.view_certificate',
+            'netbox_rpki.view_roareconciliationrun',
+            'netbox_rpki.view_roachangeplan',
         )
+        scenario = create_test_roa_change_plan_matrix(organization=self.organization)
 
         response = self.client.get(reverse('plugins:netbox_rpki:operations_dashboard'))
 
@@ -421,6 +507,9 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
         self.assertNotContains(response, self.future_certificate.name)
         self.assertContains(response, 'Expires in 7 day(s)')
         self.assertContains(response, 'Expires in 14 day(s)')
+        self.assertContains(response, 'Reconciliation Runs Requiring Attention')
+        self.assertContains(response, 'Open ROA Change Plans Requiring Attention')
+        self.assertContains(response, scenario.provider_plan.name)
 
 
 class GeneratedSurfaceContractTestCase(PluginViewTestCase):

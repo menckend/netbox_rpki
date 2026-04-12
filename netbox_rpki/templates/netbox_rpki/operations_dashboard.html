@@ -13,21 +13,35 @@
             Expiry sections include items expiring on or before {{ expiry_threshold }}.
           </p>
           <div class="row g-3">
-            <div class="col col-md-4">
+            <div class="col col-md-3">
               <div class="border rounded p-3 h-100">
                 <div class="text-muted small text-uppercase">Provider Accounts Requiring Attention</div>
                 <div class="fs-2 fw-semibold">{{ provider_accounts|length }}</div>
                 <div class="text-muted">Failed or stale sync state</div>
               </div>
             </div>
-            <div class="col col-md-4">
+            <div class="col col-md-3">
+              <div class="border rounded p-3 h-100">
+                <div class="text-muted small text-uppercase">Reconciliation Runs Requiring Attention</div>
+                <div class="fs-2 fw-semibold">{{ reconciliation_attention_runs|length }}</div>
+                <div class="text-muted">Replacement drift or lint warnings present</div>
+              </div>
+            </div>
+            <div class="col col-md-3">
+              <div class="border rounded p-3 h-100">
+                <div class="text-muted small text-uppercase">Open Change Plans Requiring Attention</div>
+                <div class="fs-2 fw-semibold">{{ change_plans_requiring_attention|length }}</div>
+                <div class="text-muted">Draft, approved, or failed plans with open analysis</div>
+              </div>
+            </div>
+            <div class="col col-md-3">
               <div class="border rounded p-3 h-100">
                 <div class="text-muted small text-uppercase">ROAs Expiring Within {{ expiry_window_days }} Days</div>
                 <div class="fs-2 fw-semibold">{{ expiring_roas|length }}</div>
                 <div class="text-muted">Sorted by earliest valid-to date</div>
               </div>
             </div>
-            <div class="col col-md-4">
+            <div class="col col-md-3">
               <div class="border rounded p-3 h-100">
                 <div class="text-muted small text-uppercase">Certificates Expiring Within {{ expiry_window_days }} Days</div>
                 <div class="fs-2 fw-semibold">{{ expiring_certificates|length }}</div>
@@ -111,6 +125,92 @@
           </div>
         {% else %}
           <div class="card-body text-muted">No ROAs are currently within the expiry window.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="row mb-4">
+    <div class="col col-md-12">
+      <div class="card">
+        <h5 class="card-header">ROA Reconciliation Runs Requiring Attention</h5>
+        {% if reconciliation_attention_runs %}
+          <div class="card-body table-responsive">
+            <table class="table table-hover align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Organization</th>
+                  <th>Intent Profile</th>
+                  <th>Comparison Scope</th>
+                  <th>Replacement Drift</th>
+                  <th>Lint Warnings</th>
+                  <th>Lint Errors</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in reconciliation_attention_runs %}
+                  <tr>
+                    <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
+                    <td><a href="{{ item.object.organization.get_absolute_url }}">{{ item.object.organization }}</a></td>
+                    <td><a href="{{ item.object.intent_profile.get_absolute_url }}">{{ item.object.intent_profile }}</a></td>
+                    <td>{{ item.object.comparison_scope }}</td>
+                    <td>{{ item.replacement_count }}</td>
+                    <td>{{ item.warning_count }}</td>
+                    <td>{{ item.error_count }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="card-body text-muted">No reconciliation runs currently require operator attention.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="row mb-4">
+    <div class="col col-md-12">
+      <div class="card">
+        <h5 class="card-header">Open ROA Change Plans Requiring Attention</h5>
+        {% if change_plans_requiring_attention %}
+          <div class="card-body table-responsive">
+            <table class="table table-hover align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Organization</th>
+                  <th>Status</th>
+                  <th>Replacement Actions</th>
+                  <th>Lint Warnings</th>
+                  <th>Lint Errors</th>
+                  <th>Simulation</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in change_plans_requiring_attention %}
+                  <tr>
+                    <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
+                    <td><a href="{{ item.object.organization.get_absolute_url }}">{{ item.object.organization }}</a></td>
+                    <td>{{ item.object.status }}</td>
+                    <td>{{ item.replacement_count }}</td>
+                    <td>{{ item.warning_count }}</td>
+                    <td>{{ item.error_count }}</td>
+                    <td>
+                      {% if item.simulation_run %}
+                        <a href="{{ item.simulation_run.get_absolute_url }}">{{ item.simulation_run.predicted_valid_count }} valid / {{ item.simulation_run.predicted_invalid_count }} invalid / {{ item.simulation_run.predicted_not_found_count }} not-found</a>
+                      {% else %}
+                        <span class="text-muted">No simulation</span>
+                      {% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="card-body text-muted">No open change plans currently require operator attention.</div>
         {% endif %}
       </div>
     </div>

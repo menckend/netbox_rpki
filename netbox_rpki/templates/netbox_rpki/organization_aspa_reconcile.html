@@ -1,0 +1,37 @@
+{% extends 'generic/_base.html' %}
+
+{% block title %}Run ASPA Reconciliation for {{ organization }}{% endblock %}
+
+{% block content %}
+  <div class="row mt-5">
+    <div class="col col-md-8 offset-md-2">
+      <form action="" method="post" class="form">
+        {% csrf_token %}
+        {% for field in form.hidden_fields %}
+          {{ field }}
+        {% endfor %}
+        <div class="card border-primary">
+          <h2 class="card-header">Run ASPA Reconciliation</h2>
+          <div class="card-body">
+            <p>
+              Queue a local ASPA reconciliation for <strong>{{ organization }}</strong>.
+              This compares configured ASPA intents against locally managed ASPA records.
+            </p>
+            <dl class="row mb-0">
+              <dt class="col-sm-4">Organization ID</dt>
+              <dd class="col-sm-8">{{ organization.org_id }}</dd>
+              <dt class="col-sm-4">Name</dt>
+              <dd class="col-sm-8">{{ organization.name }}</dd>
+              <dt class="col-sm-4">Intent Rows</dt>
+              <dd class="col-sm-8">{{ organization.aspa_intents.count }}</dd>
+            </dl>
+          </div>
+          <div class="card-footer text-end">
+            <a href="{{ return_url }}" class="btn btn-outline-secondary">Cancel</a>
+            <button type="submit" name="_confirm" class="btn btn-primary">Queue Reconciliation</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endblock %}

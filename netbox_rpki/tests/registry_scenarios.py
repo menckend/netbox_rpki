@@ -26,6 +26,10 @@ from netbox_rpki.tests.utils import (
     create_test_asn,
     create_test_aspa,
     create_test_aspa_provider,
+    create_test_aspa_intent,
+    create_test_aspa_intent_match,
+    create_test_aspa_intent_result,
+    create_test_aspa_reconciliation_run,
     create_test_certificate,
     create_test_certificate_revocation_list,
     create_test_certificate_asn,
@@ -41,7 +45,10 @@ from netbox_rpki.tests.utils import (
     create_test_imported_aspa,
     create_test_imported_aspa_provider,
     create_test_provider_write_execution,
+    create_test_roa_lint_run,
+    create_test_roa_lint_finding,
     create_test_publication_point,
+    create_test_published_aspa_result,
     create_test_provider_sync_run,
     create_test_provider_snapshot,
     create_test_repository,
@@ -49,6 +56,7 @@ from netbox_rpki.tests.utils import (
     create_test_revoked_certificate,
     create_test_roa_change_plan,
     create_test_roa_change_plan_item,
+    create_test_roa_change_plan_matrix,
     create_test_imported_roa_authorization,
     create_test_roa,
     create_test_roa_intent,
@@ -57,6 +65,8 @@ from netbox_rpki.tests.utils import (
     create_test_roa_intent_result,
     create_test_roa_reconciliation_run,
     create_test_roa_prefix,
+    create_test_roa_validation_simulation_result,
+    create_test_roa_validation_simulation_run,
     create_test_router_certificate,
     create_test_rsc,
     create_test_rsc_file_hash,
@@ -277,9 +287,23 @@ def _build_related_value(field_name: str, token: str, variant: int = 0, for_form
     elif field_name == "basis_derivation_run":
         value = create_test_intent_derivation_run(name=f"Basis Run {token}")
     elif field_name == "reconciliation_run":
-        value = create_test_roa_reconciliation_run(name=f"Reconciliation Run {token}")
+        if spec is not None and spec.model.__name__ in {
+            "ASPAReconciliationRun",
+            "ASPAIntentResult",
+            "PublishedASPAResult",
+            "ASPAIntentMatch",
+        }:
+            value = create_test_aspa_reconciliation_run(name=f"ASPA Reconciliation Run {token}")
+        else:
+            value = create_test_roa_reconciliation_run(name=f"Reconciliation Run {token}")
+    elif field_name == "aspa_intent":
+        value = create_test_aspa_intent(name=f"ASPA Intent {token}")
     elif field_name == "best_roa":
         value = create_test_roa(name=f"Best ROA {token}")
+    elif field_name == "best_aspa":
+        value = create_test_aspa(name=f"Best ASPA {token}")
+    elif field_name == "best_imported_aspa":
+        value = create_test_imported_aspa(name=f"Best Imported ASPA {token}")
     elif field_name == "certificate_name":
         org = create_unique_organization(f"{token}-certificate-org")
         value = create_unique_certificate(f"{token}-certificate", rpki_org=org)
@@ -333,6 +357,7 @@ def _build_scalar_value(field_name: str, token: str, variant: int = 0, for_form:
         "matched_intent_count",
         "published_roa_count",
         "intent_count",
+        "published_aspa_count",
     }:
         return 24 + variant
     if field_name in {"repository_serial"}:
@@ -524,10 +549,21 @@ def _register_scenario_builders() -> None:
                 origin_asn=create_unique_asn(),
                 max_length=24,
             ),
+            "aspaintent": lambda: create_test_aspa_intent(
+                name=f"ASPA Intent {unique_token('aspa-intent')}",
+                customer_as=create_unique_asn(),
+                provider_as=create_unique_asn(),
+            ),
             "roaintentmatch": lambda: create_test_roa_intent_match(name=f"ROA Intent Match {unique_token('roa-intent-match')}"),
+            "aspaintentmatch": lambda: create_test_aspa_intent_match(name=f"ASPA Intent Match {unique_token('aspa-intent-match')}"),
             "roareconciliationrun": lambda: create_test_roa_reconciliation_run(name=f"ROA Reconciliation Run {unique_token('roa-reconciliation-run')}"),
+            "roalintrun": lambda: create_test_roa_lint_run(name=f"ROA Lint Run {unique_token('roa-lint-run')}"),
+            "aspareconciliationrun": lambda: create_test_aspa_reconciliation_run(name=f"ASPA Reconciliation Run {unique_token('aspa-reconciliation-run')}"),
             "roaintentresult": lambda: create_test_roa_intent_result(name=f"ROA Intent Result {unique_token('roa-intent-result')}"),
+            "roalintfinding": lambda: create_test_roa_lint_finding(name=f"ROA Lint Finding {unique_token('roa-lint-finding')}"),
+            "aspaintentresult": lambda: create_test_aspa_intent_result(name=f"ASPA Intent Result {unique_token('aspa-intent-result')}"),
             "publishedroaresult": lambda: create_test_published_roa_result(name=f"Published ROA Result {unique_token('published-roa-result')}"),
+            "publishedasparesult": lambda: create_test_published_aspa_result(name=f"Published ASPA Result {unique_token('published-aspa-result')}"),
             "rpkiprovideraccount": lambda: create_test_provider_account(
                 name=f"Provider Account {unique_token('provider-account')}",
                 org_handle=f"ORG{unique_token('orghandle')}",
@@ -549,8 +585,14 @@ def _register_scenario_builders() -> None:
                 name=f"Imported ASPA {unique_token('imported-aspa')}",
                 customer_as=create_unique_asn(),
             ),
-            "roachangeplan": lambda: create_test_roa_change_plan(name=f"ROA Change Plan {unique_token('roa-change-plan')}"),
-            "roachangeplanitem": lambda: create_test_roa_change_plan_item(name=f"ROA Change Plan Item {unique_token('roa-change-plan-item')}"),
+            "roachangeplan": lambda: build_roa_change_plan_matrix_instance(),
+            "roachangeplanitem": lambda: build_roa_change_plan_matrix_item_instance(),
+            "roavalidationsimulationrun": lambda: create_test_roa_validation_simulation_run(
+                name=f"ROA Validation Simulation Run {unique_token('roa-validation-simulation-run')}"
+            ),
+            "roavalidationsimulationresult": lambda: create_test_roa_validation_simulation_result(
+                name=f"ROA Validation Simulation Result {unique_token('roa-validation-simulation-result')}"
+            ),
         }
     )
 
@@ -886,6 +928,15 @@ def build_certificate_asn_table_rows() -> None:
     certificate = create_unique_certificate("table-certificate-asn-parent", rpki_org=organization)
     create_test_certificate_asn(asn=create_unique_asn(), certificate=certificate)
     create_test_certificate_asn(asn=create_unique_asn(), certificate=certificate)
+
+
+def build_roa_change_plan_matrix_instance():
+    return create_test_roa_change_plan_matrix().provider_plan
+
+
+def build_roa_change_plan_matrix_item_instance():
+    scenario = create_test_roa_change_plan_matrix()
+    return scenario.provider_plan.items.order_by('pk').first()
 
 
 _register_scenario_builders()

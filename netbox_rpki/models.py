@@ -170,6 +170,7 @@ class ROAIntentMatchKind(models.TextChoices):
 
 class ReconciliationComparisonScope(models.TextChoices):
     LOCAL_ROA_RECORDS = "local_roa_records", "Local ROA Records"
+    LOCAL_ASPA_RECORDS = "local_aspa_records", "Local ASPA Records"
     PROVIDER_IMPORTED = "provider_imported", "Provider Imported"
     MIXED = "mixed", "Mixed"
 
@@ -239,6 +240,34 @@ class PublishedROAResultType(models.TextChoices):
     UNSCOPED = "unscoped", "Unscoped"
 
 
+class ASPAIntentMatchKind(models.TextChoices):
+    EXACT = "exact", "Exact"
+    CUSTOMER_MISMATCH = "customer_mismatch", "Customer Mismatch"
+    PROVIDER_MISMATCH = "provider_mismatch", "Provider Mismatch"
+    STALE_CANDIDATE = "stale_candidate", "Stale Candidate"
+
+
+class ASPAIntentResultType(models.TextChoices):
+    MATCH = "match", "Match"
+    MISSING = "missing", "Missing"
+    MISSING_PROVIDER = "missing_provider", "Missing Provider"
+    CUSTOMER_MISMATCH = "customer_mismatch", "Customer Mismatch"
+    PROVIDER_MISMATCH = "provider_mismatch", "Provider Mismatch"
+    STALE = "stale", "Stale"
+    UNSCOPED = "unscoped", "Unscoped"
+
+
+class PublishedASPAResultType(models.TextChoices):
+    MATCHED = "matched", "Matched"
+    ORPHANED = "orphaned", "Orphaned"
+    DUPLICATE = "duplicate", "Duplicate"
+    EXTRA_PROVIDER = "extra_provider", "Extra Provider"
+    MISSING_PROVIDER = "missing_provider", "Missing Provider"
+    CUSTOMER_MISMATCH = "customer_mismatch", "Customer Mismatch"
+    STALE = "stale", "Stale"
+    UNSCOPED = "unscoped", "Unscoped"
+
+
 class ROAChangePlanStatus(models.TextChoices):
     DRAFT = "draft", "Draft"
     APPROVED = "approved", "Approved"
@@ -250,6 +279,13 @@ class ROAChangePlanStatus(models.TextChoices):
 class ROAChangePlanAction(models.TextChoices):
     CREATE = "create", "Create"
     WITHDRAW = "withdraw", "Withdraw"
+
+
+class ROAChangePlanItemSemantic(models.TextChoices):
+    CREATE = "create", "Create"
+    WITHDRAW = "withdraw", "Withdraw"
+    REPLACE = "replace", "Replace"
+    RESHAPE = "reshape", "Reshape"
 
 
 class ProviderWriteOperation(models.TextChoices):
@@ -2090,6 +2126,284 @@ class ImportedAspaProvider(RpkiStandardModel):
         return self.name if hasattr(self, 'name') else 'Imported ASPA Provider'
 
 
+class ASPAIntent(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='aspa_intents'
+    )
+    intent_key = models.CharField(max_length=64)
+    customer_as = models.ForeignKey(
+        to=ASN,
+        on_delete=models.PROTECT,
+        related_name='aspa_customer_intents'
+    )
+    provider_as = models.ForeignKey(
+        to=ASN,
+        on_delete=models.PROTECT,
+        related_name='aspa_provider_intents'
+    )
+    explanation = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ("name",)
+        constraints = (
+            models.UniqueConstraint(
+                fields=("organization", "intent_key"),
+                name="netbox_rpki_aspaintent_org_intent_key_unique",
+            ),
+        )
+        indexes = (
+            models.Index(fields=("organization", "customer_as", "provider_as"), name="nb_rpki_ai_org_pair_idx"),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def clean(self):
+        super().clean()
+        if self.customer_as_id is not None and self.customer_as_id == self.provider_as_id:
+            raise ValidationError({'provider_as': ['Provider ASN must differ from the ASPA customer ASN.']})
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:aspaintent", args=[self.pk])
+
+    @classmethod
+    def build_intent_key(
+        cls,
+        *,
+        customer_asn_value: int | None,
+        provider_asn_value: int | None,
+    ) -> str:
+        normalized = "|".join(
+            str(value)
+            for value in (
+                customer_asn_value if customer_asn_value is not None else "",
+                provider_asn_value if provider_asn_value is not None else "",
+            )
+        )
+        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+class ASPAIntentMatch(NamedRpkiStandardModel):
+    aspa_intent = models.ForeignKey(
+        to='ASPAIntent',
+        on_delete=models.PROTECT,
+        related_name='candidate_matches'
+    )
+    aspa = models.ForeignKey(
+        to='ASPA',
+        on_delete=models.PROTECT,
+        related_name='intent_matches',
+        blank=True,
+        null=True
+    )
+    imported_aspa = models.ForeignKey(
+        to='ImportedAspa',
+        on_delete=models.PROTECT,
+        related_name='intent_matches',
+        blank=True,
+        null=True
+    )
+    match_kind = models.CharField(
+        max_length=32,
+        choices=ASPAIntentMatchKind.choices,
+        default=ASPAIntentMatchKind.EXACT,
+    )
+    is_best_match = models.BooleanField(default=False)
+    details_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("name",)
+        constraints = (
+            models.UniqueConstraint(
+                fields=("aspa_intent", "aspa"),
+                condition=models.Q(aspa__isnull=False, imported_aspa__isnull=True),
+                name="netbox_rpki_aspaintentmatch_aspa_intent_aspa_unique",
+            ),
+            models.UniqueConstraint(
+                fields=("aspa_intent", "imported_aspa"),
+                condition=models.Q(aspa__isnull=True, imported_aspa__isnull=False),
+                name="netbox_rpki_aspaintentmatch_aspa_intent_imported_unique",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(aspa__isnull=False, imported_aspa__isnull=True)
+                    | models.Q(aspa__isnull=True, imported_aspa__isnull=False)
+                ),
+                name="netbox_rpki_aspaintentmatch_exactly_one_source",
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:aspaintentmatch", args=[self.pk])
+
+
+class ASPAReconciliationRun(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='aspa_reconciliation_runs'
+    )
+    provider_snapshot = models.ForeignKey(
+        to='ProviderSnapshot',
+        on_delete=models.PROTECT,
+        related_name='aspa_reconciliation_runs',
+        blank=True,
+        null=True
+    )
+    comparison_scope = models.CharField(
+        max_length=32,
+        choices=ReconciliationComparisonScope.choices,
+        default=ReconciliationComparisonScope.LOCAL_ASPA_RECORDS,
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=ValidationRunStatus.choices,
+        default=ValidationRunStatus.PENDING,
+    )
+    started_at = models.DateTimeField(blank=True, null=True)
+    completed_at = models.DateTimeField(blank=True, null=True)
+    intent_count = models.PositiveIntegerField(default=0)
+    published_aspa_count = models.PositiveIntegerField(default=0)
+    result_summary_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("-started_at", "name")
+
+    def __str__(self):
+        return self.name
+
+    def clean(self):
+        super().clean()
+        if self.comparison_scope == ReconciliationComparisonScope.PROVIDER_IMPORTED and self.provider_snapshot_id is None:
+            raise ValidationError({'provider_snapshot': ['Provider snapshot is required for provider-imported ASPA reconciliation runs.']})
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:aspareconciliationrun", args=[self.pk])
+
+
+class ASPAIntentResult(NamedRpkiStandardModel):
+    reconciliation_run = models.ForeignKey(
+        to='ASPAReconciliationRun',
+        on_delete=models.PROTECT,
+        related_name='intent_results'
+    )
+    aspa_intent = models.ForeignKey(
+        to='ASPAIntent',
+        on_delete=models.PROTECT,
+        related_name='reconciliation_results'
+    )
+    result_type = models.CharField(
+        max_length=32,
+        choices=ASPAIntentResultType.choices,
+        default=ASPAIntentResultType.MATCH,
+    )
+    severity = models.CharField(
+        max_length=16,
+        choices=ReconciliationSeverity.choices,
+        default=ReconciliationSeverity.INFO,
+    )
+    best_aspa = models.ForeignKey(
+        to=ASPA,
+        on_delete=models.SET_NULL,
+        related_name='intent_result_matches',
+        blank=True,
+        null=True
+    )
+    best_imported_aspa = models.ForeignKey(
+        to='ImportedAspa',
+        on_delete=models.SET_NULL,
+        related_name='intent_result_matches',
+        blank=True,
+        null=True
+    )
+    match_count = models.PositiveIntegerField(default=0)
+    details_json = models.JSONField(default=dict, blank=True)
+    computed_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        ordering = ("name",)
+        constraints = (
+            models.UniqueConstraint(
+                fields=("reconciliation_run", "aspa_intent"),
+                name="netbox_rpki_aspaintentresult_run_intent_unique",
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:aspaintentresult", args=[self.pk])
+
+
+class PublishedASPAResult(NamedRpkiStandardModel):
+    reconciliation_run = models.ForeignKey(
+        to='ASPAReconciliationRun',
+        on_delete=models.PROTECT,
+        related_name='published_aspa_results'
+    )
+    aspa = models.ForeignKey(
+        to=ASPA,
+        on_delete=models.PROTECT,
+        related_name='published_reconciliation_results',
+        blank=True,
+        null=True
+    )
+    imported_aspa = models.ForeignKey(
+        to='ImportedAspa',
+        on_delete=models.PROTECT,
+        related_name='published_reconciliation_results',
+        blank=True,
+        null=True
+    )
+    result_type = models.CharField(
+        max_length=64,
+        choices=PublishedASPAResultType.choices,
+        default=PublishedASPAResultType.MATCHED,
+    )
+    severity = models.CharField(
+        max_length=16,
+        choices=ReconciliationSeverity.choices,
+        default=ReconciliationSeverity.INFO,
+    )
+    matched_intent_count = models.PositiveIntegerField(default=0)
+    details_json = models.JSONField(default=dict, blank=True)
+    computed_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        ordering = ("name",)
+        constraints = (
+            models.UniqueConstraint(
+                fields=("reconciliation_run", "aspa"),
+                condition=models.Q(aspa__isnull=False, imported_aspa__isnull=True),
+                name="netbox_rpki_publishedasparesult_run_aspa_unique",
+            ),
+            models.UniqueConstraint(
+                fields=("reconciliation_run", "imported_aspa"),
+                condition=models.Q(aspa__isnull=True, imported_aspa__isnull=False),
+                name="netbox_rpki_publishedasparesult_run_imported_unique",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(aspa__isnull=False, imported_aspa__isnull=True)
+                    | models.Q(aspa__isnull=True, imported_aspa__isnull=False)
+                ),
+                name="netbox_rpki_publishedasparesult_exactly_one_source",
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:publishedasparesult", args=[self.pk])
+
+
 class ROAIntentMatch(NamedRpkiStandardModel):
     roa_intent = models.ForeignKey(
         to='ROAIntent',
@@ -2195,6 +2509,43 @@ class ROAReconciliationRun(NamedRpkiStandardModel):
 
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:roareconciliationrun", args=[self.pk])
+
+
+class ROALintRun(NamedRpkiStandardModel):
+    reconciliation_run = models.ForeignKey(
+        to='ROAReconciliationRun',
+        on_delete=models.PROTECT,
+        related_name='lint_runs'
+    )
+    change_plan = models.ForeignKey(
+        to='ROAChangePlan',
+        on_delete=models.PROTECT,
+        related_name='lint_runs',
+        blank=True,
+        null=True
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=ValidationRunStatus.choices,
+        default=ValidationRunStatus.PENDING,
+    )
+    started_at = models.DateTimeField(blank=True, null=True)
+    completed_at = models.DateTimeField(blank=True, null=True)
+    finding_count = models.PositiveIntegerField(default=0)
+    info_count = models.PositiveIntegerField(default=0)
+    warning_count = models.PositiveIntegerField(default=0)
+    error_count = models.PositiveIntegerField(default=0)
+    critical_count = models.PositiveIntegerField(default=0)
+    summary_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("-started_at", "name")
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:roalintrun", args=[self.pk])
 
 
 class ROAIntentResult(NamedRpkiStandardModel):
@@ -2314,6 +2665,52 @@ class PublishedROAResult(NamedRpkiStandardModel):
 
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:publishedroaresult", args=[self.pk])
+
+
+class ROALintFinding(NamedRpkiStandardModel):
+    lint_run = models.ForeignKey(
+        to='ROALintRun',
+        on_delete=models.PROTECT,
+        related_name='findings'
+    )
+    roa_intent_result = models.ForeignKey(
+        to='ROAIntentResult',
+        on_delete=models.PROTECT,
+        related_name='lint_findings',
+        blank=True,
+        null=True
+    )
+    published_roa_result = models.ForeignKey(
+        to='PublishedROAResult',
+        on_delete=models.PROTECT,
+        related_name='lint_findings',
+        blank=True,
+        null=True
+    )
+    change_plan_item = models.ForeignKey(
+        to='ROAChangePlanItem',
+        on_delete=models.PROTECT,
+        related_name='lint_findings',
+        blank=True,
+        null=True
+    )
+    finding_code = models.CharField(max_length=64)
+    severity = models.CharField(
+        max_length=16,
+        choices=ReconciliationSeverity.choices,
+        default=ReconciliationSeverity.INFO,
+    )
+    details_json = models.JSONField(default=dict, blank=True)
+    computed_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        ordering = ("name",)
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:roalintfinding", args=[self.pk])
 
 
 class ROAChangePlan(NamedRpkiStandardModel):
@@ -2557,6 +2954,13 @@ class ROAChangePlanItem(NamedRpkiStandardModel):
         max_length=16,
         choices=ROAChangePlanAction.choices,
     )
+    # action_type remains the physical delta; plan_semantic captures the logical change class.
+    plan_semantic = models.CharField(
+        max_length=16,
+        choices=ROAChangePlanItemSemantic.choices,
+        blank=True,
+        null=True,
+    )
     roa_intent = models.ForeignKey(
         to='ROAIntent',
         on_delete=models.PROTECT,
@@ -2596,6 +3000,72 @@ class ROAChangePlanItem(NamedRpkiStandardModel):
 
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:roachangeplanitem", args=[self.pk])
+
+
+class ROAValidationSimulationRun(NamedRpkiStandardModel):
+    change_plan = models.ForeignKey(
+        to='ROAChangePlan',
+        on_delete=models.PROTECT,
+        related_name='simulation_runs'
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=ValidationRunStatus.choices,
+        default=ValidationRunStatus.PENDING,
+    )
+    started_at = models.DateTimeField(blank=True, null=True)
+    completed_at = models.DateTimeField(blank=True, null=True)
+    result_count = models.PositiveIntegerField(default=0)
+    predicted_valid_count = models.PositiveIntegerField(default=0)
+    predicted_invalid_count = models.PositiveIntegerField(default=0)
+    predicted_not_found_count = models.PositiveIntegerField(default=0)
+    summary_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("-started_at", "name")
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:roavalidationsimulationrun", args=[self.pk])
+
+
+class ROAValidationSimulationOutcome(models.TextChoices):
+    VALID = "valid", "Valid"
+    INVALID = "invalid", "Invalid"
+    NOT_FOUND = "not_found", "Not Found"
+
+
+class ROAValidationSimulationResult(NamedRpkiStandardModel):
+    simulation_run = models.ForeignKey(
+        to='ROAValidationSimulationRun',
+        on_delete=models.PROTECT,
+        related_name='results'
+    )
+    change_plan_item = models.ForeignKey(
+        to='ROAChangePlanItem',
+        on_delete=models.PROTECT,
+        related_name='simulation_results',
+        blank=True,
+        null=True
+    )
+    outcome_type = models.CharField(
+        max_length=16,
+        choices=ROAValidationSimulationOutcome.choices,
+        default=ROAValidationSimulationOutcome.NOT_FOUND,
+    )
+    details_json = models.JSONField(default=dict, blank=True)
+    computed_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        ordering = ("name",)
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:roavalidationsimulationresult", args=[self.pk])
 
 
 def _register_plugin_action_urls():

@@ -1,7 +1,11 @@
+from dataclasses import dataclass
+from uuid import uuid4
+
 from django.utils.text import slugify
 from netaddr import IPNetwork
 
 from ipam.models import ASN, Prefix, RIR
+from tenancy.models import Tenant
 
 from netbox_rpki import models as rpki_models
 from netbox_rpki.sample_data import count_seed_sample_data, seed_sample_data
@@ -473,6 +477,37 @@ def create_test_aspa_provider(aspa=None, provider_as=None, is_current=True, **kw
         aspa=aspa,
         provider_as=provider_as,
         is_current=is_current,
+        **kwargs,
+    )
+
+
+def create_test_aspa_intent(
+    name='ASPA Intent 1',
+    organization=None,
+    intent_key='',
+    customer_as=None,
+    provider_as=None,
+    explanation='',
+    **kwargs,
+):
+    if organization is None:
+        organization = create_test_organization()
+    if customer_as is None:
+        customer_as = create_test_asn()
+    if provider_as is None:
+        provider_as = create_test_asn(customer_as.asn + 1)
+    if not intent_key:
+        intent_key = rpki_models.ASPAIntent.build_intent_key(
+            customer_asn_value=customer_as.asn,
+            provider_asn_value=provider_as.asn,
+        )
+    return rpki_models.ASPAIntent.objects.create(
+        name=name,
+        organization=organization,
+        intent_key=intent_key,
+        customer_as=customer_as,
+        provider_as=provider_as,
+        explanation=explanation,
         **kwargs,
     )
 
@@ -1161,6 +1196,32 @@ def create_test_imported_aspa_provider(
     )
 
 
+def create_test_aspa_intent_match(
+    name='ASPA Intent Match 1',
+    aspa_intent=None,
+    aspa=None,
+    imported_aspa=None,
+    match_kind=None,
+    is_best_match=False,
+    details_json=None,
+    **kwargs,
+):
+    if aspa_intent is None:
+        aspa_intent = create_test_aspa_intent()
+    if aspa is None and imported_aspa is None:
+        aspa = create_test_aspa(customer_as=aspa_intent.customer_as)
+    return rpki_models.ASPAIntentMatch.objects.create(
+        name=name,
+        aspa_intent=aspa_intent,
+        aspa=aspa,
+        imported_aspa=imported_aspa,
+        match_kind=match_kind or rpki_models.ASPAIntentMatchKind.EXACT,
+        is_best_match=is_best_match,
+        details_json=details_json or {},
+        **kwargs,
+    )
+
+
 def create_test_roa_intent_match(
     name='ROA Intent Match 1',
     roa_intent=None,
@@ -1221,6 +1282,154 @@ def create_test_roa_reconciliation_run(
         published_roa_count=published_roa_count,
         intent_count=intent_count,
         result_summary_json=result_summary_json or {},
+        **kwargs,
+    )
+
+
+def create_test_roa_lint_run(
+    name='ROA Lint Run 1',
+    reconciliation_run=None,
+    change_plan=None,
+    status=None,
+    started_at=None,
+    completed_at=None,
+    finding_count=0,
+    info_count=0,
+    warning_count=0,
+    error_count=0,
+    critical_count=0,
+    summary_json=None,
+    **kwargs,
+):
+    if reconciliation_run is None:
+        reconciliation_run = create_test_roa_reconciliation_run()
+    return rpki_models.ROALintRun.objects.create(
+        name=name,
+        reconciliation_run=reconciliation_run,
+        change_plan=change_plan,
+        tenant=reconciliation_run.tenant,
+        status=status or rpki_models.ValidationRunStatus.COMPLETED,
+        started_at=started_at,
+        completed_at=completed_at,
+        finding_count=finding_count,
+        info_count=info_count,
+        warning_count=warning_count,
+        error_count=error_count,
+        critical_count=critical_count,
+        summary_json=summary_json or {},
+        **kwargs,
+    )
+
+
+def create_test_aspa_reconciliation_run(
+    name='ASPA Reconciliation Run 1',
+    organization=None,
+    provider_snapshot=None,
+    comparison_scope=None,
+    status=None,
+    started_at=None,
+    completed_at=None,
+    intent_count=0,
+    published_aspa_count=0,
+    result_summary_json=None,
+    **kwargs,
+):
+    if organization is None:
+        organization = create_test_organization()
+    resolved_scope = comparison_scope or rpki_models.ReconciliationComparisonScope.LOCAL_ASPA_RECORDS
+    if provider_snapshot is None and resolved_scope == rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED:
+        provider_snapshot = create_test_provider_snapshot(organization=organization)
+    return rpki_models.ASPAReconciliationRun.objects.create(
+        name=name,
+        organization=organization,
+        provider_snapshot=provider_snapshot,
+        comparison_scope=resolved_scope,
+        status=status or rpki_models.ValidationRunStatus.PENDING,
+        started_at=started_at,
+        completed_at=completed_at,
+        intent_count=intent_count,
+        published_aspa_count=published_aspa_count,
+        result_summary_json=result_summary_json or {},
+        **kwargs,
+    )
+
+
+def create_test_aspa_intent_result(
+    name='ASPA Intent Result 1',
+    reconciliation_run=None,
+    aspa_intent=None,
+    result_type=None,
+    severity=None,
+    best_aspa=None,
+    best_imported_aspa=None,
+    match_count=0,
+    details_json=None,
+    computed_at=None,
+    **kwargs,
+):
+    if aspa_intent is None:
+        aspa_intent = create_test_aspa_intent()
+    if reconciliation_run is None:
+        run_scope = rpki_models.ReconciliationComparisonScope.LOCAL_ASPA_RECORDS
+        provider_snapshot = None
+        if best_imported_aspa is not None and best_aspa is None:
+            run_scope = rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED
+            provider_snapshot = best_imported_aspa.provider_snapshot
+        reconciliation_run = create_test_aspa_reconciliation_run(
+            organization=aspa_intent.organization,
+            provider_snapshot=provider_snapshot,
+            comparison_scope=run_scope,
+        )
+    return rpki_models.ASPAIntentResult.objects.create(
+        name=name,
+        reconciliation_run=reconciliation_run,
+        aspa_intent=aspa_intent,
+        result_type=result_type or rpki_models.ASPAIntentResultType.MATCH,
+        severity=severity or rpki_models.ReconciliationSeverity.INFO,
+        best_aspa=best_aspa,
+        best_imported_aspa=best_imported_aspa,
+        match_count=match_count,
+        details_json=details_json or {},
+        computed_at=computed_at,
+        **kwargs,
+    )
+
+
+def create_test_published_aspa_result(
+    name='Published ASPA Result 1',
+    reconciliation_run=None,
+    aspa=None,
+    imported_aspa=None,
+    result_type=None,
+    severity=None,
+    matched_intent_count=0,
+    details_json=None,
+    computed_at=None,
+    **kwargs,
+):
+    if aspa is None and imported_aspa is None:
+        aspa = create_test_aspa()
+    if reconciliation_run is None:
+        run_scope = rpki_models.ReconciliationComparisonScope.LOCAL_ASPA_RECORDS
+        provider_snapshot = None
+        if imported_aspa is not None and aspa is None:
+            run_scope = rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED
+            provider_snapshot = imported_aspa.provider_snapshot
+        reconciliation_run = create_test_aspa_reconciliation_run(
+            organization=getattr(aspa, 'organization', None) or getattr(imported_aspa, 'organization', None),
+            provider_snapshot=provider_snapshot,
+            comparison_scope=run_scope,
+        )
+    return rpki_models.PublishedASPAResult.objects.create(
+        name=name,
+        reconciliation_run=reconciliation_run,
+        aspa=aspa,
+        imported_aspa=imported_aspa,
+        result_type=result_type or rpki_models.PublishedASPAResultType.MATCHED,
+        severity=severity or rpki_models.ReconciliationSeverity.INFO,
+        matched_intent_count=matched_intent_count,
+        details_json=details_json or {},
+        computed_at=computed_at,
         **kwargs,
     )
 
@@ -1298,6 +1507,35 @@ def create_test_published_roa_result(
     )
 
 
+def create_test_roa_lint_finding(
+    name='ROA Lint Finding 1',
+    lint_run=None,
+    roa_intent_result=None,
+    published_roa_result=None,
+    change_plan_item=None,
+    finding_code='replacement_required',
+    severity=None,
+    details_json=None,
+    computed_at=None,
+    **kwargs,
+):
+    if lint_run is None:
+        lint_run = create_test_roa_lint_run()
+    return rpki_models.ROALintFinding.objects.create(
+        name=name,
+        lint_run=lint_run,
+        tenant=lint_run.tenant,
+        roa_intent_result=roa_intent_result,
+        published_roa_result=published_roa_result,
+        change_plan_item=change_plan_item,
+        finding_code=finding_code,
+        severity=severity or rpki_models.ReconciliationSeverity.WARNING,
+        details_json=details_json or {},
+        computed_at=computed_at,
+        **kwargs,
+    )
+
+
 def create_test_roa_change_plan(
     name='ROA Change Plan 1',
     organization=None,
@@ -1355,6 +1593,7 @@ def create_test_roa_change_plan_item(
     name='ROA Change Plan Item 1',
     change_plan=None,
     action_type=None,
+    plan_semantic=None,
     roa_intent=None,
     roa=None,
     imported_authorization=None,
@@ -1371,6 +1610,7 @@ def create_test_roa_change_plan_item(
         name=name,
         change_plan=change_plan,
         action_type=action_type or rpki_models.ROAChangePlanAction.CREATE,
+        plan_semantic=plan_semantic,
         roa_intent=roa_intent,
         roa=roa,
         imported_authorization=imported_authorization,
@@ -1380,6 +1620,199 @@ def create_test_roa_change_plan_item(
         after_state_json=after_state_json or {},
         reason=reason,
         **kwargs,
+    )
+
+
+def create_test_roa_validation_simulation_run(
+    name='ROA Validation Simulation Run 1',
+    change_plan=None,
+    status=None,
+    started_at=None,
+    completed_at=None,
+    result_count=0,
+    predicted_valid_count=0,
+    predicted_invalid_count=0,
+    predicted_not_found_count=0,
+    summary_json=None,
+    **kwargs,
+):
+    if change_plan is None:
+        change_plan = create_test_roa_change_plan()
+    return rpki_models.ROAValidationSimulationRun.objects.create(
+        name=name,
+        change_plan=change_plan,
+        tenant=change_plan.tenant,
+        status=status or rpki_models.ValidationRunStatus.COMPLETED,
+        started_at=started_at,
+        completed_at=completed_at,
+        result_count=result_count,
+        predicted_valid_count=predicted_valid_count,
+        predicted_invalid_count=predicted_invalid_count,
+        predicted_not_found_count=predicted_not_found_count,
+        summary_json=summary_json or {},
+        **kwargs,
+    )
+
+
+def create_test_roa_validation_simulation_result(
+    name='ROA Validation Simulation Result 1',
+    simulation_run=None,
+    change_plan_item=None,
+    outcome_type=None,
+    details_json=None,
+    computed_at=None,
+    **kwargs,
+):
+    if simulation_run is None:
+        simulation_run = create_test_roa_validation_simulation_run()
+    return rpki_models.ROAValidationSimulationResult.objects.create(
+        name=name,
+        simulation_run=simulation_run,
+        tenant=simulation_run.tenant,
+        change_plan_item=change_plan_item,
+        outcome_type=outcome_type or rpki_models.ROAValidationSimulationOutcome.NOT_FOUND,
+        details_json=details_json or {},
+        computed_at=computed_at,
+        **kwargs,
+    )
+
+
+@dataclass(frozen=True)
+class RoaChangePlanMatrixScenario:
+    organization: object
+    tenant: object
+    intent_profile: object
+    derivation_run: object
+    local_reconciliation_run: object
+    local_plan: object
+    provider_account: object
+    provider_snapshot: object
+    provider_reconciliation_run: object
+    provider_plan: object
+    selected_prefixes: tuple[object, object]
+    orphan_prefix: object
+    replacement_roa: object
+    orphan_roa: object
+    replacement_imported_authorization: object
+    orphan_imported_authorization: object
+
+
+def create_test_roa_change_plan_matrix(
+    *,
+    organization=None,
+    tenant=None,
+    intent_profile=None,
+    provider_account=None,
+    provider_snapshot=None,
+    selected_prefix_cidrs=('10.210.1.0/24', '10.210.2.0/24'),
+    orphan_prefix_cidr='10.210.99.0/24',
+    active_origin_asn=66110,
+    replacement_origin_asn=66111,
+    orphan_origin_asn=66112,
+    replacement_max_length=26,
+    provider_name='Krill',
+) -> RoaChangePlanMatrixScenario:
+    from netbox_rpki.services import create_roa_change_plan, derive_roa_intents, reconcile_roa_intents
+
+    if organization is None:
+        organization = create_test_organization(org_id='roa-plan-matrix-org', name='ROA Plan Matrix Org')
+    if tenant is None:
+        tenant_suffix = uuid4().hex[:8]
+        tenant = Tenant.objects.create(
+            name=f'ROA Plan Matrix Tenant {tenant_suffix}',
+            slug=f'roa-plan-matrix-tenant-{tenant_suffix}',
+        )
+    active_asn = create_test_asn(active_origin_asn)
+    replacement_asn = create_test_asn(replacement_origin_asn)
+    orphan_asn = create_test_asn(orphan_origin_asn)
+    if intent_profile is None:
+        intent_profile = create_test_routing_intent_profile(
+            name='ROA Plan Matrix Profile',
+            organization=organization,
+            status=rpki_models.RoutingIntentProfileStatus.ACTIVE,
+            selector_mode=rpki_models.RoutingIntentSelectorMode.FILTERED,
+            prefix_selector_query=f'tenant_id={tenant.pk}',
+            asn_selector_query=f'id={active_asn.pk}',
+        )
+
+    selected_prefixes = tuple(
+        create_test_prefix(prefix_cidr, tenant=tenant, status='active')
+        for prefix_cidr in selected_prefix_cidrs
+    )
+    orphan_prefix = create_test_prefix(orphan_prefix_cidr, status='active')
+
+    derivation_run = derive_roa_intents(intent_profile)
+
+    local_certificate = create_test_certificate(name='ROA Plan Matrix Local Cert', rpki_org=organization)
+    replacement_roa = create_test_roa(name='ROA Plan Matrix Replacement ROA', signed_by=local_certificate, origin_as=replacement_asn)
+    create_test_roa_prefix(prefix=selected_prefixes[0], roa=replacement_roa, max_length=replacement_max_length)
+    orphan_roa = create_test_roa(name='ROA Plan Matrix Orphan ROA', signed_by=local_certificate, origin_as=orphan_asn)
+    create_test_roa_prefix(prefix=orphan_prefix, roa=orphan_roa, max_length=24)
+
+    local_reconciliation_run = reconcile_roa_intents(derivation_run)
+    local_plan = create_roa_change_plan(local_reconciliation_run, name='ROA Plan Matrix Local Plan')
+
+    if provider_account is None:
+        provider_account = create_test_provider_account(
+            name='ROA Plan Matrix Provider Account',
+            organization=organization,
+            provider_type=rpki_models.ProviderType.KRILL,
+            org_handle='ORG-ROA-PLAN-MATRIX',
+            ca_handle='ca-roa-plan-matrix',
+            api_base_url='https://krill.example.invalid',
+        )
+    if provider_snapshot is None:
+        provider_snapshot = create_test_provider_snapshot(
+            name='ROA Plan Matrix Provider Snapshot',
+            organization=organization,
+            provider_account=provider_account,
+            provider_name=provider_name,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+
+    replacement_imported_authorization = create_test_imported_roa_authorization(
+        name='ROA Plan Matrix Replacement Imported Authorization',
+        provider_snapshot=provider_snapshot,
+        organization=organization,
+        prefix=selected_prefixes[0],
+        origin_asn=replacement_asn,
+        max_length=replacement_max_length,
+        payload_json={'comment': 'replacement target'},
+    )
+    orphan_imported_authorization = create_test_imported_roa_authorization(
+        name='ROA Plan Matrix Orphan Imported Authorization',
+        provider_snapshot=provider_snapshot,
+        organization=organization,
+        prefix=orphan_prefix,
+        origin_asn=orphan_asn,
+        max_length=24,
+        payload_json={'comment': 'orphaned target'},
+    )
+
+    provider_reconciliation_run = reconcile_roa_intents(
+        derivation_run,
+        comparison_scope=rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
+        provider_snapshot=provider_snapshot,
+    )
+    provider_plan = create_roa_change_plan(provider_reconciliation_run, name='ROA Plan Matrix Provider Plan')
+
+    return RoaChangePlanMatrixScenario(
+        organization=organization,
+        tenant=tenant,
+        intent_profile=intent_profile,
+        derivation_run=derivation_run,
+        local_reconciliation_run=local_reconciliation_run,
+        local_plan=local_plan,
+        provider_account=provider_account,
+        provider_snapshot=provider_snapshot,
+        provider_reconciliation_run=provider_reconciliation_run,
+        provider_plan=provider_plan,
+        selected_prefixes=selected_prefixes,
+        orphan_prefix=orphan_prefix,
+        replacement_roa=replacement_roa,
+        orphan_roa=orphan_roa,
+        replacement_imported_authorization=replacement_imported_authorization,
+        orphan_imported_authorization=orphan_imported_authorization,
     )
 
 

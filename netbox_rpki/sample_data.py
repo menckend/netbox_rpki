@@ -44,6 +44,11 @@ SEED_TARGET_MODELS = (
     rpki_models.CertificateAsn,
     rpki_models.ASPA,
     rpki_models.ASPAProvider,
+    rpki_models.ASPAIntent,
+    rpki_models.ASPAIntentMatch,
+    rpki_models.ASPAReconciliationRun,
+    rpki_models.ASPAIntentResult,
+    rpki_models.PublishedASPAResult,
     rpki_models.RSC,
     rpki_models.RSCFileHash,
     rpki_models.RouterCertificate,
@@ -206,6 +211,11 @@ def seed_sample_data(
     certificate_asns = []
     aspas = []
     aspa_providers = []
+    aspa_intents = []
+    aspa_intent_matches = []
+    aspa_reconciliation_runs = []
+    aspa_intent_results = []
+    published_aspa_results = []
     rscs = []
     rsc_file_hashes = []
     router_certificates = []
@@ -438,6 +448,68 @@ def seed_sample_data(
             is_current=True,
             tenant=tenants[index],
             **_seeded_text_kwargs(rpki_models.ASPAProvider, marker),
+        )
+        aspa_intent_key = rpki_models.ASPAIntent.build_intent_key(
+            customer_asn_value=customer_asns[index].asn,
+            provider_asn_value=provider_asns[index].asn,
+        )
+        aspa_intent = rpki_models.ASPAIntent.objects.create(
+            name=f"{label_prefix} ASPA Intent {suffix}",
+            organization=organization,
+            intent_key=aspa_intent_key,
+            customer_as=customer_asns[index],
+            provider_as=provider_asns[index],
+            explanation=f"seed intent {suffix}",
+            tenant=tenants[index],
+            **_seeded_text_kwargs(rpki_models.ASPAIntent, marker),
+        )
+        aspa_intent_match = rpki_models.ASPAIntentMatch.objects.create(
+            name=f"{label_prefix} ASPA Intent Match {suffix}",
+            aspa_intent=aspa_intent,
+            aspa=aspa,
+            match_kind=rpki_models.ASPAIntentMatchKind.EXACT,
+            is_best_match=True,
+            details_json={"seed_suffix": suffix},
+            tenant=tenants[index],
+            **_seeded_text_kwargs(rpki_models.ASPAIntentMatch, marker),
+        )
+        aspa_reconciliation_run = rpki_models.ASPAReconciliationRun.objects.create(
+            name=f"{label_prefix} ASPA Reconciliation Run {suffix}",
+            organization=organization,
+            comparison_scope=rpki_models.ReconciliationComparisonScope.LOCAL_ASPA_RECORDS,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+            started_at=started_at,
+            completed_at=completed_at,
+            intent_count=1,
+            published_aspa_count=1,
+            result_summary_json={"matches": 1},
+            tenant=tenants[index],
+            **_seeded_text_kwargs(rpki_models.ASPAReconciliationRun, marker),
+        )
+        aspa_intent_result = rpki_models.ASPAIntentResult.objects.create(
+            name=f"{label_prefix} ASPA Intent Result {suffix}",
+            reconciliation_run=aspa_reconciliation_run,
+            aspa_intent=aspa_intent,
+            result_type=rpki_models.ASPAIntentResultType.MATCH,
+            severity=rpki_models.ReconciliationSeverity.INFO,
+            best_aspa=aspa,
+            match_count=1,
+            details_json={"seed_suffix": suffix},
+            computed_at=completed_at,
+            tenant=tenants[index],
+            **_seeded_text_kwargs(rpki_models.ASPAIntentResult, marker),
+        )
+        published_aspa_result = rpki_models.PublishedASPAResult.objects.create(
+            name=f"{label_prefix} Published ASPA Result {suffix}",
+            reconciliation_run=aspa_reconciliation_run,
+            aspa=aspa,
+            result_type=rpki_models.PublishedASPAResultType.MATCHED,
+            severity=rpki_models.ReconciliationSeverity.INFO,
+            matched_intent_count=1,
+            details_json={"seed_suffix": suffix},
+            computed_at=completed_at,
+            tenant=tenants[index],
+            **_seeded_text_kwargs(rpki_models.PublishedASPAResult, marker),
         )
         rsc = rpki_models.RSC.objects.create(
             name=f"{label_prefix} RSC {suffix}",
@@ -726,6 +798,11 @@ def seed_sample_data(
         certificate_asns.append(certificate_asn)
         aspas.append(aspa)
         aspa_providers.append(aspa_provider)
+        aspa_intents.append(aspa_intent)
+        aspa_intent_matches.append(aspa_intent_match)
+        aspa_reconciliation_runs.append(aspa_reconciliation_run)
+        aspa_intent_results.append(aspa_intent_result)
+        published_aspa_results.append(published_aspa_result)
         rscs.append(rsc)
         rsc_file_hashes.append(rsc_file_hash)
         router_certificates.append(router_certificate)
@@ -777,6 +854,11 @@ def seed_sample_data(
         "certificate_asns": certificate_asns,
         "aspas": aspas,
         "aspa_providers": aspa_providers,
+        "aspa_intents": aspa_intents,
+        "aspa_intent_matches": aspa_intent_matches,
+        "aspa_reconciliation_runs": aspa_reconciliation_runs,
+        "aspa_intent_results": aspa_intent_results,
+        "published_aspa_results": published_aspa_results,
         "rscs": rscs,
         "rsc_file_hashes": rsc_file_hashes,
         "router_certificates": router_certificates,

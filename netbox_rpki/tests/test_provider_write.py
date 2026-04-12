@@ -26,6 +26,7 @@ from netbox_rpki.tests.utils import (
     create_test_provider_snapshot,
     create_test_provider_sync_run,
     create_test_roa_change_plan,
+    create_test_roa_change_plan_matrix,
     create_test_routing_intent_profile,
 )
 
@@ -161,6 +162,42 @@ class ProviderWriteServiceTestCase(TestCase):
                         'prefix': '10.77.0.0/24',
                         'max_length': 26,
                         'comment': 'replace this route',
+                    },
+                ],
+            },
+        )
+
+    def test_build_krill_delta_translates_mixed_create_withdraw_and_replacement_items(self):
+        scenario = create_test_roa_change_plan_matrix(
+            organization=self.organization,
+            provider_account=self.provider_account,
+        )
+
+        delta = build_roa_change_plan_delta(scenario.provider_plan)
+
+        self.assertEqual(scenario.provider_plan.summary_json['create_count'], 2)
+        self.assertEqual(scenario.provider_plan.summary_json['withdraw_count'], 2)
+        self.assertEqual(scenario.provider_plan.summary_json['replacement_count'], 1)
+        self.assertTrue(scenario.provider_plan.summary_json['provider_backed'])
+        self.assertEqual(
+            delta,
+            {
+                'added': [
+                    {'asn': 66110, 'prefix': '10.210.1.0/24', 'max_length': 24},
+                    {'asn': 66110, 'prefix': '10.210.2.0/24', 'max_length': 24},
+                ],
+                'removed': [
+                    {
+                        'asn': 66111,
+                        'prefix': '10.210.1.0/24',
+                        'max_length': 26,
+                        'comment': 'replacement target',
+                    },
+                    {
+                        'asn': 66112,
+                        'prefix': '10.210.99.0/24',
+                        'max_length': 24,
+                        'comment': 'orphaned target',
                     },
                 ],
             },
@@ -410,6 +447,7 @@ class ROAChangePlanActionAPITestCase(PluginAPITestCase):
         self.assertIn('delta', response.data)
         self.assertIn('execution', response.data)
         self.assertEqual(response.data['status'], rpki_models.ROAChangePlanStatus.DRAFT)
+        self.assertIn('latest_simulation_summary', response.data)
 
     def test_approve_action_transitions_plan(self):
         self.add_permissions('netbox_rpki.view_roachangeplan', 'netbox_rpki.change_roachangeplan')
@@ -480,6 +518,28 @@ class ROAChangePlanActionAPITestCase(PluginAPITestCase):
         self.assertEqual(self.plan.apply_requested_by, self.user.username)
         self.assertEqual(response.data['execution']['status'], rpki_models.ValidationRunStatus.COMPLETED)
 
+    def test_simulate_action_returns_simulation_run(self):
+        self.add_permissions('netbox_rpki.view_roachangeplan', 'netbox_rpki.change_roachangeplan')
+        url = reverse('plugins-api:netbox_rpki-api:roachangeplan-simulate', kwargs={'pk': self.plan.pk})
+
+        response = self.client.post(url, {}, format='json', **self.header)
+
+        self.assertHttpStatus(response, 200)
+        self.assertIn('simulation_run', response.data)
+        self.assertIn('latest_simulation_summary', response.data)
+        self.assertEqual(response.data['simulation_run']['result_count'], self.plan.items.count())
+
+    def test_summary_action_returns_aggregate_counts(self):
+        self.add_permissions('netbox_rpki.view_roachangeplan')
+        url = reverse('plugins-api:netbox_rpki-api:roachangeplan-summary')
+
+        response = self.client.get(url, **self.header)
+
+        self.assertHttpStatus(response, 200)
+        self.assertIn('total_plans', response.data)
+        self.assertIn('by_status', response.data)
+        self.assertIn('simulated_plan_count', response.data)
+
     def test_provider_account_api_exposes_write_capability_metadata(self):
         self.add_permissions('netbox_rpki.view_rpkiprovideraccount')
         url = reverse('plugins-api:netbox_rpki-api:provideraccount-detail', kwargs={'pk': self.provider_account.pk})
@@ -496,7 +556,7 @@ class ROAChangePlanActionAPITestCase(PluginAPITestCase):
 
     def test_custom_actions_require_change_permission(self):
         self.add_permissions('netbox_rpki.view_roachangeplan')
-        for action in ('preview', 'approve', 'apply'):
+        for action in ('preview', 'approve', 'apply', 'simulate'):
             url = reverse(f'plugins-api:netbox_rpki-api:roachangeplan-{action}', kwargs={'pk': self.plan.pk})
             response = self.client.post(url, {}, format='json', **self.header)
             with self.subTest(action=action):

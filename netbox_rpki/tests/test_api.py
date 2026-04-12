@@ -3,6 +3,7 @@ from datetime import timedelta
 from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 from django.utils import timezone
+from unittest.mock import patch
 
 from netbox_rpki import filtersets
 from netbox_rpki.api import serializers as api_serializers
@@ -37,9 +38,11 @@ from netbox_rpki.tests.utils import (
     create_test_organization,
     create_test_prefix,
     create_test_provider_account,
+    create_test_provider_snapshot,
     create_test_rir,
     create_test_roa,
     create_test_roa_change_plan,
+    create_test_roa_change_plan_matrix,
     create_test_roa_prefix,
     create_test_roa_reconciliation_run,
     create_test_routing_intent_profile,
@@ -154,7 +157,7 @@ class ViewSetSmokeTestCase(SimpleTestCase):
     def test_viewsets_expose_expected_custom_actions_only(self):
         for spec in API_OBJECT_SPECS:
             viewset_class = getattr(api_views, spec.api.viewset_name)
-            expected_actions = CUSTOM_ACTION_CONTRACTS.get(spec.registry_key, {}).get('actions', ())
+            expected_actions = EXTRA_ACTION_NAME_CONTRACTS.get(spec.registry_key, ())
 
             with self.subTest(object_key=spec.registry_key):
                 self.assertEqual(
@@ -187,7 +190,23 @@ def _get_custom_action_route_names(contract):
         return route_names
     return (contract['route_name'],)
 
+EXTRA_ACTION_NAME_CONTRACTS = {
+    'organization': ('run_aspa_reconciliation',),
+    'routingintentprofile': ('run',),
+    'rpkiprovideraccount': ('sync',),
+    'roareconciliationrun': ('create_plan', 'summary'),
+    'roachangeplan': ('apply', 'approve', 'preview', 'simulate', 'summary'),
+}
+
 CUSTOM_ACTION_CONTRACTS = {
+    'organization': {
+        'actions': ('run_aspa_reconciliation',),
+        'route_name': 'plugins-api:netbox_rpki-api:organization-run-aspa-reconciliation',
+        'denied_status': 404,
+        'view_permissions': ('netbox_rpki.view_organization',),
+        'allowed_permissions': ('netbox_rpki.view_organization', 'netbox_rpki.change_organization'),
+        'instance_attr': 'organization',
+    },
     'routingintentprofile': {
         'actions': ('run',),
         'route_name': 'plugins-api:netbox_rpki-api:routingintentprofile-run',
@@ -213,11 +232,12 @@ CUSTOM_ACTION_CONTRACTS = {
         'instance_attr': 'reconciliation_run',
     },
     'roachangeplan': {
-        'actions': ('apply', 'approve', 'preview'),
+        'actions': ('apply', 'approve', 'preview', 'simulate'),
         'route_names': (
             'plugins-api:netbox_rpki-api:roachangeplan-preview',
             'plugins-api:netbox_rpki-api:roachangeplan-approve',
             'plugins-api:netbox_rpki-api:roachangeplan-apply',
+            'plugins-api:netbox_rpki-api:roachangeplan-simulate',
         ),
         'denied_status': 404,
         'view_permissions': ('netbox_rpki.view_roachangeplan',),
@@ -568,6 +588,87 @@ class CustomActionSurfaceContractTestCase(PluginAPITestCase):
 
                 with self.subTest(object_key=registry_key, route_name=route_name):
                     self.assertHttpStatus(response, contract['denied_status'])
+
+
+class OrganizationAspaReconciliationActionAPITestCase(PluginAPITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='org-aspa-action', name='Organization ASPA Action')
+        cls.provider_account = create_test_provider_account(
+            name='Organization ASPA Provider',
+            organization=cls.organization,
+            provider_type='krill',
+            org_handle='ORG-ASPA-ACTION',
+            ca_handle='org-aspa-action',
+        )
+
+    def test_run_aspa_reconciliation_action_enqueues_job(self):
+        self.add_permissions('netbox_rpki.view_organization', 'netbox_rpki.change_organization')
+        url = reverse('plugins-api:netbox_rpki-api:organization-run-aspa-reconciliation', kwargs={'pk': self.organization.pk})
+
+        class StubJob:
+            pk = 880
+            status = 'queued'
+
+            @staticmethod
+            def get_absolute_url():
+                return '/core/jobs/880/'
+
+        with patch(
+            'netbox_rpki.api.views.RunAspaReconciliationJob.enqueue_for_organization',
+            return_value=(StubJob(), True),
+        ) as enqueue_mock:
+            response = self.client.post(url, {}, format='json', **self.header)
+
+        self.assertHttpStatus(response, 200)
+        self.assertEqual(response.data['job']['id'], 880)
+        self.assertFalse(response.data['reconciliation_in_progress'])
+        enqueue_mock.assert_called_once_with(
+            self.organization,
+            comparison_scope='local_aspa_records',
+            provider_snapshot=None,
+            user=self.user,
+        )
+
+    def test_run_aspa_reconciliation_action_accepts_provider_snapshot(self):
+        self.add_permissions('netbox_rpki.view_organization', 'netbox_rpki.change_organization')
+        snapshot = create_test_provider_snapshot(
+            name='Organization ASPA Snapshot',
+            organization=self.organization,
+            provider_account=self.provider_account,
+            status='completed',
+        )
+        url = reverse('plugins-api:netbox_rpki-api:organization-run-aspa-reconciliation', kwargs={'pk': self.organization.pk})
+
+        class StubJob:
+            pk = 881
+            status = 'queued'
+
+            @staticmethod
+            def get_absolute_url():
+                return '/core/jobs/881/'
+
+        with patch(
+            'netbox_rpki.api.views.RunAspaReconciliationJob.enqueue_for_organization',
+            return_value=(StubJob(), True),
+        ) as enqueue_mock:
+            response = self.client.post(
+                url,
+                {
+                    'comparison_scope': 'provider_imported',
+                    'provider_snapshot': snapshot.pk,
+                },
+                format='json',
+                **self.header,
+            )
+
+        self.assertHttpStatus(response, 200)
+        enqueue_mock.assert_called_once_with(
+            self.organization,
+            comparison_scope='provider_imported',
+            provider_snapshot=snapshot,
+            user=self.user,
+        )
 
 
 @_install_registry_api_tests

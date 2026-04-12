@@ -983,6 +983,14 @@ def reconcile_roa_intents(
         'intent_count',
         'result_summary_json',
     ))
+    from netbox_rpki.services.roa_lint import run_roa_lint
+
+    try:
+        lint_run = run_roa_lint(reconciliation_run)
+        reconciliation_run.result_summary_json['lint_run_id'] = lint_run.pk
+    except Exception as exc:
+        reconciliation_run.result_summary_json['lint_error'] = str(exc)
+    reconciliation_run.save(update_fields=('result_summary_json',))
     return reconciliation_run
 
 
@@ -1141,6 +1149,7 @@ def create_roa_change_plan(
     replacement_create_count = 0
     replacement_withdraw_count = 0
     replacement_reason_counts: dict[str, int] = {}
+    plan_semantic_counts: dict[str, int] = {}
     skipped_counts: dict[str, int] = {}
     replacement_withdraw_sources: set[str] = set()
 
@@ -1158,6 +1167,7 @@ def create_roa_change_plan(
                 change_plan=plan,
                 tenant=intent_result.tenant,
                 action_type=rpki_models.ROAChangePlanAction.CREATE,
+                plan_semantic=rpki_models.ROAChangePlanItemSemantic.CREATE,
                 roa_intent=intent_result.roa_intent,
                 provider_operation=(
                     rpki_models.ProviderWriteOperation.ADD_ROUTE
@@ -1173,6 +1183,9 @@ def create_roa_change_plan(
                 reason='Intent is active but no published authorization matched.',
             )
             create_count += 1
+            plan_semantic_counts[rpki_models.ROAChangePlanItemSemantic.CREATE] = (
+                plan_semantic_counts.get(rpki_models.ROAChangePlanItemSemantic.CREATE, 0) + 1
+            )
         elif (
             intent_result.roa_intent.derived_state == rpki_models.ROAIntentDerivedState.ACTIVE
             and _intent_result_requires_replacement(intent_result)
@@ -1185,6 +1198,7 @@ def create_roa_change_plan(
                 change_plan=plan,
                 tenant=intent_result.tenant,
                 action_type=rpki_models.ROAChangePlanAction.CREATE,
+                plan_semantic=rpki_models.ROAChangePlanItemSemantic.REPLACE,
                 roa_intent=intent_result.roa_intent,
                 provider_operation=(
                     rpki_models.ProviderWriteOperation.ADD_ROUTE
@@ -1203,6 +1217,9 @@ def create_roa_change_plan(
             create_count += 1
             replacement_count += 1
             replacement_create_count += 1
+            plan_semantic_counts[rpki_models.ROAChangePlanItemSemantic.REPLACE] = (
+                plan_semantic_counts.get(rpki_models.ROAChangePlanItemSemantic.REPLACE, 0) + 1
+            )
             if replacement_reason:
                 replacement_reason_counts[replacement_reason] = replacement_reason_counts.get(replacement_reason, 0) + 1
 
@@ -1213,6 +1230,7 @@ def create_roa_change_plan(
                     change_plan=plan,
                     tenant=intent_result.tenant,
                     action_type=rpki_models.ROAChangePlanAction.WITHDRAW,
+                    plan_semantic=rpki_models.ROAChangePlanItemSemantic.REPLACE,
                     roa=intent_result.best_roa,
                     imported_authorization=intent_result.best_imported_authorization,
                     provider_operation=(
@@ -1231,6 +1249,9 @@ def create_roa_change_plan(
                 )
                 withdraw_count += 1
                 replacement_withdraw_count += 1
+                plan_semantic_counts[rpki_models.ROAChangePlanItemSemantic.REPLACE] = (
+                    plan_semantic_counts.get(rpki_models.ROAChangePlanItemSemantic.REPLACE, 0) + 1
+                )
                 replacement_withdraw_sources.add(withdraw_source_key)
         else:
             skipped_counts[intent_result.result_type] = skipped_counts.get(intent_result.result_type, 0) + 1
@@ -1242,6 +1263,7 @@ def create_roa_change_plan(
                 change_plan=plan,
                 tenant=published_result.tenant,
                 action_type=rpki_models.ROAChangePlanAction.WITHDRAW,
+                plan_semantic=rpki_models.ROAChangePlanItemSemantic.WITHDRAW,
                 roa=published_result.roa,
                 imported_authorization=published_result.imported_authorization,
                 provider_operation=(
@@ -1258,6 +1280,9 @@ def create_roa_change_plan(
                 reason='Published authorization is orphaned relative to current intent.',
             )
             withdraw_count += 1
+            plan_semantic_counts[rpki_models.ROAChangePlanItemSemantic.WITHDRAW] = (
+                plan_semantic_counts.get(rpki_models.ROAChangePlanItemSemantic.WITHDRAW, 0) + 1
+            )
         else:
             skipped_key = f'published:{published_result.result_type}'
             if _plan_withdraw_source_key_for_published_result(published_result) not in replacement_withdraw_sources:
@@ -1274,7 +1299,22 @@ def create_roa_change_plan(
         'provider_account_id': getattr(provider_account, 'pk', None),
         'provider_snapshot_id': getattr(provider_snapshot, 'pk', None),
         'comparison_scope': reconciliation_run.comparison_scope,
+        'plan_semantic_counts': plan_semantic_counts,
         'skipped_counts': skipped_counts,
     }
+    plan.save(update_fields=('summary_json',))
+    from netbox_rpki.services.roa_lint import run_roa_lint
+    from netbox_rpki.services.rov_simulation import simulate_roa_change_plan
+
+    try:
+        lint_run = run_roa_lint(reconciliation_run, change_plan=plan)
+        plan.summary_json['lint_run_id'] = lint_run.pk
+    except Exception as exc:
+        plan.summary_json['lint_error'] = str(exc)
+    try:
+        simulation_run = simulate_roa_change_plan(plan)
+        plan.summary_json['simulation_run_id'] = simulation_run.pk
+    except Exception as exc:
+        plan.summary_json['simulation_error'] = str(exc)
     plan.save(update_fields=('summary_json',))
     return plan

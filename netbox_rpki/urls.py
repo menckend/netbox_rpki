@@ -24,6 +24,14 @@ def build_object_urlpatterns(spec):
                 name='provideraccount_sync',
             )
         )
+    if spec.registry_key == 'organization':
+        urlpatterns.append(
+            path(
+                f'{path_prefix}/<int:pk>/run-aspa-reconciliation/',
+                views.OrganizationRunAspaReconciliationView.as_view(),
+                name='organization_run_aspa_reconciliation',
+            )
+        )
     if spec.registry_key == 'roachangeplan':
         urlpatterns.extend(
             (

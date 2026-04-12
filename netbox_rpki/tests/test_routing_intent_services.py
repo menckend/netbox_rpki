@@ -19,6 +19,7 @@ from netbox_rpki.tests.utils import (
     create_test_provider_snapshot,
     create_test_roa,
     create_test_roa_change_plan,
+    create_test_roa_change_plan_matrix,
     create_test_roa_prefix,
     create_test_routing_intent_profile,
     create_test_roa_intent_override,
@@ -153,6 +154,8 @@ class RoutingIntentServiceTestCase(TestCase):
         self.assertEqual(published_result.details_json['replacement_reason_code'], 'origin_and_max_length_overbroad')
         self.assertEqual(reconciliation_run.result_summary_json['replacement_required_intent_count'], 1)
         self.assertEqual(reconciliation_run.result_summary_json['replacement_required_published_count'], 1)
+        self.assertTrue(reconciliation_run.lint_runs.exists())
+        self.assertIn('lint_run_id', reconciliation_run.result_summary_json)
 
     def test_change_plan_creates_create_and_withdraw_actions(self):
         derivation_run = derive_roa_intents(self.profile)
@@ -278,6 +281,103 @@ class RoutingIntentServiceTestCase(TestCase):
             },
         )
         self.assertEqual(withdraw_item.before_state_json['replacement_reason_code'], 'origin_and_max_length_overbroad')
+
+    def test_change_plan_creation_runs_lint_and_simulation_analysis(self):
+        derivation_run = derive_roa_intents(self.profile)
+        certificate = create_test_certificate(name='Analysis Local Cert', rpki_org=self.organization)
+        replacement_roa = create_test_roa(
+            name='Analysis Local ROA',
+            signed_by=certificate,
+            origin_as=create_test_asn(65564),
+        )
+        create_test_roa_prefix(prefix=self.primary_prefix, roa=replacement_roa, max_length=26)
+
+        reconciliation_run = reconcile_roa_intents(derivation_run)
+        plan = create_roa_change_plan(reconciliation_run)
+
+        self.assertTrue(reconciliation_run.lint_runs.exists())
+        self.assertTrue(plan.lint_runs.exists())
+        self.assertTrue(plan.simulation_runs.exists())
+        self.assertIn('lint_run_id', reconciliation_run.result_summary_json)
+        self.assertIn('lint_run_id', plan.summary_json)
+        self.assertIn('simulation_run_id', plan.summary_json)
+
+        lint_run = plan.lint_runs.get()
+        simulation_run = plan.simulation_runs.get()
+        self.assertGreater(lint_run.finding_count, 0)
+        self.assertEqual(simulation_run.result_count, plan.items.count())
+        self.assertGreaterEqual(simulation_run.predicted_valid_count, 1)
+
+    def test_change_plan_items_record_plan_semantics(self):
+        scenario = create_test_roa_change_plan_matrix()
+
+        local_semantics = list(
+            scenario.local_plan.items.order_by('name').values_list('plan_semantic', flat=True)
+        )
+        provider_semantics = list(
+            scenario.provider_plan.items.order_by('name').values_list('plan_semantic', flat=True)
+        )
+
+        self.assertEqual(local_semantics.count(rpki_models.ROAChangePlanItemSemantic.CREATE), 1)
+        self.assertEqual(local_semantics.count(rpki_models.ROAChangePlanItemSemantic.WITHDRAW), 1)
+        self.assertEqual(local_semantics.count(rpki_models.ROAChangePlanItemSemantic.REPLACE), 2)
+        self.assertEqual(provider_semantics.count(rpki_models.ROAChangePlanItemSemantic.CREATE), 1)
+        self.assertEqual(provider_semantics.count(rpki_models.ROAChangePlanItemSemantic.WITHDRAW), 1)
+        self.assertEqual(provider_semantics.count(rpki_models.ROAChangePlanItemSemantic.REPLACE), 2)
+        self.assertEqual(
+            scenario.provider_plan.summary_json['plan_semantic_counts'],
+            {
+                rpki_models.ROAChangePlanItemSemantic.CREATE: 1,
+                rpki_models.ROAChangePlanItemSemantic.REPLACE: 2,
+                rpki_models.ROAChangePlanItemSemantic.WITHDRAW: 1,
+            },
+        )
+
+    def test_reconciliation_summary_stays_consistent_across_local_and_provider_scopes(self):
+        scenario = create_test_roa_change_plan_matrix()
+
+        local_summary = scenario.local_reconciliation_run.result_summary_json
+        provider_summary = scenario.provider_reconciliation_run.result_summary_json
+
+        self.assertEqual(local_summary['comparison_scope'], rpki_models.ReconciliationComparisonScope.LOCAL_ROA_RECORDS)
+        self.assertEqual(provider_summary['comparison_scope'], rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED)
+        self.assertIsNone(local_summary['provider_snapshot_id'])
+        self.assertEqual(provider_summary['provider_snapshot_id'], scenario.provider_snapshot.pk)
+
+        self.assertEqual(local_summary['intent_result_types'], provider_summary['intent_result_types'])
+        self.assertEqual(local_summary['published_result_types'], provider_summary['published_result_types'])
+        self.assertEqual(local_summary['best_match_kinds'], provider_summary['best_match_kinds'])
+        self.assertEqual(local_summary['replacement_required_intent_count'], 1)
+        self.assertEqual(local_summary['replacement_required_published_count'], 1)
+        self.assertEqual(provider_summary['replacement_required_intent_count'], 1)
+        self.assertEqual(provider_summary['replacement_required_published_count'], 1)
+
+    def test_mixed_change_plan_counts_cover_create_withdraw_and_replacement_combinations(self):
+        scenario = create_test_roa_change_plan_matrix()
+
+        local_plan = scenario.local_plan
+        provider_plan = scenario.provider_plan
+
+        self.assertEqual(local_plan.summary_json['create_count'], 2)
+        self.assertEqual(local_plan.summary_json['withdraw_count'], 2)
+        self.assertEqual(local_plan.summary_json['replacement_count'], 1)
+        self.assertEqual(local_plan.summary_json['replacement_create_count'], 1)
+        self.assertEqual(local_plan.summary_json['replacement_withdraw_count'], 1)
+        self.assertEqual(local_plan.summary_json['replacement_reason_counts'], {'origin_and_max_length_overbroad': 1})
+        self.assertEqual(local_plan.items.filter(action_type=rpki_models.ROAChangePlanAction.CREATE).count(), 2)
+        self.assertEqual(local_plan.items.filter(action_type=rpki_models.ROAChangePlanAction.WITHDRAW).count(), 2)
+
+        self.assertEqual(provider_plan.summary_json['create_count'], 2)
+        self.assertEqual(provider_plan.summary_json['withdraw_count'], 2)
+        self.assertEqual(provider_plan.summary_json['replacement_count'], 1)
+        self.assertEqual(provider_plan.summary_json['replacement_create_count'], 1)
+        self.assertEqual(provider_plan.summary_json['replacement_withdraw_count'], 1)
+        self.assertEqual(provider_plan.summary_json['replacement_reason_counts'], {'origin_and_max_length_overbroad': 1})
+        self.assertTrue(provider_plan.summary_json['provider_backed'])
+        self.assertEqual(provider_plan.summary_json['provider_account_id'], scenario.provider_account.pk)
+        self.assertEqual(provider_plan.summary_json['provider_snapshot_id'], scenario.provider_snapshot.pk)
+        self.assertEqual(provider_plan.items.filter(action_type=rpki_models.ROAChangePlanAction.CREATE).count(), 2)
+        self.assertEqual(provider_plan.items.filter(action_type=rpki_models.ROAChangePlanAction.WITHDRAW).count(), 2)
 
     def test_management_command_runs_pipeline_synchronously(self):
         call_command('run_routing_intent_profile', '--profile', str(self.profile.pk))
@@ -419,3 +519,14 @@ class ROAReconciliationRunCreatePlanAPITestCase(PluginAPITestCase):
         self.assertHttpStatus(response, 200)
         self.assertTrue(rpki_models.ROAChangePlan.objects.filter(source_reconciliation_run=self.reconciliation_run).exists())
         self.assertIn('item_count', response.data)
+
+    def test_summary_action_returns_aggregate_counts(self):
+        self.add_permissions('netbox_rpki.view_roareconciliationrun')
+        url = reverse('plugins-api:netbox_rpki-api:roareconciliationrun-summary')
+
+        response = self.client.get(url, **self.header)
+
+        self.assertHttpStatus(response, 200)
+        self.assertIn('total_runs', response.data)
+        self.assertIn('replacement_required_intent_total', response.data)
+        self.assertIn('lint_warning_total', response.data)

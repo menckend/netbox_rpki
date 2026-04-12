@@ -5,6 +5,7 @@ from urllib.parse import urlencode
 from django.contrib import messages
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.views.generic import View
 from netbox.object_actions import AddObject, BulkExport, CloneObject, DeleteObject, EditObject
 from netbox.views import generic
@@ -12,7 +13,7 @@ from utilities.forms import ConfirmationForm
 from utilities.views import ContentTypePermissionRequiredMixin
 
 from netbox_rpki import models, forms, tables, filtersets
-from netbox_rpki.jobs import SyncProviderAccountJob
+from netbox_rpki.jobs import RunAspaReconciliationJob, SyncProviderAccountJob
 from netbox_rpki.detail_specs import (
     CERTIFICATE_DETAIL_SPEC,
     DETAIL_SPEC_BY_MODEL,
@@ -322,12 +323,64 @@ class ProviderAccountSyncView(generic.ObjectEditView):
         return redirect(provider_account.get_absolute_url())
 
 
+class OrganizationRunAspaReconciliationView(generic.ObjectEditView):
+    queryset = models.Organization.objects.all()
+    template_name = 'netbox_rpki/organization_aspa_reconcile.html'
+
+    def get_required_permission(self):
+        return 'netbox_rpki.change_organization'
+
+    def get_organization(self, pk):
+        return get_object_or_404(self.queryset, pk=pk)
+
+    def _render(self, request, organization, *, form=None, status=200):
+        return render(request, self.template_name, {
+            'object': organization,
+            'organization': organization,
+            'form': form or ConfirmationForm(),
+            'return_url': self.get_return_url(request, organization),
+        }, status=status)
+
+    def get(self, request, pk):
+        organization = self.get_organization(pk)
+        return self._render(request, organization)
+
+    def post(self, request, pk):
+        organization = self.get_organization(pk)
+        form = ConfirmationForm(request.POST)
+        if not form.is_valid():
+            return self._render(request, organization, form=form, status=400)
+
+        job, created = RunAspaReconciliationJob.enqueue_for_organization(
+            organization,
+            user=request.user,
+        )
+        if created:
+            messages.success(
+                request,
+                f'Enqueued ASPA reconciliation job {job.pk} for {organization.name}.',
+            )
+        elif job is not None:
+            messages.warning(
+                request,
+                f'ASPA reconciliation job {job.pk} is already queued for {organization.name}.',
+            )
+        else:
+            messages.warning(
+                request,
+                f'Organization {organization.name} already has an ASPA reconciliation in progress.',
+            )
+        return redirect(organization.get_absolute_url())
+
+
 class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
     template_name = 'netbox_rpki/operations_dashboard.html'
     expiry_window_days = 30
     additional_permissions = [
         'netbox_rpki.view_roa',
         'netbox_rpki.view_certificate',
+        'netbox_rpki.view_roareconciliationrun',
+        'netbox_rpki.view_roachangeplan',
     ]
     provider_health_priority = {
         models.ProviderSyncHealth.FAILED: 0,
@@ -347,11 +400,15 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
             today=today,
             expiry_threshold=expiry_threshold,
         )
+        reconciliation_attention_runs = self.get_reconciliation_attention_runs(request)
+        change_plans_requiring_attention = self.get_change_plans_requiring_attention(request)
 
         return render(request, self.template_name, {
             'provider_accounts': provider_accounts,
             'expiring_roas': expiring_roas,
             'expiring_certificates': expiring_certificates,
+            'reconciliation_attention_runs': reconciliation_attention_runs,
+            'change_plans_requiring_attention': change_plans_requiring_attention,
             'expiry_window_days': self.expiry_window_days,
             'expiry_threshold': expiry_threshold,
         })
@@ -415,6 +472,78 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
             }
             for certificate in queryset
         ]
+
+    def get_reconciliation_attention_runs(self, request):
+        queryset = (
+            models.ROAReconciliationRun.objects.restrict(request.user, 'view')
+            .select_related('organization', 'intent_profile', 'provider_snapshot')
+            .prefetch_related('lint_runs')
+        )
+        runs = []
+        for run in queryset:
+            summary = dict(run.result_summary_json or {})
+            lint_run = run.lint_runs.order_by('-started_at', '-created').first()
+            replacement_count = summary.get('replacement_required_intent_count', 0)
+            warning_count = getattr(lint_run, 'warning_count', 0)
+            error_count = getattr(lint_run, 'error_count', 0) + getattr(lint_run, 'critical_count', 0)
+            if run.status != models.ValidationRunStatus.COMPLETED and replacement_count == 0 and warning_count == 0 and error_count == 0:
+                continue
+            if replacement_count == 0 and warning_count == 0 and error_count == 0:
+                continue
+            runs.append({
+                'object': run,
+                'replacement_count': replacement_count,
+                'warning_count': warning_count,
+                'error_count': error_count,
+                'lint_run': lint_run,
+            })
+        runs.sort(
+            key=lambda item: (
+                item['error_count'],
+                item['warning_count'],
+                item['replacement_count'],
+                (item['object'].completed_at or item['object'].started_at or timezone.now()).timestamp(),
+            ),
+            reverse=True,
+        )
+        return runs[:10]
+
+    def get_change_plans_requiring_attention(self, request):
+        queryset = (
+            models.ROAChangePlan.objects.restrict(request.user, 'view')
+            .select_related('organization', 'provider_account', 'source_reconciliation_run')
+            .prefetch_related('simulation_runs', 'lint_runs')
+        )
+        attention_statuses = {
+            models.ROAChangePlanStatus.DRAFT,
+            models.ROAChangePlanStatus.APPROVED,
+            models.ROAChangePlanStatus.FAILED,
+        }
+        plans = []
+        for plan in queryset:
+            if plan.status not in attention_statuses:
+                continue
+            latest_simulation = plan.simulation_runs.order_by('-started_at', '-created').first()
+            latest_lint_run = plan.lint_runs.order_by('-started_at', '-created').first()
+            plans.append({
+                'object': plan,
+                'replacement_count': (plan.summary_json or {}).get('replacement_count', 0),
+                'warning_count': getattr(latest_lint_run, 'warning_count', 0),
+                'error_count': getattr(latest_lint_run, 'error_count', 0) + getattr(latest_lint_run, 'critical_count', 0),
+                'simulation_run': latest_simulation,
+                'lint_run': latest_lint_run,
+            })
+        plans.sort(
+            key=lambda item: (
+                item['object'].status == models.ROAChangePlanStatus.FAILED,
+                item['error_count'],
+                item['warning_count'],
+                item['replacement_count'],
+                item['object'].created.timestamp(),
+            ),
+            reverse=True,
+        )
+        return plans[:10]
 
     def get_expiry_text(self, valid_to, *, today):
         days_remaining = (valid_to - today).days
