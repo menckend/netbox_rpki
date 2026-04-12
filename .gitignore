@@ -4,6 +4,7 @@
 devrun/.env
 devrun/*.log
 devrun/.state/
+devrun/work_in_progress/
 node_modules/
 playwright-report/
 test-results/
