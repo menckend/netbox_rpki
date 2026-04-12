@@ -36,7 +36,9 @@ from netbox_rpki.tests.utils import (
     create_test_manifest_entry,
     create_test_model,
     create_test_prefix,
+    create_test_provider_account,
     create_test_publication_point,
+    create_test_provider_sync_run,
     create_test_provider_snapshot,
     create_test_repository,
     create_test_rir,
@@ -93,7 +95,7 @@ def _build_expected_route_paths() -> dict[str, dict[str, str]]:
             paths["edit"] = reverse(f"plugins:netbox_rpki:{spec.routes.slug}_edit", kwargs={"pk": 1})
         if spec.view.supports_delete:
             paths["delete"] = reverse(f"plugins:netbox_rpki:{spec.routes.slug}_delete", kwargs={"pk": 1})
-        expected_paths[spec.key] = paths
+        expected_paths[spec.registry_key] = paths
     return expected_paths
 
 
@@ -103,7 +105,7 @@ EXPECTED_MODEL_CHILD_INCLUDE_ROUTES = tuple(
     pattern.pattern._route for pattern in urlpatterns if isinstance(pattern, URLResolver)
 )
 
-EXPECTED_NAVIGATION_GROUPS = tuple((group_name, tuple(spec.key for spec in specs)) for group_name, specs in get_navigation_groups())
+EXPECTED_NAVIGATION_GROUPS = tuple((group_name, tuple(spec.registry_key for spec in specs)) for group_name, specs in get_navigation_groups())
 
 EXPECTED_NAVIGATION_LINKS = {
     group_name: tuple((spec.navigation.label, spec.list_url_name) for spec in specs)
@@ -111,7 +113,7 @@ EXPECTED_NAVIGATION_LINKS = {
 }
 
 EXPECTED_GRAPHQL_FIELD_NAMES_BY_KEY = {
-    spec.key: (spec.graphql.detail_field_name, spec.graphql.list_field_name)
+    spec.registry_key: (spec.graphql.detail_field_name, spec.graphql.list_field_name)
     for spec in GRAPHQL_OBJECT_SPECS
 }
 
@@ -380,7 +382,7 @@ def _build_model_kwargs_for_spec(spec, token: str, variant: int = 0) -> dict[str
 
 
 def _build_form_data_for_spec(spec, token: str | None = None, variant: int = 0) -> dict[str, object]:
-    token = token or unique_token(spec.key)
+    token = token or unique_token(spec.registry_key)
     kwargs = _build_model_kwargs_for_spec(spec, token, variant=variant)
     form_data: dict[str, object] = {}
     form_class = getattr(forms, spec.form.class_name)
@@ -407,8 +409,8 @@ def _build_form_data_for_spec(spec, token: str | None = None, variant: int = 0) 
 
 
 def _build_instance_for_spec(spec, token: str | None = None, variant: int = 0):
-    token = token or unique_token(spec.key)
-    builder = _READONLY_INSTANCE_BUILDERS.get(spec.key)
+    token = token or unique_token(spec.registry_key)
+    builder = _READONLY_INSTANCE_BUILDERS.get(spec.registry_key)
     if builder is not None:
         return builder()
     return create_test_model(spec.model.__name__, **_build_model_kwargs_for_spec(spec, token, variant=variant))
@@ -434,7 +436,7 @@ def _resolve_lookup_value(instance: object, lookup: str):
 
 
 def _build_filter_cases_for_spec(spec) -> tuple[FilterCase, ...]:
-    token = unique_token(f"{spec.key}-filter")
+    token = unique_token(f"{spec.registry_key}-filter")
     alpha = _build_instance_for_spec(spec, token=f"{token}-alpha", variant=0)
     bravo = _build_instance_for_spec(spec, token=f"{token}-bravo", variant=1)
 
@@ -475,8 +477,8 @@ def _build_filter_cases_for_spec(spec) -> tuple[FilterCase, ...]:
 
 
 def _build_table_rows_for_spec(spec) -> None:
-    _build_instance_for_spec(spec, token=f"{spec.key}-table-a", variant=0)
-    _build_instance_for_spec(spec, token=f"{spec.key}-table-b", variant=1)
+    _build_instance_for_spec(spec, token=f"{spec.registry_key}-table-a", variant=0)
+    _build_instance_for_spec(spec, token=f"{spec.registry_key}-table-b", variant=1)
 
 
 def _register_scenario_builders() -> None:
@@ -522,7 +524,12 @@ def _register_scenario_builders() -> None:
             "roareconciliationrun": lambda: create_test_roa_reconciliation_run(name=f"ROA Reconciliation Run {unique_token('roa-reconciliation-run')}"),
             "roaintentresult": lambda: create_test_roa_intent_result(name=f"ROA Intent Result {unique_token('roa-intent-result')}"),
             "publishedroaresult": lambda: create_test_published_roa_result(name=f"Published ROA Result {unique_token('published-roa-result')}"),
+            "rpkiprovideraccount": lambda: create_test_provider_account(
+                name=f"Provider Account {unique_token('provider-account')}",
+                org_handle=f"ORG{unique_token('orghandle')}",
+            ),
             "providersnapshot": lambda: create_test_provider_snapshot(name=f"Provider Snapshot {unique_token('provider-snapshot')}"),
+            "providersyncrun": lambda: create_test_provider_sync_run(name=f"Provider Sync Run {unique_token('provider-sync-run')}"),
             "importedroaauthorization": lambda: create_test_imported_roa_authorization(
                 name=f"Imported ROA Authorization {unique_token('imported-roa-authorization')}",
                 origin_asn=create_unique_asn(),
@@ -629,7 +636,7 @@ def _build_form_scenario(spec):
         for name, field in form_class().fields.items()
         if field.required and not name.startswith("_")
     )
-    builder = _FORM_SCENARIO_BUILDERS.get(spec.key)
+    builder = _FORM_SCENARIO_BUILDERS.get(spec.registry_key)
     if builder is None:
         builder = lambda spec=spec: _build_form_data_for_spec(spec)
 
@@ -639,7 +646,7 @@ def _build_form_scenario(spec):
             payload["_init_time"] = 0
         return payload
 
-    return FormScenario(object_key=spec.key, required_fields=required_fields, build_valid_data=build_valid_data)
+    return FormScenario(object_key=spec.registry_key, required_fields=required_fields, build_valid_data=build_valid_data)
 
 
 FORM_SCENARIOS = tuple(_build_form_scenario(spec) for spec in FORM_OBJECT_SPECS)
@@ -815,10 +822,10 @@ def build_certificate_asn_filter_cases() -> tuple[FilterCase, ...]:
 
 
 def _build_filterset_scenario(spec):
-    builder = _FILTER_SCENARIO_BUILDERS.get(spec.key)
+    builder = _FILTER_SCENARIO_BUILDERS.get(spec.registry_key)
     if builder is None:
         builder = lambda spec=spec: _build_filter_cases_for_spec(spec)
-    return FilterSetScenario(object_key=spec.key, build_filter_cases=builder)
+    return FilterSetScenario(object_key=spec.registry_key, build_filter_cases=builder)
 
 
 FILTERSET_SCENARIOS = tuple(_build_filterset_scenario(spec) for spec in FILTERSET_OBJECT_SPECS)
@@ -871,10 +878,10 @@ _register_scenario_builders()
 
 
 def _build_table_scenario(spec):
-    builder = _TABLE_SCENARIO_BUILDERS.get(spec.key)
+    builder = _TABLE_SCENARIO_BUILDERS.get(spec.registry_key)
     if builder is None:
         builder = lambda spec=spec: _build_table_rows_for_spec(spec)
-    return TableScenario(object_key=spec.key, build_rows=builder)
+    return TableScenario(object_key=spec.registry_key, build_rows=builder)
 
 
 TABLE_SCENARIOS = tuple(_build_table_scenario(spec) for spec in TABLE_OBJECT_SPECS)

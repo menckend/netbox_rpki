@@ -8,7 +8,7 @@ from netbox.api.viewsets import NetBoxModelViewSet
 
 from netbox_rpki import filtersets as filterset_module
 from netbox_rpki.api.serializers import SERIALIZER_CLASS_MAP
-from netbox_rpki.jobs import RunRoutingIntentProfileJob
+from netbox_rpki.jobs import RunRoutingIntentProfileJob, SyncProviderAccountJob
 from netbox_rpki.object_registry import API_OBJECT_SPECS
 from netbox_rpki.object_specs import ObjectSpec
 from netbox_rpki.services import create_roa_change_plan
@@ -23,7 +23,7 @@ def build_viewset_class(spec: ObjectSpec) -> type[NetBoxModelViewSet]:
     namespace = {
         "__module__": __name__,
         "queryset": spec.model.objects.all(),
-        "serializer_class": SERIALIZER_CLASS_MAP[spec.key],
+        "serializer_class": SERIALIZER_CLASS_MAP[spec.registry_key],
         "filterset_class": getattr(filterset_module, spec.filterset.class_name),
     }
     if spec.api.read_only:
@@ -39,7 +39,7 @@ def build_viewset_class(spec: ObjectSpec) -> type[NetBoxModelViewSet]:
 VIEWSET_CLASS_MAP = {}
 for object_spec in API_OBJECT_SPECS:
     viewset_class = build_viewset_class(object_spec)
-    VIEWSET_CLASS_MAP[object_spec.key] = viewset_class
+    VIEWSET_CLASS_MAP[object_spec.registry_key] = viewset_class
     globals()[object_spec.api.viewset_name] = viewset_class
 
 
@@ -80,6 +80,37 @@ class RoutingIntentProfileViewSet(VIEWSET_CLASS_MAP['routingintentprofile']):
         return Response(payload)
 
 
+class RpkiProviderAccountViewSet(VIEWSET_CLASS_MAP['rpkiprovideraccount']):
+    def get_queryset(self):
+        queryset = super().get_queryset()
+
+        if getattr(self, 'action', None) == 'sync' and self.request.user.is_authenticated:
+            return self.queryset.model.objects.restrict(self.request.user, 'change')
+
+        return queryset
+
+    @action(detail=True, methods=['post'], permission_classes=[TokenWritePermission])
+    def sync(self, request, pk=None):
+        provider_account = self.get_object()
+
+        if not request.user.has_perm('netbox_rpki.change_rpkiprovideraccount', provider_account):
+            raise PermissionDenied('This user does not have permission to sync this provider account.')
+
+        job = SyncProviderAccountJob.enqueue(
+            instance=provider_account,
+            user=request.user,
+            provider_account_pk=provider_account.pk,
+        )
+        serializer = SERIALIZER_CLASS_MAP['rpkiprovideraccount'](provider_account, context={'request': request})
+        payload = dict(serializer.data)
+        payload['job'] = {
+            'id': job.pk,
+            'status': job.status,
+            'url': job.get_absolute_url(),
+        }
+        return Response(payload)
+
+
 class ROAReconciliationRunViewSet(VIEWSET_CLASS_MAP['roareconciliationrun']):
     http_method_names = ['get', 'head', 'options', 'post']
 
@@ -107,6 +138,8 @@ class ROAReconciliationRunViewSet(VIEWSET_CLASS_MAP['roareconciliationrun']):
 
 VIEWSET_CLASS_MAP['routingintentprofile'] = RoutingIntentProfileViewSet
 globals()['RoutingIntentProfileViewSet'] = RoutingIntentProfileViewSet
+VIEWSET_CLASS_MAP['rpkiprovideraccount'] = RpkiProviderAccountViewSet
+globals()['RpkiProviderAccountViewSet'] = RpkiProviderAccountViewSet
 VIEWSET_CLASS_MAP['roareconciliationrun'] = ROAReconciliationRunViewSet
 globals()['ROAReconciliationRunViewSet'] = ROAReconciliationRunViewSet
 

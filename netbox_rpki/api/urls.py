@@ -12,7 +12,7 @@ router.APIRootView = RootView
 for object_spec in API_OBJECT_SPECS:
     router.register(
         object_spec.api.basename,
-        VIEWSET_CLASS_MAP[object_spec.key],
+        VIEWSET_CLASS_MAP[object_spec.registry_key],
         basename=object_spec.api.basename,
     )
 

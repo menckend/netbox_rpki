@@ -5,15 +5,16 @@ from django.urls.resolvers import URLResolver
 from netbox_rpki.object_registry import VIEW_OBJECT_SPECS
 from netbox_rpki.tests.registry_scenarios import EXPECTED_MODEL_CHILD_INCLUDE_ROUTES, EXPECTED_ROUTE_PATHS
 from netbox_rpki.urls import urlpatterns
+from utilities.views import get_action_url
 
 
 class UrlRegistrationTestCase(SimpleTestCase):
     def test_standard_routes_reverse_to_stable_paths(self):
         for spec in VIEW_OBJECT_SPECS:
-            expected_paths = EXPECTED_ROUTE_PATHS[spec.key]
+            expected_paths = EXPECTED_ROUTE_PATHS[spec.registry_key]
             route_slug = spec.routes.slug
 
-            with self.subTest(object_key=spec.key):
+            with self.subTest(object_key=spec.registry_key):
                 self.assertEqual(reverse(spec.routes.list_url_name), expected_paths['list'])
                 self.assertEqual(
                     reverse(f'plugins:netbox_rpki:{route_slug}', kwargs={'pk': 1}),
@@ -33,10 +34,10 @@ class UrlRegistrationTestCase(SimpleTestCase):
 
     def test_standard_routes_resolve_to_stable_names(self):
         for spec in VIEW_OBJECT_SPECS:
-            expected_paths = EXPECTED_ROUTE_PATHS[spec.key]
+            expected_paths = EXPECTED_ROUTE_PATHS[spec.registry_key]
             route_slug = spec.routes.slug
 
-            with self.subTest(object_key=spec.key):
+            with self.subTest(object_key=spec.registry_key):
                 self.assertEqual(resolve(expected_paths['list']).view_name, spec.routes.list_url_name)
                 self.assertEqual(resolve(expected_paths['detail']).view_name, f'plugins:netbox_rpki:{route_slug}')
                 if spec.view.supports_create:
@@ -50,3 +51,10 @@ class UrlRegistrationTestCase(SimpleTestCase):
             [pattern.pattern._route for pattern in urlpatterns if isinstance(pattern, URLResolver)],
             list(EXPECTED_MODEL_CHILD_INCLUDE_ROUTES),
         )
+
+    def test_generic_action_urls_use_plugin_route_slugs(self):
+        for spec in VIEW_OBJECT_SPECS:
+            with self.subTest(object_key=spec.registry_key):
+                self.assertEqual(get_action_url(spec.model, action='list'), reverse(spec.routes.list_url_name))
+                if spec.view.supports_create:
+                    self.assertEqual(get_action_url(spec.model, action='add'), reverse(spec.routes.add_url_name))

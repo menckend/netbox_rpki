@@ -3,11 +3,41 @@ import hashlib
 import ipam
 from django.db import models
 from django.urls import reverse
+from django.urls.exceptions import NoReverseMatch
 from netbox.models import NetBoxModel
 from netbox.models.features import JobsMixin
 from ipam.models.asns import ASN
 from ipam.models.ip import Prefix
 from ipam.models import RIR
+
+
+def _resolve_object_spec_for_model(model_class):
+    from netbox_rpki.object_registry import OBJECT_SPECS
+
+    for spec in OBJECT_SPECS:
+        if spec.model is model_class:
+            return spec
+    raise LookupError(f'No object spec registered for {model_class.__name__}')
+
+
+def _plugin_get_action_url(cls, action=None, rest_api=False, kwargs=None):
+    from utilities.views import get_viewname
+
+    spec = _resolve_object_spec_for_model(cls)
+
+    if rest_api:
+        viewname = f'plugins-api:netbox_rpki-api:{spec.api.basename}'
+        if action:
+            viewname = f'{viewname}-{action}'
+    else:
+        viewname = f'plugins:netbox_rpki:{spec.routes.slug}'
+        if action:
+            viewname = f'{viewname}_{action}'
+
+    try:
+        return reverse(viewname, kwargs=kwargs)
+    except NoReverseMatch:
+        return reverse(get_viewname(cls, action, rest_api), kwargs=kwargs)
 
 
 class PublicationStatus(models.TextChoices):
@@ -139,6 +169,16 @@ class ReconciliationComparisonScope(models.TextChoices):
     LOCAL_ROA_RECORDS = "local_roa_records", "Local ROA Records"
     PROVIDER_IMPORTED = "provider_imported", "Provider Imported"
     MIXED = "mixed", "Mixed"
+
+
+class ProviderType(models.TextChoices):
+    ARIN = "arin", "ARIN"
+    KRILL = "krill", "Krill"
+
+
+class ProviderSyncTransport(models.TextChoices):
+    PRODUCTION = "production", "Production"
+    OTE = "ote", "OT&E"
 
 
 class ReconciliationSeverity(models.TextChoices):
@@ -1552,7 +1592,105 @@ class ROAIntent(NamedRpkiStandardModel):
         return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
+class RpkiProviderAccount(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='provider_accounts'
+    )
+    provider_type = models.CharField(
+        max_length=32,
+        choices=ProviderType.choices,
+        default=ProviderType.ARIN,
+    )
+    transport = models.CharField(
+        max_length=16,
+        choices=ProviderSyncTransport.choices,
+        default=ProviderSyncTransport.PRODUCTION,
+    )
+    org_handle = models.CharField(max_length=100)
+    ca_handle = models.CharField(max_length=100, blank=True)
+    api_key = models.CharField(max_length=255)
+    api_base_url = models.CharField(max_length=255, default='https://reg.arin.net')
+    sync_enabled = models.BooleanField(default=True)
+    last_successful_sync = models.DateTimeField(blank=True, null=True)
+    last_sync_status = models.CharField(
+        max_length=32,
+        choices=ValidationRunStatus.choices,
+        default=ValidationRunStatus.PENDING,
+    )
+    last_sync_summary_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("name",)
+        constraints = (
+            models.UniqueConstraint(
+                fields=("organization", "provider_type", "org_handle"),
+                name="netbox_rpki_provideraccount_org_provider_handle_unique",
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:provideraccount", args=[self.pk])
+
+    @property
+    def sync_target_handle(self) -> str:
+        if self.provider_type == ProviderType.KRILL:
+            return self.ca_handle.strip()
+        return self.org_handle.strip()
+
+
+class ProviderSyncRun(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='provider_sync_runs'
+    )
+    provider_account = models.ForeignKey(
+        to='RpkiProviderAccount',
+        on_delete=models.PROTECT,
+        related_name='sync_runs'
+    )
+    provider_snapshot = models.OneToOneField(
+        to='ProviderSnapshot',
+        on_delete=models.PROTECT,
+        related_name='sync_run',
+        blank=True,
+        null=True,
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=ValidationRunStatus.choices,
+        default=ValidationRunStatus.PENDING,
+    )
+    started_at = models.DateTimeField(blank=True, null=True)
+    completed_at = models.DateTimeField(blank=True, null=True)
+    records_fetched = models.PositiveIntegerField(default=0)
+    records_imported = models.PositiveIntegerField(default=0)
+    error = models.TextField(blank=True)
+    summary_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("-started_at", "name")
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:providersyncrun", args=[self.pk])
+
+
 class ProviderSnapshot(NamedRpkiStandardModel):
+    provider_account = models.ForeignKey(
+        to='RpkiProviderAccount',
+        on_delete=models.PROTECT,
+        related_name='snapshots',
+        blank=True,
+        null=True,
+    )
     organization = models.ForeignKey(
         to=Organization,
         on_delete=models.PROTECT,
@@ -1947,3 +2085,20 @@ class ROAChangePlanItem(NamedRpkiStandardModel):
 
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:roachangeplanitem", args=[self.pk])
+
+
+def _register_plugin_action_urls():
+    for value in tuple(globals().values()):
+        if not isinstance(value, type):
+            continue
+        if not issubclass(value, NetBoxModel):
+            continue
+        if value.__module__ != __name__:
+            continue
+        meta = getattr(value, '_meta', None)
+        if meta is None or meta.abstract:
+            continue
+        setattr(value, '_get_action_url', classmethod(_plugin_get_action_url))
+
+
+_register_plugin_action_urls()

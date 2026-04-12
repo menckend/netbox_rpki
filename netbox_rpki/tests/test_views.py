@@ -28,6 +28,7 @@ from netbox_rpki.tests.utils import (
     create_test_roa_prefix,
     create_test_routing_intent_profile,
     create_test_routing_intent_rule,
+    create_test_provider_account,
 )
 from utilities.testing.utils import post_data
 
@@ -69,14 +70,34 @@ class ViewRegistrySmokeTestCase(TestCase):
 class GeneratedSimpleDetailRenderTestCase(PluginViewTestCase):
     def test_generated_simple_detail_views_render(self):
         for spec in SIMPLE_DETAIL_VIEW_OBJECT_SPECS:
-            instance = _build_instance_for_spec(spec, token=f'{spec.key}-detail-view')
+            instance = _build_instance_for_spec(spec, token=f'{spec.registry_key}-detail-view')
             self.add_permissions(f'{spec.model._meta.app_label}.view_{spec.model._meta.model_name}')
 
             response = self.client.get(instance.get_absolute_url())
 
-            with self.subTest(object_key=spec.key):
+            with self.subTest(object_key=spec.registry_key):
                 self.assertHttpStatus(response, 200)
                 self.assertTemplateUsed(response, 'netbox_rpki/object_detail.html')
+
+
+class GeneratedListViewActionLinkTestCase(PluginViewTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='provider-view-org', name='Provider View Org')
+        cls.provider_account = create_test_provider_account(
+            name='Provider View Account',
+            organization=cls.organization,
+            org_handle='ORG-VIEW',
+        )
+
+    def test_provider_account_list_renders_add_link(self):
+        self.add_permissions('netbox_rpki.view_rpkiprovideraccount', 'netbox_rpki.add_rpkiprovideraccount')
+
+        response = self.client.get(reverse('plugins:netbox_rpki:provideraccount_list'))
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, reverse('plugins:netbox_rpki:provideraccount_add'))
+        self.assertNotContains(response, '/plugins/netbox_rpki/provideraccounts/None')
 
 
 class ReconciliationDetailViewTestCase(PluginViewTestCase):

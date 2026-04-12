@@ -1,7 +1,7 @@
 from netbox.jobs import JobRunner
 
 from netbox_rpki import models as rpki_models
-from netbox_rpki.services import run_routing_intent_pipeline
+from netbox_rpki.services import run_routing_intent_pipeline, sync_provider_account
 
 
 class RunRoutingIntentProfileJob(JobRunner):
@@ -28,4 +28,23 @@ class RunRoutingIntentProfileJob(JobRunner):
         self.logger.info(
             f'Completed routing-intent pipeline with derivation run {derivation_run.pk} '
             f'and reconciliation run {reconciliation_run.pk}'
+        )
+
+
+class SyncProviderAccountJob(JobRunner):
+    class Meta:
+        name = 'Provider ROA Sync'
+
+    def run(self, provider_account_pk, *args, **kwargs):
+        provider_account = rpki_models.RpkiProviderAccount.objects.get(pk=provider_account_pk)
+        self.logger.info(f'Running provider sync for account {provider_account.name} ({provider_account.pk})')
+        sync_run, snapshot = sync_provider_account(provider_account)
+        self.job.data = {
+            'provider_account_pk': provider_account.pk,
+            'provider_sync_run_pk': sync_run.pk,
+            'provider_snapshot_pk': snapshot.pk,
+        }
+        self.job.save(update_fields=('data',))
+        self.logger.info(
+            f'Completed provider sync with sync run {sync_run.pk} and provider snapshot {snapshot.pk}'
         )

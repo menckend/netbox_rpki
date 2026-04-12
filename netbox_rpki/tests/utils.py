@@ -911,6 +911,7 @@ def create_test_roa_intent(
 
 def create_test_provider_snapshot(
     name='Provider Snapshot 1',
+    provider_account=None,
     organization=None,
     provider_name='ARIN',
     status=None,
@@ -923,11 +924,82 @@ def create_test_provider_snapshot(
         organization = create_test_organization()
     return rpki_models.ProviderSnapshot.objects.create(
         name=name,
+        provider_account=provider_account,
         organization=organization,
         provider_name=provider_name,
         status=status or rpki_models.ValidationRunStatus.COMPLETED,
         fetched_at=fetched_at,
         completed_at=completed_at,
+        summary_json=summary_json or {},
+        **kwargs,
+    )
+
+
+def create_test_provider_account(
+    name='Provider Account 1',
+    organization=None,
+    provider_type=None,
+    transport=None,
+    org_handle='ORG-TEST',
+    ca_handle='',
+    api_key='test-api-key',
+    api_base_url='https://reg.arin.net',
+    sync_enabled=True,
+    last_successful_sync=None,
+    last_sync_status=None,
+    last_sync_summary_json=None,
+    **kwargs,
+):
+    if organization is None:
+        organization = create_test_organization()
+    return rpki_models.RpkiProviderAccount.objects.create(
+        name=name,
+        organization=organization,
+        provider_type=provider_type or rpki_models.ProviderType.ARIN,
+        transport=transport or rpki_models.ProviderSyncTransport.PRODUCTION,
+        org_handle=org_handle,
+        ca_handle=ca_handle,
+        api_key=api_key,
+        api_base_url=api_base_url,
+        sync_enabled=sync_enabled,
+        last_successful_sync=last_successful_sync,
+        last_sync_status=last_sync_status or rpki_models.ValidationRunStatus.PENDING,
+        last_sync_summary_json=last_sync_summary_json or {},
+        **kwargs,
+    )
+
+
+def create_test_provider_sync_run(
+    name='Provider Sync Run 1',
+    organization=None,
+    provider_account=None,
+    provider_snapshot=None,
+    status=None,
+    started_at=None,
+    completed_at=None,
+    records_fetched=0,
+    records_imported=0,
+    error='',
+    summary_json=None,
+    **kwargs,
+):
+    if organization is None:
+        organization = create_test_organization()
+    if provider_account is None:
+        provider_account = create_test_provider_account(organization=organization)
+    if provider_snapshot is None:
+        provider_snapshot = create_test_provider_snapshot(organization=organization, provider_account=provider_account)
+    return rpki_models.ProviderSyncRun.objects.create(
+        name=name,
+        organization=organization,
+        provider_account=provider_account,
+        provider_snapshot=provider_snapshot,
+        status=status or rpki_models.ValidationRunStatus.COMPLETED,
+        started_at=started_at,
+        completed_at=completed_at,
+        records_fetched=records_fetched,
+        records_imported=records_imported,
+        error=error,
         summary_json=summary_json or {},
         **kwargs,
     )

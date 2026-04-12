@@ -8,7 +8,7 @@ from netbox_rpki.tests.registry_scenarios import EXPECTED_NAVIGATION_GROUPS, EXP
 class NavigationTestCase(SimpleTestCase):
     def test_navigation_registry_exposes_expected_groups(self):
         self.assertEqual(
-            [(group_name, [spec.key for spec in specs]) for group_name, specs in get_navigation_groups()],
+            [(group_name, [spec.registry_key for spec in specs]) for group_name, specs in get_navigation_groups()],
             [(group_name, list(object_keys)) for group_name, object_keys in EXPECTED_NAVIGATION_GROUPS],
         )
 

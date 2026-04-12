@@ -20,7 +20,9 @@ from netbox_rpki.tests.utils import (
     create_test_aspa_provider,
     create_test_manifest_entry,
     create_test_prefix,
+    create_test_provider_account,
     create_test_provider_snapshot,
+    create_test_provider_sync_run,
     create_test_published_roa_result,
     create_test_revoked_certificate,
     create_test_roa_change_plan,
@@ -204,9 +206,21 @@ class PriorityOneModelBehaviorTestCase(TestCase):
             basis_derivation_run=cls.derivation_run,
             status=rpki_models.ValidationRunStatus.COMPLETED,
         )
+        cls.provider_account = create_test_provider_account(
+            name='Provider Account 1',
+            organization=cls.organization,
+            org_handle='ORG-PRIORITY-ONE',
+        )
         cls.provider_snapshot = create_test_provider_snapshot(
             name='Provider Snapshot 1',
             organization=cls.organization,
+            provider_account=cls.provider_account,
+        )
+        cls.provider_sync_run = create_test_provider_sync_run(
+            name='Provider Sync Run 1',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+            provider_snapshot=cls.provider_snapshot,
         )
         cls.imported_authorization = create_test_imported_roa_authorization(
             name='Imported Authorization 1',
@@ -250,7 +264,9 @@ class PriorityOneModelBehaviorTestCase(TestCase):
             self.reconciliation_run,
             self.intent_result,
             self.published_result,
+            self.provider_account,
             self.provider_snapshot,
+            self.provider_sync_run,
             self.imported_authorization,
             self.change_plan,
             self.change_plan_item,
@@ -269,7 +285,9 @@ class PriorityOneModelBehaviorTestCase(TestCase):
             self.reconciliation_run: 'roareconciliationrun',
             self.intent_result: 'roaintentresult',
             self.published_result: 'publishedroaresult',
+            self.provider_account: 'provideraccount',
             self.provider_snapshot: 'providersnapshot',
+            self.provider_sync_run: 'providersyncrun',
             self.imported_authorization: 'importedroaauthorization',
             self.change_plan: 'roachangeplan',
             self.change_plan_item: 'roachangeplanitem',

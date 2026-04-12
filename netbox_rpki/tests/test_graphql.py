@@ -44,12 +44,12 @@ class GraphQLSchemaRegistrationTestCase(SimpleTestCase):
     def test_schema_uses_registry_object_set(self):
         self.assertTupleEqual(
             tuple(plugin_graphql_schema.GRAPHQL_TYPE_CLASS_MAP),
-            tuple(spec.key for spec in GRAPHQL_OBJECT_SPECS),
+            tuple(spec.registry_key for spec in GRAPHQL_OBJECT_SPECS),
         )
         self.assertDictEqual(
             plugin_graphql_schema.GRAPHQL_FIELD_NAME_MAP,
             {
-                spec.key: (spec.graphql.detail_field_name, spec.graphql.list_field_name)
+                spec.registry_key: (spec.graphql.detail_field_name, spec.graphql.list_field_name)
                 for spec in GRAPHQL_OBJECT_SPECS
             },
         )
@@ -57,7 +57,7 @@ class GraphQLSchemaRegistrationTestCase(SimpleTestCase):
     def test_registry_pins_stable_graphql_field_names(self):
         self.assertDictEqual(
             {
-                spec.key: (spec.graphql.detail_field_name, spec.graphql.list_field_name)
+                spec.registry_key: (spec.graphql.detail_field_name, spec.graphql.list_field_name)
                 for spec in GRAPHQL_OBJECT_SPECS
             },
             EXPECTED_GRAPHQL_FIELD_NAMES_BY_KEY,
@@ -83,9 +83,9 @@ class GraphQLSchemaRegistrationTestCase(SimpleTestCase):
         graphql_types = import_module('netbox_rpki.graphql.types')
 
         for spec in GRAPHQL_OBJECT_SPECS:
-            with self.subTest(object_key=spec.key):
+            with self.subTest(object_key=spec.registry_key):
                 self.assertIs(
-                    plugin_graphql_schema.GRAPHQL_TYPE_CLASS_MAP[spec.key],
+                    plugin_graphql_schema.GRAPHQL_TYPE_CLASS_MAP[spec.registry_key],
                     getattr(graphql_types, f'{spec.model.__name__}Type'),
                 )
 

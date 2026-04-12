@@ -51,7 +51,7 @@ def build_graphql_filter_class(spec: ObjectSpec) -> type[NetBoxModelFilter]:
 GRAPHQL_FILTER_CLASS_MAP = {}
 for object_spec in GRAPHQL_OBJECT_SPECS:
     filter_class = build_graphql_filter_class(object_spec)
-    GRAPHQL_FILTER_CLASS_MAP[object_spec.key] = filter_class
+    GRAPHQL_FILTER_CLASS_MAP[object_spec.registry_key] = filter_class
     globals()[object_spec.graphql.filter.class_name] = filter_class
 
 

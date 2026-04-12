@@ -16,12 +16,12 @@ def get_graphql_field_names(spec: ObjectSpec) -> tuple[str, str]:
 
 
 GRAPHQL_TYPE_CLASS_MAP = {
-    spec.key: get_graphql_type_class(spec)
+    spec.registry_key: get_graphql_type_class(spec)
     for spec in GRAPHQL_OBJECT_SPECS
 }
 
 GRAPHQL_FIELD_NAME_MAP = {
-    spec.key: get_graphql_field_names(spec)
+    spec.registry_key: get_graphql_field_names(spec)
     for spec in GRAPHQL_OBJECT_SPECS
 }
 
@@ -33,8 +33,8 @@ def build_query_type() -> type:
     }
 
     for spec in GRAPHQL_OBJECT_SPECS:
-        type_class = GRAPHQL_TYPE_CLASS_MAP[spec.key]
-        detail_field_name, list_field_name = GRAPHQL_FIELD_NAME_MAP[spec.key]
+        type_class = GRAPHQL_TYPE_CLASS_MAP[spec.registry_key]
+        detail_field_name, list_field_name = GRAPHQL_FIELD_NAME_MAP[spec.registry_key]
         annotations[detail_field_name] = type_class
         annotations[list_field_name] = list[type_class]
         namespace[detail_field_name] = strawberry_django.field()

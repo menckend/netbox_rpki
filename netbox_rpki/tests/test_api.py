@@ -41,14 +41,14 @@ from netbox_rpki.tests.utils import (
 class ObjectRegistrySmokeTestCase(SimpleTestCase):
     def test_api_object_specs_match_expected_contract(self):
         for spec in API_OBJECT_SPECS:
-            with self.subTest(object_key=spec.key):
-                self.assertEqual(spec.api.basename, spec.key)
+            with self.subTest(object_key=spec.registry_key):
+                self.assertEqual(spec.api.basename, spec.routes.slug)
                 self.assertTrue(spec.api.serializer_name.endswith('Serializer'))
                 self.assertTrue(spec.api.viewset_name.endswith('ViewSet'))
 
     def test_registry_uses_structured_surface_specs(self):
         for spec in API_OBJECT_SPECS:
-            with self.subTest(object_key=spec.key):
+            with self.subTest(object_key=spec.registry_key):
                 self.assertEqual(getattr(api_serializers, spec.api.serializer_name).__name__, spec.api.serializer_name)
                 self.assertEqual(spec.routes.list_url_name, f'plugins:netbox_rpki:{spec.routes.slug}_list')
                 self.assertEqual(spec.routes.add_url_name, f'plugins:netbox_rpki:{spec.routes.slug}_add')
@@ -68,8 +68,8 @@ class GraphQLSmokeTestCase(SimpleTestCase):
     def test_generated_graphql_filters_remain_stable_and_inspectable(self):
         for spec in GRAPHQL_OBJECT_SPECS:
             filter_class = getattr(graphql_filters, spec.graphql.filter.class_name)
-            with self.subTest(object_key=spec.key):
-                self.assertIs(graphql_filters.GRAPHQL_FILTER_CLASS_MAP[spec.key], filter_class)
+            with self.subTest(object_key=spec.registry_key):
+                self.assertIs(graphql_filters.GRAPHQL_FILTER_CLASS_MAP[spec.registry_key], filter_class)
                 self.assertIs(filter_class.__object_spec__, spec)
                 for field in spec.graphql.filter.fields:
                     self.assertIn(field.field_name, filter_class.__annotations__)
@@ -77,8 +77,8 @@ class GraphQLSmokeTestCase(SimpleTestCase):
     def test_generated_graphql_types_remain_stable_and_inspectable(self):
         for spec in GRAPHQL_OBJECT_SPECS:
             type_class = getattr(graphql_types, spec.graphql.type.class_name)
-            with self.subTest(object_key=spec.key):
-                self.assertIs(graphql_types.GRAPHQL_TYPE_CLASS_MAP[spec.key], type_class)
+            with self.subTest(object_key=spec.registry_key):
+                self.assertIs(graphql_types.GRAPHQL_TYPE_CLASS_MAP[spec.registry_key], type_class)
                 self.assertIs(type_class.__object_spec__, spec)
                 self.assertEqual(type_class.__name__, spec.graphql.type.class_name)
 
@@ -88,7 +88,7 @@ class SerializerSmokeTestCase(SimpleTestCase):
         for spec in API_OBJECT_SPECS:
             serializer_class = getattr(api_serializers, spec.api.serializer_name)
             serializer = serializer_class()
-            with self.subTest(object_key=spec.key):
+            with self.subTest(object_key=spec.registry_key):
                 self.assertEqual(serializer.fields["url"].view_name, spec.api.detail_view_name)
 
     def test_serializer_class_names_remain_stable(self):
@@ -104,7 +104,7 @@ class ViewSetSmokeTestCase(SimpleTestCase):
             viewset_class = getattr(api_views, spec.api.viewset_name)
             serializer_class = getattr(api_serializers, spec.api.serializer_name)
             filterset_class = getattr(filtersets, spec.filterset.class_name)
-            with self.subTest(object_key=spec.key):
+            with self.subTest(object_key=spec.registry_key):
                 self.assertEqual(viewset_class.queryset.model, spec.model)
                 self.assertIs(viewset_class.serializer_class, serializer_class)
                 self.assertIs(viewset_class.filterset_class, filterset_class)
@@ -125,7 +125,7 @@ class RouterSmokeTestCase(SimpleTestCase):
         )
 
 
-OBJECT_SPEC_BY_KEY = {spec.key: spec for spec in API_OBJECT_SPECS}
+OBJECT_SPEC_BY_REGISTRY_KEY = {spec.registry_key: spec for spec in API_OBJECT_SPECS}
 
 
 def _resolve_api_test_value(value, test_case):
@@ -274,7 +274,7 @@ API_TEST_CASES = {
 
 
 def _install_registry_api_tests(cls):
-    cls.model = OBJECT_SPEC_BY_KEY[cls.object_spec_key].model
+    cls.model = OBJECT_SPEC_BY_REGISTRY_KEY[cls.object_spec_key].model
     case = API_TEST_CASES[cls.object_spec_key]
     test_names = {
         f"test_get_{case['method_singular']}": '_run_get_object_test',
@@ -306,7 +306,7 @@ class RegistryDrivenObjectAPITestCase(PluginAPITestCase):
 
     @property
     def object_spec(self):
-        return OBJECT_SPEC_BY_KEY[self.object_spec_key]
+        return OBJECT_SPEC_BY_REGISTRY_KEY[self.object_spec_key]
 
     def _get_case_value(self, key):
         return _resolve_api_test_value(self.api_case[key], self)

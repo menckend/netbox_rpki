@@ -6,18 +6,9 @@ from netbox_rpki.object_registry import VIEW_OBJECT_SPECS
 
 app_name = 'netbox_rpki'
 
-OBJECT_UI_PATH_PREFIXES = {
-    'certificate': 'certificate',
-    'organization': 'orgs',
-    'roa': 'roa',
-    'roaprefix': 'roaprefixes',
-    'certificateprefix': 'certificateprefixes',
-    'certificateasn': 'certificateasns',
-}
-
 
 def build_object_urlpatterns(spec):
-    path_prefix = OBJECT_UI_PATH_PREFIXES.get(spec.key, f'{spec.routes.slug}s')
+    path_prefix = spec.routes.resolved_path_prefix
     route_slug = spec.routes.slug
     list_view = getattr(views, spec.view.list_class_name)
     detail_view = getattr(views, spec.view.detail_class_name)
@@ -32,7 +23,12 @@ def build_object_urlpatterns(spec):
     if spec.view.delete_class_name is not None:
         delete_view = getattr(views, spec.view.delete_class_name)
         urlpatterns.append(path(f'{path_prefix}/<int:pk>/delete/', delete_view.as_view(), name=f'{route_slug}_delete'))
-    urlpatterns.append(path(f'{path_prefix}/<int:pk>/', include(get_model_urls('netbox_rpki', spec.key))))
+    urlpatterns.append(
+        path(
+            f'{path_prefix}/<int:pk>/',
+            include(get_model_urls('netbox_rpki', spec.model._meta.model_name)),
+        )
+    )
 
     return urlpatterns
 urlpatterns = []

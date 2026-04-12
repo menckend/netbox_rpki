@@ -21,14 +21,14 @@ def build_graphql_type_class(spec: ObjectSpec) -> type[NetBoxObjectType]:
     return strawberry_django.type(
         spec.model,
         fields=spec.graphql.type.fields,
-        filters=GRAPHQL_FILTER_CLASS_MAP[spec.key],
+        filters=GRAPHQL_FILTER_CLASS_MAP[spec.registry_key],
     )(type_class)
 
 
 GRAPHQL_TYPE_CLASS_MAP = {}
 for object_spec in GRAPHQL_OBJECT_SPECS:
     type_class = build_graphql_type_class(object_spec)
-    GRAPHQL_TYPE_CLASS_MAP[object_spec.key] = type_class
+    GRAPHQL_TYPE_CLASS_MAP[object_spec.registry_key] = type_class
     globals()[object_spec.graphql.type.class_name] = type_class
 
 

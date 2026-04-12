@@ -178,7 +178,7 @@ def build_detail_view_class(spec: ObjectSpec) -> type[MetadataDrivenDetailView]:
 
 def build_edit_view_class(spec: ObjectSpec) -> type[generic.ObjectEditView]:
     if spec.view.edit_class_name is None or spec.form is None:
-        raise AttributeError(f'{spec.key} does not define an editable view')
+        raise AttributeError(f'{spec.registry_key} does not define an editable view')
     return type(
         spec.view.edit_class_name,
         (generic.ObjectEditView,),
@@ -192,7 +192,7 @@ def build_edit_view_class(spec: ObjectSpec) -> type[generic.ObjectEditView]:
 
 def build_delete_view_class(spec: ObjectSpec) -> type[generic.ObjectDeleteView]:
     if spec.view.delete_class_name is None:
-        raise AttributeError(f'{spec.key} does not define a delete view')
+        raise AttributeError(f'{spec.registry_key} does not define a delete view')
     return type(
         spec.view.delete_class_name,
         (generic.ObjectDeleteView,),

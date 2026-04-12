@@ -20,9 +20,14 @@ from .object_specs import (
 
 def build_standard_object_spec(
     *,
-    key,
+    registry_key,
     model,
     class_prefix,
+    route_slug=None,
+    route_path_prefix=None,
+    api_basename=None,
+    graphql_detail_field_name=None,
+    graphql_list_field_name=None,
     label_singular,
     label_plural,
     api_fields,
@@ -49,15 +54,20 @@ def build_standard_object_spec(
         view_edit_class_name = f"{class_prefix}EditView"
         view_delete_class_name = f"{class_prefix}DeleteView"
 
+    route_slug = route_slug or registry_key
+    api_basename = api_basename or route_slug
+    graphql_detail_field_name = graphql_detail_field_name or f"netbox_rpki_{route_slug}"
+    graphql_list_field_name = graphql_list_field_name or f"netbox_rpki_{route_slug}_list"
+
     return ObjectSpec(
-        key=key,
+        registry_key=registry_key,
         model=model,
         labels=LabelSpec(singular=label_singular, plural=label_plural),
-        routes=RouteSpec(slug=key),
+        routes=RouteSpec(slug=route_slug, path_prefix=route_path_prefix),
         api=ApiSpec(
             serializer_name=f"{class_prefix}Serializer",
             viewset_name=f"{class_prefix}ViewSet",
-            basename=key,
+            basename=api_basename,
             fields=("id", "url",) + api_fields,
             brief_fields=brief_fields,
             read_only=api_read_only,
@@ -76,8 +86,8 @@ def build_standard_object_spec(
                 ),
             ),
             type=GraphQLTypeSpec(class_name=f"{class_prefix}Type"),
-            detail_field_name=f"netbox_rpki_{key}",
-            list_field_name=f"netbox_rpki_{key}_list",
+            detail_field_name=graphql_detail_field_name,
+            list_field_name=graphql_list_field_name,
         ),
         form=form_spec,
         filter_form=FilterFormSpec(class_name=f"{class_prefix}FilterForm"),
@@ -109,10 +119,10 @@ def build_standard_object_spec(
 
 OBJECT_SPECS = (
     ObjectSpec(
-        key="certificate",
+        registry_key="certificate",
         model=models.Certificate,
         labels=LabelSpec(singular="Certificate", plural="Certificates"),
-        routes=RouteSpec(slug="certificate"),
+        routes=RouteSpec(slug="certificate", path_prefix="certificate"),
         api=ApiSpec(
             serializer_name="CertificateSerializer",
             viewset_name="CertificateViewSet",
@@ -248,10 +258,10 @@ OBJECT_SPECS = (
         ),
     ),
     ObjectSpec(
-        key="organization",
+        registry_key="organization",
         model=models.Organization,
         labels=LabelSpec(singular="Organization", plural="Organizations"),
-        routes=RouteSpec(slug="organization"),
+        routes=RouteSpec(slug="organization", path_prefix="orgs"),
         api=ApiSpec(
             serializer_name="OrganizationSerializer",
             viewset_name="OrganizationViewSet",
@@ -307,10 +317,10 @@ OBJECT_SPECS = (
         ),
     ),
     ObjectSpec(
-        key="roa",
+        registry_key="roa",
         model=models.Roa,
         labels=LabelSpec(singular="ROA", plural="ROAs"),
-        routes=RouteSpec(slug="roa"),
+        routes=RouteSpec(slug="roa", path_prefix="roa"),
         api=ApiSpec(
             serializer_name="RoaSerializer",
             viewset_name="RoaViewSet",
@@ -370,10 +380,10 @@ OBJECT_SPECS = (
         ),
     ),
     ObjectSpec(
-        key="roaprefix",
+        registry_key="roaprefix",
         model=models.RoaPrefix,
         labels=LabelSpec(singular="ROA Prefix", plural="ROA Prefixes"),
-        routes=RouteSpec(slug="roaprefix"),
+        routes=RouteSpec(slug="roaprefix", path_prefix="roaprefixes"),
         api=ApiSpec(
             serializer_name="RoaPrefixSerializer",
             viewset_name="RoaPrefixViewSet",
@@ -418,10 +428,10 @@ OBJECT_SPECS = (
         ),
     ),
     ObjectSpec(
-        key="certificateprefix",
+        registry_key="certificateprefix",
         model=models.CertificatePrefix,
         labels=LabelSpec(singular="Certificate Prefix", plural="Certificate Prefixes"),
-        routes=RouteSpec(slug="certificateprefix"),
+        routes=RouteSpec(slug="certificateprefix", path_prefix="certificateprefixes"),
         api=ApiSpec(
             serializer_name="CertificatePrefixSerializer",
             viewset_name="CertificatePrefixViewSet",
@@ -466,10 +476,10 @@ OBJECT_SPECS = (
         ),
     ),
     ObjectSpec(
-        key="certificateasn",
+        registry_key="certificateasn",
         model=models.CertificateAsn,
         labels=LabelSpec(singular="Certificate ASN", plural="Certificate ASNs"),
-        routes=RouteSpec(slug="certificateasn"),
+        routes=RouteSpec(slug="certificateasn", path_prefix="certificateasns"),
         api=ApiSpec(
             serializer_name="CertificateAsnSerializer",
             viewset_name="CertificateAsnViewSet",
@@ -514,7 +524,7 @@ OBJECT_SPECS = (
         ),
     ),
     build_standard_object_spec(
-        key="repository",
+        registry_key="repository",
         model=models.Repository,
         class_prefix="Repository",
         label_singular="Repository",
@@ -542,7 +552,7 @@ OBJECT_SPECS = (
         navigation_order=30,
     ),
     build_standard_object_spec(
-        key="publicationpoint",
+        registry_key="publicationpoint",
         model=models.PublicationPoint,
         class_prefix="PublicationPoint",
         label_singular="Publication Point",
@@ -573,7 +583,7 @@ OBJECT_SPECS = (
         navigation_order=40,
     ),
     build_standard_object_spec(
-        key="trustanchor",
+        registry_key="trustanchor",
         model=models.TrustAnchor,
         class_prefix="TrustAnchor",
         label_singular="Trust Anchor",
@@ -602,7 +612,7 @@ OBJECT_SPECS = (
         navigation_order=10,
     ),
     build_standard_object_spec(
-        key="trustanchorlocator",
+        registry_key="trustanchorlocator",
         model=models.TrustAnchorLocator,
         class_prefix="TrustAnchorLocator",
         label_singular="Trust Anchor Locator",
@@ -621,7 +631,7 @@ OBJECT_SPECS = (
         navigation_order=20,
     ),
     build_standard_object_spec(
-        key="endentitycertificate",
+        registry_key="endentitycertificate",
         model=models.EndEntityCertificate,
         class_prefix="EndEntityCertificate",
         label_singular="End-Entity Certificate",
@@ -657,7 +667,7 @@ OBJECT_SPECS = (
         navigation_order=50,
     ),
     build_standard_object_spec(
-        key="signedobject",
+        registry_key="signedobject",
         model=models.SignedObject,
         class_prefix="SignedObject",
         label_singular="Signed Object",
@@ -722,7 +732,7 @@ OBJECT_SPECS = (
         navigation_order=10,
     ),
     build_standard_object_spec(
-        key="certificaterevocationlist",
+        registry_key="certificaterevocationlist",
         model=models.CertificateRevocationList,
         class_prefix="CertificateRevocationList",
         label_singular="Certificate Revocation List",
@@ -766,7 +776,7 @@ OBJECT_SPECS = (
         navigation_order=60,
     ),
     build_standard_object_spec(
-        key="manifest",
+        registry_key="manifest",
         model=models.Manifest,
         class_prefix="Manifest",
         label_singular="Manifest",
@@ -785,7 +795,7 @@ OBJECT_SPECS = (
         navigation_order=20,
     ),
     build_standard_object_spec(
-        key="trustanchorkey",
+        registry_key="trustanchorkey",
         model=models.TrustAnchorKey,
         class_prefix="TrustAnchorKey",
         label_singular="Trust Anchor Key",
@@ -815,7 +825,7 @@ OBJECT_SPECS = (
         navigation_order=30,
     ),
     build_standard_object_spec(
-        key="aspa",
+        registry_key="aspa",
         model=models.ASPA,
         class_prefix="ASPA",
         label_singular="ASPA",
@@ -836,7 +846,7 @@ OBJECT_SPECS = (
         navigation_order=30,
     ),
     build_standard_object_spec(
-        key="rsc",
+        registry_key="rsc",
         model=models.RSC,
         class_prefix="RSC",
         label_singular="RSC",
@@ -857,7 +867,7 @@ OBJECT_SPECS = (
         navigation_order=40,
     ),
     build_standard_object_spec(
-        key="routercertificate",
+        registry_key="routercertificate",
         model=models.RouterCertificate,
         class_prefix="RouterCertificate",
         label_singular="Router Certificate",
@@ -894,7 +904,7 @@ OBJECT_SPECS = (
         navigation_order=70,
     ),
     build_standard_object_spec(
-        key="validatorinstance",
+        registry_key="validatorinstance",
         model=models.ValidatorInstance,
         class_prefix="ValidatorInstance",
         label_singular="Validator Instance",
@@ -914,7 +924,7 @@ OBJECT_SPECS = (
         navigation_order=10,
     ),
     build_standard_object_spec(
-        key="validationrun",
+        registry_key="validationrun",
         model=models.ValidationRun,
         class_prefix="ValidationRun",
         label_singular="Validation Run",
@@ -933,7 +943,7 @@ OBJECT_SPECS = (
         navigation_order=20,
     ),
     build_standard_object_spec(
-        key="objectvalidationresult",
+        registry_key="objectvalidationresult",
         model=models.ObjectValidationResult,
         class_prefix="ObjectValidationResult",
         label_singular="Object Validation Result",
@@ -954,7 +964,7 @@ OBJECT_SPECS = (
         navigation_order=30,
     ),
     build_standard_object_spec(
-        key="validatedroapayload",
+        registry_key="validatedroapayload",
         model=models.ValidatedRoaPayload,
         class_prefix="ValidatedRoaPayload",
         label_singular="Validated ROA Payload",
@@ -975,7 +985,7 @@ OBJECT_SPECS = (
         navigation_order=40,
     ),
     build_standard_object_spec(
-        key="validatedaspapayload",
+        registry_key="validatedaspapayload",
         model=models.ValidatedAspaPayload,
         class_prefix="ValidatedAspaPayload",
         label_singular="Validated ASPA Payload",
@@ -996,7 +1006,7 @@ OBJECT_SPECS = (
         navigation_order=50,
     ),
     build_standard_object_spec(
-        key="routingintentprofile",
+        registry_key="routingintentprofile",
         model=models.RoutingIntentProfile,
         class_prefix="RoutingIntentProfile",
         label_singular="Routing Intent Profile",
@@ -1030,7 +1040,7 @@ OBJECT_SPECS = (
         navigation_order=10,
     ),
     build_standard_object_spec(
-        key="routingintentrule",
+        registry_key="routingintentrule",
         model=models.RoutingIntentRule,
         class_prefix="RoutingIntentRule",
         label_singular="Routing Intent Rule",
@@ -1081,7 +1091,7 @@ OBJECT_SPECS = (
         navigation_order=20,
     ),
     build_standard_object_spec(
-        key="roaintentoverride",
+        registry_key="roaintentoverride",
         model=models.ROAIntentOverride,
         class_prefix="ROAIntentOverride",
         label_singular="ROA Intent Override",
@@ -1135,7 +1145,7 @@ OBJECT_SPECS = (
         navigation_order=30,
     ),
     build_standard_object_spec(
-        key="intentderivationrun",
+        registry_key="intentderivationrun",
         model=models.IntentDerivationRun,
         class_prefix="IntentDerivationRun",
         label_singular="Intent Derivation Run",
@@ -1172,7 +1182,7 @@ OBJECT_SPECS = (
         show_add_button=False,
     ),
     build_standard_object_spec(
-        key="roaintent",
+        registry_key="roaintent",
         model=models.ROAIntent,
         class_prefix="ROAIntent",
         label_singular="ROA Intent",
@@ -1237,7 +1247,7 @@ OBJECT_SPECS = (
         show_add_button=False,
     ),
     build_standard_object_spec(
-        key="roaintentmatch",
+        registry_key="roaintentmatch",
         model=models.ROAIntentMatch,
         class_prefix="ROAIntentMatch",
         label_singular="ROA Intent Match",
@@ -1262,7 +1272,7 @@ OBJECT_SPECS = (
         show_add_button=False,
     ),
     build_standard_object_spec(
-        key="roareconciliationrun",
+        registry_key="roareconciliationrun",
         model=models.ROAReconciliationRun,
         class_prefix="ROAReconciliationRun",
         label_singular="ROA Reconciliation Run",
@@ -1301,7 +1311,7 @@ OBJECT_SPECS = (
         show_add_button=False,
     ),
     build_standard_object_spec(
-        key="roaintentresult",
+        registry_key="roaintentresult",
         model=models.ROAIntentResult,
         class_prefix="ROAIntentResult",
         label_singular="ROA Intent Result",
@@ -1338,7 +1348,7 @@ OBJECT_SPECS = (
         show_add_button=False,
     ),
     build_standard_object_spec(
-        key="publishedroaresult",
+        registry_key="publishedroaresult",
         model=models.PublishedROAResult,
         class_prefix="PublishedROAResult",
         label_singular="Published ROA Result",
@@ -1373,25 +1383,7 @@ OBJECT_SPECS = (
         show_add_button=False,
     ),
     build_standard_object_spec(
-        key="providersnapshot",
-        model=models.ProviderSnapshot,
-        class_prefix="ProviderSnapshot",
-        label_singular="Provider Snapshot",
-        label_plural="Provider Snapshots",
-        api_fields=("name", "organization", "provider_name", "status", "fetched_at", "completed_at", "summary_json"),
-        brief_fields=("name", "organization", "provider_name", "status"),
-        filter_fields=("name", "organization", "provider_name", "status", "tenant"),
-        search_fields=("name__icontains", "provider_name__icontains", "comments__icontains"),
-        graphql_fields=(("name", "str"), ("organization_id", "id"), ("provider_name", "str"), ("status", "str")),
-        navigation_group="Intent",
-        navigation_label="Provider Snapshots",
-        navigation_order=100,
-        api_read_only=True,
-        ui_read_only=True,
-        show_add_button=False,
-    ),
-    build_standard_object_spec(
-        key="importedroaauthorization",
+        registry_key="importedroaauthorization",
         model=models.ImportedRoaAuthorization,
         class_prefix="ImportedRoaAuthorization",
         label_singular="Imported ROA Authorization",
@@ -1423,7 +1415,7 @@ OBJECT_SPECS = (
         show_add_button=False,
     ),
     build_standard_object_spec(
-        key="roachangeplan",
+        registry_key="roachangeplan",
         model=models.ROAChangePlan,
         class_prefix="ROAChangePlan",
         label_singular="ROA Change Plan",
@@ -1441,7 +1433,66 @@ OBJECT_SPECS = (
         show_add_button=False,
     ),
     build_standard_object_spec(
-        key="roachangeplanitem",
+        registry_key="rpkiprovideraccount",
+        model=models.RpkiProviderAccount,
+        class_prefix="RpkiProviderAccount",
+        route_slug="provideraccount",
+        api_basename="provideraccount",
+        graphql_detail_field_name="netbox_rpki_provideraccount",
+        graphql_list_field_name="netbox_rpki_provideraccount_list",
+        label_singular="Provider Account",
+        label_plural="Provider Accounts",
+        api_fields=(
+            "name",
+            "organization",
+            "provider_type",
+            "transport",
+            "org_handle",
+            "ca_handle",
+            "api_key",
+            "api_base_url",
+            "sync_enabled",
+            "last_successful_sync",
+            "last_sync_status",
+            "last_sync_summary_json",
+        ),
+        brief_fields=("name", "organization", "provider_type", "org_handle", "ca_handle", "last_sync_status"),
+        filter_fields=("name", "organization", "provider_type", "transport", "org_handle", "ca_handle", "sync_enabled", "last_sync_status", "tenant"),
+        search_fields=("name__icontains", "org_handle__icontains", "ca_handle__icontains", "comments__icontains"),
+        graphql_fields=(
+            ("name", "str"),
+            ("organization_id", "id"),
+            ("provider_type", "str"),
+            ("transport", "str"),
+            ("org_handle", "str"),
+            ("ca_handle", "str"),
+            ("sync_enabled", "bool"),
+            ("last_sync_status", "str"),
+        ),
+        navigation_group="Intent",
+        navigation_label="Provider Accounts",
+        navigation_order=95,
+    ),
+    build_standard_object_spec(
+        registry_key="providersnapshot",
+        model=models.ProviderSnapshot,
+        class_prefix="ProviderSnapshot",
+        label_singular="Provider Snapshot",
+        label_plural="Provider Snapshots",
+        api_fields=("name", "provider_account", "organization", "provider_name", "status", "fetched_at", "completed_at", "summary_json"),
+        brief_fields=("name", "provider_account", "organization", "provider_name", "status"),
+        filter_fields=("name", "provider_account", "organization", "provider_name", "status", "tenant"),
+        search_fields=("name__icontains", "provider_name__icontains", "comments__icontains"),
+        graphql_fields=(("name", "str"), ("provider_account_id", "id"), ("organization_id", "id"), ("provider_name", "str"), ("status", "str")),
+        navigation_group="Intent",
+        navigation_label="Provider Snapshots",
+        navigation_order=100,
+        api_read_only=True,
+        ui_read_only=True,
+        show_add_button=False,
+    ),
+    build_standard_object_spec(
+        registry_key="roachangeplanitem",
         model=models.ROAChangePlanItem,
         class_prefix="ROAChangePlanItem",
         label_singular="ROA Change Plan Item",
@@ -1458,6 +1509,42 @@ OBJECT_SPECS = (
         ui_read_only=True,
         show_add_button=False,
     ),
+    build_standard_object_spec(
+        registry_key="providersyncrun",
+        model=models.ProviderSyncRun,
+        class_prefix="ProviderSyncRun",
+        label_singular="Provider Sync Run",
+        label_plural="Provider Sync Runs",
+        api_fields=(
+            "name",
+            "organization",
+            "provider_account",
+            "provider_snapshot",
+            "status",
+            "started_at",
+            "completed_at",
+            "records_fetched",
+            "records_imported",
+            "error",
+            "summary_json",
+        ),
+        brief_fields=("name", "provider_account", "provider_snapshot", "status", "started_at"),
+        filter_fields=("name", "organization", "provider_account", "provider_snapshot", "status", "tenant"),
+        search_fields=("name__icontains", "error__icontains", "comments__icontains"),
+        graphql_fields=(
+            ("name", "str"),
+            ("organization_id", "id"),
+            ("provider_account_id", "id"),
+            ("provider_snapshot_id", "id"),
+            ("status", "str"),
+        ),
+        navigation_group="Intent",
+        navigation_label="Provider Sync Runs",
+        navigation_order=105,
+        api_read_only=True,
+        ui_read_only=True,
+        show_add_button=False,
+    ),
 )
 
 API_OBJECT_SPECS = OBJECT_SPECS
@@ -1468,12 +1555,12 @@ FILTER_FORM_OBJECT_SPECS = tuple(spec for spec in OBJECT_SPECS if spec.filter_fo
 TABLE_OBJECT_SPECS = tuple(spec for spec in OBJECT_SPECS if spec.table is not None)
 VIEW_OBJECT_SPECS = tuple(spec for spec in OBJECT_SPECS if spec.view is not None)
 SIMPLE_DETAIL_VIEW_OBJECT_SPECS = tuple(spec for spec in VIEW_OBJECT_SPECS if spec.view.simple_detail)
-OBJECT_SPEC_BY_KEY = {spec.key: spec for spec in OBJECT_SPECS}
+OBJECT_SPEC_BY_REGISTRY_KEY = {spec.registry_key: spec for spec in OBJECT_SPECS}
 MENU_GROUP_ORDER = ("Resources", "ROAs", "Objects", "Trust", "Intent", "Validation")
 
 
-def get_object_spec(key: str) -> ObjectSpec:
-    return OBJECT_SPEC_BY_KEY[key]
+def get_object_spec(registry_key: str) -> ObjectSpec:
+    return OBJECT_SPEC_BY_REGISTRY_KEY[registry_key]
 
 
 def get_navigation_groups() -> tuple[tuple[str, tuple[ObjectSpec, ...]], ...]:

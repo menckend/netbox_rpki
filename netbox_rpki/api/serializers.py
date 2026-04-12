@@ -30,7 +30,7 @@ def build_serializer_class(spec: ObjectSpec) -> type[NetBoxModelSerializer]:
 SERIALIZER_CLASS_MAP = {}
 for object_spec in API_OBJECT_SPECS:
     serializer_class = build_serializer_class(object_spec)
-    SERIALIZER_CLASS_MAP[object_spec.key] = serializer_class
+    SERIALIZER_CLASS_MAP[object_spec.registry_key] = serializer_class
     globals()[object_spec.api.serializer_name] = serializer_class
 
 

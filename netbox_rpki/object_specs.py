@@ -10,6 +10,11 @@ class LabelSpec:
 @dataclass(frozen=True)
 class RouteSpec:
     slug: str
+    path_prefix: str | None = None
+
+    @property
+    def resolved_path_prefix(self) -> str:
+        return self.path_prefix or f"{self.slug}s"
 
     @property
     def list_url_name(self) -> str:
@@ -113,7 +118,7 @@ class ViewSpec:
 
 @dataclass(frozen=True)
 class ObjectSpec:
-    key: str
+    registry_key: str
     model: type
     labels: LabelSpec
     routes: RouteSpec
