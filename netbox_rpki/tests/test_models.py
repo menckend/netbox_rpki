@@ -20,9 +20,13 @@ from netbox_rpki.tests.utils import (
     create_test_aspa_provider,
     create_test_manifest_entry,
     create_test_prefix,
+    create_test_provider_snapshot,
     create_test_published_roa_result,
     create_test_revoked_certificate,
+    create_test_roa_change_plan,
+    create_test_roa_change_plan_item,
     create_test_rsc_file_hash,
+    create_test_imported_roa_authorization,
     create_test_roa,
     create_test_roa_intent,
     create_test_roa_intent_match,
@@ -200,6 +204,18 @@ class PriorityOneModelBehaviorTestCase(TestCase):
             basis_derivation_run=cls.derivation_run,
             status=rpki_models.ValidationRunStatus.COMPLETED,
         )
+        cls.provider_snapshot = create_test_provider_snapshot(
+            name='Provider Snapshot 1',
+            organization=cls.organization,
+        )
+        cls.imported_authorization = create_test_imported_roa_authorization(
+            name='Imported Authorization 1',
+            organization=cls.organization,
+            provider_snapshot=cls.provider_snapshot,
+            prefix=cls.prefix,
+            origin_asn=cls.origin_asn,
+            max_length=24,
+        )
         cls.intent_result = create_test_roa_intent_result(
             name='Intent Result 1',
             reconciliation_run=cls.reconciliation_run,
@@ -210,6 +226,17 @@ class PriorityOneModelBehaviorTestCase(TestCase):
             name='Published Result 1',
             reconciliation_run=cls.reconciliation_run,
             roa=cls.roa,
+        )
+        cls.change_plan = create_test_roa_change_plan(
+            name='Change Plan 1',
+            organization=cls.organization,
+            source_reconciliation_run=cls.reconciliation_run,
+        )
+        cls.change_plan_item = create_test_roa_change_plan_item(
+            name='Change Plan Item 1',
+            change_plan=cls.change_plan,
+            action_type=rpki_models.ROAChangePlanAction.CREATE,
+            roa_intent=cls.roa_intent,
         )
 
     def test_priority_one_models_stringify_cleanly(self):
@@ -223,6 +250,10 @@ class PriorityOneModelBehaviorTestCase(TestCase):
             self.reconciliation_run,
             self.intent_result,
             self.published_result,
+            self.provider_snapshot,
+            self.imported_authorization,
+            self.change_plan,
+            self.change_plan_item,
         ):
             with self.subTest(model=instance.__class__.__name__):
                 self.assertEqual(str(instance), instance.name)
@@ -238,6 +269,10 @@ class PriorityOneModelBehaviorTestCase(TestCase):
             self.reconciliation_run: 'roareconciliationrun',
             self.intent_result: 'roaintentresult',
             self.published_result: 'publishedroaresult',
+            self.provider_snapshot: 'providersnapshot',
+            self.imported_authorization: 'importedroaauthorization',
+            self.change_plan: 'roachangeplan',
+            self.change_plan_item: 'roachangeplanitem',
         }
         for instance, route_name in expected_routes.items():
             with self.subTest(model=instance.__class__.__name__):
@@ -305,6 +340,38 @@ class PriorityOneModelBehaviorTestCase(TestCase):
                     reconciliation_run=self.reconciliation_run,
                     roa=self.roa,
                 )
+
+    def test_imported_authorization_enforces_unique_snapshot_key(self):
+        with transaction.atomic():
+            with self.assertRaises(IntegrityError):
+                create_test_imported_roa_authorization(
+                    name='Duplicate Imported Authorization',
+                    organization=self.organization,
+                    provider_snapshot=self.provider_snapshot,
+                    prefix=self.prefix,
+                    origin_asn=self.origin_asn,
+                    max_length=24,
+                    authorization_key=self.imported_authorization.authorization_key,
+                )
+
+    def test_published_result_accepts_imported_authorization_source(self):
+        imported_run = create_test_roa_reconciliation_run(
+            name='Imported Reconciliation Run',
+            organization=self.organization,
+            intent_profile=self.profile,
+            basis_derivation_run=self.derivation_run,
+            provider_snapshot=self.provider_snapshot,
+            comparison_scope=rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
+        )
+        published_result = create_test_published_roa_result(
+            name='Imported Published Result',
+            reconciliation_run=imported_run,
+            imported_authorization=self.imported_authorization,
+            roa=None,
+        )
+
+        self.assertEqual(published_result.imported_authorization, self.imported_authorization)
+        self.assertIsNone(published_result.roa)
 
 
 class SampleDataFixtureTestCase(TestCase):

@@ -14,11 +14,20 @@ from netbox_rpki.tests.utils import (
     create_test_certificate,
     create_test_certificate_asn,
     create_test_certificate_prefix,
+    create_test_intent_derivation_run,
     create_test_organization,
     create_test_prefix,
+    create_test_published_roa_result,
     create_test_rir,
     create_test_roa,
+    create_test_roa_intent,
+    create_test_roa_intent_match,
+    create_test_roa_intent_override,
+    create_test_roa_intent_result,
+    create_test_roa_reconciliation_run,
     create_test_roa_prefix,
+    create_test_routing_intent_profile,
+    create_test_routing_intent_rule,
 )
 from utilities.testing.utils import post_data
 
@@ -68,6 +77,141 @@ class GeneratedSimpleDetailRenderTestCase(PluginViewTestCase):
             with self.subTest(object_key=spec.key):
                 self.assertHttpStatus(response, 200)
                 self.assertTemplateUsed(response, 'netbox_rpki/object_detail.html')
+
+
+class ReconciliationDetailViewTestCase(PluginViewTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='reconcile-org', name='Reconcile Org')
+        cls.profile = create_test_routing_intent_profile(
+            name='Dashboard Profile',
+            organization=cls.organization,
+            description='Primary profile for reconciliation dashboard coverage.',
+            prefix_selector_query='role=edge',
+            asn_selector_query='asn=64512',
+        )
+        cls.rule = create_test_routing_intent_rule(
+            name='Dashboard Rule',
+            intent_profile=cls.profile,
+        )
+        cls.override = create_test_roa_intent_override(
+            name='Dashboard Override',
+            organization=cls.organization,
+            intent_profile=cls.profile,
+            prefix_cidr_text='10.10.0.0/24',
+            origin_asn_value=64512,
+            max_length=24,
+        )
+        cls.derivation_run = create_test_intent_derivation_run(
+            name='Dashboard Derivation Run',
+            organization=cls.organization,
+            intent_profile=cls.profile,
+            intent_count_emitted=1,
+        )
+        cls.origin_asn = create_test_asn(64512)
+        cls.prefix = create_test_prefix('10.10.0.0/24')
+        cls.roa_intent = create_test_roa_intent(
+            name='Dashboard Intent',
+            derivation_run=cls.derivation_run,
+            organization=cls.organization,
+            intent_profile=cls.profile,
+            prefix=cls.prefix,
+            origin_asn=cls.origin_asn,
+            origin_asn_value=cls.origin_asn.asn,
+            max_length=24,
+            source_rule=cls.rule,
+            applied_override=cls.override,
+        )
+        cls.certificate = create_test_certificate(name='Dashboard Certificate', rpki_org=cls.organization)
+        cls.roa = create_test_roa(name='Dashboard Published ROA', origin_as=cls.origin_asn, signed_by=cls.certificate)
+        cls.roa_prefix = create_test_roa_prefix(roa=cls.roa, prefix=cls.prefix, max_length=25)
+        cls.candidate_match = create_test_roa_intent_match(
+            name='Dashboard Candidate Match',
+            roa_intent=cls.roa_intent,
+            roa=cls.roa,
+            details_json={'comparison': 'max_length differs'},
+            is_best_match=True,
+        )
+        cls.reconciliation_run = create_test_roa_reconciliation_run(
+            name='Dashboard Reconciliation Run',
+            organization=cls.organization,
+            intent_profile=cls.profile,
+            basis_derivation_run=cls.derivation_run,
+            published_roa_count=1,
+            intent_count=1,
+            result_summary_json={
+                'missing': 0,
+                'overbroad': 1,
+                'matched': 0,
+            },
+        )
+        cls.intent_result = create_test_roa_intent_result(
+            name='Dashboard Intent Result',
+            reconciliation_run=cls.reconciliation_run,
+            roa_intent=cls.roa_intent,
+            best_roa=cls.roa,
+            match_count=1,
+            details_json={
+                'expected': {'prefix': '10.10.0.0/24', 'max_length': 24},
+                'published': {'prefix': '10.10.0.0/24', 'max_length': 25},
+                'delta': {'max_length': {'expected': 24, 'published': 25}},
+            },
+        )
+        cls.published_result = create_test_published_roa_result(
+            name='Dashboard Published Result',
+            reconciliation_run=cls.reconciliation_run,
+            roa=cls.roa,
+            details_json={'status': 'extra breadth'},
+        )
+
+    def test_routing_intent_profile_detail_renders_dashboard_sections(self):
+        self.add_permissions('netbox_rpki.view_routingintentprofile')
+
+        response = self.client.get(self.profile.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertTemplateUsed(response, 'netbox_rpki/object_detail.html')
+        self.assertContains(response, 'Routing Intent Profile Dashboard')
+        self.assertContains(response, 'Routing Intent Rules')
+        self.assertContains(response, 'ROA Intent Overrides')
+        self.assertContains(response, 'Intent Derivation Runs')
+        self.assertContains(response, 'ROA Reconciliation Runs')
+        self.assertContains(response, 'Derived ROA Intents')
+        self.assertContains(response, 'Dashboard Rule')
+        self.assertContains(response, 'Dashboard Override')
+        self.assertContains(response, 'Dashboard Derivation Run')
+        self.assertContains(response, 'Dashboard Reconciliation Run')
+
+    def test_reconciliation_run_detail_renders_drilldown_sections(self):
+        self.add_permissions('netbox_rpki.view_roareconciliationrun')
+
+        response = self.client.get(self.reconciliation_run.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertTemplateUsed(response, 'netbox_rpki/object_detail.html')
+        self.assertContains(response, 'ROA Reconciliation Run')
+        self.assertContains(response, 'Result Summary')
+        self.assertContains(response, '&quot;overbroad&quot;: 1')
+        self.assertContains(response, 'ROA Intent Results')
+        self.assertContains(response, 'Published ROA Results')
+        self.assertContains(response, 'Dashboard Intent Result')
+        self.assertContains(response, 'Dashboard Published Result')
+
+    def test_roa_intent_result_detail_renders_diff_context_and_candidate_matches(self):
+        self.add_permissions('netbox_rpki.view_roaintentresult')
+
+        response = self.client.get(self.intent_result.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertTemplateUsed(response, 'netbox_rpki/object_detail.html')
+        self.assertContains(response, 'ROA Intent Result Diff')
+        self.assertContains(response, 'Expected Prefix')
+        self.assertContains(response, '10.10.0.0/24')
+        self.assertContains(response, 'Published Max Lengths')
+        self.assertContains(response, '25')
+        self.assertContains(response, 'Candidate Matches')
+        self.assertContains(response, 'Dashboard Candidate Match')
+        self.assertContains(response, '&quot;delta&quot;')
 
 
 class GeneratedObjectViewTestMixin:

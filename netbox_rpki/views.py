@@ -5,7 +5,13 @@ from django.urls import reverse
 from netbox.views import generic
 
 from netbox_rpki import models, forms, tables, filtersets
-from netbox_rpki.detail_specs import CERTIFICATE_DETAIL_SPEC, DetailFieldSpec, ORGANIZATION_DETAIL_SPEC, ROA_DETAIL_SPEC
+from netbox_rpki.detail_specs import (
+    CERTIFICATE_DETAIL_SPEC,
+    DETAIL_SPEC_BY_MODEL,
+    DetailFieldSpec,
+    ORGANIZATION_DETAIL_SPEC,
+    ROA_DETAIL_SPEC,
+)
 from netbox_rpki.object_registry import SIMPLE_DETAIL_VIEW_OBJECT_SPECS, VIEW_OBJECT_SPECS
 from netbox_rpki.object_specs import ObjectSpec
 
@@ -124,6 +130,10 @@ def build_generated_detail_field_spec(spec: ObjectSpec, field_name: str) -> Deta
 
 
 def build_generated_detail_spec(spec: ObjectSpec):
+    custom_spec = DETAIL_SPEC_BY_MODEL.get(spec.model)
+    if custom_spec is not None:
+        return custom_spec
+
     detail_fields = tuple(
         build_generated_detail_field_spec(spec, field_name)
         for field_name in spec.api.fields

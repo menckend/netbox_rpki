@@ -909,10 +909,85 @@ def create_test_roa_intent(
     )
 
 
+def create_test_provider_snapshot(
+    name='Provider Snapshot 1',
+    organization=None,
+    provider_name='ARIN',
+    status=None,
+    fetched_at=None,
+    completed_at=None,
+    summary_json=None,
+    **kwargs,
+):
+    if organization is None:
+        organization = create_test_organization()
+    return rpki_models.ProviderSnapshot.objects.create(
+        name=name,
+        organization=organization,
+        provider_name=provider_name,
+        status=status or rpki_models.ValidationRunStatus.COMPLETED,
+        fetched_at=fetched_at,
+        completed_at=completed_at,
+        summary_json=summary_json or {},
+        **kwargs,
+    )
+
+
+def create_test_imported_roa_authorization(
+    name='Imported ROA Authorization 1',
+    provider_snapshot=None,
+    organization=None,
+    authorization_key='',
+    prefix=None,
+    prefix_cidr_text='',
+    address_family=None,
+    origin_asn=None,
+    origin_asn_value=None,
+    max_length=None,
+    external_object_id='',
+    is_stale=False,
+    payload_json=None,
+    **kwargs,
+):
+    if organization is None:
+        organization = create_test_organization()
+    if provider_snapshot is None:
+        provider_snapshot = create_test_provider_snapshot(organization=organization)
+    if prefix is None and not prefix_cidr_text:
+        prefix = create_test_prefix()
+    resolved_prefix_text = prefix_cidr_text or (str(prefix.prefix) if prefix is not None else '')
+    resolved_origin_value = origin_asn_value if origin_asn_value is not None else getattr(origin_asn, 'asn', None)
+    if not authorization_key:
+        authorization_key = rpki_models.ImportedRoaAuthorization.build_authorization_key(
+            prefix_cidr_text=resolved_prefix_text,
+            address_family=address_family or rpki_models.AddressFamily.IPV4,
+            origin_asn_value=resolved_origin_value,
+            max_length=max_length,
+            external_object_id=external_object_id,
+        )
+    return rpki_models.ImportedRoaAuthorization.objects.create(
+        name=name,
+        provider_snapshot=provider_snapshot,
+        organization=organization,
+        authorization_key=authorization_key,
+        prefix=prefix,
+        prefix_cidr_text=resolved_prefix_text,
+        address_family=address_family or rpki_models.AddressFamily.IPV4,
+        origin_asn=origin_asn,
+        origin_asn_value=resolved_origin_value,
+        max_length=max_length,
+        external_object_id=external_object_id,
+        is_stale=is_stale,
+        payload_json=payload_json or {},
+        **kwargs,
+    )
+
+
 def create_test_roa_intent_match(
     name='ROA Intent Match 1',
     roa_intent=None,
     roa=None,
+    imported_authorization=None,
     match_kind=None,
     is_best_match=False,
     details_json=None,
@@ -920,12 +995,13 @@ def create_test_roa_intent_match(
 ):
     if roa_intent is None:
         roa_intent = create_test_roa_intent(origin_asn=create_test_asn())
-    if roa is None:
+    if roa is None and imported_authorization is None:
         roa = create_test_roa(origin_as=roa_intent.origin_asn, signed_by=create_test_certificate())
     return rpki_models.ROAIntentMatch.objects.create(
         name=name,
         roa_intent=roa_intent,
         roa=roa,
+        imported_authorization=imported_authorization,
         match_kind=match_kind or rpki_models.ROAIntentMatchKind.EXACT,
         is_best_match=is_best_match,
         details_json=details_json or {},
@@ -938,6 +1014,7 @@ def create_test_roa_reconciliation_run(
     organization=None,
     intent_profile=None,
     basis_derivation_run=None,
+    provider_snapshot=None,
     comparison_scope=None,
     status=None,
     started_at=None,
@@ -958,6 +1035,7 @@ def create_test_roa_reconciliation_run(
         organization=organization,
         intent_profile=intent_profile,
         basis_derivation_run=basis_derivation_run,
+        provider_snapshot=provider_snapshot,
         comparison_scope=comparison_scope or rpki_models.ReconciliationComparisonScope.LOCAL_ROA_RECORDS,
         status=status or rpki_models.ValidationRunStatus.PENDING,
         started_at=started_at,
@@ -976,6 +1054,7 @@ def create_test_roa_intent_result(
     result_type=None,
     severity=None,
     best_roa=None,
+    best_imported_authorization=None,
     match_count=0,
     details_json=None,
     computed_at=None,
@@ -996,6 +1075,7 @@ def create_test_roa_intent_result(
         result_type=result_type or rpki_models.ROAIntentResultType.MATCH,
         severity=severity or rpki_models.ReconciliationSeverity.INFO,
         best_roa=best_roa,
+        best_imported_authorization=best_imported_authorization,
         match_count=match_count,
         details_json=details_json or {},
         computed_at=computed_at,
@@ -1007,6 +1087,7 @@ def create_test_published_roa_result(
     name='Published ROA Result 1',
     reconciliation_run=None,
     roa=None,
+    imported_authorization=None,
     result_type=None,
     severity=None,
     matched_intent_count=0,
@@ -1014,7 +1095,7 @@ def create_test_published_roa_result(
     computed_at=None,
     **kwargs,
 ):
-    if roa is None:
+    if roa is None and imported_authorization is None:
         roa = create_test_roa()
     if reconciliation_run is None:
         organization = create_test_organization()
@@ -1029,11 +1110,69 @@ def create_test_published_roa_result(
         name=name,
         reconciliation_run=reconciliation_run,
         roa=roa,
+        imported_authorization=imported_authorization,
         result_type=result_type or rpki_models.PublishedROAResultType.MATCHED,
         severity=severity or rpki_models.ReconciliationSeverity.INFO,
         matched_intent_count=matched_intent_count,
         details_json=details_json or {},
         computed_at=computed_at,
+        **kwargs,
+    )
+
+
+def create_test_roa_change_plan(
+    name='ROA Change Plan 1',
+    organization=None,
+    source_reconciliation_run=None,
+    status=None,
+    summary_json=None,
+    **kwargs,
+):
+    if organization is None:
+        organization = create_test_organization()
+    if source_reconciliation_run is None:
+        profile = create_test_routing_intent_profile(organization=organization)
+        derivation_run = create_test_intent_derivation_run(organization=organization, intent_profile=profile)
+        source_reconciliation_run = create_test_roa_reconciliation_run(
+            organization=organization,
+            intent_profile=profile,
+            basis_derivation_run=derivation_run,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+    return rpki_models.ROAChangePlan.objects.create(
+        name=name,
+        organization=organization,
+        source_reconciliation_run=source_reconciliation_run,
+        status=status or rpki_models.ROAChangePlanStatus.DRAFT,
+        summary_json=summary_json or {},
+        **kwargs,
+    )
+
+
+def create_test_roa_change_plan_item(
+    name='ROA Change Plan Item 1',
+    change_plan=None,
+    action_type=None,
+    roa_intent=None,
+    roa=None,
+    imported_authorization=None,
+    before_state_json=None,
+    after_state_json=None,
+    reason='',
+    **kwargs,
+):
+    if change_plan is None:
+        change_plan = create_test_roa_change_plan()
+    return rpki_models.ROAChangePlanItem.objects.create(
+        name=name,
+        change_plan=change_plan,
+        action_type=action_type or rpki_models.ROAChangePlanAction.CREATE,
+        roa_intent=roa_intent,
+        roa=roa,
+        imported_authorization=imported_authorization,
+        before_state_json=before_state_json or {},
+        after_state_json=after_state_json or {},
+        reason=reason,
         **kwargs,
     )
 

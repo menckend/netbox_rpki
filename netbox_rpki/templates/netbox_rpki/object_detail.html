@@ -42,6 +42,12 @@
                     {% else %}
                       {{ row.value }}
                     {% endif %}
+                  {% elif row.kind == 'code' %}
+                    {% if row.is_empty and row.empty_text %}
+                      <span class="text-muted">{{ row.empty_text }}</span>
+                    {% else %}
+                      <pre class="mb-0"><code>{{ row.value }}</code></pre>
+                    {% endif %}
                   {% elif row.is_empty and row.empty_text %}
                     <span class="text-muted">{{ row.empty_text }}</span>
                   {% else %}

@@ -37,9 +37,13 @@ from netbox_rpki.tests.utils import (
     create_test_model,
     create_test_prefix,
     create_test_publication_point,
+    create_test_provider_snapshot,
     create_test_repository,
     create_test_rir,
     create_test_revoked_certificate,
+    create_test_roa_change_plan,
+    create_test_roa_change_plan_item,
+    create_test_imported_roa_authorization,
     create_test_roa,
     create_test_roa_intent,
     create_test_roa_intent_match,
@@ -518,6 +522,14 @@ def _register_scenario_builders() -> None:
             "roareconciliationrun": lambda: create_test_roa_reconciliation_run(name=f"ROA Reconciliation Run {unique_token('roa-reconciliation-run')}"),
             "roaintentresult": lambda: create_test_roa_intent_result(name=f"ROA Intent Result {unique_token('roa-intent-result')}"),
             "publishedroaresult": lambda: create_test_published_roa_result(name=f"Published ROA Result {unique_token('published-roa-result')}"),
+            "providersnapshot": lambda: create_test_provider_snapshot(name=f"Provider Snapshot {unique_token('provider-snapshot')}"),
+            "importedroaauthorization": lambda: create_test_imported_roa_authorization(
+                name=f"Imported ROA Authorization {unique_token('imported-roa-authorization')}",
+                origin_asn=create_unique_asn(),
+                max_length=24,
+            ),
+            "roachangeplan": lambda: create_test_roa_change_plan(name=f"ROA Change Plan {unique_token('roa-change-plan')}"),
+            "roachangeplanitem": lambda: create_test_roa_change_plan_item(name=f"ROA Change Plan Item {unique_token('roa-change-plan-item')}"),
         }
     )
 

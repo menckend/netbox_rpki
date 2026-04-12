@@ -4,6 +4,7 @@ import ipam
 from django.db import models
 from django.urls import reverse
 from netbox.models import NetBoxModel
+from netbox.models.features import JobsMixin
 from ipam.models.asns import ASN
 from ipam.models.ip import Prefix
 from ipam.models import RIR
@@ -167,6 +168,17 @@ class PublishedROAResultType(models.TextChoices):
     WRONG_ORIGIN = "wrong_origin", "Wrong Origin"
     STALE = "stale", "Stale"
     UNSCOPED = "unscoped", "Unscoped"
+
+
+class ROAChangePlanStatus(models.TextChoices):
+    DRAFT = "draft", "Draft"
+    APPROVED = "approved", "Approved"
+    APPLIED = "applied", "Applied"
+
+
+class ROAChangePlanAction(models.TextChoices):
+    CREATE = "create", "Create"
+    WITHDRAW = "withdraw", "Withdraw"
 
 
 class RpkiStandardModel(NetBoxModel):
@@ -1173,7 +1185,7 @@ class ValidatedAspaPayload(NamedRpkiStandardModel):
         return reverse("plugins:netbox_rpki:validatedaspapayload", args=[self.pk])
 
 
-class RoutingIntentProfile(NamedRpkiStandardModel):
+class RoutingIntentProfile(JobsMixin, NamedRpkiStandardModel):
     organization = models.ForeignKey(
         to=Organization,
         on_delete=models.PROTECT,
@@ -1540,6 +1552,104 @@ class ROAIntent(NamedRpkiStandardModel):
         return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
+class ProviderSnapshot(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='provider_snapshots'
+    )
+    provider_name = models.CharField(max_length=100)
+    status = models.CharField(
+        max_length=32,
+        choices=ValidationRunStatus.choices,
+        default=ValidationRunStatus.PENDING,
+    )
+    fetched_at = models.DateTimeField(blank=True, null=True)
+    completed_at = models.DateTimeField(blank=True, null=True)
+    summary_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("-fetched_at", "name")
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:providersnapshot", args=[self.pk])
+
+
+class ImportedRoaAuthorization(NamedRpkiStandardModel):
+    provider_snapshot = models.ForeignKey(
+        to='ProviderSnapshot',
+        on_delete=models.PROTECT,
+        related_name='imported_roa_authorizations'
+    )
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='imported_roa_authorizations'
+    )
+    authorization_key = models.CharField(max_length=64)
+    prefix = models.ForeignKey(
+        to=Prefix,
+        on_delete=models.PROTECT,
+        related_name='imported_roa_authorizations',
+        blank=True,
+        null=True
+    )
+    prefix_cidr_text = models.CharField(max_length=64)
+    address_family = models.CharField(max_length=8, choices=AddressFamily.choices)
+    origin_asn = models.ForeignKey(
+        to=ASN,
+        on_delete=models.PROTECT,
+        related_name='imported_roa_authorizations',
+        blank=True,
+        null=True
+    )
+    origin_asn_value = models.PositiveBigIntegerField(blank=True, null=True)
+    max_length = models.PositiveSmallIntegerField(blank=True, null=True)
+    external_object_id = models.CharField(max_length=200, blank=True)
+    is_stale = models.BooleanField(default=False)
+    payload_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("name",)
+        constraints = (
+            models.UniqueConstraint(
+                fields=("provider_snapshot", "authorization_key"),
+                name="netbox_rpki_importedroaauth_snapshot_key_unique",
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:importedroaauthorization", args=[self.pk])
+
+    @classmethod
+    def build_authorization_key(
+        cls,
+        *,
+        prefix_cidr_text: str,
+        address_family: str,
+        origin_asn_value: int | None,
+        max_length: int | None,
+        external_object_id: str = '',
+    ) -> str:
+        normalized = "|".join(
+            str(value)
+            for value in (
+                prefix_cidr_text.strip().lower(),
+                address_family,
+                origin_asn_value if origin_asn_value is not None else "",
+                max_length if max_length is not None else "",
+                external_object_id.strip(),
+            )
+        )
+        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
 class ROAIntentMatch(NamedRpkiStandardModel):
     roa_intent = models.ForeignKey(
         to='ROAIntent',
@@ -1550,6 +1660,16 @@ class ROAIntentMatch(NamedRpkiStandardModel):
         to=Roa,
         on_delete=models.PROTECT,
         related_name='intent_matches'
+        ,
+        blank=True,
+        null=True
+    )
+    imported_authorization = models.ForeignKey(
+        to='ImportedRoaAuthorization',
+        on_delete=models.PROTECT,
+        related_name='intent_matches',
+        blank=True,
+        null=True
     )
     match_kind = models.CharField(
         max_length=32,
@@ -1564,7 +1684,20 @@ class ROAIntentMatch(NamedRpkiStandardModel):
         constraints = (
             models.UniqueConstraint(
                 fields=("roa_intent", "roa"),
+                condition=models.Q(roa__isnull=False, imported_authorization__isnull=True),
                 name="netbox_rpki_roaintentmatch_roa_intent_roa_unique",
+            ),
+            models.UniqueConstraint(
+                fields=("roa_intent", "imported_authorization"),
+                condition=models.Q(roa__isnull=True, imported_authorization__isnull=False),
+                name="netbox_rpki_roaintentmatch_roa_intent_imported_unique",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(roa__isnull=False, imported_authorization__isnull=True)
+                    | models.Q(roa__isnull=True, imported_authorization__isnull=False)
+                ),
+                name="netbox_rpki_roaintentmatch_exactly_one_source",
             ),
         )
 
@@ -1590,6 +1723,13 @@ class ROAReconciliationRun(NamedRpkiStandardModel):
         to='IntentDerivationRun',
         on_delete=models.PROTECT,
         related_name='reconciliation_runs'
+    )
+    provider_snapshot = models.ForeignKey(
+        to='ProviderSnapshot',
+        on_delete=models.PROTECT,
+        related_name='reconciliation_runs',
+        blank=True,
+        null=True
     )
     comparison_scope = models.CharField(
         max_length=32,
@@ -1645,6 +1785,13 @@ class ROAIntentResult(NamedRpkiStandardModel):
         blank=True,
         null=True
     )
+    best_imported_authorization = models.ForeignKey(
+        to='ImportedRoaAuthorization',
+        on_delete=models.SET_NULL,
+        related_name='intent_result_matches',
+        blank=True,
+        null=True
+    )
     match_count = models.PositiveIntegerField(default=0)
     details_json = models.JSONField(default=dict, blank=True)
     computed_at = models.DateTimeField(blank=True, null=True)
@@ -1675,6 +1822,16 @@ class PublishedROAResult(NamedRpkiStandardModel):
         to=Roa,
         on_delete=models.PROTECT,
         related_name='published_reconciliation_results'
+        ,
+        blank=True,
+        null=True
+    )
+    imported_authorization = models.ForeignKey(
+        to='ImportedRoaAuthorization',
+        on_delete=models.PROTECT,
+        related_name='published_reconciliation_results',
+        blank=True,
+        null=True
     )
     result_type = models.CharField(
         max_length=32,
@@ -1695,7 +1852,20 @@ class PublishedROAResult(NamedRpkiStandardModel):
         constraints = (
             models.UniqueConstraint(
                 fields=("reconciliation_run", "roa"),
+                condition=models.Q(roa__isnull=False, imported_authorization__isnull=True),
                 name="netbox_rpki_publishedroaresult_run_roa_unique",
+            ),
+            models.UniqueConstraint(
+                fields=("reconciliation_run", "imported_authorization"),
+                condition=models.Q(roa__isnull=True, imported_authorization__isnull=False),
+                name="netbox_rpki_publishedresult_run_imported_unique",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(roa__isnull=False, imported_authorization__isnull=True)
+                    | models.Q(roa__isnull=True, imported_authorization__isnull=False)
+                ),
+                name="netbox_rpki_publishedroaresult_exactly_one_source",
             ),
         )
 
@@ -1704,3 +1874,76 @@ class PublishedROAResult(NamedRpkiStandardModel):
 
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:publishedroaresult", args=[self.pk])
+
+
+class ROAChangePlan(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='roa_change_plans'
+    )
+    source_reconciliation_run = models.ForeignKey(
+        to='ROAReconciliationRun',
+        on_delete=models.PROTECT,
+        related_name='change_plans'
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=ROAChangePlanStatus.choices,
+        default=ROAChangePlanStatus.DRAFT,
+    )
+    summary_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("-created", "name")
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:roachangeplan", args=[self.pk])
+
+
+class ROAChangePlanItem(NamedRpkiStandardModel):
+    change_plan = models.ForeignKey(
+        to='ROAChangePlan',
+        on_delete=models.PROTECT,
+        related_name='items'
+    )
+    action_type = models.CharField(
+        max_length=16,
+        choices=ROAChangePlanAction.choices,
+    )
+    roa_intent = models.ForeignKey(
+        to='ROAIntent',
+        on_delete=models.PROTECT,
+        related_name='change_plan_items',
+        blank=True,
+        null=True
+    )
+    roa = models.ForeignKey(
+        to=Roa,
+        on_delete=models.PROTECT,
+        related_name='change_plan_items',
+        blank=True,
+        null=True
+    )
+    imported_authorization = models.ForeignKey(
+        to='ImportedRoaAuthorization',
+        on_delete=models.PROTECT,
+        related_name='change_plan_items',
+        blank=True,
+        null=True
+    )
+    before_state_json = models.JSONField(default=dict, blank=True)
+    after_state_json = models.JSONField(default=dict, blank=True)
+    reason = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ("name",)
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:roachangeplanitem", args=[self.pk])

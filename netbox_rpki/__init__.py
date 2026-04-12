@@ -23,5 +23,10 @@ class RpkiConfig(PluginConfig):
         'top_level_menu': True
         }
 
+    def ready(self):
+        super().ready()
+
+        from . import jobs  # noqa: F401
+
 
 config = RpkiConfig
