@@ -1,4 +1,5 @@
 from django.test import SimpleTestCase
+from django.urls import reverse
 
 from netbox_rpki import navigation
 from netbox_rpki.object_registry import get_navigation_groups
@@ -22,11 +23,26 @@ class NavigationTestCase(SimpleTestCase):
     def test_resource_menu_items_match_expected_links(self):
         self.assertEqual(
             [item.link_text for item in navigation.resource_menu_items],
-            [label for label, _link in EXPECTED_NAVIGATION_LINKS['Resources']],
+            [label for label, _link in EXPECTED_NAVIGATION_LINKS['Resources']] + ['Operations'],
         )
         self.assertEqual(
             [item.link for item in navigation.resource_menu_items],
-            [link for _label, link in EXPECTED_NAVIGATION_LINKS['Resources']],
+            [link for _label, link in EXPECTED_NAVIGATION_LINKS['Resources']] + ['plugins:netbox_rpki:operations_dashboard'],
+        )
+
+    def test_operations_menu_item_has_expected_permissions(self):
+        operations_item = navigation.resource_menu_items[-1]
+
+        self.assertEqual(operations_item.link_text, 'Operations')
+        self.assertEqual(operations_item.link, 'plugins:netbox_rpki:operations_dashboard')
+        self.assertEqual(operations_item.url, reverse('plugins:netbox_rpki:operations_dashboard'))
+        self.assertEqual(
+            operations_item.permissions,
+            [
+                'netbox_rpki.view_rpkiprovideraccount',
+                'netbox_rpki.view_roa',
+                'netbox_rpki.view_certificate',
+            ],
         )
 
     def test_roa_menu_items_match_expected_links(self):

@@ -1,12 +1,15 @@
+from datetime import date, timedelta
 from types import SimpleNamespace
 from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.views.generic import View
 from netbox.object_actions import AddObject, BulkExport, CloneObject, DeleteObject, EditObject
 from netbox.views import generic
 from utilities.forms import ConfirmationForm
+from utilities.views import ContentTypePermissionRequiredMixin
 
 from netbox_rpki import models, forms, tables, filtersets
 from netbox_rpki.jobs import SyncProviderAccountJob
@@ -297,15 +300,137 @@ class ProviderAccountSyncView(generic.ObjectEditView):
             messages.error(request, f'Provider account {provider_account.name} is disabled for sync.')
             return redirect(provider_account.get_absolute_url())
 
-        job = SyncProviderAccountJob.enqueue(
+        job, created = SyncProviderAccountJob.enqueue_for_provider_account(
+            provider_account,
             user=request.user,
-            provider_account_pk=provider_account.pk,
         )
-        messages.success(
-            request,
-            f'Enqueued provider sync job {job.pk} for {provider_account.name}.',
-        )
+        if created:
+            messages.success(
+                request,
+                f'Enqueued provider sync job {job.pk} for {provider_account.name}.',
+            )
+        elif job is not None:
+            messages.warning(
+                request,
+                f'Provider sync job {job.pk} is already queued for {provider_account.name}.',
+            )
+        else:
+            messages.warning(
+                request,
+                f'Provider account {provider_account.name} already has a sync in progress.',
+            )
         return redirect(provider_account.get_absolute_url())
+
+
+class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
+    template_name = 'netbox_rpki/operations_dashboard.html'
+    expiry_window_days = 30
+    additional_permissions = [
+        'netbox_rpki.view_roa',
+        'netbox_rpki.view_certificate',
+    ]
+    provider_health_priority = {
+        models.ProviderSyncHealth.FAILED: 0,
+        models.ProviderSyncHealth.STALE: 1,
+    }
+
+    def get_required_permission(self):
+        return 'netbox_rpki.view_rpkiprovideraccount'
+
+    def get(self, request):
+        today = date.today()
+        expiry_threshold = today + timedelta(days=self.expiry_window_days)
+        provider_accounts = self.get_provider_accounts(request)
+        expiring_roas = self.get_expiring_roas(request, today=today, expiry_threshold=expiry_threshold)
+        expiring_certificates = self.get_expiring_certificates(
+            request,
+            today=today,
+            expiry_threshold=expiry_threshold,
+        )
+
+        return render(request, self.template_name, {
+            'provider_accounts': provider_accounts,
+            'expiring_roas': expiring_roas,
+            'expiring_certificates': expiring_certificates,
+            'expiry_window_days': self.expiry_window_days,
+            'expiry_threshold': expiry_threshold,
+        })
+
+    def get_provider_accounts(self, request):
+        attention_healths = {
+            models.ProviderSyncHealth.FAILED,
+            models.ProviderSyncHealth.STALE,
+        }
+        provider_accounts = [
+            provider_account
+            for provider_account in models.RpkiProviderAccount.objects.restrict(request.user, 'view').select_related('organization')
+            if provider_account.sync_enabled and provider_account.sync_health in attention_healths
+        ]
+        provider_accounts.sort(key=self.get_provider_account_sort_key)
+        return provider_accounts
+
+    def get_provider_account_sort_key(self, provider_account):
+        last_successful_sync_timestamp = (
+            provider_account.last_successful_sync.timestamp()
+            if provider_account.last_successful_sync is not None
+            else float('-inf')
+        )
+        return (
+            self.provider_health_priority.get(provider_account.sync_health, 99),
+            last_successful_sync_timestamp,
+            provider_account.name.lower(),
+        )
+
+    def get_expiring_roas(self, request, *, today, expiry_threshold):
+        queryset = models.Roa.objects.restrict(request.user, 'view').select_related(
+            'origin_as',
+            'signed_by',
+            'signed_by__rpki_org',
+        ).filter(
+            valid_to__isnull=False,
+            valid_to__lte=expiry_threshold,
+        ).order_by('valid_to', 'name')
+        return [
+            {
+                'object': roa,
+                'organization': roa.signed_by.rpki_org,
+                'related_object': roa.signed_by,
+                'expiry_text': self.get_expiry_text(roa.valid_to, today=today),
+                'expiry_badge_class': self.get_expiry_badge_class(roa.valid_to, today=today),
+            }
+            for roa in queryset
+        ]
+
+    def get_expiring_certificates(self, request, *, today, expiry_threshold):
+        queryset = models.Certificate.objects.restrict(request.user, 'view').select_related('rpki_org').filter(
+            valid_to__isnull=False,
+            valid_to__lte=expiry_threshold,
+        ).order_by('valid_to', 'name')
+        return [
+            {
+                'object': certificate,
+                'organization': certificate.rpki_org,
+                'expiry_text': self.get_expiry_text(certificate.valid_to, today=today),
+                'expiry_badge_class': self.get_expiry_badge_class(certificate.valid_to, today=today),
+            }
+            for certificate in queryset
+        ]
+
+    def get_expiry_text(self, valid_to, *, today):
+        days_remaining = (valid_to - today).days
+        if days_remaining < 0:
+            return f'Expired {-days_remaining} day(s) ago'
+        if days_remaining == 0:
+            return 'Expires today'
+        return f'Expires in {days_remaining} day(s)'
+
+    def get_expiry_badge_class(self, valid_to, *, today):
+        days_remaining = (valid_to - today).days
+        if days_remaining < 0:
+            return 'danger'
+        if days_remaining <= 7:
+            return 'warning text-dark'
+        return 'info'
 
 
 class ROAChangePlanPreviewView(ROAChangePlanActionView):
@@ -356,32 +481,46 @@ class ROAChangePlanApproveView(ROAChangePlanActionView):
     action_label = 'Approve'
     button_class = 'primary'
 
-    def get(self, request, pk):
-        plan = self.get_plan(pk)
+    def get_form(self, data=None, *, plan):
+        initial = {
+            'ticket_reference': plan.ticket_reference,
+            'change_reference': plan.change_reference,
+            'maintenance_window_start': plan.maintenance_window_start,
+            'maintenance_window_end': plan.maintenance_window_end,
+        }
+        return forms.ROAChangePlanApprovalForm(data=data, initial=initial)
+
+    def _render(self, request, plan, *, form=None, status=200):
         return render(request, self.template_name, {
             'object': plan,
             'change_plan': plan,
-            'form': ConfirmationForm(),
+            'form': form or self.get_form(plan=plan),
             'return_url': self.get_return_url(request, plan),
             'action_label': self.action_label,
             'button_class': self.button_class,
-        })
+            'show_governance_inputs': True,
+        }, status=status)
+
+    def get(self, request, pk):
+        plan = self.get_plan(pk)
+        return self._render(request, plan)
 
     def post(self, request, pk):
         plan = self.get_plan(pk)
-        form = ConfirmationForm(request.POST)
+        form = self.get_form(request.POST, plan=plan)
         if not form.is_valid():
-            return render(request, self.template_name, {
-                'object': plan,
-                'change_plan': plan,
-                'form': form,
-                'return_url': self.get_return_url(request, plan),
-                'action_label': self.action_label,
-                'button_class': self.button_class,
-            }, status=400)
+            return self._render(request, plan, form=form, status=400)
 
         try:
-            approve_roa_change_plan(plan, approved_by=self.get_requested_by(request))
+            approve_roa_change_plan(
+                plan,
+                approved_by=self.get_requested_by(request),
+                ticket_reference=form.cleaned_data['ticket_reference'],
+                change_reference=form.cleaned_data['change_reference'],
+                maintenance_window_start=form.cleaned_data['maintenance_window_start'],
+                maintenance_window_end=form.cleaned_data['maintenance_window_end'],
+                approval_notes=form.cleaned_data['approval_notes'],
+            )
         except ProviderWriteError as exc:
             messages.error(request, str(exc))
             return redirect(plan.get_absolute_url())
@@ -409,6 +548,7 @@ class ROAChangePlanApplyView(ROAChangePlanActionView):
             'return_url': self.get_return_url(request, plan),
             'action_label': self.action_label,
             'button_class': self.button_class,
+            'show_governance_inputs': False,
         })
 
     def post(self, request, pk):
@@ -422,6 +562,7 @@ class ROAChangePlanApplyView(ROAChangePlanActionView):
                 'return_url': self.get_return_url(request, plan),
                 'action_label': self.action_label,
                 'button_class': self.button_class,
+                'show_governance_inputs': False,
             }, status=400)
 
         try:

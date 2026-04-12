@@ -1,7 +1,9 @@
+from datetime import timedelta
 from unittest.mock import patch
 
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from netbox_rpki import models as rpki_models
 from netbox_rpki.services import (
@@ -139,9 +141,45 @@ class ProviderWriteServiceTestCase(TestCase):
         self.assertIsNotNone(plan.approved_at)
         self.assertEqual(plan.approved_by, 'approval-user')
 
+    def test_approve_records_governance_metadata_and_approval_record(self):
+        plan = create_roa_change_plan(self.reconciliation_run, name='Governed Approval Plan')
+        window_start = timezone.now()
+        window_end = window_start + timedelta(hours=2)
+
+        approve_roa_change_plan(
+            plan,
+            approved_by='approval-user',
+            ticket_reference='CHG-1234',
+            change_reference='CAB-77',
+            maintenance_window_start=window_start,
+            maintenance_window_end=window_end,
+            approval_notes='Scheduled change approval.',
+        )
+        plan.refresh_from_db()
+        approval_record = plan.approval_records.get()
+
+        self.assertEqual(plan.ticket_reference, 'CHG-1234')
+        self.assertEqual(plan.change_reference, 'CAB-77')
+        self.assertEqual(plan.maintenance_window_start, window_start)
+        self.assertEqual(plan.maintenance_window_end, window_end)
+        self.assertEqual(approval_record.disposition, rpki_models.ValidationDisposition.ACCEPTED)
+        self.assertEqual(approval_record.recorded_by, 'approval-user')
+        self.assertEqual(approval_record.ticket_reference, 'CHG-1234')
+        self.assertEqual(approval_record.change_reference, 'CAB-77')
+        self.assertEqual(approval_record.notes, 'Scheduled change approval.')
+
     def test_apply_submits_delta_records_execution_and_triggers_followup_sync(self):
         plan = create_roa_change_plan(self.reconciliation_run, name='Apply Plan')
-        approve_roa_change_plan(plan, approved_by='apply-approver')
+        window_start = timezone.now()
+        window_end = window_start + timedelta(hours=1)
+        approve_roa_change_plan(
+            plan,
+            approved_by='apply-approver',
+            ticket_reference='CHG-APPLY',
+            change_reference='CR-APPLY',
+            maintenance_window_start=window_start,
+            maintenance_window_end=window_end,
+        )
         followup_snapshot = create_test_provider_snapshot(
             name='Follow-Up Snapshot',
             organization=self.organization,
@@ -178,6 +216,15 @@ class ProviderWriteServiceTestCase(TestCase):
         self.assertEqual(execution.followup_provider_snapshot, followup_snapshot)
         self.assertEqual(execution.request_payload_json, delta)
         self.assertEqual(execution.response_payload_json['provider_response'], {'message': 'accepted'})
+        self.assertEqual(
+            execution.response_payload_json['governance'],
+            {
+                'ticket_reference': 'CHG-APPLY',
+                'change_reference': 'CR-APPLY',
+                'maintenance_window_start': window_start.isoformat(),
+                'maintenance_window_end': window_end.isoformat(),
+            },
+        )
         submit_mock.assert_called_once_with(self.provider_account, delta)
         sync_mock.assert_called_once_with(
             self.provider_account,
@@ -332,6 +379,31 @@ class ROAChangePlanActionAPITestCase(PluginAPITestCase):
         self.assertIsNotNone(self.plan.approved_at)
         self.assertEqual(self.plan.approved_by, self.user.username)
 
+    def test_approve_action_records_governance_metadata(self):
+        self.add_permissions('netbox_rpki.view_roachangeplan', 'netbox_rpki.change_roachangeplan')
+        url = reverse('plugins-api:netbox_rpki-api:roachangeplan-approve', kwargs={'pk': self.plan.pk})
+
+        response = self.client.post(
+            url,
+            {
+                'ticket_reference': 'API-CHG-100',
+                'change_reference': 'API-CAB-10',
+                'maintenance_window_start': '2026-04-12T22:00:00Z',
+                'maintenance_window_end': '2026-04-12T23:00:00Z',
+                'approval_notes': 'API approval note',
+            },
+            format='json',
+            **self.header,
+        )
+
+        self.assertHttpStatus(response, 200)
+        self.plan.refresh_from_db()
+        self.assertEqual(self.plan.ticket_reference, 'API-CHG-100')
+        self.assertEqual(self.plan.change_reference, 'API-CAB-10')
+        self.assertIn('approval_record', response.data)
+        self.assertEqual(response.data['approval_record']['ticket_reference'], 'API-CHG-100')
+        self.assertEqual(response.data['approval_record']['notes'], 'API approval note')
+
     def test_apply_action_runs_provider_write_flow(self):
         self.add_permissions('netbox_rpki.view_roachangeplan', 'netbox_rpki.change_roachangeplan')
         approve_roa_change_plan(self.plan, approved_by='api-approver')
@@ -450,6 +522,50 @@ class ROAChangePlanActionViewTestCase(PluginViewTestCase):
         self.assertHttpStatus(response, 200)
         self.assertContains(response, 'Preview Provider Delta')
         self.assertContains(response, '10.89.0.0/24')
+
+    def test_approve_view_renders_and_persists_governance_fields(self):
+        self.add_permissions('netbox_rpki.view_roachangeplan', 'netbox_rpki.change_roachangeplan')
+        url = reverse('plugins:netbox_rpki:roachangeplan_approve', kwargs={'pk': self.plan.pk})
+
+        get_response = self.client.get(url)
+
+        self.assertHttpStatus(get_response, 200)
+        self.assertContains(get_response, 'Ticket Reference')
+        self.assertContains(get_response, 'Change Reference')
+
+        response = self.client.post(
+            url,
+            {
+                'confirm': True,
+                'ticket_reference': 'UI-CHG-88',
+                'change_reference': 'UI-CAB-12',
+                'maintenance_window_start': '2026-04-13T01:00',
+                'maintenance_window_end': '2026-04-13T02:00',
+                'approval_notes': 'Window approved in UI.',
+            },
+        )
+
+        self.assertRedirects(response, self.plan.get_absolute_url())
+        self.plan.refresh_from_db()
+        self.assertEqual(self.plan.ticket_reference, 'UI-CHG-88')
+        self.assertEqual(self.plan.change_reference, 'UI-CAB-12')
+        self.assertEqual(self.plan.approval_records.count(), 1)
+
+    def test_apply_view_shows_governance_metadata_after_approval(self):
+        approve_roa_change_plan(
+            self.plan,
+            approved_by='view-approver',
+            ticket_reference='UI-APPLY-1',
+            change_reference='UI-APPLY-CR',
+        )
+        self.add_permissions('netbox_rpki.view_roachangeplan', 'netbox_rpki.change_roachangeplan')
+
+        response = self.client.get(reverse('plugins:netbox_rpki:roachangeplan_apply', kwargs={'pk': self.plan.pk}))
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'Governance Metadata')
+        self.assertContains(response, 'UI-APPLY-1')
+        self.assertContains(response, 'UI-APPLY-CR')
 
     def test_unsupported_provider_plan_hides_write_buttons(self):
         unsupported_account = create_test_provider_account(

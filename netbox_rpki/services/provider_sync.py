@@ -269,6 +269,73 @@ def _build_snapshot_summary(provider_account: rpki_models.RpkiProviderAccount) -
     return summary
 
 
+def _build_external_reference_identity(
+    provider_account: rpki_models.RpkiProviderAccount,
+    *,
+    external_object_id: str,
+    prefix_cidr_text: str,
+    origin_asn_value: int | None,
+    max_length: int | None,
+) -> str:
+    normalized_external_id = external_object_id.strip()
+    normalized_prefix = prefix_cidr_text.strip().lower()
+    if provider_account.provider_type == rpki_models.ProviderType.ARIN and normalized_external_id:
+        return f'{normalized_external_id}|{normalized_prefix}'
+
+    if normalized_external_id:
+        return normalized_external_id
+
+    return '|'.join(
+        str(value)
+        for value in (
+            normalized_prefix,
+            origin_asn_value if origin_asn_value is not None else '',
+            max_length if max_length is not None else '',
+        )
+    )
+
+
+def _build_external_reference_name(
+    provider_account: rpki_models.RpkiProviderAccount,
+    provider_identity: str,
+) -> str:
+    return f'{provider_account.name} {provider_account.get_provider_type_display()} {provider_identity}'
+
+
+def _bind_external_reference(
+    *,
+    provider_account: rpki_models.RpkiProviderAccount,
+    snapshot: rpki_models.ProviderSnapshot,
+    imported_authorization: rpki_models.ImportedRoaAuthorization,
+) -> rpki_models.ExternalObjectReference | None:
+    provider_identity = _build_external_reference_identity(
+        provider_account,
+        external_object_id=imported_authorization.external_object_id,
+        prefix_cidr_text=imported_authorization.prefix_cidr_text,
+        origin_asn_value=imported_authorization.origin_asn_value,
+        max_length=imported_authorization.max_length,
+    )
+    if not provider_identity:
+        return None
+
+    reference, _ = rpki_models.ExternalObjectReference.objects.update_or_create(
+        provider_account=provider_account,
+        object_type=rpki_models.ExternalObjectType.ROA_AUTHORIZATION,
+        provider_identity=provider_identity,
+        defaults={
+            'name': _build_external_reference_name(provider_account, provider_identity),
+            'organization': provider_account.organization,
+            'external_object_id': imported_authorization.external_object_id,
+            'last_seen_provider_snapshot': snapshot,
+            'last_seen_imported_authorization': imported_authorization,
+            'last_seen_at': snapshot.fetched_at,
+        },
+    )
+    imported_authorization.external_reference = reference
+    imported_authorization.save(update_fields=('external_reference',))
+    return reference
+
+
 def _import_arin_records(
     provider_account: rpki_models.RpkiProviderAccount,
     snapshot: rpki_models.ProviderSnapshot,
@@ -288,7 +355,7 @@ def _import_arin_records(
                 max_length=record.max_length,
                 external_object_id=record.roa_handle,
             )
-            rpki_models.ImportedRoaAuthorization.objects.create(
+            imported_authorization = rpki_models.ImportedRoaAuthorization.objects.create(
                 name=_build_import_name(provider_account, record),
                 provider_snapshot=snapshot,
                 organization=provider_account.organization,
@@ -315,6 +382,11 @@ def _import_arin_records(
                     'auto_linked': record.auto_linked,
                 },
             )
+            _bind_external_reference(
+                provider_account=provider_account,
+                snapshot=snapshot,
+                imported_authorization=imported_authorization,
+            )
             imported_count += 1
     return len(records), imported_count
 
@@ -338,7 +410,7 @@ def _import_krill_records(
                 max_length=record.max_length,
                 external_object_id=record.external_object_id,
             )
-            rpki_models.ImportedRoaAuthorization.objects.create(
+            imported_authorization = rpki_models.ImportedRoaAuthorization.objects.create(
                 name=_build_krill_import_name(provider_account, record),
                 provider_snapshot=snapshot,
                 organization=provider_account.organization,
@@ -356,6 +428,11 @@ def _import_krill_records(
                     'comment': record.comment,
                     'roa_objects': record.roa_objects,
                 },
+            )
+            _bind_external_reference(
+                provider_account=provider_account,
+                snapshot=snapshot,
+                imported_authorization=imported_authorization,
             )
             imported_count += 1
     return len(records), imported_count
@@ -377,6 +454,8 @@ def sync_provider_account(
         raise ProviderSyncError(f'Provider type {provider_account.provider_type} is not supported.')
 
     now = timezone.now()
+    provider_account.last_sync_status = rpki_models.ValidationRunStatus.RUNNING
+    provider_account.save(update_fields=('last_sync_status',))
     sync_run = rpki_models.ProviderSyncRun.objects.create(
         name=f'{provider_account.name} Sync {now:%Y-%m-%d %H:%M:%S}',
         organization=provider_account.organization,

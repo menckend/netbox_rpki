@@ -200,6 +200,10 @@ ROA_CHANGE_PLAN_DETAIL_SPEC = DetailSpec(
             empty_text='None',
         ),
         DetailFieldSpec(label='Status', value=lambda obj: obj.status),
+        DetailFieldSpec(label='Ticket Reference', value=lambda obj: obj.ticket_reference, empty_text='None'),
+        DetailFieldSpec(label='Change Reference', value=lambda obj: obj.change_reference, empty_text='None'),
+        DetailFieldSpec(label='Maintenance Window Start', value=lambda obj: obj.maintenance_window_start, empty_text='None'),
+        DetailFieldSpec(label='Maintenance Window End', value=lambda obj: obj.maintenance_window_end, empty_text='None'),
         DetailFieldSpec(label='Approved At', value=lambda obj: obj.approved_at, empty_text='None'),
         DetailFieldSpec(label='Approved By', value=lambda obj: obj.approved_by, empty_text='None'),
         DetailFieldSpec(label='Apply Started At', value=lambda obj: obj.apply_started_at, empty_text='None'),
@@ -244,6 +248,11 @@ ROA_CHANGE_PLAN_DETAIL_SPEC = DetailSpec(
             title='ROA Change Plan Items',
             table_class_name='ROAChangePlanItemTable',
             queryset=lambda obj: obj.items.all(),
+        ),
+        DetailTableSpec(
+            title='Approval Records',
+            table_class_name='ApprovalRecordTable',
+            queryset=lambda obj: obj.approval_records.all(),
         ),
         DetailTableSpec(
             title='Provider Write Executions',
@@ -594,6 +603,9 @@ PROVIDER_ACCOUNT_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(label='API Key', value=lambda obj: obj.api_key),
         DetailFieldSpec(label='API Base URL', value=lambda obj: obj.api_base_url, kind='url'),
         DetailFieldSpec(label='Sync Enabled', value=lambda obj: obj.sync_enabled),
+        DetailFieldSpec(label='Sync Interval (Minutes)', value=lambda obj: obj.sync_interval, empty_text='Manual only'),
+        DetailFieldSpec(label='Next Sync Due', value=lambda obj: obj.next_sync_due_at, empty_text='Not scheduled'),
+        DetailFieldSpec(label='Sync Health', value=lambda obj: obj.sync_health_display),
         DetailFieldSpec(label='Last Successful Sync', value=lambda obj: obj.last_successful_sync, empty_text='None'),
         DetailFieldSpec(label='Last Sync Status', value=lambda obj: obj.last_sync_status),
         DetailFieldSpec(

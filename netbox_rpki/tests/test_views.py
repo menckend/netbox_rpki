@@ -1,8 +1,9 @@
-from datetime import date
+from datetime import date, timedelta
 
 from django.test import TestCase
 from django.urls import reverse
 from django.utils.formats import date_format
+from django.utils import timezone
 
 from netbox_rpki import filtersets, forms, tables, views
 from netbox_rpki.models import Certificate, CertificateAsn, CertificatePrefix, Organization, Roa, RoaPrefix
@@ -175,22 +176,22 @@ class ProviderAccountSyncViewTestCase(PluginViewTestCase):
             def get_absolute_url():
                 return '/core/jobs/778/'
 
-        with patch('netbox_rpki.views.SyncProviderAccountJob.enqueue', return_value=StubJob()) as enqueue_mock:
+        with patch(
+            'netbox_rpki.views.SyncProviderAccountJob.enqueue_for_provider_account',
+            return_value=(StubJob(), True),
+        ) as enqueue_mock:
             response = self.client.post(
                 reverse('plugins:netbox_rpki:provideraccount_sync', kwargs={'pk': self.provider_account.pk}),
                 {'confirm': True},
             )
 
         self.assertRedirects(response, self.provider_account.get_absolute_url())
-        enqueue_mock.assert_called_once_with(
-            user=self.user,
-            provider_account_pk=self.provider_account.pk,
-        )
+        enqueue_mock.assert_called_once_with(self.provider_account, user=self.user)
 
     def test_provider_account_sync_view_does_not_enqueue_when_disabled(self):
         self.add_permissions('netbox_rpki.view_rpkiprovideraccount', 'netbox_rpki.change_rpkiprovideraccount')
 
-        with patch('netbox_rpki.views.SyncProviderAccountJob.enqueue') as enqueue_mock:
+        with patch('netbox_rpki.views.SyncProviderAccountJob.enqueue_for_provider_account') as enqueue_mock:
             response = self.client.post(
                 reverse('plugins:netbox_rpki:provideraccount_sync', kwargs={'pk': self.disabled_provider_account.pk}),
                 {'confirm': True},
@@ -198,6 +199,119 @@ class ProviderAccountSyncViewTestCase(PluginViewTestCase):
 
         self.assertRedirects(response, self.disabled_provider_account.get_absolute_url())
         enqueue_mock.assert_not_called()
+
+    def test_provider_account_sync_view_reuses_existing_job(self):
+        self.add_permissions('netbox_rpki.view_rpkiprovideraccount', 'netbox_rpki.change_rpkiprovideraccount')
+
+        class StubJob:
+            pk = 779
+            status = 'pending'
+
+            @staticmethod
+            def get_absolute_url():
+                return '/core/jobs/779/'
+
+        with patch(
+            'netbox_rpki.views.SyncProviderAccountJob.enqueue_for_provider_account',
+            return_value=(StubJob(), False),
+        ):
+            response = self.client.post(
+                reverse('plugins:netbox_rpki:provideraccount_sync', kwargs={'pk': self.provider_account.pk}),
+                {'confirm': True},
+            )
+
+        self.assertRedirects(response, self.provider_account.get_absolute_url())
+
+    def test_provider_account_detail_shows_sync_health(self):
+        stale_provider_account = create_test_provider_account(
+            name='Provider Sync Stale UI Account',
+            organization=self.organization,
+            org_handle='ORG-SYNC-UI-STALE',
+            sync_interval=60,
+            last_successful_sync=timezone.now() - timedelta(hours=4),
+            last_sync_status='completed',
+        )
+        self.add_permissions('netbox_rpki.view_rpkiprovideraccount', 'netbox_rpki.change_rpkiprovideraccount')
+
+        response = self.client.get(stale_provider_account.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'Sync Health')
+        self.assertContains(response, 'Stale')
+
+
+class OperationsDashboardViewTestCase(PluginViewTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='operations-dashboard-org', name='Operations Dashboard Org')
+        cls.failed_provider_account = create_test_provider_account(
+            name='Failed Operations Account',
+            organization=cls.organization,
+            org_handle='ORG-OPS-FAILED',
+            sync_interval=60,
+            last_successful_sync=timezone.now() - timedelta(days=1),
+            last_sync_status='failed',
+        )
+        cls.stale_provider_account = create_test_provider_account(
+            name='Stale Operations Account',
+            organization=cls.organization,
+            org_handle='ORG-OPS-STALE',
+            sync_interval=60,
+            last_successful_sync=timezone.now() - timedelta(days=3),
+            last_sync_status='completed',
+        )
+        cls.healthy_provider_account = create_test_provider_account(
+            name='Healthy Operations Account',
+            organization=cls.organization,
+            org_handle='ORG-OPS-HEALTHY',
+            sync_interval=60,
+            last_successful_sync=timezone.now() - timedelta(minutes=15),
+            last_sync_status='completed',
+        )
+        cls.expiring_certificate = create_test_certificate(
+            name='Operations Expiring Certificate',
+            rpki_org=cls.organization,
+            issuer='Operations Issuer',
+            valid_to=date.today() + timedelta(days=14),
+        )
+        cls.future_certificate = create_test_certificate(
+            name='Operations Future Certificate',
+            rpki_org=cls.organization,
+            valid_to=date.today() + timedelta(days=90),
+        )
+        cls.expiring_roa = create_test_roa(
+            name='Operations Expiring ROA',
+            signed_by=cls.expiring_certificate,
+            origin_as=create_test_asn(64521),
+            valid_to=date.today() + timedelta(days=7),
+        )
+        cls.future_roa = create_test_roa(
+            name='Operations Future ROA',
+            signed_by=cls.future_certificate,
+            origin_as=create_test_asn(64522),
+            valid_to=date.today() + timedelta(days=75),
+        )
+
+    def test_operations_dashboard_surfaces_sync_and_expiry_issues(self):
+        self.add_permissions(
+            'netbox_rpki.view_rpkiprovideraccount',
+            'netbox_rpki.view_roa',
+            'netbox_rpki.view_certificate',
+        )
+
+        response = self.client.get(reverse('plugins:netbox_rpki:operations_dashboard'))
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'Operations Dashboard')
+        self.assertContains(response, self.failed_provider_account.name)
+        self.assertContains(response, self.stale_provider_account.name)
+        self.assertNotContains(response, self.healthy_provider_account.name)
+        self.assertContains(response, self.expiring_roa.name)
+        self.assertNotContains(response, self.future_roa.name)
+        self.assertContains(response, self.expiring_certificate.name)
+        self.assertNotContains(response, self.future_certificate.name)
+        self.assertContains(response, 'Expires in 7 day(s)')
+        self.assertContains(response, 'Expires in 14 day(s)')
 
 
 class GeneratedSurfaceContractTestCase(PluginViewTestCase):

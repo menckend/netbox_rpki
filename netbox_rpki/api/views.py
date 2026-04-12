@@ -7,7 +7,7 @@ from netbox.api.authentication import TokenWritePermission
 from netbox.api.viewsets import NetBoxModelViewSet
 
 from netbox_rpki import filtersets as filterset_module
-from netbox_rpki.api.serializers import SERIALIZER_CLASS_MAP
+from netbox_rpki.api.serializers import ROAChangePlanApproveActionSerializer, SERIALIZER_CLASS_MAP
 from netbox_rpki.jobs import RunRoutingIntentProfileJob, SyncProviderAccountJob
 from netbox_rpki.object_registry import API_OBJECT_SPECS
 from netbox_rpki.object_specs import ObjectSpec
@@ -102,17 +102,24 @@ class RpkiProviderAccountViewSet(VIEWSET_CLASS_MAP['rpkiprovideraccount']):
         if not request.user.has_perm('netbox_rpki.change_rpkiprovideraccount', provider_account):
             raise PermissionDenied('This user does not have permission to sync this provider account.')
 
-        job = SyncProviderAccountJob.enqueue(
+        if not provider_account.sync_enabled:
+            raise ValidationError('This provider account is disabled for sync.')
+
+        job, created = SyncProviderAccountJob.enqueue_for_provider_account(
+            provider_account,
             user=request.user,
-            provider_account_pk=provider_account.pk,
         )
         serializer = SERIALIZER_CLASS_MAP['rpkiprovideraccount'](provider_account, context={'request': request})
         payload = dict(serializer.data)
-        payload['job'] = {
-            'id': job.pk,
-            'status': job.status,
-            'url': job.get_absolute_url(),
-        }
+        payload['job'] = None
+        if job is not None:
+            payload['job'] = {
+                'id': job.pk,
+                'status': job.status,
+                'url': job.get_absolute_url(),
+                'existing': not created,
+            }
+        payload['sync_in_progress'] = not created
         return Response(payload)
 
 
@@ -187,13 +194,26 @@ class ROAChangePlanViewSet(VIEWSET_CLASS_MAP['roachangeplan']):
     def approve(self, request, pk=None):
         plan = self.get_object()
         self._require_change_permission(plan)
+        input_serializer = ROAChangePlanApproveActionSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
 
         try:
-            plan = approve_roa_change_plan(plan, approved_by=getattr(request.user, 'username', ''))
+            plan = approve_roa_change_plan(
+                plan,
+                approved_by=getattr(request.user, 'username', ''),
+                **input_serializer.validated_data,
+            )
         except ProviderWriteError as exc:
             raise ValidationError(str(exc)) from exc
 
-        return Response(self._serialize_plan_payload(request, plan))
+        payload = self._serialize_plan_payload(request, plan)
+        latest_record = plan.approval_records.order_by('-recorded_at', '-created').first()
+        if latest_record is not None:
+            payload['approval_record'] = SERIALIZER_CLASS_MAP['approvalrecord'](
+                latest_record,
+                context={'request': request},
+            ).data
+        return Response(payload)
 
     @action(detail=True, methods=['post'], permission_classes=[TokenWritePermission])
     def apply(self, request, pk=None):

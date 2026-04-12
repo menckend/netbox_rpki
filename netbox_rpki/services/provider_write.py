@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from urllib.request import Request, urlopen
 
+from django.db import transaction
 from django.utils import timezone
 
 from netbox_rpki import models as rpki_models
@@ -118,19 +119,62 @@ def build_roa_change_plan_delta(
     }
 
 
+def _get_plan_governance_metadata(plan: rpki_models.ROAChangePlan) -> dict[str, str]:
+    return plan.get_governance_metadata()
+
+
+def _build_approval_record_name(plan: rpki_models.ROAChangePlan, approved_at) -> str:
+    return f'{plan.name} Approval {approved_at:%Y-%m-%d %H:%M:%S}'
+
+
 def approve_roa_change_plan(
     plan: rpki_models.ROAChangePlan | int,
     *,
     approved_by: str = '',
+    ticket_reference: str = '',
+    change_reference: str = '',
+    maintenance_window_start=None,
+    maintenance_window_end=None,
+    approval_notes: str = '',
 ) -> rpki_models.ROAChangePlan:
     plan = _normalize_plan(plan)
     _require_approvable(plan)
 
     approved_at = timezone.now()
-    plan.status = rpki_models.ROAChangePlanStatus.APPROVED
-    plan.approved_at = approved_at
-    plan.approved_by = approved_by
-    plan.save(update_fields=('status', 'approved_at', 'approved_by'))
+    with transaction.atomic():
+        plan.status = rpki_models.ROAChangePlanStatus.APPROVED
+        plan.ticket_reference = ticket_reference
+        plan.change_reference = change_reference
+        plan.maintenance_window_start = maintenance_window_start
+        plan.maintenance_window_end = maintenance_window_end
+        plan.approved_at = approved_at
+        plan.approved_by = approved_by
+        plan.full_clean(validate_unique=False)
+        plan.save(update_fields=(
+            'status',
+            'ticket_reference',
+            'change_reference',
+            'maintenance_window_start',
+            'maintenance_window_end',
+            'approved_at',
+            'approved_by',
+        ))
+        approval_record = rpki_models.ApprovalRecord(
+            name=_build_approval_record_name(plan, approved_at),
+            organization=plan.organization,
+            change_plan=plan,
+            tenant=plan.tenant,
+            disposition=rpki_models.ValidationDisposition.ACCEPTED,
+            recorded_by=approved_by,
+            recorded_at=approved_at,
+            ticket_reference=ticket_reference,
+            change_reference=change_reference,
+            maintenance_window_start=maintenance_window_start,
+            maintenance_window_end=maintenance_window_end,
+            notes=approval_notes,
+        )
+        approval_record.full_clean(validate_unique=False)
+        approval_record.save()
     return plan
 
 
@@ -193,6 +237,7 @@ def preview_roa_change_plan_provider_write(
         response_payload_json={
             'preview_only': True,
             'roa_write_mode': provider_account.roa_write_mode,
+            'governance': _get_plan_governance_metadata(plan),
         },
     )
     return execution, delta
@@ -268,6 +313,7 @@ def apply_roa_change_plan_provider_write(
         response_payload_json = {
             'provider_response': provider_response,
             'roa_write_mode': provider_account.roa_write_mode,
+            'governance': _get_plan_governance_metadata(plan),
         }
         followup_sync_run = None
         followup_snapshot = None
@@ -315,6 +361,7 @@ def apply_roa_change_plan_provider_write(
         execution.error = str(exc)
         execution.response_payload_json = {
             'roa_write_mode': provider_account.roa_write_mode,
+            'governance': _get_plan_governance_metadata(plan),
         }
         execution.save(update_fields=('status', 'completed_at', 'error', 'response_payload_json'))
         raise ProviderWriteError(str(exc)) from exc

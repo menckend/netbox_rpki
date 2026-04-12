@@ -24,6 +24,10 @@
               <dd class="col-sm-8">{{ provider_account.transport }}</dd>
               <dt class="col-sm-4">Sync Enabled</dt>
               <dd class="col-sm-8">{{ provider_account.sync_enabled }}</dd>
+              <dt class="col-sm-4">Sync Interval</dt>
+              <dd class="col-sm-8">{{ provider_account.sync_interval|default:'Manual only' }}</dd>
+              <dt class="col-sm-4">Sync Health</dt>
+              <dd class="col-sm-8">{{ provider_account.sync_health_display }}</dd>
               <dt class="col-sm-4">Last Sync Status</dt>
               <dd class="col-sm-8">{{ provider_account.last_sync_status }}</dd>
             </dl>

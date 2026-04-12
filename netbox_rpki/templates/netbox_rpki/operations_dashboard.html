@@ -1,0 +1,154 @@
+{% extends 'generic/_base.html' %}
+
+{% block title %}Operations Dashboard{% endblock %}
+
+{% block content %}
+  <div class="row mb-4">
+    <div class="col col-md-12">
+      <div class="card border-primary">
+        <h2 class="card-header">Operations Dashboard</h2>
+        <div class="card-body">
+          <p class="mb-3">
+            Read-only operational visibility for provider sync drift and upcoming certificate or ROA expiry.
+            Expiry sections include items expiring on or before {{ expiry_threshold }}.
+          </p>
+          <div class="row g-3">
+            <div class="col col-md-4">
+              <div class="border rounded p-3 h-100">
+                <div class="text-muted small text-uppercase">Provider Accounts Requiring Attention</div>
+                <div class="fs-2 fw-semibold">{{ provider_accounts|length }}</div>
+                <div class="text-muted">Failed or stale sync state</div>
+              </div>
+            </div>
+            <div class="col col-md-4">
+              <div class="border rounded p-3 h-100">
+                <div class="text-muted small text-uppercase">ROAs Expiring Within {{ expiry_window_days }} Days</div>
+                <div class="fs-2 fw-semibold">{{ expiring_roas|length }}</div>
+                <div class="text-muted">Sorted by earliest valid-to date</div>
+              </div>
+            </div>
+            <div class="col col-md-4">
+              <div class="border rounded p-3 h-100">
+                <div class="text-muted small text-uppercase">Certificates Expiring Within {{ expiry_window_days }} Days</div>
+                <div class="fs-2 fw-semibold">{{ expiring_certificates|length }}</div>
+                <div class="text-muted">Includes already expired certificates</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row mb-4">
+    <div class="col col-md-12">
+      <div class="card">
+        <h5 class="card-header">Provider Accounts Requiring Attention</h5>
+        {% if provider_accounts %}
+          <div class="card-body table-responsive">
+            <table class="table table-hover align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Organization</th>
+                  <th>Provider Type</th>
+                  <th>Sync Health</th>
+                  <th>Last Sync Status</th>
+                  <th>Last Successful Sync</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for provider_account in provider_accounts %}
+                  <tr>
+                    <td><a href="{{ provider_account.get_absolute_url }}">{{ provider_account.name }}</a></td>
+                    <td><a href="{{ provider_account.organization.get_absolute_url }}">{{ provider_account.organization }}</a></td>
+                    <td>{{ provider_account.get_provider_type_display }}</td>
+                    <td><span class="badge bg-danger">{{ provider_account.sync_health_display }}</span></td>
+                    <td>{{ provider_account.last_sync_status }}</td>
+                    <td>{{ provider_account.last_successful_sync|default:'Never' }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="card-body text-muted">No provider accounts are currently stale or failed.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="row mb-4">
+    <div class="col col-md-12">
+      <div class="card">
+        <h5 class="card-header">ROAs Nearing Expiry</h5>
+        {% if expiring_roas %}
+          <div class="card-body table-responsive">
+            <table class="table table-hover align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Organization</th>
+                  <th>Origin AS</th>
+                  <th>Signed By</th>
+                  <th>Valid To</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in expiring_roas %}
+                  <tr>
+                    <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
+                    <td><a href="{{ item.organization.get_absolute_url }}">{{ item.organization }}</a></td>
+                    <td>{{ item.object.origin_as|default:'-' }}</td>
+                    <td><a href="{{ item.related_object.get_absolute_url }}">{{ item.related_object }}</a></td>
+                    <td>{{ item.object.valid_to }}</td>
+                    <td><span class="badge bg-{{ item.expiry_badge_class }}">{{ item.expiry_text }}</span></td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="card-body text-muted">No ROAs are currently within the expiry window.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="col col-md-12">
+      <div class="card">
+        <h5 class="card-header">Certificates Nearing Expiry</h5>
+        {% if expiring_certificates %}
+          <div class="card-body table-responsive">
+            <table class="table table-hover align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Organization</th>
+                  <th>Issuer</th>
+                  <th>Valid To</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in expiring_certificates %}
+                  <tr>
+                    <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
+                    <td><a href="{{ item.organization.get_absolute_url }}">{{ item.organization }}</a></td>
+                    <td>{{ item.object.issuer|default:'-' }}</td>
+                    <td>{{ item.object.valid_to }}</td>
+                    <td><span class="badge bg-{{ item.expiry_badge_class }}">{{ item.expiry_text }}</span></td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="card-body text-muted">No certificates are currently within the expiry window.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+{% endblock %}

@@ -20,6 +20,32 @@
                 Apply <strong>{{ change_plan }}</strong> to the configured provider and trigger a follow-up provider sync.
               {% endif %}
             </p>
+            {% if show_governance_inputs %}
+              {% for field in form.visible_fields %}
+                <div class="mb-3">
+                  <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                  {{ field }}
+                  {% if field.help_text %}
+                    <div class="form-text">{{ field.help_text }}</div>
+                  {% endif %}
+                  {% for error in field.errors %}
+                    <div class="text-danger">{{ error }}</div>
+                  {% endfor %}
+                </div>
+              {% endfor %}
+            {% elif change_plan.has_governance_metadata %}
+              <h5>Governance Metadata</h5>
+              <dl class="row">
+                <dt class="col-sm-4">Ticket Reference</dt>
+                <dd class="col-sm-8">{{ change_plan.ticket_reference|default:'None' }}</dd>
+                <dt class="col-sm-4">Change Reference</dt>
+                <dd class="col-sm-8">{{ change_plan.change_reference|default:'None' }}</dd>
+                <dt class="col-sm-4">Maintenance Window Start</dt>
+                <dd class="col-sm-8">{{ change_plan.maintenance_window_start|default:'None' }}</dd>
+                <dt class="col-sm-4">Maintenance Window End</dt>
+                <dd class="col-sm-8">{{ change_plan.maintenance_window_end|default:'None' }}</dd>
+              </dl>
+            {% endif %}
             {% if delta %}
               <h5>Outbound Delta</h5>
               <pre class="mb-0"><code>{{ delta }}</code></pre>

@@ -1,7 +1,11 @@
+from datetime import timedelta
+
 from django.db import IntegrityError
 from django.db import transaction
+from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from netbox_rpki import models as rpki_models
 from netbox_rpki.models import Certificate, CertificateAsn, CertificatePrefix, Organization, Roa, RoaPrefix
@@ -10,6 +14,7 @@ from netbox_rpki.sample_data import SEED_TARGET_MODELS
 from netbox_rpki.tests.registry_scenarios import SECTION_9_MODEL_SCENARIOS, SECTION_9_SUPPORT_MODEL_SCENARIOS
 from netbox_rpki.tests.utils import (
     count_test_sample_dataset,
+    create_test_approval_record,
     create_test_asn,
     create_test_certificate,
     create_test_certificate_asn,
@@ -478,3 +483,50 @@ class SampleDataFixtureTestCase(TestCase):
         for key in expected_keys:
             with self.subTest(key=key):
                 self.assertEqual(len(self.dataset[key]), 12)
+
+
+class GovernanceModelBehaviorTestCase(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='gov-org', name='Governance Org')
+        cls.profile = create_test_routing_intent_profile(
+            name='Governance Profile',
+            organization=cls.organization,
+        )
+        cls.derivation_run = create_test_intent_derivation_run(
+            organization=cls.organization,
+            intent_profile=cls.profile,
+        )
+        cls.reconciliation_run = create_test_roa_reconciliation_run(
+            organization=cls.organization,
+            intent_profile=cls.profile,
+            basis_derivation_run=cls.derivation_run,
+        )
+
+    def test_change_plan_rejects_inverted_maintenance_window(self):
+        change_plan = rpki_models.ROAChangePlan(
+            name='Invalid Governance Plan',
+            organization=self.organization,
+            source_reconciliation_run=self.reconciliation_run,
+            maintenance_window_start=timezone.now(),
+            maintenance_window_end=timezone.now() - timedelta(minutes=5),
+        )
+
+        with self.assertRaises(ValidationError):
+            change_plan.full_clean()
+
+    def test_approval_record_rejects_inverted_maintenance_window(self):
+        change_plan = create_test_roa_change_plan(
+            organization=self.organization,
+            source_reconciliation_run=self.reconciliation_run,
+        )
+        approval_record = rpki_models.ApprovalRecord(
+            name='Invalid Approval Record',
+            organization=self.organization,
+            change_plan=change_plan,
+            maintenance_window_start=timezone.now(),
+            maintenance_window_end=timezone.now() - timedelta(minutes=5),
+        )
+
+        with self.assertRaises(ValidationError):
+            approval_record.full_clean()

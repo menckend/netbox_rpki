@@ -24,10 +24,21 @@ class Command(BaseCommand):
             raise CommandError(f'ProviderAccount {provider_account_pk} does not exist.') from exc
 
         if options['enqueue']:
-            job = SyncProviderAccountJob.enqueue(
-                provider_account_pk=provider_account.pk,
-            )
-            self.stdout.write(self.style.SUCCESS(f'Enqueued job {job.pk} for provider account {provider_account.pk}.'))
+            try:
+                job, created = SyncProviderAccountJob.enqueue_for_provider_account(provider_account)
+            except ValueError as exc:
+                raise CommandError(str(exc)) from exc
+
+            if created:
+                self.stdout.write(self.style.SUCCESS(f'Enqueued job {job.pk} for provider account {provider_account.pk}.'))
+            elif job is not None:
+                self.stdout.write(self.style.WARNING(
+                    f'Job {job.pk} is already queued for provider account {provider_account.pk}.'
+                ))
+            else:
+                self.stdout.write(self.style.WARNING(
+                    f'Provider account {provider_account.pk} already has a sync in progress.'
+                ))
             return
 
         sync_run, snapshot = sync_provider_account(provider_account)

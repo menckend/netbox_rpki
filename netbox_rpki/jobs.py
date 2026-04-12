@@ -1,4 +1,6 @@
 from netbox.jobs import JobRunner
+from core.choices import JobStatusChoices
+from core.models import Job
 
 from netbox_rpki import models as rpki_models
 from netbox_rpki.services import run_routing_intent_pipeline, sync_provider_account
@@ -34,6 +36,50 @@ class RunRoutingIntentProfileJob(JobRunner):
 class SyncProviderAccountJob(JobRunner):
     class Meta:
         name = 'Provider ROA Sync'
+
+    @classmethod
+    def get_job_name(cls, provider_account: rpki_models.RpkiProviderAccount | int) -> str:
+        provider_account_pk = provider_account.pk if hasattr(provider_account, 'pk') else provider_account
+        return f'{cls.name} [{provider_account_pk}]'
+
+    @classmethod
+    def get_active_job_for_provider_account(cls, provider_account: rpki_models.RpkiProviderAccount | int):
+        return Job.objects.filter(
+            name=cls.get_job_name(provider_account),
+            status__in=JobStatusChoices.ENQUEUED_STATE_CHOICES,
+        ).order_by('created').first()
+
+    @classmethod
+    def enqueue_for_provider_account(
+        cls,
+        provider_account: rpki_models.RpkiProviderAccount | int,
+        *,
+        user=None,
+        schedule_at=None,
+    ):
+        if not isinstance(provider_account, rpki_models.RpkiProviderAccount):
+            provider_account = rpki_models.RpkiProviderAccount.objects.get(pk=provider_account)
+
+        if not provider_account.sync_enabled:
+            raise ValueError(f'Provider account {provider_account.name} is disabled for sync.')
+
+        existing_job = cls.get_active_job_for_provider_account(provider_account)
+        if existing_job is not None:
+            return existing_job, False
+
+        if rpki_models.ProviderSyncRun.objects.filter(
+            provider_account=provider_account,
+            status=rpki_models.ValidationRunStatus.RUNNING,
+        ).exists():
+            return None, False
+
+        job = cls.enqueue(
+            name=cls.get_job_name(provider_account),
+            user=user,
+            schedule_at=schedule_at,
+            provider_account_pk=provider_account.pk,
+        )
+        return job, True
 
     def run(self, provider_account_pk, *args, **kwargs):
         provider_account = rpki_models.RpkiProviderAccount.objects.get(pk=provider_account_pk)

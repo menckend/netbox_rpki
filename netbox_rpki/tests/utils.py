@@ -945,6 +945,7 @@ def create_test_provider_account(
     api_key='test-api-key',
     api_base_url='https://reg.arin.net',
     sync_enabled=True,
+    sync_interval=None,
     last_successful_sync=None,
     last_sync_status=None,
     last_sync_summary_json=None,
@@ -962,6 +963,7 @@ def create_test_provider_account(
         api_key=api_key,
         api_base_url=api_base_url,
         sync_enabled=sync_enabled,
+        sync_interval=sync_interval,
         last_successful_sync=last_successful_sync,
         last_sync_status=last_sync_status or rpki_models.ValidationRunStatus.PENDING,
         last_sync_summary_json=last_sync_summary_json or {},
@@ -1005,6 +1007,41 @@ def create_test_provider_sync_run(
     )
 
 
+def create_test_external_object_reference(
+    name='External Object Reference 1',
+    organization=None,
+    provider_account=None,
+    object_type=None,
+    provider_identity='provider-object-1',
+    external_object_id='provider-object-1',
+    last_seen_provider_snapshot=None,
+    last_seen_imported_authorization=None,
+    last_seen_at=None,
+    **kwargs,
+):
+    if organization is None:
+        organization = create_test_organization()
+    if provider_account is None:
+        provider_account = create_test_provider_account(organization=organization)
+    if last_seen_provider_snapshot is None:
+        last_seen_provider_snapshot = create_test_provider_snapshot(
+            organization=organization,
+            provider_account=provider_account,
+        )
+    return rpki_models.ExternalObjectReference.objects.create(
+        name=name,
+        organization=organization,
+        provider_account=provider_account,
+        object_type=object_type or rpki_models.ExternalObjectType.ROA_AUTHORIZATION,
+        provider_identity=provider_identity,
+        external_object_id=external_object_id,
+        last_seen_provider_snapshot=last_seen_provider_snapshot,
+        last_seen_imported_authorization=last_seen_imported_authorization,
+        last_seen_at=last_seen_at,
+        **kwargs,
+    )
+
+
 def create_test_imported_roa_authorization(
     name='Imported ROA Authorization 1',
     provider_snapshot=None,
@@ -1017,6 +1054,7 @@ def create_test_imported_roa_authorization(
     origin_asn_value=None,
     max_length=None,
     external_object_id='',
+    external_reference=None,
     is_stale=False,
     payload_json=None,
     **kwargs,
@@ -1049,6 +1087,7 @@ def create_test_imported_roa_authorization(
         origin_asn_value=resolved_origin_value,
         max_length=max_length,
         external_object_id=external_object_id,
+        external_reference=external_reference,
         is_stale=is_stale,
         payload_json=payload_json or {},
         **kwargs,
@@ -1199,6 +1238,10 @@ def create_test_roa_change_plan(
     provider_account=None,
     provider_snapshot=None,
     status=None,
+    ticket_reference='',
+    change_reference='',
+    maintenance_window_start=None,
+    maintenance_window_end=None,
     approved_at=None,
     approved_by='',
     apply_started_at=None,
@@ -1226,6 +1269,10 @@ def create_test_roa_change_plan(
         provider_account=provider_account,
         provider_snapshot=provider_snapshot,
         status=status or rpki_models.ROAChangePlanStatus.DRAFT,
+        ticket_reference=ticket_reference,
+        change_reference=change_reference,
+        maintenance_window_start=maintenance_window_start,
+        maintenance_window_end=maintenance_window_end,
         approved_at=approved_at,
         approved_by=approved_by,
         apply_started_at=apply_started_at,
@@ -1320,6 +1367,41 @@ def create_test_provider_write_execution(
         error=error,
         followup_sync_run=followup_sync_run,
         followup_provider_snapshot=followup_provider_snapshot,
+        **kwargs,
+    )
+
+
+def create_test_approval_record(
+    name='Approval Record 1',
+    organization=None,
+    change_plan=None,
+    disposition=None,
+    recorded_by='',
+    recorded_at=None,
+    ticket_reference='',
+    change_reference='',
+    maintenance_window_start=None,
+    maintenance_window_end=None,
+    notes='',
+    **kwargs,
+):
+    if organization is None:
+        organization = create_test_organization()
+    if change_plan is None:
+        change_plan = create_test_roa_change_plan(organization=organization)
+    return rpki_models.ApprovalRecord.objects.create(
+        name=name,
+        organization=organization,
+        change_plan=change_plan,
+        tenant=change_plan.tenant,
+        disposition=disposition or rpki_models.ValidationDisposition.ACCEPTED,
+        recorded_by=recorded_by,
+        recorded_at=recorded_at,
+        ticket_reference=ticket_reference,
+        change_reference=change_reference,
+        maintenance_window_start=maintenance_window_start,
+        maintenance_window_end=maintenance_window_end,
+        notes=notes,
         **kwargs,
     )
 

@@ -77,3 +77,10 @@ class UrlRegistrationTestCase(SimpleTestCase):
 
         self.assertEqual(reverse(view_name, kwargs={'pk': 1}), path)
         self.assertEqual(resolve(path).view_name, view_name)
+
+    def test_operations_dashboard_route_reverses_and_resolves(self):
+        view_name = 'plugins:netbox_rpki:operations_dashboard'
+        path = '/plugins/netbox_rpki/operations/'
+
+        self.assertEqual(reverse(view_name), path)
+        self.assertEqual(resolve(path).view_name, view_name)

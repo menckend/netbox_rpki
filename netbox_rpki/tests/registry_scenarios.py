@@ -37,6 +37,7 @@ from netbox_rpki.tests.utils import (
     create_test_model,
     create_test_prefix,
     create_test_provider_account,
+    create_test_approval_record,
     create_test_provider_write_execution,
     create_test_publication_point,
     create_test_provider_sync_run,
@@ -533,6 +534,9 @@ def _register_scenario_builders() -> None:
             "providersyncrun": lambda: create_test_provider_sync_run(name=f"Provider Sync Run {unique_token('provider-sync-run')}"),
             "providerwriteexecution": lambda: create_test_provider_write_execution(
                 name=f"Provider Write Execution {unique_token('provider-write-execution')}"
+            ),
+            "approvalrecord": lambda: create_test_approval_record(
+                name=f"Approval Record {unique_token('approval-record')}"
             ),
             "importedroaauthorization": lambda: create_test_imported_roa_authorization(
                 name=f"Imported ROA Authorization {unique_token('imported-roa-authorization')}",

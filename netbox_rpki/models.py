@@ -1,9 +1,12 @@
 import hashlib
+from datetime import timedelta
 
 import ipam
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.urls import reverse
 from django.urls.exceptions import NoReverseMatch
+from django.utils import timezone
 from netbox.models import NetBoxModel
 from netbox.models.features import JobsMixin
 from ipam.models.asns import ASN
@@ -186,6 +189,19 @@ class ProviderSyncTransport(models.TextChoices):
     OTE = "ote", "OT&E"
 
 
+class ProviderSyncHealth(models.TextChoices):
+    DISABLED = "disabled", "Disabled"
+    NEVER_SYNCED = "never_synced", "Never Synced"
+    IN_PROGRESS = "in_progress", "In Progress"
+    FAILED = "failed", "Failed"
+    STALE = "stale", "Stale"
+    HEALTHY = "healthy", "Healthy"
+
+
+class ExternalObjectType(models.TextChoices):
+    ROA_AUTHORIZATION = "roa_authorization", "ROA Authorization"
+
+
 class ReconciliationSeverity(models.TextChoices):
     INFO = "info", "Info"
     WARNING = "warning", "Warning"
@@ -236,6 +252,13 @@ class ProviderWriteOperation(models.TextChoices):
 class ProviderWriteExecutionMode(models.TextChoices):
     PREVIEW = "preview", "Preview"
     APPLY = "apply", "Apply"
+
+
+def validate_maintenance_window_bounds(*, start_at, end_at):
+    if start_at is None or end_at is None:
+        return
+    if end_at < start_at:
+        raise ValidationError({'maintenance_window_end': 'Maintenance window end must be on or after the start.'})
 
 
 class RpkiStandardModel(NetBoxModel):
@@ -1610,6 +1633,8 @@ class ROAIntent(NamedRpkiStandardModel):
 
 
 class RpkiProviderAccount(NamedRpkiStandardModel):
+    DEFAULT_SYNC_HEALTH_INTERVAL_MINUTES = 24 * 60
+
     organization = models.ForeignKey(
         to=Organization,
         on_delete=models.PROTECT,
@@ -1630,6 +1655,7 @@ class RpkiProviderAccount(NamedRpkiStandardModel):
     api_key = models.CharField(max_length=255)
     api_base_url = models.CharField(max_length=255, default='https://reg.arin.net')
     sync_enabled = models.BooleanField(default=True)
+    sync_interval = models.PositiveIntegerField(blank=True, null=True)
     last_successful_sync = models.DateTimeField(blank=True, null=True)
     last_sync_status = models.CharField(
         max_length=32,
@@ -1679,6 +1705,61 @@ class RpkiProviderAccount(NamedRpkiStandardModel):
             'roa_write_mode': self.roa_write_mode,
             'supported_roa_plan_actions': supported_actions,
         }
+
+    @property
+    def sync_health_interval(self) -> timedelta:
+        interval_minutes = self.sync_interval or self.DEFAULT_SYNC_HEALTH_INTERVAL_MINUTES
+        return timedelta(minutes=interval_minutes)
+
+    @property
+    def next_sync_due_at(self):
+        if not self.sync_enabled or not self.sync_interval:
+            return None
+        if self.last_successful_sync is None:
+            return timezone.now()
+        return self.last_successful_sync + timedelta(minutes=self.sync_interval)
+
+    def is_sync_due(self, *, reference_time=None) -> bool:
+        if not self.sync_enabled or not self.sync_interval:
+            return False
+
+        if self.last_sync_status == ValidationRunStatus.RUNNING:
+            return False
+
+        if self.last_sync_status == ValidationRunStatus.FAILED:
+            return True
+
+        if self.last_successful_sync is None:
+            return True
+
+        reference_time = reference_time or timezone.now()
+        due_at = self.next_sync_due_at
+        if due_at is None:
+            return False
+        return due_at <= reference_time
+
+    @property
+    def sync_health(self) -> str:
+        if not self.sync_enabled:
+            return ProviderSyncHealth.DISABLED
+
+        if self.last_sync_status == ValidationRunStatus.RUNNING:
+            return ProviderSyncHealth.IN_PROGRESS
+
+        if self.last_sync_status == ValidationRunStatus.FAILED:
+            return ProviderSyncHealth.FAILED
+
+        if self.last_successful_sync is None:
+            return ProviderSyncHealth.NEVER_SYNCED
+
+        if self.last_successful_sync + self.sync_health_interval <= timezone.now():
+            return ProviderSyncHealth.STALE
+
+        return ProviderSyncHealth.HEALTHY
+
+    @property
+    def sync_health_display(self) -> str:
+        return ProviderSyncHealth(self.sync_health).label
 
 
 class ProviderSyncRun(NamedRpkiStandardModel):
@@ -1754,6 +1835,53 @@ class ProviderSnapshot(NamedRpkiStandardModel):
         return reverse("plugins:netbox_rpki:providersnapshot", args=[self.pk])
 
 
+class ExternalObjectReference(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='external_object_references'
+    )
+    provider_account = models.ForeignKey(
+        to='RpkiProviderAccount',
+        on_delete=models.PROTECT,
+        related_name='external_object_references'
+    )
+    object_type = models.CharField(
+        max_length=64,
+        choices=ExternalObjectType.choices,
+        default=ExternalObjectType.ROA_AUTHORIZATION,
+    )
+    provider_identity = models.CharField(max_length=512)
+    external_object_id = models.CharField(max_length=200, blank=True)
+    last_seen_provider_snapshot = models.ForeignKey(
+        to='ProviderSnapshot',
+        on_delete=models.PROTECT,
+        related_name='external_object_references',
+        blank=True,
+        null=True,
+    )
+    last_seen_imported_authorization = models.ForeignKey(
+        to='ImportedRoaAuthorization',
+        on_delete=models.SET_NULL,
+        related_name='current_external_object_references',
+        blank=True,
+        null=True,
+    )
+    last_seen_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        ordering = ("name",)
+        constraints = (
+            models.UniqueConstraint(
+                fields=("provider_account", "object_type", "provider_identity"),
+                name="netbox_rpki_extobjref_provider_identity_unique",
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+
 class ImportedRoaAuthorization(NamedRpkiStandardModel):
     provider_snapshot = models.ForeignKey(
         to='ProviderSnapshot',
@@ -1785,6 +1913,13 @@ class ImportedRoaAuthorization(NamedRpkiStandardModel):
     origin_asn_value = models.PositiveBigIntegerField(blank=True, null=True)
     max_length = models.PositiveSmallIntegerField(blank=True, null=True)
     external_object_id = models.CharField(max_length=200, blank=True)
+    external_reference = models.ForeignKey(
+        to='ExternalObjectReference',
+        on_delete=models.PROTECT,
+        related_name='imported_roa_authorizations',
+        blank=True,
+        null=True,
+    )
     is_stale = models.BooleanField(default=False)
     payload_json = models.JSONField(default=dict, blank=True)
 
@@ -2082,6 +2217,10 @@ class ROAChangePlan(NamedRpkiStandardModel):
         choices=ROAChangePlanStatus.choices,
         default=ROAChangePlanStatus.DRAFT,
     )
+    ticket_reference = models.CharField(max_length=200, blank=True)
+    change_reference = models.CharField(max_length=200, blank=True)
+    maintenance_window_start = models.DateTimeField(blank=True, null=True)
+    maintenance_window_end = models.DateTimeField(blank=True, null=True)
     approved_at = models.DateTimeField(blank=True, null=True)
     approved_by = models.CharField(max_length=150, blank=True)
     apply_started_at = models.DateTimeField(blank=True, null=True)
@@ -2092,12 +2231,52 @@ class ROAChangePlan(NamedRpkiStandardModel):
 
     class Meta:
         ordering = ("-created", "name")
+        constraints = (
+            models.CheckConstraint(
+                condition=(
+                    models.Q(maintenance_window_start__isnull=True)
+                    | models.Q(maintenance_window_end__isnull=True)
+                    | models.Q(maintenance_window_end__gte=models.F('maintenance_window_start'))
+                ),
+                name='netbox_rpki_roachangeplan_valid_maintenance_window',
+            ),
+        )
 
     def __str__(self):
         return self.name
 
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:roachangeplan", args=[self.pk])
+
+    def clean(self):
+        super().clean()
+        validate_maintenance_window_bounds(
+            start_at=self.maintenance_window_start,
+            end_at=self.maintenance_window_end,
+        )
+
+    @property
+    def has_governance_metadata(self) -> bool:
+        return any(
+            (
+                self.ticket_reference,
+                self.change_reference,
+                self.maintenance_window_start,
+                self.maintenance_window_end,
+            )
+        )
+
+    def get_governance_metadata(self) -> dict[str, str]:
+        metadata = {}
+        if self.ticket_reference:
+            metadata['ticket_reference'] = self.ticket_reference
+        if self.change_reference:
+            metadata['change_reference'] = self.change_reference
+        if self.maintenance_window_start is not None:
+            metadata['maintenance_window_start'] = self.maintenance_window_start.isoformat()
+        if self.maintenance_window_end is not None:
+            metadata['maintenance_window_end'] = self.maintenance_window_end.isoformat()
+        return metadata
 
     @property
     def is_provider_backed(self) -> bool:
@@ -2122,6 +2301,57 @@ class ROAChangePlan(NamedRpkiStandardModel):
     @property
     def can_apply(self) -> bool:
         return self.supports_provider_write and self.status == ROAChangePlanStatus.APPROVED
+
+
+class ApprovalRecord(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='approval_records'
+    )
+    change_plan = models.ForeignKey(
+        to='ROAChangePlan',
+        on_delete=models.PROTECT,
+        related_name='approval_records'
+    )
+    disposition = models.CharField(
+        max_length=16,
+        choices=ValidationDisposition.choices,
+        default=ValidationDisposition.ACCEPTED,
+    )
+    recorded_by = models.CharField(max_length=150, blank=True)
+    recorded_at = models.DateTimeField(blank=True, null=True)
+    ticket_reference = models.CharField(max_length=200, blank=True)
+    change_reference = models.CharField(max_length=200, blank=True)
+    maintenance_window_start = models.DateTimeField(blank=True, null=True)
+    maintenance_window_end = models.DateTimeField(blank=True, null=True)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ('-recorded_at', '-created', 'name')
+        constraints = (
+            models.CheckConstraint(
+                condition=(
+                    models.Q(maintenance_window_start__isnull=True)
+                    | models.Q(maintenance_window_end__isnull=True)
+                    | models.Q(maintenance_window_end__gte=models.F('maintenance_window_start'))
+                ),
+                name='netbox_rpki_approvalrecord_valid_maintenance_window',
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse('plugins:netbox_rpki:approvalrecord', args=[self.pk])
+
+    def clean(self):
+        super().clean()
+        validate_maintenance_window_bounds(
+            start_at=self.maintenance_window_start,
+            end_at=self.maintenance_window_end,
+        )
 
 
 class ProviderWriteExecution(NamedRpkiStandardModel):

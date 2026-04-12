@@ -59,6 +59,8 @@ def build_object_urlpatterns(spec):
     )
 
     return urlpatterns
-urlpatterns = []
+urlpatterns = [
+    path('operations/', views.OperationsDashboardView.as_view(), name='operations_dashboard'),
+]
 for object_spec in VIEW_OBJECT_SPECS:
     urlpatterns.extend(build_object_urlpatterns(object_spec))

@@ -1,5 +1,8 @@
-from django.test import SimpleTestCase
+from datetime import timedelta
+
+from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from netbox_rpki import filtersets
 from netbox_rpki.api import serializers as api_serializers
@@ -101,6 +104,24 @@ class SerializerSmokeTestCase(SimpleTestCase):
             [getattr(api_serializers, spec.api.serializer_name).__name__ for spec in API_OBJECT_SPECS],
             [spec.api.serializer_name for spec in API_OBJECT_SPECS],
         )
+
+
+class RpkiProviderAccountSerializerTestCase(TestCase):
+    def test_provider_account_serializer_exposes_sync_health_fields(self):
+        organization = create_test_organization(org_id='provider-serializer-org', name='Provider Serializer Org')
+        provider_account = create_test_provider_account(
+            name='Provider Serializer Account',
+            organization=organization,
+            org_handle='ORG-PROVIDER-SERIALIZER',
+            sync_interval=60,
+            last_successful_sync=timezone.now() - timedelta(hours=3),
+        )
+
+        serializer = api_serializers.RpkiProviderAccountSerializer(provider_account, context={'request': None})
+
+        self.assertEqual(serializer.data['sync_health'], 'stale')
+        self.assertEqual(serializer.data['sync_health_display'], 'Stale')
+        self.assertIn('next_sync_due_at', serializer.data)
 
 
 class ViewSetSmokeTestCase(SimpleTestCase):

@@ -4,6 +4,17 @@ from netbox.plugins import PluginMenuButton, PluginMenuItem, PluginMenu
 from netbox_rpki.object_registry import get_navigation_groups
 
 
+OPERATIONS_MENU_ITEM = PluginMenuItem(
+    link='plugins:netbox_rpki:operations_dashboard',
+    link_text='Operations',
+    permissions=[
+        'netbox_rpki.view_rpkiprovideraccount',
+        'netbox_rpki.view_roa',
+        'netbox_rpki.view_certificate',
+    ],
+)
+
+
 def build_menu_item(spec):
     buttons = ()
     if spec.navigation.show_add_button and spec.view is not None and spec.view.supports_create:
@@ -26,6 +37,7 @@ navigation_groups = {
     group_name: tuple(build_menu_item(spec) for spec in specs)
     for group_name, specs in get_navigation_groups()
 }
+navigation_groups['Resources'] = navigation_groups.get('Resources', ()) + (OPERATIONS_MENU_ITEM,)
 
 menu_groups = tuple(
     (group_name, navigation_groups.get(group_name, ()))

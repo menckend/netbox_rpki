@@ -52,3 +52,25 @@ def build_table_class(spec: ObjectSpec) -> type[NetBoxTable]:
 
 for object_spec in TABLE_OBJECT_SPECS:
     globals()[object_spec.table.class_name] = build_table_class(object_spec)
+
+
+_BaseRpkiProviderAccountTable = RpkiProviderAccountTable
+
+
+class RpkiProviderAccountTable(_BaseRpkiProviderAccountTable):
+    sync_health = tables.Column(accessor='sync_health_display', verbose_name='Sync Health')
+
+    class Meta(_BaseRpkiProviderAccountTable.Meta):
+        fields = _BaseRpkiProviderAccountTable.Meta.fields + ('sync_health',)
+        default_columns = (
+            'name',
+            'organization',
+            'provider_type',
+            'org_handle',
+            'ca_handle',
+            'sync_health',
+            'last_sync_status',
+            'comments',
+            'tenant',
+            'tags',
+        )
