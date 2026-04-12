@@ -16,6 +16,7 @@ from netbox_rpki.tests.utils import (
     count_test_sample_dataset,
     create_test_approval_record,
     create_test_asn,
+    create_test_aspa,
     create_test_certificate,
     create_test_certificate_asn,
     create_test_certificate_prefix,
@@ -148,6 +149,30 @@ class SectionNineModelBehaviorTestCase(TestCase):
         for object_name, instance in self.section9_support_instances.items():
             with self.subTest(object_name=object_name):
                 self.assertEqual(str(instance), expected_strings[object_name])
+
+
+class ASPAProviderModelValidationTestCase(TestCase):
+    def test_aspa_provider_enforces_unique_provider_per_aspa(self):
+        aspa = create_test_aspa()
+        provider_as = create_test_asn(65210)
+        create_test_aspa_provider(aspa=aspa, provider_as=provider_as)
+
+        with transaction.atomic():
+            with self.assertRaises(IntegrityError):
+                create_test_aspa_provider(aspa=aspa, provider_as=provider_as)
+
+    def test_aspa_provider_rejects_customer_as_as_provider_as(self):
+        customer_as = create_test_asn(65220)
+        aspa = create_test_aspa(customer_as=customer_as)
+        authorization = rpki_models.ASPAProvider(aspa=aspa, provider_as=customer_as)
+
+        with self.assertRaises(ValidationError) as context:
+            authorization.full_clean()
+
+        self.assertEqual(
+            context.exception.message_dict,
+            {'provider_as': ['Provider ASN must differ from the ASPA customer ASN.']},
+        )
 
 
 class PriorityOneModelBehaviorTestCase(TestCase):

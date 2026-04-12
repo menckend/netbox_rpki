@@ -67,6 +67,25 @@ class KrillRouteAuthorizationRecord:
         return f'{self.prefix}|{max_length}|{asn}'
 
 
+@dataclass(frozen=True)
+class KrillAspaProviderRecord:
+    raw_provider_text: str
+    provider_as_value: int | None
+    address_family: str
+
+
+@dataclass(frozen=True)
+class KrillAspaRecord:
+    customer_as_value: int | None
+    providers: list[KrillAspaProviderRecord]
+
+    @property
+    def external_object_id(self) -> str:
+        if self.customer_as_value is None:
+            return ''
+        return f'AS{self.customer_as_value}'
+
+
 def _strip_namespace(tag: str) -> str:
     if '}' in tag:
         return tag.split('}', 1)[1]
@@ -194,6 +213,32 @@ def _fetch_krill_routes_json(provider_account: rpki_models.RpkiProviderAccount) 
     return payload
 
 
+def _krill_aspas_url(provider_account: rpki_models.RpkiProviderAccount) -> str:
+    base_url = provider_account.api_base_url.rstrip('/')
+    ca_handle = provider_account.sync_target_handle
+    return f'{base_url}/api/v1/cas/{ca_handle}/aspas'
+
+
+def _fetch_krill_aspas_json(provider_account: rpki_models.RpkiProviderAccount) -> list[dict]:
+    request = Request(
+        _krill_aspas_url(provider_account),
+        headers={
+            'Accept': 'application/json',
+            'Authorization': f'Bearer {provider_account.api_key}',
+        },
+        method='GET',
+    )
+    urlopen_kwargs = {'timeout': 30}
+    ssl_context = _krill_ssl_context(provider_account)
+    if ssl_context is not None:
+        urlopen_kwargs['context'] = ssl_context
+    with urlopen(request, **urlopen_kwargs) as response:
+        payload = json.loads(response.read().decode('utf-8'))
+    if not isinstance(payload, list):
+        raise ProviderSyncError('Krill ASPAs response must be a JSON list.')
+    return payload
+
+
 def _parse_krill_route_records(route_payload: list[dict]) -> list[KrillRouteAuthorizationRecord]:
     records = []
     for route in route_payload:
@@ -225,6 +270,63 @@ def _parse_krill_route_records(route_payload: list[dict]) -> list[KrillRouteAuth
     return records
 
 
+def _parse_asn_token(value) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    text = str(value).strip().upper()
+    if not text:
+        return None
+    if text.startswith('AS'):
+        text = text[2:]
+    try:
+        return int(text)
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_krill_aspa_provider(provider_value) -> KrillAspaProviderRecord | None:
+    raw_text = str(provider_value or '').strip()
+    if not raw_text or raw_text == '<none>':
+        return None
+
+    address_family = ''
+    normalized = raw_text
+    if raw_text.endswith('(v4)'):
+        address_family = rpki_models.AddressFamily.IPV4
+        normalized = raw_text[:-4]
+    elif raw_text.endswith('(v6)'):
+        address_family = rpki_models.AddressFamily.IPV6
+        normalized = raw_text[:-4]
+
+    return KrillAspaProviderRecord(
+        raw_provider_text=raw_text,
+        provider_as_value=_parse_asn_token(normalized),
+        address_family=address_family,
+    )
+
+
+def _parse_krill_aspa_records(aspa_payload: list[dict]) -> list[KrillAspaRecord]:
+    records = []
+    for aspa in aspa_payload:
+        if not isinstance(aspa, dict):
+            continue
+        customer_as_value = _parse_asn_token(aspa.get('customer'))
+        providers = []
+        for provider in list(aspa.get('providers') or []):
+            parsed_provider = _parse_krill_aspa_provider(provider)
+            if parsed_provider is not None:
+                providers.append(parsed_provider)
+        records.append(
+            KrillAspaRecord(
+                customer_as_value=customer_as_value,
+                providers=providers,
+            )
+        )
+    return records
+
+
 def _resolve_prefix(prefix_cidr_text: str):
     try:
         network = IPNetwork(prefix_cidr_text).cidr
@@ -237,6 +339,12 @@ def _resolve_origin_asn(origin_asn_value: int | None):
     if origin_asn_value is None:
         return None
     return ASN.objects.filter(asn=origin_asn_value).first()
+
+
+def _resolve_asn(asn_value: int | None):
+    if asn_value is None:
+        return None
+    return ASN.objects.filter(asn=asn_value).first()
 
 
 def _build_import_name(provider_account: rpki_models.RpkiProviderAccount, record: ArinRoaRecord) -> str:
@@ -254,6 +362,14 @@ def _build_krill_import_name(
     return f'{provider_account.sync_target_handle} {label} {record.prefix} {asn_value}'
 
 
+def _build_krill_aspa_import_name(
+    provider_account: rpki_models.RpkiProviderAccount,
+    record: KrillAspaRecord,
+) -> str:
+    customer = f'AS{record.customer_as_value}' if record.customer_as_value is not None else 'AS?'
+    return f'{provider_account.sync_target_handle} ASPA {customer}'
+
+
 def _build_snapshot_summary(provider_account: rpki_models.RpkiProviderAccount) -> dict:
     summary = {
         'provider_account_id': provider_account.pk,
@@ -269,7 +385,7 @@ def _build_snapshot_summary(provider_account: rpki_models.RpkiProviderAccount) -
     return summary
 
 
-def _build_external_reference_identity(
+def _build_roa_external_reference_identity(
     provider_account: rpki_models.RpkiProviderAccount,
     *,
     external_object_id: str,
@@ -295,6 +411,19 @@ def _build_external_reference_identity(
     )
 
 
+def _build_aspa_external_reference_identity(
+    *,
+    external_object_id: str,
+    customer_as_value: int | None,
+) -> str:
+    normalized_external_id = external_object_id.strip()
+    if normalized_external_id:
+        return normalized_external_id
+    if customer_as_value is None:
+        return ''
+    return f'AS{customer_as_value}'
+
+
 def _build_external_reference_name(
     provider_account: rpki_models.RpkiProviderAccount,
     provider_identity: str,
@@ -302,13 +431,13 @@ def _build_external_reference_name(
     return f'{provider_account.name} {provider_account.get_provider_type_display()} {provider_identity}'
 
 
-def _bind_external_reference(
+def _bind_roa_external_reference(
     *,
     provider_account: rpki_models.RpkiProviderAccount,
     snapshot: rpki_models.ProviderSnapshot,
     imported_authorization: rpki_models.ImportedRoaAuthorization,
 ) -> rpki_models.ExternalObjectReference | None:
-    provider_identity = _build_external_reference_identity(
+    provider_identity = _build_roa_external_reference_identity(
         provider_account,
         external_object_id=imported_authorization.external_object_id,
         prefix_cidr_text=imported_authorization.prefix_cidr_text,
@@ -333,6 +462,37 @@ def _bind_external_reference(
     )
     imported_authorization.external_reference = reference
     imported_authorization.save(update_fields=('external_reference',))
+    return reference
+
+
+def _bind_aspa_external_reference(
+    *,
+    provider_account: rpki_models.RpkiProviderAccount,
+    snapshot: rpki_models.ProviderSnapshot,
+    imported_aspa: rpki_models.ImportedAspa,
+) -> rpki_models.ExternalObjectReference | None:
+    provider_identity = _build_aspa_external_reference_identity(
+        external_object_id=imported_aspa.external_object_id,
+        customer_as_value=imported_aspa.customer_as_value,
+    )
+    if not provider_identity:
+        return None
+
+    reference, _ = rpki_models.ExternalObjectReference.objects.update_or_create(
+        provider_account=provider_account,
+        object_type=rpki_models.ExternalObjectType.ASPA,
+        provider_identity=provider_identity,
+        defaults={
+            'name': _build_external_reference_name(provider_account, provider_identity),
+            'organization': provider_account.organization,
+            'external_object_id': imported_aspa.external_object_id,
+            'last_seen_provider_snapshot': snapshot,
+            'last_seen_imported_aspa': imported_aspa,
+            'last_seen_at': snapshot.fetched_at,
+        },
+    )
+    imported_aspa.external_reference = reference
+    imported_aspa.save(update_fields=('external_reference',))
     return reference
 
 
@@ -382,7 +542,7 @@ def _import_arin_records(
                     'auto_linked': record.auto_linked,
                 },
             )
-            _bind_external_reference(
+            _bind_roa_external_reference(
                 provider_account=provider_account,
                 snapshot=snapshot,
                 imported_authorization=imported_authorization,
@@ -394,11 +554,14 @@ def _import_arin_records(
 def _import_krill_records(
     provider_account: rpki_models.RpkiProviderAccount,
     snapshot: rpki_models.ProviderSnapshot,
-) -> tuple[int, int]:
+) -> tuple[int, int, int, int]:
     route_payload = _fetch_krill_routes_json(provider_account)
     records = _parse_krill_route_records(route_payload)
+    aspa_payload = _fetch_krill_aspas_json(provider_account)
+    aspa_records = _parse_krill_aspa_records(aspa_payload)
 
     imported_count = 0
+    imported_aspa_count = 0
     with transaction.atomic():
         for record in records:
             prefix = _resolve_prefix(record.prefix)
@@ -429,13 +592,48 @@ def _import_krill_records(
                     'roa_objects': record.roa_objects,
                 },
             )
-            _bind_external_reference(
+            _bind_roa_external_reference(
                 provider_account=provider_account,
                 snapshot=snapshot,
                 imported_authorization=imported_authorization,
             )
             imported_count += 1
-    return len(records), imported_count
+
+        for record in aspa_records:
+            customer_as = _resolve_asn(record.customer_as_value)
+            authorization_key = rpki_models.ImportedAspa.build_authorization_key(
+                customer_as_value=record.customer_as_value,
+                external_object_id=record.external_object_id,
+            )
+            imported_aspa = rpki_models.ImportedAspa.objects.create(
+                name=_build_krill_aspa_import_name(provider_account, record),
+                provider_snapshot=snapshot,
+                organization=provider_account.organization,
+                authorization_key=authorization_key,
+                customer_as=customer_as,
+                customer_as_value=record.customer_as_value,
+                external_object_id=record.external_object_id,
+                payload_json={
+                    'provider_type': provider_account.provider_type,
+                    'ca_handle': provider_account.ca_handle,
+                    'provider_count': len(record.providers),
+                },
+            )
+            _bind_aspa_external_reference(
+                provider_account=provider_account,
+                snapshot=snapshot,
+                imported_aspa=imported_aspa,
+            )
+            for provider in record.providers:
+                rpki_models.ImportedAspaProvider.objects.create(
+                    imported_aspa=imported_aspa,
+                    provider_as=_resolve_asn(provider.provider_as_value),
+                    provider_as_value=provider.provider_as_value,
+                    address_family=provider.address_family,
+                    raw_provider_text=provider.raw_provider_text,
+                )
+            imported_aspa_count += 1
+    return len(records), imported_count, len(aspa_records), imported_aspa_count
 
 
 def sync_provider_account(
@@ -476,8 +674,11 @@ def sync_provider_account(
     sync_run.save(update_fields=('provider_snapshot',))
 
     try:
+        route_fetched = route_imported = aspa_fetched = aspa_imported = 0
         if provider_account.provider_type == rpki_models.ProviderType.KRILL:
-            fetched_count, imported_count = _import_krill_records(provider_account, snapshot)
+            route_fetched, route_imported, aspa_fetched, aspa_imported = _import_krill_records(provider_account, snapshot)
+            fetched_count = route_fetched + aspa_fetched
+            imported_count = route_imported + aspa_imported
         else:
             fetched_count, imported_count = _import_arin_records(provider_account, snapshot)
 
@@ -487,6 +688,13 @@ def sync_provider_account(
             'records_fetched': fetched_count,
             'records_imported': imported_count,
         })
+        if provider_account.provider_type == rpki_models.ProviderType.KRILL:
+            summary.update({
+                'route_records_fetched': route_fetched,
+                'route_records_imported': route_imported,
+                'aspa_records_fetched': aspa_fetched,
+                'aspa_records_imported': aspa_imported,
+            })
         snapshot.status = rpki_models.ValidationRunStatus.COMPLETED
         snapshot.completed_at = completed_at
         snapshot.summary_json = summary

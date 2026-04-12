@@ -44,6 +44,97 @@ MATCH_SCORES = {
     rpki_models.ROAIntentMatchKind.STALE_CANDIDATE: 40,
 }
 
+REPLACEMENT_REASON_TEXT = {
+    'origin_mismatch': 'the published authorization uses the wrong origin ASN',
+    'max_length_overbroad': 'the published authorization is broader than the intended maxLength',
+    'max_length_too_narrow': 'the published authorization is narrower than the intended maxLength',
+    'max_length_mismatch': 'the published authorization uses a different maxLength than intent',
+    'origin_and_max_length_overbroad': 'the published authorization uses the wrong origin ASN and an overbroad maxLength',
+    'origin_and_max_length_too_narrow': 'the published authorization uses the wrong origin ASN and a too-narrow maxLength',
+    'origin_and_max_length_mismatch': 'the published authorization uses the wrong origin ASN and a different maxLength',
+}
+
+REPLACEMENT_REASON_PRIORITY = {
+    'origin_and_max_length_overbroad': 70,
+    'origin_and_max_length_too_narrow': 65,
+    'origin_and_max_length_mismatch': 60,
+    'origin_mismatch': 50,
+    'max_length_overbroad': 40,
+    'max_length_too_narrow': 35,
+    'max_length_mismatch': 30,
+}
+
+INTENT_RESULT_FROM_REPLACEMENT_REASON = {
+    'origin_mismatch': (
+        rpki_models.ROAIntentResultType.ASN_MISMATCH,
+        rpki_models.ReconciliationSeverity.ERROR,
+    ),
+    'max_length_overbroad': (
+        rpki_models.ROAIntentResultType.MAX_LENGTH_OVERBROAD,
+        rpki_models.ReconciliationSeverity.WARNING,
+    ),
+    'max_length_too_narrow': (
+        rpki_models.ROAIntentResultType.MAX_LENGTH_TOO_NARROW,
+        rpki_models.ReconciliationSeverity.WARNING,
+    ),
+    'max_length_mismatch': (
+        rpki_models.ROAIntentResultType.MAX_LENGTH_TOO_NARROW,
+        rpki_models.ReconciliationSeverity.WARNING,
+    ),
+    'origin_and_max_length_overbroad': (
+        rpki_models.ROAIntentResultType.ASN_AND_MAX_LENGTH_OVERBROAD,
+        rpki_models.ReconciliationSeverity.ERROR,
+    ),
+    'origin_and_max_length_too_narrow': (
+        rpki_models.ROAIntentResultType.ASN_AND_MAX_LENGTH_TOO_NARROW,
+        rpki_models.ReconciliationSeverity.ERROR,
+    ),
+    'origin_and_max_length_mismatch': (
+        rpki_models.ROAIntentResultType.ASN_AND_MAX_LENGTH_MISMATCH,
+        rpki_models.ReconciliationSeverity.ERROR,
+    ),
+}
+
+PUBLISHED_RESULT_FROM_REPLACEMENT_REASON = {
+    'origin_mismatch': (
+        rpki_models.PublishedROAResultType.WRONG_ORIGIN,
+        rpki_models.ReconciliationSeverity.ERROR,
+    ),
+    'max_length_overbroad': (
+        rpki_models.PublishedROAResultType.BROADER_THAN_NEEDED,
+        rpki_models.ReconciliationSeverity.WARNING,
+    ),
+    'max_length_too_narrow': (
+        rpki_models.PublishedROAResultType.MAX_LENGTH_TOO_NARROW,
+        rpki_models.ReconciliationSeverity.WARNING,
+    ),
+    'max_length_mismatch': (
+        rpki_models.PublishedROAResultType.MAX_LENGTH_TOO_NARROW,
+        rpki_models.ReconciliationSeverity.WARNING,
+    ),
+    'origin_and_max_length_overbroad': (
+        rpki_models.PublishedROAResultType.WRONG_ORIGIN_AND_MAX_LENGTH_OVERBROAD,
+        rpki_models.ReconciliationSeverity.ERROR,
+    ),
+    'origin_and_max_length_too_narrow': (
+        rpki_models.PublishedROAResultType.WRONG_ORIGIN_AND_MAX_LENGTH_TOO_NARROW,
+        rpki_models.ReconciliationSeverity.ERROR,
+    ),
+    'origin_and_max_length_mismatch': (
+        rpki_models.PublishedROAResultType.WRONG_ORIGIN_AND_MAX_LENGTH_MISMATCH,
+        rpki_models.ReconciliationSeverity.ERROR,
+    ),
+}
+
+REPLACEMENT_INTENT_RESULT_TYPES = {
+    rpki_models.ROAIntentResultType.ASN_MISMATCH,
+    rpki_models.ROAIntentResultType.ASN_AND_MAX_LENGTH_OVERBROAD,
+    rpki_models.ROAIntentResultType.ASN_AND_MAX_LENGTH_TOO_NARROW,
+    rpki_models.ROAIntentResultType.ASN_AND_MAX_LENGTH_MISMATCH,
+    rpki_models.ROAIntentResultType.MAX_LENGTH_OVERBROAD,
+    rpki_models.ROAIntentResultType.MAX_LENGTH_TOO_NARROW,
+}
+
 
 def _build_selector_querydict(raw_query: str) -> QueryDict:
     raw_query = (raw_query or '').strip().lstrip('?')
@@ -548,17 +639,114 @@ def _classify_match(intent: rpki_models.ROAIntent, published: PublishedAuthoriza
     return None
 
 
-def _result_from_best_match(intent: rpki_models.ROAIntent, best_match_kind: str | None) -> tuple[str, str]:
+def _max_length_relation(intent_max_length: int | None, published_max_length: int | None) -> str:
+    if intent_max_length == published_max_length:
+        return 'exact'
+    if intent_max_length is None or published_max_length is None:
+        return 'different'
+    if published_max_length > intent_max_length:
+        return 'broader'
+    if published_max_length < intent_max_length:
+        return 'narrower'
+    return 'different'
+
+
+def _replacement_reason_code(*, prefix_relation: str, same_origin: bool, max_length_relation: str) -> str | None:
+    if prefix_relation != 'exact':
+        return None
+    if same_origin:
+        if max_length_relation == 'broader':
+            return 'max_length_overbroad'
+        if max_length_relation == 'narrower':
+            return 'max_length_too_narrow'
+        if max_length_relation == 'different':
+            return 'max_length_mismatch'
+        return None
+
+    if max_length_relation == 'exact':
+        return 'origin_mismatch'
+    if max_length_relation == 'broader':
+        return 'origin_and_max_length_overbroad'
+    if max_length_relation == 'narrower':
+        return 'origin_and_max_length_too_narrow'
+    return 'origin_and_max_length_mismatch'
+
+
+def _build_match_analysis(intent: rpki_models.ROAIntent, published: PublishedAuthorization) -> dict:
+    intent_network = IPNetwork(intent.prefix_cidr_text)
+    same_prefix = intent_network == published.network
+    same_origin = intent.origin_asn_value == published.origin_asn_value
+    if same_prefix:
+        prefix_relation = 'exact'
+    elif _network_contains(published.network, intent_network):
+        prefix_relation = 'published_superset'
+    elif _network_contains(intent_network, published.network):
+        prefix_relation = 'published_subset'
+    else:
+        prefix_relation = 'disjoint'
+
+    max_length_relation = _max_length_relation(intent.max_length, published.max_length)
+    mismatch_axes = []
+    if prefix_relation != 'exact':
+        mismatch_axes.append('prefix')
+    if not same_origin:
+        mismatch_axes.append('origin_asn')
+    if max_length_relation != 'exact':
+        mismatch_axes.append('max_length')
+
+    replacement_reason = _replacement_reason_code(
+        prefix_relation=prefix_relation,
+        same_origin=same_origin,
+        max_length_relation=max_length_relation,
+    )
+    return {
+        'prefix_relation': prefix_relation,
+        'same_origin': same_origin,
+        'max_length_relation': max_length_relation,
+        'mismatch_axes': mismatch_axes,
+        'replacement_required': replacement_reason is not None,
+        'replacement_reason_code': replacement_reason,
+    }
+
+
+def _serialize_match_source(match: rpki_models.ROAIntentMatch | None) -> dict:
+    if match is None:
+        return {}
+    if match.roa_id is not None:
+        return {
+            'source': 'local_roa',
+            'roa_id': match.roa_id,
+            'name': match.roa.name,
+        }
+
+    imported = match.imported_authorization
+    return {
+        'source': 'provider_imported',
+        'imported_authorization_id': imported.pk,
+        'name': imported.name,
+        'external_object_id': imported.external_object_id,
+        'payload_json': imported.payload_json,
+    }
+
+
+def _result_from_best_match(
+    intent: rpki_models.ROAIntent,
+    best_match: rpki_models.ROAIntentMatch | None,
+) -> tuple[str, str]:
     if intent.derived_state == rpki_models.ROAIntentDerivedState.SUPPRESSED:
         return rpki_models.ROAIntentResultType.SUPPRESSED_BY_POLICY, rpki_models.ReconciliationSeverity.INFO
     if intent.derived_state != rpki_models.ROAIntentDerivedState.ACTIVE:
         return rpki_models.ROAIntentResultType.INACTIVE_INTENT, rpki_models.ReconciliationSeverity.WARNING
-    if best_match_kind is None:
+    if best_match is None:
         return rpki_models.ROAIntentResultType.MISSING, rpki_models.ReconciliationSeverity.ERROR
+    best_match_kind = best_match.match_kind
     if best_match_kind == rpki_models.ROAIntentMatchKind.EXACT:
         return rpki_models.ROAIntentResultType.MATCH, rpki_models.ReconciliationSeverity.INFO
     if best_match_kind == rpki_models.ROAIntentMatchKind.STALE_CANDIDATE:
         return rpki_models.ROAIntentResultType.STALE, rpki_models.ReconciliationSeverity.WARNING
+    replacement_reason = (best_match.details_json or {}).get('replacement_reason_code')
+    if replacement_reason:
+        return INTENT_RESULT_FROM_REPLACEMENT_REASON[replacement_reason]
     if best_match_kind == rpki_models.ROAIntentMatchKind.ORIGIN_CONFLICT:
         return rpki_models.ROAIntentResultType.ASN_MISMATCH, rpki_models.ReconciliationSeverity.ERROR
     if best_match_kind == rpki_models.ROAIntentMatchKind.LENGTH_BROADER:
@@ -572,6 +760,58 @@ def _match_source_key(match: rpki_models.ROAIntentMatch) -> str:
     if match.roa_id is not None:
         return f'roa:{match.roa_id}'
     return f'imported:{match.imported_authorization_id}'
+
+
+def _published_result_from_matches(row_matches: list[dict]) -> tuple[str, str, dict]:
+    if not row_matches:
+        return (
+            rpki_models.PublishedROAResultType.ORPHANED,
+            rpki_models.ReconciliationSeverity.WARNING,
+            {
+                'replacement_required': False,
+                'matched_intent_result_types': [],
+            },
+        )
+
+    replacement_matches = [match_info for match_info in row_matches if match_info.get('replacement_required')]
+    if replacement_matches:
+        selected = max(
+            replacement_matches,
+            key=lambda match_info: REPLACEMENT_REASON_PRIORITY.get(match_info.get('replacement_reason_code') or '', 0),
+        )
+        result_type, severity = PUBLISHED_RESULT_FROM_REPLACEMENT_REASON[selected['replacement_reason_code']]
+        return (
+            result_type,
+            severity,
+            {
+                'replacement_required': True,
+                'replacement_reason_code': selected['replacement_reason_code'],
+                'matched_intent_ids': [match_info['roa_intent_id'] for match_info in row_matches],
+                'matched_intent_result_types': [match_info['result_type'] for match_info in row_matches],
+            },
+        )
+
+    result_types = {match_info['result_type'] for match_info in row_matches}
+    if rpki_models.ROAIntentResultType.STALE in result_types:
+        return (
+            rpki_models.PublishedROAResultType.STALE,
+            rpki_models.ReconciliationSeverity.WARNING,
+            {
+                'replacement_required': False,
+                'matched_intent_ids': [match_info['roa_intent_id'] for match_info in row_matches],
+                'matched_intent_result_types': [match_info['result_type'] for match_info in row_matches],
+            },
+        )
+
+    return (
+        rpki_models.PublishedROAResultType.MATCHED,
+        rpki_models.ReconciliationSeverity.INFO,
+        {
+            'replacement_required': False,
+            'matched_intent_ids': [match_info['roa_intent_id'] for match_info in row_matches],
+            'matched_intent_result_types': [match_info['result_type'] for match_info in row_matches],
+        },
+    )
 
 
 def reconcile_roa_intents(
@@ -597,8 +837,10 @@ def reconcile_roa_intents(
     )
 
     published_rows = [row for rows in published_by_source.values() for row in rows]
-    result_summary = {}
-    best_results_by_source: dict[str, list[str]] = {}
+    intent_result_summary: dict[str, int] = {}
+    published_result_summary: dict[str, int] = {}
+    best_match_kind_summary: dict[str, int] = {}
+    best_results_by_source: dict[str, list[dict]] = {}
     active_intents = 0
 
     intents = derivation_run.roa_intents.select_related('origin_asn', 'prefix', 'scope_tenant', 'scope_vrf', 'scope_site', 'scope_region').all()
@@ -611,6 +853,7 @@ def reconcile_roa_intents(
             match_kind = _classify_match(intent, published)
             if match_kind is None:
                 continue
+            match_analysis = _build_match_analysis(intent, published)
             match = rpki_models.ROAIntentMatch.objects.create(
                 name=f'{intent.name} vs {published.source_name}',
                 roa_intent=intent,
@@ -626,6 +869,7 @@ def reconcile_roa_intents(
                     'intent_max_length': intent.max_length,
                     'published_max_length': published.max_length,
                     'stale': published.stale,
+                    **match_analysis,
                 },
             )
             candidates.append(match)
@@ -636,10 +880,12 @@ def reconcile_roa_intents(
             if best_match is not None:
                 best_match.is_best_match = True
                 best_match.save(update_fields=('is_best_match',))
+                best_match_kind_summary[best_match.match_kind] = best_match_kind_summary.get(best_match.match_kind, 0) + 1
 
-        result_type, severity = _result_from_best_match(intent, getattr(best_match, 'match_kind', None))
-        result_summary[result_type] = result_summary.get(result_type, 0) + 1
-        rpki_models.ROAIntentResult.objects.create(
+        result_type, severity = _result_from_best_match(intent, best_match)
+        intent_result_summary[result_type] = intent_result_summary.get(result_type, 0) + 1
+        best_match_details = dict(getattr(best_match, 'details_json', {}) or {})
+        intent_result = rpki_models.ROAIntentResult.objects.create(
             name=f'{intent.name} Result',
             reconciliation_run=reconciliation_run,
             roa_intent=intent,
@@ -654,27 +900,35 @@ def reconcile_roa_intents(
                 'intent_prefix': intent.prefix_cidr_text,
                 'intent_origin_asn': intent.origin_asn_value,
                 'intent_max_length': intent.max_length,
+                'comparison_scope': comparison_scope,
+                'published_prefix': best_match_details.get('published_prefix'),
+                'published_origin_asn': best_match_details.get('published_origin_asn'),
+                'published_max_length': best_match_details.get('published_max_length'),
+                'prefix_relation': best_match_details.get('prefix_relation'),
+                'max_length_relation': best_match_details.get('max_length_relation'),
+                'mismatch_axes': best_match_details.get('mismatch_axes', []),
+                'replacement_required': best_match_details.get('replacement_required', False),
+                'replacement_reason_code': best_match_details.get('replacement_reason_code'),
+                'published_source': _serialize_match_source(best_match),
             },
             computed_at=now,
         )
         if best_match is not None:
-            best_results_by_source.setdefault(_match_source_key(best_match), []).append(result_type)
+            best_results_by_source.setdefault(_match_source_key(best_match), []).append(
+                {
+                    'intent_result_id': intent_result.pk,
+                    'roa_intent_id': intent.pk,
+                    'result_type': result_type,
+                    'replacement_required': best_match_details.get('replacement_required', False),
+                    'replacement_reason_code': best_match_details.get('replacement_reason_code'),
+                }
+            )
 
     for source_key, source_rows in published_by_source.items():
         representative = source_rows[0]
         row_matches = best_results_by_source.get(source_key, [])
-        if not row_matches:
-            result_type = rpki_models.PublishedROAResultType.ORPHANED
-            severity = rpki_models.ReconciliationSeverity.WARNING
-        elif rpki_models.ROAIntentResultType.ASN_MISMATCH in row_matches:
-            result_type = rpki_models.PublishedROAResultType.WRONG_ORIGIN
-            severity = rpki_models.ReconciliationSeverity.ERROR
-        elif rpki_models.ROAIntentResultType.MAX_LENGTH_OVERBROAD in row_matches:
-            result_type = rpki_models.PublishedROAResultType.BROADER_THAN_NEEDED
-            severity = rpki_models.ReconciliationSeverity.WARNING
-        else:
-            result_type = rpki_models.PublishedROAResultType.MATCHED
-            severity = rpki_models.ReconciliationSeverity.INFO
+        result_type, severity, published_details = _published_result_from_matches(row_matches)
+        published_result_summary[result_type] = published_result_summary.get(result_type, 0) + 1
 
         rpki_models.PublishedROAResult.objects.create(
             name=f'{representative.source_name} Published Result',
@@ -689,6 +943,11 @@ def reconcile_roa_intents(
                 'origin_asn': representative.origin_asn_value,
                 'prefix_count': len(source_rows),
                 'source': source_key,
+                'comparison_scope': comparison_scope,
+                'prefix_cidr_text': representative.prefix_cidr_text,
+                'max_length': representative.max_length,
+                'stale': representative.stale,
+                **published_details,
             },
             computed_at=now,
         )
@@ -697,7 +956,26 @@ def reconcile_roa_intents(
     reconciliation_run.completed_at = timezone.now()
     reconciliation_run.published_roa_count = len(published_by_source)
     reconciliation_run.intent_count = active_intents
-    reconciliation_run.result_summary_json = result_summary
+    reconciliation_run.result_summary_json = {
+        'intent_result_types': intent_result_summary,
+        'published_result_types': published_result_summary,
+        'best_match_kinds': best_match_kind_summary,
+        'comparison_scope': comparison_scope,
+        'provider_snapshot_id': getattr(resolved_snapshot, 'pk', None),
+        'replacement_required_intent_count': sum(
+            intent_result_summary.get(result_type, 0)
+            for result_type in REPLACEMENT_INTENT_RESULT_TYPES
+        ),
+        'replacement_required_published_count': sum(
+            count
+            for result_type, count in published_result_summary.items()
+            if result_type not in {
+                rpki_models.PublishedROAResultType.MATCHED,
+                rpki_models.PublishedROAResultType.ORPHANED,
+                rpki_models.PublishedROAResultType.STALE,
+            }
+        ),
+    }
     reconciliation_run.save(update_fields=(
         'status',
         'completed_at',
@@ -758,6 +1036,50 @@ def _serialize_published_source_for_plan(published_result: rpki_models.Published
     }
 
 
+def _serialize_best_published_state_for_plan(intent_result: rpki_models.ROAIntentResult) -> dict:
+    details = dict(intent_result.details_json or {})
+    published_source = dict(details.get('published_source') or {})
+    published_source.update(
+        {
+            'prefix_cidr_text': details.get('published_prefix'),
+            'origin_asn_value': details.get('published_origin_asn'),
+            'max_length': details.get('published_max_length'),
+            'best_match_kind': details.get('best_match_kind'),
+            'replacement_reason_code': details.get('replacement_reason_code'),
+            'mismatch_axes': details.get('mismatch_axes', []),
+        }
+    )
+    return published_source
+
+
+def _replacement_reason_text(reason_code: str | None) -> str:
+    if not reason_code:
+        return 'the published authorization differs from intent'
+    return REPLACEMENT_REASON_TEXT.get(reason_code, 'the published authorization differs from intent')
+
+
+def _intent_result_requires_replacement(intent_result: rpki_models.ROAIntentResult) -> bool:
+    details = intent_result.details_json or {}
+    return bool(
+        intent_result.result_type in REPLACEMENT_INTENT_RESULT_TYPES
+        or details.get('replacement_required')
+    )
+
+
+def _plan_withdraw_source_key_for_intent_result(intent_result: rpki_models.ROAIntentResult) -> str | None:
+    if intent_result.best_roa_id is not None:
+        return f'roa:{intent_result.best_roa_id}'
+    if intent_result.best_imported_authorization_id is not None:
+        return f'imported:{intent_result.best_imported_authorization_id}'
+    return None
+
+
+def _plan_withdraw_source_key_for_published_result(published_result: rpki_models.PublishedROAResult) -> str:
+    if published_result.roa_id is not None:
+        return f'roa:{published_result.roa_id}'
+    return f'imported:{published_result.imported_authorization_id}'
+
+
 def _serialize_provider_route_payload_for_intent(intent: rpki_models.ROAIntent) -> dict:
     return {
         'asn': intent.origin_asn_value,
@@ -815,9 +1137,18 @@ def create_roa_change_plan(
 
     create_count = 0
     withdraw_count = 0
+    replacement_count = 0
+    replacement_create_count = 0
+    replacement_withdraw_count = 0
+    replacement_reason_counts: dict[str, int] = {}
     skipped_counts: dict[str, int] = {}
+    replacement_withdraw_sources: set[str] = set()
 
-    for intent_result in reconciliation_run.intent_results.select_related('roa_intent').all():
+    for intent_result in reconciliation_run.intent_results.select_related(
+        'roa_intent',
+        'best_roa',
+        'best_imported_authorization',
+    ).all():
         if (
             intent_result.result_type == rpki_models.ROAIntentResultType.MISSING
             and intent_result.roa_intent.derived_state == rpki_models.ROAIntentDerivedState.ACTIVE
@@ -842,6 +1173,65 @@ def create_roa_change_plan(
                 reason='Intent is active but no published authorization matched.',
             )
             create_count += 1
+        elif (
+            intent_result.roa_intent.derived_state == rpki_models.ROAIntentDerivedState.ACTIVE
+            and _intent_result_requires_replacement(intent_result)
+        ):
+            replacement_reason = (intent_result.details_json or {}).get('replacement_reason_code')
+            published_state = _serialize_best_published_state_for_plan(intent_result)
+            target_state = _serialize_intent_for_plan(intent_result.roa_intent)
+            rpki_models.ROAChangePlanItem.objects.create(
+                name=f'Replace with {intent_result.roa_intent.name}',
+                change_plan=plan,
+                tenant=intent_result.tenant,
+                action_type=rpki_models.ROAChangePlanAction.CREATE,
+                roa_intent=intent_result.roa_intent,
+                provider_operation=(
+                    rpki_models.ProviderWriteOperation.ADD_ROUTE
+                    if provider_account is not None
+                    else ''
+                ),
+                provider_payload_json=(
+                    _serialize_provider_route_payload_for_intent(intent_result.roa_intent)
+                    if provider_account is not None
+                    else {}
+                ),
+                before_state_json=published_state,
+                after_state_json=target_state,
+                reason=f'Create the intended authorization because {_replacement_reason_text(replacement_reason)}.',
+            )
+            create_count += 1
+            replacement_count += 1
+            replacement_create_count += 1
+            if replacement_reason:
+                replacement_reason_counts[replacement_reason] = replacement_reason_counts.get(replacement_reason, 0) + 1
+
+            withdraw_source_key = _plan_withdraw_source_key_for_intent_result(intent_result)
+            if withdraw_source_key is not None and withdraw_source_key not in replacement_withdraw_sources:
+                rpki_models.ROAChangePlanItem.objects.create(
+                    name=f'Withdraw replaced authorization for {intent_result.roa_intent.name}',
+                    change_plan=plan,
+                    tenant=intent_result.tenant,
+                    action_type=rpki_models.ROAChangePlanAction.WITHDRAW,
+                    roa=intent_result.best_roa,
+                    imported_authorization=intent_result.best_imported_authorization,
+                    provider_operation=(
+                        rpki_models.ProviderWriteOperation.REMOVE_ROUTE
+                        if provider_account is not None and intent_result.best_imported_authorization_id is not None
+                        else ''
+                    ),
+                    provider_payload_json=(
+                        _serialize_provider_route_payload_for_imported(intent_result.best_imported_authorization)
+                        if provider_account is not None and intent_result.best_imported_authorization_id is not None
+                        else {}
+                    ),
+                    before_state_json=published_state,
+                    after_state_json=target_state,
+                    reason=f'Withdraw the mismatched published authorization because {_replacement_reason_text(replacement_reason)}.',
+                )
+                withdraw_count += 1
+                replacement_withdraw_count += 1
+                replacement_withdraw_sources.add(withdraw_source_key)
         else:
             skipped_counts[intent_result.result_type] = skipped_counts.get(intent_result.result_type, 0) + 1
 
@@ -870,14 +1260,20 @@ def create_roa_change_plan(
             withdraw_count += 1
         else:
             skipped_key = f'published:{published_result.result_type}'
-            skipped_counts[skipped_key] = skipped_counts.get(skipped_key, 0) + 1
+            if _plan_withdraw_source_key_for_published_result(published_result) not in replacement_withdraw_sources:
+                skipped_counts[skipped_key] = skipped_counts.get(skipped_key, 0) + 1
 
     plan.summary_json = {
         'create_count': create_count,
         'withdraw_count': withdraw_count,
+        'replacement_count': replacement_count,
+        'replacement_create_count': replacement_create_count,
+        'replacement_withdraw_count': replacement_withdraw_count,
+        'replacement_reason_counts': replacement_reason_counts,
         'provider_backed': provider_account is not None,
         'provider_account_id': getattr(provider_account, 'pk', None),
         'provider_snapshot_id': getattr(provider_snapshot, 'pk', None),
+        'comparison_scope': reconciliation_run.comparison_scope,
         'skipped_counts': skipped_counts,
     }
     plan.save(update_fields=('summary_json',))

@@ -113,6 +113,47 @@ class RoutingIntentServiceTestCase(TestCase):
         self.assertEqual(best_match.imported_authorization, imported_authorization)
         self.assertEqual(published_result.result_type, rpki_models.PublishedROAResultType.MATCHED)
 
+    def test_reconciliation_marks_same_prefix_provider_mismatch_as_replacement(self):
+        derivation_run = derive_roa_intents(self.profile)
+        provider_snapshot = create_test_provider_snapshot(
+            name='Replacement Snapshot',
+            organization=self.organization,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        replacement_import = create_test_imported_roa_authorization(
+            name='Replacement Imported Authorization',
+            provider_snapshot=provider_snapshot,
+            organization=self.organization,
+            prefix=self.primary_prefix,
+            origin_asn=create_test_asn(65561),
+            max_length=26,
+            payload_json={'comment': 'replace me'},
+        )
+
+        reconciliation_run = reconcile_roa_intents(
+            derivation_run,
+            comparison_scope=rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
+            provider_snapshot=provider_snapshot,
+        )
+
+        intent_result = reconciliation_run.intent_results.get(roa_intent__prefix=self.primary_prefix)
+        published_result = reconciliation_run.published_roa_results.get(imported_authorization=replacement_import)
+
+        self.assertEqual(intent_result.result_type, rpki_models.ROAIntentResultType.ASN_AND_MAX_LENGTH_OVERBROAD)
+        self.assertEqual(intent_result.best_imported_authorization, replacement_import)
+        self.assertTrue(intent_result.details_json['replacement_required'])
+        self.assertEqual(intent_result.details_json['replacement_reason_code'], 'origin_and_max_length_overbroad')
+        self.assertEqual(intent_result.details_json['mismatch_axes'], ['origin_asn', 'max_length'])
+
+        self.assertEqual(
+            published_result.result_type,
+            rpki_models.PublishedROAResultType.WRONG_ORIGIN_AND_MAX_LENGTH_OVERBROAD,
+        )
+        self.assertTrue(published_result.details_json['replacement_required'])
+        self.assertEqual(published_result.details_json['replacement_reason_code'], 'origin_and_max_length_overbroad')
+        self.assertEqual(reconciliation_run.result_summary_json['replacement_required_intent_count'], 1)
+        self.assertEqual(reconciliation_run.result_summary_json['replacement_required_published_count'], 1)
+
     def test_change_plan_creates_create_and_withdraw_actions(self):
         derivation_run = derive_roa_intents(self.profile)
         provider_account = create_test_provider_account(
@@ -151,6 +192,92 @@ class RoutingIntentServiceTestCase(TestCase):
         self.assertEqual(plan.items.filter(action_type=rpki_models.ROAChangePlanAction.WITHDRAW).count(), 1)
         self.assertEqual(plan.summary_json['create_count'], 1)
         self.assertEqual(plan.summary_json['withdraw_count'], 1)
+
+    def test_change_plan_creates_replacement_items_for_local_mismatch(self):
+        derivation_run = derive_roa_intents(self.profile)
+        certificate = create_test_certificate(name='Replacement Local Cert', rpki_org=self.organization)
+        replacement_roa = create_test_roa(
+            name='Replacement Local ROA',
+            signed_by=certificate,
+            origin_as=create_test_asn(65562),
+        )
+        create_test_roa_prefix(prefix=self.primary_prefix, roa=replacement_roa, max_length=26)
+
+        reconciliation_run = reconcile_roa_intents(derivation_run)
+        plan = create_roa_change_plan(reconciliation_run)
+
+        create_item = plan.items.get(action_type=rpki_models.ROAChangePlanAction.CREATE)
+        withdraw_item = plan.items.get(action_type=rpki_models.ROAChangePlanAction.WITHDRAW)
+
+        self.assertEqual(plan.summary_json['replacement_count'], 1)
+        self.assertEqual(plan.summary_json['replacement_create_count'], 1)
+        self.assertEqual(plan.summary_json['replacement_withdraw_count'], 1)
+        self.assertEqual(
+            plan.summary_json['replacement_reason_counts'],
+            {'origin_and_max_length_overbroad': 1},
+        )
+        self.assertIn('wrong origin ASN and an overbroad maxLength', create_item.reason)
+        self.assertEqual(withdraw_item.roa, replacement_roa)
+        self.assertEqual(withdraw_item.provider_operation, '')
+        self.assertEqual(withdraw_item.before_state_json['source'], 'local_roa')
+        self.assertEqual(withdraw_item.after_state_json['prefix_cidr_text'], '10.55.0.0/24')
+
+    def test_change_plan_creates_replacement_items_for_provider_mismatch(self):
+        derivation_run = derive_roa_intents(self.profile)
+        provider_account = create_test_provider_account(
+            name='Replacement Provider Account',
+            organization=self.organization,
+            provider_type=rpki_models.ProviderType.KRILL,
+            org_handle='ORG-PLAN-REPLACE',
+            ca_handle='ca-plan-replace',
+            api_base_url='https://krill.example.invalid',
+        )
+        provider_snapshot = create_test_provider_snapshot(
+            name='Replacement Provider Snapshot',
+            organization=self.organization,
+            provider_account=provider_account,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        replacement_import = create_test_imported_roa_authorization(
+            name='Replacement Imported Authorization 2',
+            provider_snapshot=provider_snapshot,
+            organization=self.organization,
+            prefix=self.primary_prefix,
+            origin_asn=create_test_asn(65563),
+            max_length=26,
+            payload_json={'comment': 'replacement target'},
+        )
+
+        reconciliation_run = reconcile_roa_intents(
+            derivation_run,
+            comparison_scope=rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
+            provider_snapshot=provider_snapshot,
+        )
+        plan = create_roa_change_plan(reconciliation_run)
+
+        create_item = plan.items.get(action_type=rpki_models.ROAChangePlanAction.CREATE)
+        withdraw_item = plan.items.get(action_type=rpki_models.ROAChangePlanAction.WITHDRAW)
+
+        self.assertEqual(plan.summary_json['create_count'], 1)
+        self.assertEqual(plan.summary_json['withdraw_count'], 1)
+        self.assertEqual(plan.summary_json['replacement_count'], 1)
+        self.assertEqual(create_item.provider_operation, rpki_models.ProviderWriteOperation.ADD_ROUTE)
+        self.assertEqual(
+            create_item.provider_payload_json,
+            {'asn': self.origin_asn.asn, 'prefix': '10.55.0.0/24', 'max_length': 24},
+        )
+        self.assertEqual(withdraw_item.imported_authorization, replacement_import)
+        self.assertEqual(withdraw_item.provider_operation, rpki_models.ProviderWriteOperation.REMOVE_ROUTE)
+        self.assertEqual(
+            withdraw_item.provider_payload_json,
+            {
+                'asn': replacement_import.origin_asn_value,
+                'prefix': '10.55.0.0/24',
+                'max_length': 26,
+                'comment': 'replacement target',
+            },
+        )
+        self.assertEqual(withdraw_item.before_state_json['replacement_reason_code'], 'origin_and_max_length_overbroad')
 
     def test_management_command_runs_pipeline_synchronously(self):
         call_command('run_routing_intent_profile', '--profile', str(self.profile.pk))

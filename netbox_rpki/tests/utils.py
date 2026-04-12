@@ -1016,6 +1016,7 @@ def create_test_external_object_reference(
     external_object_id='provider-object-1',
     last_seen_provider_snapshot=None,
     last_seen_imported_authorization=None,
+    last_seen_imported_aspa=None,
     last_seen_at=None,
     **kwargs,
 ):
@@ -1037,6 +1038,7 @@ def create_test_external_object_reference(
         external_object_id=external_object_id,
         last_seen_provider_snapshot=last_seen_provider_snapshot,
         last_seen_imported_authorization=last_seen_imported_authorization,
+        last_seen_imported_aspa=last_seen_imported_aspa,
         last_seen_at=last_seen_at,
         **kwargs,
     )
@@ -1090,6 +1092,71 @@ def create_test_imported_roa_authorization(
         external_reference=external_reference,
         is_stale=is_stale,
         payload_json=payload_json or {},
+        **kwargs,
+    )
+
+
+def create_test_imported_aspa(
+    name='Imported ASPA 1',
+    provider_snapshot=None,
+    organization=None,
+    authorization_key='',
+    customer_as=None,
+    customer_as_value=None,
+    external_object_id='',
+    external_reference=None,
+    is_stale=False,
+    payload_json=None,
+    **kwargs,
+):
+    if organization is None:
+        organization = create_test_organization()
+    if provider_snapshot is None:
+        provider_snapshot = create_test_provider_snapshot(organization=organization)
+    resolved_customer_value = customer_as_value if customer_as_value is not None else getattr(customer_as, 'asn', None)
+    if not authorization_key:
+        authorization_key = rpki_models.ImportedAspa.build_authorization_key(
+            customer_as_value=resolved_customer_value,
+            external_object_id=external_object_id,
+        )
+    return rpki_models.ImportedAspa.objects.create(
+        name=name,
+        provider_snapshot=provider_snapshot,
+        organization=organization,
+        authorization_key=authorization_key,
+        customer_as=customer_as,
+        customer_as_value=resolved_customer_value,
+        external_object_id=external_object_id,
+        external_reference=external_reference,
+        is_stale=is_stale,
+        payload_json=payload_json or {},
+        **kwargs,
+    )
+
+
+def create_test_imported_aspa_provider(
+    imported_aspa=None,
+    provider_as=None,
+    provider_as_value=None,
+    address_family='',
+    raw_provider_text='',
+    **kwargs,
+):
+    if imported_aspa is None:
+        imported_aspa = create_test_imported_aspa()
+    resolved_provider_value = provider_as_value if provider_as_value is not None else getattr(provider_as, 'asn', None)
+    if not raw_provider_text and resolved_provider_value is not None:
+        raw_provider_text = f'AS{resolved_provider_value}'
+        if address_family == rpki_models.AddressFamily.IPV4:
+            raw_provider_text += '(v4)'
+        elif address_family == rpki_models.AddressFamily.IPV6:
+            raw_provider_text += '(v6)'
+    return rpki_models.ImportedAspaProvider.objects.create(
+        imported_aspa=imported_aspa,
+        provider_as=provider_as,
+        provider_as_value=resolved_provider_value,
+        address_family=address_family,
+        raw_provider_text=raw_provider_text,
         **kwargs,
     )
 

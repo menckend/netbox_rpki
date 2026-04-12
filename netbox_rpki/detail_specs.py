@@ -132,6 +132,10 @@ def get_result_details(result: models.ROAIntentResult) -> str | None:
     return get_pretty_json(result.details_json)
 
 
+def get_published_result_details(result: models.PublishedROAResult) -> str | None:
+    return get_pretty_json(result.details_json)
+
+
 def get_result_expected_origin(result: models.ROAIntentResult) -> Any:
     return result.roa_intent.origin_asn or result.roa_intent.origin_asn_value
 
@@ -174,8 +178,112 @@ def get_write_execution_response_payload(execution: models.ProviderWriteExecutio
     return get_pretty_json(execution.response_payload_json)
 
 
+def get_change_plan_item_provider_payload(item: models.ROAChangePlanItem) -> str | None:
+    return get_pretty_json(item.provider_payload_json)
+
+
+def get_change_plan_item_before_state(item: models.ROAChangePlanItem) -> str | None:
+    return get_pretty_json(item.before_state_json)
+
+
+def get_change_plan_item_after_state(item: models.ROAChangePlanItem) -> str | None:
+    return get_pretty_json(item.after_state_json)
+
+
 def get_provider_last_sync_summary(account: models.RpkiProviderAccount) -> str | None:
     return get_pretty_json(account.last_sync_summary_json)
+
+
+IMPORTED_ASPA_DETAIL_SPEC = DetailSpec(
+    model=models.ImportedAspa,
+    list_url_name='plugins:netbox_rpki:importedaspa_list',
+    breadcrumb_label='Imported ASPAs',
+    card_title='Imported ASPA',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Provider Snapshot', value=lambda obj: obj.provider_snapshot, kind='link'),
+        DetailFieldSpec(label='Organization', value=lambda obj: obj.organization, kind='link'),
+        DetailFieldSpec(
+            label='Customer ASN',
+            value=lambda obj: obj.customer_as or obj.customer_as_value,
+            kind='link',
+            empty_text='None',
+        ),
+        DetailFieldSpec(label='Authorization Key', value=lambda obj: obj.authorization_key),
+        DetailFieldSpec(label='External Object ID', value=lambda obj: obj.external_object_id, empty_text='None'),
+        DetailFieldSpec(label='External Reference', value=lambda obj: obj.external_reference, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Is Stale', value=lambda obj: obj.is_stale),
+        DetailFieldSpec(label='Imported Providers', value=get_related_count('provider_authorizations')),
+        DetailFieldSpec(
+            label='Payload',
+            value=lambda obj: get_pretty_json(obj.payload_json),
+            kind='code',
+            empty_text='None',
+        ),
+    ),
+    bottom_tables=(
+        DetailTableSpec(
+            title='Imported Provider Authorizations',
+            table_class_name='ImportedAspaProviderTable',
+            queryset=lambda obj: obj.provider_authorizations.select_related('provider_as', 'tenant').all(),
+        ),
+    ),
+)
+
+
+ASPA_DETAIL_SPEC = DetailSpec(
+    model=models.ASPA,
+    list_url_name='plugins:netbox_rpki:aspa_list',
+    breadcrumb_label='ASPAs',
+    card_title='ASPA',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(
+            label='Tenant',
+            value=lambda obj: obj.tenant,
+            kind='link',
+            use_header=False,
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='Organization',
+            value=lambda obj: obj.organization,
+            kind='link',
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='Signed Object',
+            value=lambda obj: obj.signed_object,
+            kind='link',
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='Customer ASN',
+            value=lambda obj: obj.customer_as,
+            kind='link',
+            empty_text='None',
+        ),
+        DetailFieldSpec(label='Valid From', value=lambda obj: obj.valid_from, empty_text='None'),
+        DetailFieldSpec(label='Valid To', value=lambda obj: obj.valid_to, empty_text='None'),
+        DetailFieldSpec(label='Validation State', value=lambda obj: obj.validation_state),
+        DetailFieldSpec(label='Authorized Providers', value=get_related_count('provider_authorizations')),
+        DetailFieldSpec(label='Validated Payloads', value=get_related_count('validated_payloads')),
+    ),
+    side_tables=(
+        DetailTableSpec(
+            title='Authorized Provider ASNs',
+            table_class_name='ASPAProviderAuthorizationTable',
+            queryset=lambda obj: obj.provider_authorizations.select_related('provider_as', 'tenant').all(),
+        ),
+    ),
+    bottom_tables=(
+        DetailTableSpec(
+            title='Validated ASPA Payloads',
+            table_class_name='ValidatedAspaPayloadTable',
+            queryset=lambda obj: obj.validated_payloads.select_related('validation_run', 'customer_as', 'provider_as').all(),
+        ),
+    ),
+)
 
 
 ROA_CHANGE_PLAN_DETAIL_SPEC = DetailSpec(
@@ -394,6 +502,12 @@ ROA_RECONCILIATION_RUN_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(label='Organization', value=lambda obj: obj.organization, kind='link'),
         DetailFieldSpec(label='Intent Profile', value=lambda obj: obj.intent_profile, kind='link'),
         DetailFieldSpec(label='Basis Derivation Run', value=lambda obj: obj.basis_derivation_run, kind='link'),
+        DetailFieldSpec(
+            label='Provider Snapshot',
+            value=lambda obj: obj.provider_snapshot,
+            kind='link',
+            empty_text='None',
+        ),
         DetailFieldSpec(label='Comparison Scope', value=lambda obj: obj.comparison_scope),
         DetailFieldSpec(label='Status', value=lambda obj: obj.status),
         DetailFieldSpec(label='Started At', value=lambda obj: obj.started_at, empty_text='None'),
@@ -442,6 +556,12 @@ ROA_INTENT_RESULT_DETAIL_SPEC = DetailSpec(
             kind='link',
             empty_text='None',
         ),
+        DetailFieldSpec(
+            label='Best Imported Authorization',
+            value=lambda obj: obj.best_imported_authorization,
+            kind='link',
+            empty_text='None',
+        ),
         DetailFieldSpec(label='Computed At', value=lambda obj: obj.computed_at, empty_text='None'),
         DetailFieldSpec(label='Expected Prefix', value=lambda obj: obj.roa_intent.prefix_cidr_text, empty_text='None'),
         DetailFieldSpec(label='Expected Origin ASN', value=get_result_expected_origin, kind='link', empty_text='None'),
@@ -461,6 +581,76 @@ ROA_INTENT_RESULT_DETAIL_SPEC = DetailSpec(
             title='Candidate Matches',
             table_class_name='ROAIntentMatchTable',
             queryset=lambda obj: obj.roa_intent.candidate_matches.all(),
+        ),
+    ),
+)
+
+
+PUBLISHED_ROA_RESULT_DETAIL_SPEC = DetailSpec(
+    model=models.PublishedROAResult,
+    list_url_name='plugins:netbox_rpki:publishedroaresult_list',
+    breadcrumb_label='Published ROA Results',
+    card_title='Published ROA Result Diff',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Reconciliation Run', value=lambda obj: obj.reconciliation_run, kind='link'),
+        DetailFieldSpec(label='Published ROA', value=lambda obj: obj.roa, kind='link', empty_text='None'),
+        DetailFieldSpec(
+            label='Imported Authorization',
+            value=lambda obj: obj.imported_authorization,
+            kind='link',
+            empty_text='None',
+        ),
+        DetailFieldSpec(label='Result Type', value=lambda obj: obj.result_type),
+        DetailFieldSpec(label='Severity', value=lambda obj: obj.severity),
+        DetailFieldSpec(label='Matched Intent Count', value=lambda obj: obj.matched_intent_count),
+        DetailFieldSpec(label='Computed At', value=lambda obj: obj.computed_at, empty_text='None'),
+        DetailFieldSpec(
+            label='Diff Details',
+            value=get_published_result_details,
+            kind='code',
+            empty_text='None',
+        ),
+    ),
+)
+
+
+ROA_CHANGE_PLAN_ITEM_DETAIL_SPEC = DetailSpec(
+    model=models.ROAChangePlanItem,
+    list_url_name='plugins:netbox_rpki:roachangeplanitem_list',
+    breadcrumb_label='ROA Change Plan Items',
+    card_title='ROA Change Plan Item',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Change Plan', value=lambda obj: obj.change_plan, kind='link'),
+        DetailFieldSpec(label='Action Type', value=lambda obj: obj.action_type),
+        DetailFieldSpec(label='ROA Intent', value=lambda obj: obj.roa_intent, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Published ROA', value=lambda obj: obj.roa, kind='link', empty_text='None'),
+        DetailFieldSpec(
+            label='Imported Authorization',
+            value=lambda obj: obj.imported_authorization,
+            kind='link',
+            empty_text='None',
+        ),
+        DetailFieldSpec(label='Provider Operation', value=lambda obj: obj.provider_operation, empty_text='None'),
+        DetailFieldSpec(label='Reason', value=lambda obj: obj.reason, empty_text='None'),
+        DetailFieldSpec(
+            label='Provider Payload',
+            value=get_change_plan_item_provider_payload,
+            kind='code',
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='Before State',
+            value=get_change_plan_item_before_state,
+            kind='code',
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='After State',
+            value=get_change_plan_item_after_state,
+            kind='code',
+            empty_text='None',
         ),
     ),
 )
@@ -642,10 +832,14 @@ DETAIL_SPEC_BY_MODEL = {
     models.Organization: ORGANIZATION_DETAIL_SPEC,
     models.Certificate: CERTIFICATE_DETAIL_SPEC,
     models.Roa: ROA_DETAIL_SPEC,
+    models.ASPA: ASPA_DETAIL_SPEC,
+    models.ImportedAspa: IMPORTED_ASPA_DETAIL_SPEC,
     models.RpkiProviderAccount: PROVIDER_ACCOUNT_DETAIL_SPEC,
     models.RoutingIntentProfile: ROUTING_INTENT_PROFILE_DETAIL_SPEC,
     models.ROAReconciliationRun: ROA_RECONCILIATION_RUN_DETAIL_SPEC,
     models.ROAChangePlan: ROA_CHANGE_PLAN_DETAIL_SPEC,
     models.ROAIntentResult: ROA_INTENT_RESULT_DETAIL_SPEC,
+    models.PublishedROAResult: PUBLISHED_ROA_RESULT_DETAIL_SPEC,
+    models.ROAChangePlanItem: ROA_CHANGE_PLAN_ITEM_DETAIL_SPEC,
     models.ProviderWriteExecution: PROVIDER_WRITE_EXECUTION_DETAIL_SPEC,
 }

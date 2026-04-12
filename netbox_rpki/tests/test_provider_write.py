@@ -122,6 +122,50 @@ class ProviderWriteServiceTestCase(TestCase):
             },
         )
 
+    def test_build_krill_delta_translates_replacement_items(self):
+        replacement_snapshot = create_test_provider_snapshot(
+            name='Replacement Delta Snapshot',
+            organization=self.organization,
+            provider_account=self.provider_account,
+            provider_name='Krill',
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        replacement_import = create_test_imported_roa_authorization(
+            name='Replacement Delta Imported Authorization',
+            provider_snapshot=replacement_snapshot,
+            organization=self.organization,
+            prefix=self.primary_prefix,
+            origin_asn=create_test_asn(65177),
+            max_length=26,
+            payload_json={'comment': 'replace this route'},
+        )
+        replacement_reconciliation = reconcile_roa_intents(
+            self.derivation_run,
+            comparison_scope=rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
+            provider_snapshot=replacement_snapshot,
+        )
+        replacement_plan = create_roa_change_plan(replacement_reconciliation, name='Replacement Delta Plan')
+
+        delta = build_roa_change_plan_delta(replacement_plan)
+
+        self.assertEqual(replacement_plan.summary_json['replacement_count'], 1)
+        self.assertEqual(
+            delta,
+            {
+                'added': [
+                    {'asn': self.primary_asn.asn, 'prefix': '10.77.0.0/24', 'max_length': 24},
+                ],
+                'removed': [
+                    {
+                        'asn': replacement_import.origin_asn_value,
+                        'prefix': '10.77.0.0/24',
+                        'max_length': 26,
+                        'comment': 'replace this route',
+                    },
+                ],
+            },
+        )
+
     def test_preview_records_audit_without_applying(self):
         execution, delta = preview_roa_change_plan_provider_write(self.plan, requested_by='preview-user')
 

@@ -200,6 +200,7 @@ class ProviderSyncHealth(models.TextChoices):
 
 class ExternalObjectType(models.TextChoices):
     ROA_AUTHORIZATION = "roa_authorization", "ROA Authorization"
+    ASPA = "aspa", "ASPA"
 
 
 class ReconciliationSeverity(models.TextChoices):
@@ -213,6 +214,9 @@ class ROAIntentResultType(models.TextChoices):
     MATCH = "match", "Match"
     MISSING = "missing", "Missing"
     ASN_MISMATCH = "asn_mismatch", "ASN Mismatch"
+    ASN_AND_MAX_LENGTH_OVERBROAD = "asn_and_max_length_overbroad", "ASN + Overbroad maxLength"
+    ASN_AND_MAX_LENGTH_TOO_NARROW = "asn_and_max_length_too_narrow", "ASN + Too-Narrow maxLength"
+    ASN_AND_MAX_LENGTH_MISMATCH = "asn_and_max_length_mismatch", "ASN + maxLength Mismatch"
     PREFIX_MISMATCH = "prefix_mismatch", "Prefix Mismatch"
     MAX_LENGTH_OVERBROAD = "max_length_overbroad", "maxLength Overbroad"
     MAX_LENGTH_TOO_NARROW = "max_length_too_narrow", "maxLength Too Narrow"
@@ -226,7 +230,11 @@ class PublishedROAResultType(models.TextChoices):
     ORPHANED = "orphaned", "Orphaned"
     DUPLICATE = "duplicate", "Duplicate"
     BROADER_THAN_NEEDED = "broader_than_needed", "Broader Than Needed"
+    MAX_LENGTH_TOO_NARROW = "max_length_too_narrow", "maxLength Too Narrow"
     WRONG_ORIGIN = "wrong_origin", "Wrong Origin"
+    WRONG_ORIGIN_AND_MAX_LENGTH_OVERBROAD = "wrong_origin_and_max_length_overbroad", "Wrong Origin + Overbroad maxLength"
+    WRONG_ORIGIN_AND_MAX_LENGTH_TOO_NARROW = "wrong_origin_and_max_length_too_narrow", "Wrong Origin + Too-Narrow maxLength"
+    WRONG_ORIGIN_AND_MAX_LENGTH_MISMATCH = "wrong_origin_and_max_length_mismatch", "Wrong Origin + maxLength Mismatch"
     STALE = "stale", "Stale"
     UNSCOPED = "unscoped", "Unscoped"
 
@@ -998,9 +1006,24 @@ class ASPAProvider(RpkiStandardModel):
 
     class Meta:
         ordering = ("provider_as",)
+        constraints = (
+            models.UniqueConstraint(
+                fields=("aspa", "provider_as"),
+                name="netbox_rpki_aspaprovider_aspa_provider_unique",
+            ),
+        )
 
     def __str__(self):
         return str(self.provider_as)
+
+    def clean(self):
+        super().clean()
+        if self.aspa_id is None or self.provider_as_id is None:
+            return
+        if self.aspa.customer_as_id == self.provider_as_id:
+            raise ValidationError(
+                {'provider_as': 'Provider ASN must differ from the ASPA customer ASN.'}
+            )
 
 
 class RSC(NamedRpkiStandardModel):
@@ -1867,6 +1890,13 @@ class ExternalObjectReference(NamedRpkiStandardModel):
         blank=True,
         null=True,
     )
+    last_seen_imported_aspa = models.ForeignKey(
+        to='ImportedAspa',
+        on_delete=models.SET_NULL,
+        related_name='current_external_object_references',
+        blank=True,
+        null=True,
+    )
     last_seen_at = models.DateTimeField(blank=True, null=True)
 
     class Meta:
@@ -1959,6 +1989,105 @@ class ImportedRoaAuthorization(NamedRpkiStandardModel):
             )
         )
         return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+class ImportedAspa(NamedRpkiStandardModel):
+    provider_snapshot = models.ForeignKey(
+        to='ProviderSnapshot',
+        on_delete=models.PROTECT,
+        related_name='imported_aspas'
+    )
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='imported_aspas'
+    )
+    authorization_key = models.CharField(max_length=64)
+    customer_as = models.ForeignKey(
+        to=ASN,
+        on_delete=models.PROTECT,
+        related_name='imported_aspas',
+        blank=True,
+        null=True
+    )
+    customer_as_value = models.PositiveBigIntegerField(blank=True, null=True)
+    external_object_id = models.CharField(max_length=200, blank=True)
+    external_reference = models.ForeignKey(
+        to='ExternalObjectReference',
+        on_delete=models.PROTECT,
+        related_name='imported_aspas',
+        blank=True,
+        null=True,
+    )
+    is_stale = models.BooleanField(default=False)
+    payload_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("name",)
+        constraints = (
+            models.UniqueConstraint(
+                fields=("provider_snapshot", "authorization_key"),
+                name="netbox_rpki_importedaspa_snapshot_key_unique",
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:importedaspa", args=[self.pk])
+
+    @classmethod
+    def build_authorization_key(
+        cls,
+        *,
+        customer_as_value: int | None,
+        external_object_id: str = '',
+    ) -> str:
+        normalized = "|".join(
+            str(value)
+            for value in (
+                customer_as_value if customer_as_value is not None else "",
+                external_object_id.strip(),
+            )
+        )
+        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+class ImportedAspaProvider(RpkiStandardModel):
+    imported_aspa = models.ForeignKey(
+        to='ImportedAspa',
+        on_delete=models.PROTECT,
+        related_name='provider_authorizations'
+    )
+    provider_as = models.ForeignKey(
+        to=ASN,
+        on_delete=models.PROTECT,
+        related_name='imported_aspa_authorizations',
+        blank=True,
+        null=True
+    )
+    provider_as_value = models.PositiveBigIntegerField(blank=True, null=True)
+    address_family = models.CharField(max_length=8, choices=AddressFamily.choices, blank=True)
+    raw_provider_text = models.CharField(max_length=64, blank=True)
+
+    class Meta:
+        ordering = ("provider_as_value", "address_family", "raw_provider_text")
+        constraints = (
+            models.UniqueConstraint(
+                fields=("imported_aspa", "raw_provider_text"),
+                name="netbox_rpki_importedaspaprovider_aspa_raw_unique",
+            ),
+        )
+
+    def __str__(self):
+        if self.raw_provider_text:
+            return self.raw_provider_text
+        if self.provider_as is not None:
+            return str(self.provider_as)
+        if self.provider_as_value is not None:
+            return f'AS{self.provider_as_value}'
+        return self.name if hasattr(self, 'name') else 'Imported ASPA Provider'
 
 
 class ROAIntentMatch(NamedRpkiStandardModel):
@@ -2145,7 +2274,7 @@ class PublishedROAResult(NamedRpkiStandardModel):
         null=True
     )
     result_type = models.CharField(
-        max_length=32,
+        max_length=64,
         choices=PublishedROAResultType.choices,
         default=PublishedROAResultType.MATCHED,
     )

@@ -94,6 +94,18 @@ KRILL_ROUTES_JSON = [
 ]
 
 
+KRILL_ASPAS_JSON = [
+    {
+        'customer': 'AS65000',
+        'providers': ['AS65001', 'AS65002(v4)', 'AS65003(v6)'],
+    },
+    {
+        'customer': 'AS65010',
+        'providers': [],
+    },
+]
+
+
 class ProviderSyncServiceTestCase(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -149,14 +161,22 @@ class ProviderSyncServiceTestCase(TestCase):
         prefix_v4 = create_test_prefix('10.10.0.0/24')
         prefix_v6 = create_test_prefix('2001:db8:100::/48')
         origin_asn = create_test_asn(65000)
+        customer_as = create_test_asn(65010)
+        provider_as_1 = create_test_asn(65001)
+        provider_as_2 = create_test_asn(65002)
+        provider_as_3 = create_test_asn(65003)
 
-        with patch('netbox_rpki.services.provider_sync._fetch_krill_routes_json', return_value=KRILL_ROUTES_JSON):
+        with patch('netbox_rpki.services.provider_sync._fetch_krill_routes_json', return_value=KRILL_ROUTES_JSON), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_aspas_json',
+            return_value=KRILL_ASPAS_JSON,
+        ):
             sync_run, snapshot = sync_provider_account(provider_account)
 
         imported = list(snapshot.imported_roa_authorizations.select_related('external_reference').order_by('prefix_cidr_text'))
+        imported_aspas = list(snapshot.imported_aspas.select_related('external_reference').order_by('customer_as_value'))
         self.assertEqual(sync_run.status, rpki_models.ValidationRunStatus.COMPLETED)
-        self.assertEqual(sync_run.records_fetched, 2)
-        self.assertEqual(sync_run.records_imported, 2)
+        self.assertEqual(sync_run.records_fetched, 4)
+        self.assertEqual(sync_run.records_imported, 4)
         self.assertEqual(imported[0].prefix, prefix_v4)
         self.assertEqual(imported[0].origin_asn, origin_asn)
         self.assertEqual(imported[0].external_object_id, '10.10.0.0/24|24|65000')
@@ -165,8 +185,19 @@ class ProviderSyncServiceTestCase(TestCase):
         self.assertEqual(imported[0].payload_json['ca_handle'], 'netbox-rpki-dev')
         self.assertEqual(imported[1].prefix, prefix_v6)
         self.assertEqual(imported[1].address_family, rpki_models.AddressFamily.IPV6)
+        self.assertEqual(len(imported_aspas), 2)
+        self.assertEqual(imported_aspas[0].customer_as, origin_asn)
+        self.assertEqual(imported_aspas[0].external_object_id, 'AS65000')
+        self.assertIsNotNone(imported_aspas[0].external_reference)
+        self.assertEqual(imported_aspas[0].external_reference.object_type, rpki_models.ExternalObjectType.ASPA)
+        imported_providers = list(imported_aspas[0].provider_authorizations.order_by('provider_as_value', 'address_family'))
+        self.assertEqual([provider.provider_as for provider in imported_providers], [provider_as_1, provider_as_2, provider_as_3])
+        self.assertEqual([provider.address_family for provider in imported_providers], ['', rpki_models.AddressFamily.IPV4, rpki_models.AddressFamily.IPV6])
+        self.assertEqual(imported_aspas[1].customer_as, customer_as)
+        self.assertEqual(imported_aspas[1].provider_authorizations.count(), 0)
         provider_account.refresh_from_db()
         self.assertEqual(provider_account.last_sync_summary_json['ca_handle'], 'netbox-rpki-dev')
+        self.assertEqual(provider_account.last_sync_summary_json['aspa_records_imported'], 2)
 
     def test_sync_provider_account_reuses_krill_external_reference_across_snapshots(self):
         provider_account = create_test_provider_account(
@@ -181,21 +212,38 @@ class ProviderSyncServiceTestCase(TestCase):
         create_test_prefix('10.10.0.0/24')
         create_test_prefix('2001:db8:100::/48')
         create_test_asn(65000)
+        create_test_asn(65001)
+        create_test_asn(65002)
+        create_test_asn(65003)
+        create_test_asn(65010)
 
-        with patch('netbox_rpki.services.provider_sync._fetch_krill_routes_json', return_value=KRILL_ROUTES_JSON):
+        with patch('netbox_rpki.services.provider_sync._fetch_krill_routes_json', return_value=KRILL_ROUTES_JSON), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_aspas_json',
+            return_value=KRILL_ASPAS_JSON,
+        ):
             _, first_snapshot = sync_provider_account(provider_account)
         first_import = first_snapshot.imported_roa_authorizations.get(prefix_cidr_text='10.10.0.0/24')
         first_reference = first_import.external_reference
+        first_aspa_import = first_snapshot.imported_aspas.get(customer_as_value=65000)
+        first_aspa_reference = first_aspa_import.external_reference
 
-        with patch('netbox_rpki.services.provider_sync._fetch_krill_routes_json', return_value=KRILL_ROUTES_JSON):
+        with patch('netbox_rpki.services.provider_sync._fetch_krill_routes_json', return_value=KRILL_ROUTES_JSON), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_aspas_json',
+            return_value=KRILL_ASPAS_JSON,
+        ):
             _, second_snapshot = sync_provider_account(provider_account)
         second_import = second_snapshot.imported_roa_authorizations.get(prefix_cidr_text='10.10.0.0/24')
+        second_aspa_import = second_snapshot.imported_aspas.get(customer_as_value=65000)
 
-        self.assertEqual(rpki_models.ExternalObjectReference.objects.count(), 2)
+        self.assertEqual(rpki_models.ExternalObjectReference.objects.count(), 4)
         self.assertEqual(second_import.external_reference_id, first_reference.pk)
         first_reference.refresh_from_db()
         self.assertEqual(first_reference.last_seen_provider_snapshot, second_snapshot)
         self.assertEqual(first_reference.last_seen_imported_authorization, second_import)
+        self.assertEqual(second_aspa_import.external_reference_id, first_aspa_reference.pk)
+        first_aspa_reference.refresh_from_db()
+        self.assertEqual(first_aspa_reference.last_seen_provider_snapshot, second_snapshot)
+        self.assertEqual(first_aspa_reference.last_seen_imported_aspa, second_aspa_import)
 
     def test_sync_provider_account_requires_krill_ca_handle(self):
         provider_account = create_test_provider_account(

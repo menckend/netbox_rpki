@@ -8,13 +8,17 @@ from django.utils import timezone
 from netbox_rpki import filtersets, forms, tables, views
 from netbox_rpki.models import Certificate, CertificateAsn, CertificatePrefix, Organization, Roa, RoaPrefix
 from netbox_rpki.object_registry import SIMPLE_DETAIL_VIEW_OBJECT_SPECS, VIEW_OBJECT_SPECS, get_object_spec
+from netbox_rpki.services import create_roa_change_plan, derive_roa_intents, reconcile_roa_intents
 from netbox_rpki.tests.registry_scenarios import _build_instance_for_spec
 from netbox_rpki.tests.base import PluginViewTestCase
 from netbox_rpki.tests.utils import (
     create_test_asn,
+    create_test_aspa,
+    create_test_aspa_provider,
     create_test_certificate,
     create_test_certificate_asn,
     create_test_certificate_prefix,
+    create_test_imported_roa_authorization,
     create_test_intent_derivation_run,
     create_test_organization,
     create_test_prefix,
@@ -30,6 +34,8 @@ from netbox_rpki.tests.utils import (
     create_test_routing_intent_profile,
     create_test_routing_intent_rule,
     create_test_provider_account,
+    create_test_provider_snapshot,
+    create_test_validated_aspa_payload,
 )
 from utilities.testing.utils import post_data
 from unittest.mock import patch
@@ -238,6 +244,109 @@ class ProviderAccountSyncViewTestCase(PluginViewTestCase):
         self.assertHttpStatus(response, 200)
         self.assertContains(response, 'Sync Health')
         self.assertContains(response, 'Stale')
+
+
+class AspaDetailViewTestCase(PluginViewTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='aspa-view-org', name='ASPA View Org')
+        cls.customer_as = create_test_asn(65300)
+        cls.provider_as = create_test_asn(65301)
+        cls.aspa = create_test_aspa(
+            name='ASPA Detail Object',
+            organization=cls.organization,
+            customer_as=cls.customer_as,
+        )
+        cls.provider_authorization = create_test_aspa_provider(
+            aspa=cls.aspa,
+            provider_as=cls.provider_as,
+        )
+        cls.validated_payload = create_test_validated_aspa_payload(
+            name='Validated ASPA Payload Detail',
+            aspa=cls.aspa,
+            customer_as=cls.customer_as,
+            provider_as=cls.provider_as,
+        )
+
+    def test_aspa_detail_view_shows_provider_authorizations_and_validated_payloads(self):
+        self.add_permissions('netbox_rpki.view_aspa', 'netbox_rpki.view_validatedaspapayload')
+
+        response = self.client.get(self.aspa.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'Authorized Provider ASNs')
+        self.assertContains(response, str(self.provider_authorization.provider_as))
+        self.assertContains(response, 'Validated ASPA Payloads')
+        self.assertContains(response, self.validated_payload.name)
+
+
+class RoutingIntentReplacementViewTestCase(PluginViewTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='replacement-view-org', name='Replacement View Org')
+        cls.primary_prefix = create_test_prefix('10.155.0.0/24', status='active')
+        cls.origin_asn = create_test_asn(65155)
+        cls.profile = create_test_routing_intent_profile(
+            name='Replacement View Profile',
+            organization=cls.organization,
+            status='active',
+            selector_mode='filtered',
+            prefix_selector_query=f'id={cls.primary_prefix.pk}',
+            asn_selector_query=f'id={cls.origin_asn.pk}',
+        )
+        cls.derivation_run = derive_roa_intents(cls.profile)
+        cls.provider_account = create_test_provider_account(
+            name='Replacement View Provider',
+            organization=cls.organization,
+            provider_type='krill',
+            org_handle='ORG-REPLACEMENT-VIEW',
+            ca_handle='ca-replacement-view',
+        )
+        cls.provider_snapshot = create_test_provider_snapshot(
+            name='Replacement View Snapshot',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+            status='completed',
+        )
+        cls.replacement_import = create_test_imported_roa_authorization(
+            name='Replacement View Imported Authorization',
+            provider_snapshot=cls.provider_snapshot,
+            organization=cls.organization,
+            prefix=cls.primary_prefix,
+            origin_asn=create_test_asn(65156),
+            max_length=26,
+            payload_json={'comment': 'view replacement'},
+        )
+        cls.reconciliation_run = reconcile_roa_intents(
+            cls.derivation_run,
+            comparison_scope='provider_imported',
+            provider_snapshot=cls.provider_snapshot,
+        )
+        cls.intent_result = cls.reconciliation_run.intent_results.get(roa_intent__prefix=cls.primary_prefix)
+        cls.published_result = cls.reconciliation_run.published_roa_results.get(imported_authorization=cls.replacement_import)
+        cls.plan = create_roa_change_plan(cls.reconciliation_run)
+        cls.create_item = cls.plan.items.get(action_type='create')
+
+    def test_reconciliation_detail_view_shows_replacement_summary(self):
+        self.add_permissions('netbox_rpki.view_roareconciliationrun')
+
+        response = self.client.get(self.reconciliation_run.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'Provider Snapshot')
+        self.assertContains(response, 'replacement_required_intent_count')
+        self.assertContains(response, 'wrong_origin_and_max_length_overbroad')
+
+    def test_plan_item_detail_view_shows_before_after_and_reason(self):
+        self.add_permissions('netbox_rpki.view_roachangeplanitem')
+
+        response = self.client.get(self.create_item.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'Before State')
+        self.assertContains(response, 'After State')
+        self.assertContains(response, 'view replacement')
+        self.assertContains(response, 'wrong origin ASN and an overbroad maxLength')
 
 
 class OperationsDashboardViewTestCase(PluginViewTestCase):

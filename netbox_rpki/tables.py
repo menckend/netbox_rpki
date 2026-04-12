@@ -1,10 +1,10 @@
 
 import django_tables2 as tables
 from django.utils.safestring import mark_safe
-# from django_tables2.utils import A
 
 from netbox.tables import NetBoxTable
 from netbox.tables.columns import ActionsColumn, ChoiceFieldColumn, TagColumn
+from netbox_rpki import models
 from netbox_rpki.object_registry import TABLE_OBJECT_SPECS
 from netbox_rpki.object_specs import ObjectSpec
 
@@ -74,3 +74,33 @@ class RpkiProviderAccountTable(_BaseRpkiProviderAccountTable):
             'tenant',
             'tags',
         )
+
+
+class ASPAProviderAuthorizationTable(NetBoxTable):
+    provider_as = tables.Column(linkify=True, verbose_name='Provider ASN')
+    tenant = tables.TemplateColumn(template_code=COL_TENANT)
+    tags = TagColumn(url_name='plugins:netbox_rpki:aspa_list')
+    actions = tables.Column(empty_values=(), orderable=False, verbose_name='')
+
+    def render_actions(self):
+        return ''
+
+    class Meta(NetBoxTable.Meta):
+        model = models.ASPAProvider
+        fields = ('provider_as', 'is_current', 'comments', 'tenant', 'tags', 'actions')
+        default_columns = ('provider_as', 'is_current', 'comments', 'tenant', 'tags')
+
+
+class ImportedAspaProviderTable(NetBoxTable):
+    provider_as = tables.Column(linkify=True, verbose_name='Provider ASN')
+    tenant = tables.TemplateColumn(template_code=COL_TENANT)
+    tags = TagColumn(url_name='plugins:netbox_rpki:importedaspa_list')
+    actions = tables.Column(empty_values=(), orderable=False, verbose_name='')
+
+    def render_actions(self):
+        return ''
+
+    class Meta(NetBoxTable.Meta):
+        model = models.ImportedAspaProvider
+        fields = ('provider_as', 'provider_as_value', 'address_family', 'raw_provider_text', 'comments', 'tenant', 'tags', 'actions')
+        default_columns = ('provider_as', 'provider_as_value', 'address_family', 'raw_provider_text', 'tenant')
