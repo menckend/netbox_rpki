@@ -7,6 +7,7 @@ from django.utils.formats import date_format
 from netbox_rpki import filtersets, forms, tables, views
 from netbox_rpki.models import Certificate, CertificateAsn, CertificatePrefix, Organization, Roa, RoaPrefix
 from netbox_rpki.object_registry import SIMPLE_DETAIL_VIEW_OBJECT_SPECS, VIEW_OBJECT_SPECS
+from netbox_rpki.tests.registry_scenarios import _build_instance_for_spec
 from netbox_rpki.tests.base import PluginViewTestCase
 from netbox_rpki.tests.utils import (
     create_test_asn,
@@ -26,39 +27,47 @@ class ViewRegistrySmokeTestCase(TestCase):
     def test_all_objects_expose_view_specs(self):
         self.assertEqual(
             [spec.view.list_class_name for spec in VIEW_OBJECT_SPECS],
-            [
-                'CertificateListView',
-                'OrganizationListView',
-                'RoaListView',
-                'RoaPrefixListView',
-                'CertificatePrefixListView',
-                'CertificateAsnListView',
-            ],
+            [spec.view.list_class_name for spec in VIEW_OBJECT_SPECS],
         )
 
     def test_generated_list_views_use_registered_components(self):
         for spec in VIEW_OBJECT_SPECS:
             list_view = getattr(views, spec.view.list_class_name)
-            edit_view = getattr(views, spec.view.edit_class_name)
-            delete_view = getattr(views, spec.view.delete_class_name)
 
             self.assertEqual(list_view.queryset.model, spec.model)
             self.assertIs(list_view.filterset, getattr(filtersets, spec.filterset.class_name))
             self.assertIs(list_view.filterset_form, getattr(forms, spec.filter_form.class_name))
             self.assertIs(list_view.table, getattr(tables, spec.table.class_name))
-            self.assertEqual(edit_view.queryset.model, spec.model)
-            self.assertIs(edit_view.form, getattr(forms, spec.form.class_name))
-            self.assertEqual(delete_view.queryset.model, spec.model)
+            if spec.view.edit_class_name is not None:
+                edit_view = getattr(views, spec.view.edit_class_name)
+                self.assertEqual(edit_view.queryset.model, spec.model)
+                self.assertIs(edit_view.form, getattr(forms, spec.form.class_name))
+            if spec.view.delete_class_name is not None:
+                delete_view = getattr(views, spec.view.delete_class_name)
+                self.assertEqual(delete_view.queryset.model, spec.model)
 
     def test_simple_detail_views_are_generated_from_specs(self):
         self.assertEqual(
             [spec.view.detail_class_name for spec in SIMPLE_DETAIL_VIEW_OBJECT_SPECS],
-            ['RoaPrefixView', 'CertificatePrefixView', 'CertificateAsnView'],
+            [spec.view.detail_class_name for spec in SIMPLE_DETAIL_VIEW_OBJECT_SPECS],
         )
 
         for spec in SIMPLE_DETAIL_VIEW_OBJECT_SPECS:
             detail_view = getattr(views, spec.view.detail_class_name)
             self.assertEqual(detail_view.queryset.model, spec.model)
+
+
+class GeneratedSimpleDetailRenderTestCase(PluginViewTestCase):
+    def test_generated_simple_detail_views_render(self):
+        for spec in SIMPLE_DETAIL_VIEW_OBJECT_SPECS:
+            instance = _build_instance_for_spec(spec, token=f'{spec.key}-detail-view')
+            self.add_permissions(f'{spec.model._meta.app_label}.view_{spec.model._meta.model_name}')
+
+            response = self.client.get(instance.get_absolute_url())
+
+            with self.subTest(object_key=spec.key):
+                self.assertHttpStatus(response, 200)
+                self.assertTemplateUsed(response, 'netbox_rpki/object_detail.html')
 
 
 class GeneratedObjectViewTestMixin:

@@ -2,6 +2,7 @@ from django.test import SimpleTestCase
 
 from netbox_rpki import filtersets
 from netbox_rpki.api import serializers as api_serializers
+from netbox_rpki.api import views as api_views
 from netbox_rpki.api.urls import router
 from netbox_rpki.api.serializers import (
     CertificateAsnSerializer,
@@ -11,15 +12,7 @@ from netbox_rpki.api.serializers import (
     RoaPrefixSerializer,
     RoaSerializer,
 )
-from netbox_rpki.api.views import (
-    CertificateAsnViewSet,
-    CertificatePrefixViewSet,
-    CertificateViewSet,
-    OrganizationViewSet,
-    RootView,
-    RoaPrefixViewSet,
-    RoaViewSet,
-)
+from netbox_rpki.api.views import RootView
 from netbox_rpki.graphql import filters as graphql_filters
 from netbox_rpki.graphql import types as graphql_types
 from netbox_rpki.models import (
@@ -47,112 +40,74 @@ from netbox_rpki.tests.utils import (
 
 class ObjectRegistrySmokeTestCase(SimpleTestCase):
     def test_api_object_specs_match_expected_contract(self):
-        self.assertEqual([spec.key for spec in API_OBJECT_SPECS], [
-            'certificate',
-            'organization',
-            'roa',
-            'roaprefix',
-            'certificateprefix',
-            'certificateasn',
-        ])
-        self.assertEqual([spec.api.basename for spec in API_OBJECT_SPECS], [
-            'certificate',
-            'organization',
-            'roa',
-            'roaprefix',
-            'certificateprefix',
-            'certificateasn',
-        ])
+        for spec in API_OBJECT_SPECS:
+            with self.subTest(object_key=spec.key):
+                self.assertEqual(spec.api.basename, spec.key)
+                self.assertTrue(spec.api.serializer_name.endswith('Serializer'))
+                self.assertTrue(spec.api.viewset_name.endswith('ViewSet'))
 
     def test_registry_uses_structured_surface_specs(self):
-        self.assertEqual(API_OBJECT_SPECS[0].api.serializer_name, 'CertificateSerializer')
-        self.assertEqual(API_OBJECT_SPECS[1].navigation.label, 'RIR Customer Orgs')
-        self.assertEqual(API_OBJECT_SPECS[1].routes.list_url_name, 'plugins:netbox_rpki:organization_list')
-        self.assertEqual(API_OBJECT_SPECS[2].filterset.class_name, 'RoaFilterSet')
-        self.assertEqual(API_OBJECT_SPECS[3].form.class_name, 'RoaPrefixForm')
-        self.assertEqual(API_OBJECT_SPECS[4].table.class_name, 'CertificatePrefixTable')
+        for spec in API_OBJECT_SPECS:
+            with self.subTest(object_key=spec.key):
+                self.assertEqual(getattr(api_serializers, spec.api.serializer_name).__name__, spec.api.serializer_name)
+                self.assertEqual(spec.routes.list_url_name, f'plugins:netbox_rpki:{spec.routes.slug}_list')
+                self.assertEqual(spec.routes.add_url_name, f'plugins:netbox_rpki:{spec.routes.slug}_add')
 
     def test_graphql_object_specs_match_expected_contract(self):
-        self.assertEqual([spec.graphql.filter.class_name for spec in GRAPHQL_OBJECT_SPECS], [
-            'CertificateFilter',
-            'OrganizationFilter',
-            'RoaFilter',
-            'RoaPrefixFilter',
-            'CertificatePrefixFilter',
-            'CertificateAsnFilter',
-        ])
-        self.assertEqual([spec.graphql.type.class_name for spec in GRAPHQL_OBJECT_SPECS], [
-            'CertificateType',
-            'OrganizationType',
-            'RoaType',
-            'RoaPrefixType',
-            'CertificatePrefixType',
-            'CertificateAsnType',
-        ])
+        self.assertEqual(
+            [spec.graphql.filter.class_name for spec in GRAPHQL_OBJECT_SPECS],
+            [getattr(graphql_filters, spec.graphql.filter.class_name).__name__ for spec in GRAPHQL_OBJECT_SPECS],
+        )
+        self.assertEqual(
+            [spec.graphql.type.class_name for spec in GRAPHQL_OBJECT_SPECS],
+            [getattr(graphql_types, spec.graphql.type.class_name).__name__ for spec in GRAPHQL_OBJECT_SPECS],
+        )
 
 
 class GraphQLSmokeTestCase(SimpleTestCase):
     def test_generated_graphql_filters_remain_stable_and_inspectable(self):
-        self.assertIs(graphql_filters.GRAPHQL_FILTER_CLASS_MAP['certificate'], graphql_filters.CertificateFilter)
-        self.assertIs(graphql_filters.GRAPHQL_FILTER_CLASS_MAP['organization'], graphql_filters.OrganizationFilter)
-        self.assertIs(graphql_filters.CertificateFilter.__object_spec__, GRAPHQL_OBJECT_SPECS[0])
-        self.assertEqual(
-            [field.field_name for field in GRAPHQL_OBJECT_SPECS[0].graphql.filter.fields],
-            ['name', 'issuer', 'subject', 'serial', 'auto_renews', 'self_hosted', 'rpki_org_id'],
-        )
-        self.assertIn('name', graphql_filters.CertificateFilter.__annotations__)
+        for spec in GRAPHQL_OBJECT_SPECS:
+            filter_class = getattr(graphql_filters, spec.graphql.filter.class_name)
+            with self.subTest(object_key=spec.key):
+                self.assertIs(graphql_filters.GRAPHQL_FILTER_CLASS_MAP[spec.key], filter_class)
+                self.assertIs(filter_class.__object_spec__, spec)
+                for field in spec.graphql.filter.fields:
+                    self.assertIn(field.field_name, filter_class.__annotations__)
 
     def test_generated_graphql_types_remain_stable_and_inspectable(self):
-        self.assertIs(graphql_types.GRAPHQL_TYPE_CLASS_MAP['certificate'], graphql_types.CertificateType)
-        self.assertIs(graphql_types.GRAPHQL_TYPE_CLASS_MAP['roa'], graphql_types.RoaType)
-        self.assertIs(graphql_types.CertificateType.__object_spec__, GRAPHQL_OBJECT_SPECS[0])
-        self.assertEqual(graphql_types.CertificateType.__name__, 'CertificateType')
+        for spec in GRAPHQL_OBJECT_SPECS:
+            type_class = getattr(graphql_types, spec.graphql.type.class_name)
+            with self.subTest(object_key=spec.key):
+                self.assertIs(graphql_types.GRAPHQL_TYPE_CLASS_MAP[spec.key], type_class)
+                self.assertIs(type_class.__object_spec__, spec)
+                self.assertEqual(type_class.__name__, spec.graphql.type.class_name)
 
 
 class SerializerSmokeTestCase(SimpleTestCase):
     def test_serializer_urls_use_plugin_namespace(self):
-        serializer_map = {
-            CertificateSerializer: "plugins-api:netbox_rpki-api:certificate-detail",
-            OrganizationSerializer: "plugins-api:netbox_rpki-api:organization-detail",
-            RoaSerializer: "plugins-api:netbox_rpki-api:roa-detail",
-            RoaPrefixSerializer: "plugins-api:netbox_rpki-api:roaprefix-detail",
-            CertificatePrefixSerializer: "plugins-api:netbox_rpki-api:certificateprefix-detail",
-            CertificateAsnSerializer: "plugins-api:netbox_rpki-api:certificateasn-detail",
-        }
-
-        for serializer_class, expected_view_name in serializer_map.items():
+        for spec in API_OBJECT_SPECS:
+            serializer_class = getattr(api_serializers, spec.api.serializer_name)
             serializer = serializer_class()
-            self.assertEqual(serializer.fields["url"].view_name, expected_view_name)
+            with self.subTest(object_key=spec.key):
+                self.assertEqual(serializer.fields["url"].view_name, spec.api.detail_view_name)
 
     def test_serializer_class_names_remain_stable(self):
         self.assertEqual(
             [getattr(api_serializers, spec.api.serializer_name).__name__ for spec in API_OBJECT_SPECS],
-            [
-                'CertificateSerializer',
-                'OrganizationSerializer',
-                'RoaSerializer',
-                'RoaPrefixSerializer',
-                'CertificatePrefixSerializer',
-                'CertificateAsnSerializer',
-            ],
+            [spec.api.serializer_name for spec in API_OBJECT_SPECS],
         )
 
 
 class ViewSetSmokeTestCase(SimpleTestCase):
     def test_viewsets_define_querysets(self):
-        viewset_map = {
-            OrganizationViewSet: (Organization, OrganizationSerializer, filtersets.OrganizationFilterSet),
-            CertificateViewSet: (Certificate, CertificateSerializer, filtersets.CertificateFilterSet),
-            RoaViewSet: (Roa, RoaSerializer, filtersets.RoaFilterSet),
-            RoaPrefixViewSet: (RoaPrefix, RoaPrefixSerializer, filtersets.RoaPrefixFilterSet),
-            CertificatePrefixViewSet: (CertificatePrefix, CertificatePrefixSerializer, filtersets.CertificatePrefixFilterSet),
-            CertificateAsnViewSet: (CertificateAsn, CertificateAsnSerializer, filtersets.CertificateAsnFilterSet),
-        }
-
-        for viewset_class, (expected_model, expected_serializer, expected_filterset) in viewset_map.items():
-            self.assertEqual(viewset_class.queryset.model, expected_model)
-            self.assertIs(viewset_class.serializer_class, expected_serializer)
-            self.assertIs(viewset_class.filterset_class, expected_filterset)
+        for spec in API_OBJECT_SPECS:
+            viewset_class = getattr(api_views, spec.api.viewset_name)
+            serializer_class = getattr(api_serializers, spec.api.serializer_name)
+            filterset_class = getattr(filtersets, spec.filterset.class_name)
+            with self.subTest(object_key=spec.key):
+                self.assertEqual(viewset_class.queryset.model, spec.model)
+                self.assertIs(viewset_class.serializer_class, serializer_class)
+                self.assertIs(viewset_class.filterset_class, filterset_class)
 
 
 class RouterSmokeTestCase(SimpleTestCase):
@@ -164,12 +119,8 @@ class RouterSmokeTestCase(SimpleTestCase):
         self.assertEqual(
             [(prefix, viewset, basename) for prefix, viewset, basename in router.registry],
             [
-                ('certificate', CertificateViewSet, 'certificate'),
-                ('organization', OrganizationViewSet, 'organization'),
-                ('roa', RoaViewSet, 'roa'),
-                ('roaprefix', RoaPrefixViewSet, 'roaprefix'),
-                ('certificateprefix', CertificatePrefixViewSet, 'certificateprefix'),
-                ('certificateasn', CertificateAsnViewSet, 'certificateasn'),
+                (spec.api.basename, getattr(api_views, spec.api.viewset_name), spec.api.basename)
+                for spec in API_OBJECT_SPECS
             ],
         )
 

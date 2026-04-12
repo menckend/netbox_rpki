@@ -27,6 +27,7 @@ class ApiSpec:
     basename: str
     fields: tuple[str, ...]
     brief_fields: tuple[str, ...]
+    read_only: bool = False
 
     @property
     def detail_view_name(self) -> str:
@@ -38,6 +39,7 @@ class NavigationSpec:
     group: str
     label: str
     order: int
+    show_add_button: bool = True
 
 
 @dataclass(frozen=True)
@@ -96,9 +98,17 @@ class TableSpec:
 class ViewSpec:
     list_class_name: str
     detail_class_name: str
-    edit_class_name: str
-    delete_class_name: str
+    edit_class_name: str | None = None
+    delete_class_name: str | None = None
     simple_detail: bool = False
+
+    @property
+    def supports_create(self) -> bool:
+        return self.edit_class_name is not None
+
+    @property
+    def supports_delete(self) -> bool:
+        return self.delete_class_name is not None
 
 
 @dataclass(frozen=True)

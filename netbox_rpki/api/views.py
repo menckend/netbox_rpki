@@ -14,15 +14,19 @@ class RootView(APIRootView):
 
 
 def build_viewset_class(spec: ObjectSpec) -> type[NetBoxModelViewSet]:
+    namespace = {
+        "__module__": __name__,
+        "queryset": spec.model.objects.all(),
+        "serializer_class": SERIALIZER_CLASS_MAP[spec.key],
+        "filterset_class": getattr(filterset_module, spec.filterset.class_name),
+    }
+    if spec.api.read_only:
+        namespace["http_method_names"] = ["get", "head", "options"]
+
     return type(
         spec.api.viewset_name,
         (NetBoxModelViewSet,),
-        {
-            "__module__": __name__,
-            "queryset": spec.model.objects.all(),
-            "serializer_class": SERIALIZER_CLASS_MAP[spec.key],
-            "filterset_class": getattr(filterset_module, spec.filterset.class_name),
-        },
+        namespace,
     )
 
 

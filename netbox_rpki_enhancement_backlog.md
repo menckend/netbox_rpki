@@ -103,6 +103,20 @@ Below is a proposed high-priority backlog, written as an implementation handoff.
 
 ### Priority 1: Intent-to-ROA reconciliation engine
 
+**Implementation status:** Priority 1 schema and surface scaffolding are now implemented in the plugin as an additive, migration-backed expansion.
+
+Completed in code:
+- materialized-history models for intent derivation runs, reconciliation runs, intent rows, candidate matches, and intent-side/published-side reconciliation results
+- writable operator-policy objects for routing intent profiles, ordered rules, and explicit ROA intent overrides
+- registry-driven UI/API exposure with writable surfaces for policy objects and read-only surfaces for derived/reconciliation objects
+- migration-backed rollout preserving existing `Roa`/`RoaPrefix` objects as the initial published-state source
+- regression coverage for generated routes, generated detail views, and object-surface behavior across the exposed plugin surfaces
+
+Still pending in later work:
+- actual derivation/reconciliation execution logic and background jobs
+- provider-imported comparison state beyond locally recorded ROA objects
+- dashboards, diff workflows, and write-back/publication planning
+
 **Problem solved**  
 The plugin currently appears to store RPKI artifacts, but a provider-grade operator needs to know whether NetBox routing intent and published hosted-RPKI state are aligned.
 
@@ -620,6 +634,23 @@ Hosted RPKI already outsources the cryptographic machinery; the plugin should fo
 ---
 
 ## 9. Missing standards-based RPKI architecture elements to add to the data model
+
+**Implementation status:** Implemented in the plugin data model and registry-driven scaffolding.
+
+The section 9 schema work has been completed as an additive standards-aligned expansion of the existing plugin. The implementation introduced explicit model support for:
+
+- repositories and publication points
+- trust anchors, trust anchor locators, and trust anchor keys
+- end-entity certificates
+- a generic signed-object framework
+- certificate revocation lists and revoked-certificate references
+- manifests and manifest entries
+- ASPAs and ASPA provider relationships
+- RSCs and RSC file-hash members
+- router certificates
+- validator instances, validation runs, object validation results, and validated ROA/ASPA payload views
+
+The implementation also added compatibility links from the legacy `Certificate` and `Roa` models into the newer architecture so the standards-based model can coexist with the original object families during the transition.
 
 The current plugin models organizations, resource certificates, ROAs, and supporting prefix/ASN relationship tables. That is enough to represent a useful slice of origin-authorization inventory, but it is still much smaller than the standards-defined RPKI architecture. RFC 6480 defines the RPKI as both a certificate hierarchy for Internet number resources and a distributed repository system for storing and disseminating the data objects that comprise the RPKI and other signed objects needed for routing security. In other words, a complete model needs to capture not just “who owns what resources and what ROAs exist,” but also revocation, publication, object packaging, retrieval, rollover, and the broader family of signed objects that sit beside ROAs. See RFC 6480, RFC 6481, RFC 6488, the IANA RPKI registries, and the newer signed-object RFCs for the authoritative standards frame.  
 **Defining references:** RFC 6480, RFC 6481, RFC 6488, IANA RPKI registries.
@@ -1310,6 +1341,8 @@ Close the largest gaps against the broader RPKI architecture.
 **Objective**  
 Make the plugin useful as an operational policy layer, not just a repository of imported objects.
 
+**Implementation status:** Partially completed. The Priority 1 data-model layer is now present under the names `RoutingIntentProfile`, `RoutingIntentRule`, `ROAIntentOverride`, `IntentDerivationRun`, `ROAIntent`, `ROAIntentMatch`, `ROAReconciliationRun`, `ROAIntentResult`, and `PublishedROAResult`. Execution logic, ASPA intent/reconciliation, and lint/simulation workflows remain future work.
+
 **Recommended migrations**
 1. Add `IntentProfile`.
 2. Add `ROAIntent` and `ROAReconciliationResult`.
@@ -1368,6 +1401,7 @@ If the coding agent needs an opinionated order of attack, use this one:
 4. add `SignedObject` and connect existing ROAs to it
 5. add `EndEntityCertificate`
 6. add `ROAIntent` and read-only reconciliation views
+   Status: completed for the initial ROA intent/reconciliation data-model layer and generated surfaces; derivation/reconciliation execution remains to be built
 7. add hosted-provider import and external object references
 8. add `ASPA` object family
 9. add manifests and CRLs

@@ -1,3 +1,5 @@
+import hashlib
+
 import ipam
 from django.db import models
 from django.urls import reverse
@@ -5,6 +7,186 @@ from netbox.models import NetBoxModel
 from ipam.models.asns import ASN
 from ipam.models.ip import Prefix
 from ipam.models import RIR
+
+
+class PublicationStatus(models.TextChoices):
+    DRAFT = "draft", "Draft"
+    PUBLISHED = "published", "Published"
+    WITHDRAWN = "withdrawn", "Withdrawn"
+
+
+class ValidationState(models.TextChoices):
+    UNKNOWN = "unknown", "Unknown"
+    VALID = "valid", "Valid"
+    INVALID = "invalid", "Invalid"
+    STALE = "stale", "Stale"
+
+
+class RetrievalState(models.TextChoices):
+    UNKNOWN = "unknown", "Unknown"
+    DISCOVERED = "discovered", "Discovered"
+    FETCHED = "fetched", "Fetched"
+    FAILED = "failed", "Failed"
+
+
+class RepositoryType(models.TextChoices):
+    RSYNC = "rsync", "rsync"
+    RRDP = "rrdp", "RRDP"
+    MIXED = "mixed", "Mixed"
+    OTHER = "other", "Other"
+
+
+class SignedObjectType(models.TextChoices):
+    ROA = "roa", "ROA"
+    MANIFEST = "manifest", "Manifest"
+    ASPA = "aspa", "ASPA"
+    RSC = "rsc", "RSC"
+    TAK = "tak", "Trust Anchor Key"
+    GHOSTBUSTERS = "ghostbusters", "Ghostbusters"
+    OTHER = "other", "Other"
+
+
+class ValidationRunStatus(models.TextChoices):
+    PENDING = "pending", "Pending"
+    RUNNING = "running", "Running"
+    COMPLETED = "completed", "Completed"
+    FAILED = "failed", "Failed"
+
+
+class ValidationDisposition(models.TextChoices):
+    ACCEPTED = "accepted", "Accepted"
+    REJECTED = "rejected", "Rejected"
+    NOTED = "noted", "Noted"
+
+
+class RoutingIntentProfileStatus(models.TextChoices):
+    DRAFT = "draft", "Draft"
+    ACTIVE = "active", "Active"
+    DISABLED = "disabled", "Disabled"
+
+
+class RoutingIntentSelectorMode(models.TextChoices):
+    ALL = "all", "All Eligible Prefixes"
+    FILTERED = "filtered", "Filtered Query"
+    EXPLICIT = "explicit", "Explicit Selection"
+
+
+class DefaultMaxLengthPolicy(models.TextChoices):
+    EXACT = "exact", "Exact Prefix Length"
+    INHERIT = "inherit", "Inherit Prefix Length"
+    CUSTOM = "custom", "Custom"
+
+
+class AddressFamily(models.TextChoices):
+    IPV4 = "ipv4", "IPv4"
+    IPV6 = "ipv6", "IPv6"
+
+
+class RoutingIntentRuleAction(models.TextChoices):
+    INCLUDE = "include", "Include"
+    EXCLUDE = "exclude", "Exclude"
+    SET_ORIGIN = "set_origin", "Set Origin ASN"
+    SET_MAX_LENGTH = "set_max_length", "Set maxLength"
+    REQUIRE_TAG = "require_tag", "Require Tag"
+    REQUIRE_CF = "require_cf", "Require Custom Field"
+
+
+class RoutingIntentRuleMaxLengthMode(models.TextChoices):
+    EXACT = "exact", "Exact"
+    INHERIT = "inherit", "Inherit Prefix Length"
+    EXPLICIT = "explicit", "Explicit Value"
+
+
+class ROAIntentOverrideAction(models.TextChoices):
+    FORCE_INCLUDE = "force_include", "Force Include"
+    SUPPRESS = "suppress", "Suppress"
+    REPLACE_ORIGIN = "replace_origin", "Replace Origin ASN"
+    REPLACE_MAX_LENGTH = "replace_max_length", "Replace maxLength"
+
+
+class IntentRunTriggerMode(models.TextChoices):
+    MANUAL = "manual", "Manual"
+    SCHEDULED = "scheduled", "Scheduled"
+    NETBOX_CHANGE = "netbox_change", "NetBox Change"
+    SYNC_FOLLOWUP = "sync_followup", "Sync Follow-Up"
+
+
+class ROAIntentDerivedState(models.TextChoices):
+    ACTIVE = "active", "Active"
+    SUPPRESSED = "suppressed", "Suppressed"
+    SHADOWED = "shadowed", "Shadowed"
+
+
+class ROAIntentExposureState(models.TextChoices):
+    ADVERTISED = "advertised", "Advertised"
+    ELIGIBLE_NOT_ADVERTISED = "eligible_not_advertised", "Eligible, Not Advertised"
+    BLOCKED = "blocked", "Blocked"
+
+
+class ROAIntentMatchKind(models.TextChoices):
+    EXACT = "exact", "Exact"
+    ORIGIN_CONFLICT = "origin_conflict", "Origin Conflict"
+    PREFIX_CONFLICT = "prefix_conflict", "Prefix Conflict"
+    LENGTH_BROADER = "length_broader", "Broader maxLength"
+    LENGTH_NARROWER = "length_narrower", "Narrower maxLength"
+    SUPERSET = "superset", "Superset"
+    SUBSET = "subset", "Subset"
+    STALE_CANDIDATE = "stale_candidate", "Stale Candidate"
+
+
+class ReconciliationComparisonScope(models.TextChoices):
+    LOCAL_ROA_RECORDS = "local_roa_records", "Local ROA Records"
+    PROVIDER_IMPORTED = "provider_imported", "Provider Imported"
+    MIXED = "mixed", "Mixed"
+
+
+class ReconciliationSeverity(models.TextChoices):
+    INFO = "info", "Info"
+    WARNING = "warning", "Warning"
+    ERROR = "error", "Error"
+    CRITICAL = "critical", "Critical"
+
+
+class ROAIntentResultType(models.TextChoices):
+    MATCH = "match", "Match"
+    MISSING = "missing", "Missing"
+    ASN_MISMATCH = "asn_mismatch", "ASN Mismatch"
+    PREFIX_MISMATCH = "prefix_mismatch", "Prefix Mismatch"
+    MAX_LENGTH_OVERBROAD = "max_length_overbroad", "maxLength Overbroad"
+    MAX_LENGTH_TOO_NARROW = "max_length_too_narrow", "maxLength Too Narrow"
+    STALE = "stale", "Stale"
+    INACTIVE_INTENT = "inactive_intent", "Inactive Intent"
+    SUPPRESSED_BY_POLICY = "suppressed_by_policy", "Suppressed by Policy"
+
+
+class PublishedROAResultType(models.TextChoices):
+    MATCHED = "matched", "Matched"
+    ORPHANED = "orphaned", "Orphaned"
+    DUPLICATE = "duplicate", "Duplicate"
+    BROADER_THAN_NEEDED = "broader_than_needed", "Broader Than Needed"
+    WRONG_ORIGIN = "wrong_origin", "Wrong Origin"
+    STALE = "stale", "Stale"
+    UNSCOPED = "unscoped", "Unscoped"
+
+
+class RpkiStandardModel(NetBoxModel):
+    comments = models.TextField(blank=True)
+    tenant = models.ForeignKey(
+        to='tenancy.Tenant',
+        on_delete=models.PROTECT,
+        blank=True,
+        null=True
+    )
+
+    class Meta:
+        abstract = True
+
+
+class NamedRpkiStandardModel(RpkiStandardModel):
+    name = models.CharField(max_length=200, editable=True)
+
+    class Meta:
+        abstract = True
 
 
 class Organization(NetBoxModel):
@@ -60,6 +242,20 @@ class Certificate(NetBoxModel):
         on_delete=models.PROTECT,
         related_name='certificates'
     )
+    trust_anchor = models.ForeignKey(
+        to='TrustAnchor',
+        on_delete=models.PROTECT,
+        related_name='certificates',
+        blank=True,
+        null=True
+    )
+    publication_point = models.ForeignKey(
+        to='PublicationPoint',
+        on_delete=models.PROTECT,
+        related_name='certificates',
+        blank=True,
+        null=True
+    )
     tenant = models.ForeignKey(
         to='tenancy.Tenant',
         on_delete=models.PROTECT,
@@ -96,6 +292,13 @@ class Roa(NetBoxModel):
         to=Certificate,
         on_delete=models.PROTECT,
         related_name='roas'
+    )
+    signed_object = models.OneToOneField(
+        to='SignedObject',
+        on_delete=models.SET_NULL,
+        related_name='legacy_roa',
+        blank=True,
+        null=True
     )
     tenant = models.ForeignKey(
         to='tenancy.Tenant',
@@ -206,3 +409,1298 @@ class CertificateAsn(NetBoxModel):
 
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:certificateasn", args=[self.pk])
+
+
+class Repository(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='repositories',
+        blank=True,
+        null=True
+    )
+    repository_type = models.CharField(
+        max_length=32,
+        choices=RepositoryType.choices,
+        default=RepositoryType.MIXED,
+    )
+    rsync_base_uri = models.CharField(max_length=255, blank=True)
+    rrdp_notify_uri = models.CharField(max_length=255, blank=True)
+    status = models.CharField(
+        max_length=32,
+        choices=ValidationState.choices,
+        default=ValidationState.UNKNOWN,
+    )
+    last_observed_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        ordering = ("name",)
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:repository", args=[self.pk])
+
+
+class PublicationPoint(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='publication_points',
+        blank=True,
+        null=True
+    )
+    repository = models.ForeignKey(
+        to=Repository,
+        on_delete=models.PROTECT,
+        related_name='publication_points',
+        blank=True,
+        null=True
+    )
+    publication_uri = models.CharField(max_length=255, blank=True)
+    rsync_base_uri = models.CharField(max_length=255, blank=True)
+    rrdp_notify_uri = models.CharField(max_length=255, blank=True)
+    retrieval_state = models.CharField(
+        max_length=32,
+        choices=RetrievalState.choices,
+        default=RetrievalState.UNKNOWN,
+    )
+    validation_state = models.CharField(
+        max_length=32,
+        choices=ValidationState.choices,
+        default=ValidationState.UNKNOWN,
+    )
+    last_observed_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        ordering = ("name",)
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:publicationpoint", args=[self.pk])
+
+
+class TrustAnchor(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='trust_anchors',
+        blank=True,
+        null=True
+    )
+    subject = models.CharField(max_length=255, blank=True)
+    subject_key_identifier = models.CharField(max_length=255, blank=True)
+    rsync_uri = models.CharField(max_length=255, blank=True)
+    rrdp_notify_uri = models.CharField(max_length=255, blank=True)
+    status = models.CharField(
+        max_length=32,
+        choices=ValidationState.choices,
+        default=ValidationState.UNKNOWN,
+    )
+    superseded_by = models.ForeignKey(
+        to='self',
+        on_delete=models.PROTECT,
+        related_name='supersedes',
+        blank=True,
+        null=True
+    )
+
+    class Meta:
+        ordering = ("name",)
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:trustanchor", args=[self.pk])
+
+
+class TrustAnchorLocator(NamedRpkiStandardModel):
+    trust_anchor = models.ForeignKey(
+        to=TrustAnchor,
+        on_delete=models.PROTECT,
+        related_name='locators'
+    )
+    rsync_uri = models.CharField(max_length=255, blank=True)
+    https_uri = models.CharField(max_length=255, blank=True)
+    public_key_info = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ("name",)
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:trustanchorlocator", args=[self.pk])
+
+
+class EndEntityCertificate(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='ee_certificates',
+        blank=True,
+        null=True
+    )
+    resource_certificate = models.ForeignKey(
+        to=Certificate,
+        on_delete=models.PROTECT,
+        related_name='ee_certificates',
+        blank=True,
+        null=True
+    )
+    publication_point = models.ForeignKey(
+        to=PublicationPoint,
+        on_delete=models.PROTECT,
+        related_name='ee_certificates',
+        blank=True,
+        null=True
+    )
+    subject = models.CharField(max_length=255, blank=True)
+    issuer = models.CharField(max_length=255, blank=True)
+    serial = models.CharField(max_length=200, blank=True)
+    ski = models.CharField(max_length=255, blank=True)
+    aki = models.CharField(max_length=255, blank=True)
+    valid_from = models.DateField(blank=True, null=True)
+    valid_to = models.DateField(blank=True, null=True)
+    public_key = models.CharField(max_length=255, blank=True)
+    status = models.CharField(
+        max_length=32,
+        choices=ValidationState.choices,
+        default=ValidationState.UNKNOWN,
+    )
+
+    class Meta:
+        ordering = ("name",)
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:endentitycertificate", args=[self.pk])
+
+
+class SignedObject(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='signed_objects',
+        blank=True,
+        null=True
+    )
+    object_type = models.CharField(
+        max_length=32,
+        choices=SignedObjectType.choices,
+        default=SignedObjectType.OTHER,
+    )
+    display_label = models.CharField(max_length=255, blank=True)
+    resource_certificate = models.ForeignKey(
+        to=Certificate,
+        on_delete=models.PROTECT,
+        related_name='signed_objects',
+        blank=True,
+        null=True
+    )
+    ee_certificate = models.ForeignKey(
+        to=EndEntityCertificate,
+        on_delete=models.PROTECT,
+        related_name='signed_objects',
+        blank=True,
+        null=True
+    )
+    publication_point = models.ForeignKey(
+        to=PublicationPoint,
+        on_delete=models.PROTECT,
+        related_name='signed_objects',
+        blank=True,
+        null=True
+    )
+    current_manifest = models.ForeignKey(
+        to='Manifest',
+        on_delete=models.PROTECT,
+        related_name='signed_objects',
+        blank=True,
+        null=True
+    )
+    filename = models.CharField(max_length=255, blank=True)
+    object_uri = models.CharField(max_length=255, blank=True)
+    repository_uri = models.CharField(max_length=255, blank=True)
+    content_hash = models.CharField(max_length=255, blank=True)
+    serial_or_version = models.CharField(max_length=200, blank=True)
+    cms_digest_algorithm = models.CharField(max_length=128, blank=True)
+    cms_signature_algorithm = models.CharField(max_length=128, blank=True)
+    publication_status = models.CharField(
+        max_length=32,
+        choices=PublicationStatus.choices,
+        default=PublicationStatus.DRAFT,
+    )
+    validation_state = models.CharField(
+        max_length=32,
+        choices=ValidationState.choices,
+        default=ValidationState.UNKNOWN,
+    )
+    valid_from = models.DateField(blank=True, null=True)
+    valid_to = models.DateField(blank=True, null=True)
+    raw_payload_reference = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        ordering = ("name",)
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:signedobject", args=[self.pk])
+
+
+class CertificateRevocationList(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='certificate_revocation_lists',
+        blank=True,
+        null=True
+    )
+    issuing_certificate = models.ForeignKey(
+        to=Certificate,
+        on_delete=models.PROTECT,
+        related_name='certificate_revocation_lists'
+    )
+    publication_point = models.ForeignKey(
+        to=PublicationPoint,
+        on_delete=models.PROTECT,
+        related_name='certificate_revocation_lists',
+        blank=True,
+        null=True
+    )
+    manifest = models.ForeignKey(
+        to='Manifest',
+        on_delete=models.PROTECT,
+        related_name='certificate_revocation_lists',
+        blank=True,
+        null=True
+    )
+    crl_number = models.CharField(max_length=200, blank=True)
+    this_update = models.DateTimeField(blank=True, null=True)
+    next_update = models.DateTimeField(blank=True, null=True)
+    publication_uri = models.CharField(max_length=255, blank=True)
+    retrieval_state = models.CharField(
+        max_length=32,
+        choices=RetrievalState.choices,
+        default=RetrievalState.UNKNOWN,
+    )
+    validation_state = models.CharField(
+        max_length=32,
+        choices=ValidationState.choices,
+        default=ValidationState.UNKNOWN,
+    )
+
+    class Meta:
+        ordering = ("name",)
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:certificaterevocationlist", args=[self.pk])
+
+
+class RevokedCertificate(RpkiStandardModel):
+    revocation_list = models.ForeignKey(
+        to=CertificateRevocationList,
+        on_delete=models.PROTECT,
+        related_name='revoked_certificates'
+    )
+    certificate = models.ForeignKey(
+        to=Certificate,
+        on_delete=models.PROTECT,
+        related_name='revocation_references',
+        blank=True,
+        null=True
+    )
+    ee_certificate = models.ForeignKey(
+        to=EndEntityCertificate,
+        on_delete=models.PROTECT,
+        related_name='revocation_references',
+        blank=True,
+        null=True
+    )
+    serial = models.CharField(max_length=200, blank=True)
+    revoked_at = models.DateTimeField(blank=True, null=True)
+    revocation_reason = models.CharField(max_length=128, blank=True)
+
+    class Meta:
+        ordering = ("serial",)
+
+    def __str__(self):
+        return self.serial or f"Revoked certificate {self.pk}"
+
+
+class Manifest(NamedRpkiStandardModel):
+    signed_object = models.OneToOneField(
+        to=SignedObject,
+        on_delete=models.PROTECT,
+        related_name='manifest_extension',
+        blank=True,
+        null=True
+    )
+    manifest_number = models.CharField(max_length=200, blank=True)
+    this_update = models.DateTimeField(blank=True, null=True)
+    next_update = models.DateTimeField(blank=True, null=True)
+    current_crl = models.ForeignKey(
+        to=CertificateRevocationList,
+        on_delete=models.PROTECT,
+        related_name='manifests',
+        blank=True,
+        null=True
+    )
+
+    class Meta:
+        ordering = ("name",)
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:manifest", args=[self.pk])
+
+
+class ManifestEntry(RpkiStandardModel):
+    manifest = models.ForeignKey(
+        to=Manifest,
+        on_delete=models.PROTECT,
+        related_name='entries'
+    )
+    signed_object = models.ForeignKey(
+        to=SignedObject,
+        on_delete=models.PROTECT,
+        related_name='manifest_entries',
+        blank=True,
+        null=True
+    )
+    certificate = models.ForeignKey(
+        to=Certificate,
+        on_delete=models.PROTECT,
+        related_name='manifest_entries',
+        blank=True,
+        null=True
+    )
+    ee_certificate = models.ForeignKey(
+        to=EndEntityCertificate,
+        on_delete=models.PROTECT,
+        related_name='manifest_entries',
+        blank=True,
+        null=True
+    )
+    revocation_list = models.ForeignKey(
+        to=CertificateRevocationList,
+        on_delete=models.PROTECT,
+        related_name='manifest_entries',
+        blank=True,
+        null=True
+    )
+    filename = models.CharField(max_length=255)
+    hash_algorithm = models.CharField(max_length=64, blank=True)
+    hash_value = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        ordering = ("filename",)
+
+    def __str__(self):
+        return self.filename
+
+
+class TrustAnchorKey(NamedRpkiStandardModel):
+    trust_anchor = models.ForeignKey(
+        to=TrustAnchor,
+        on_delete=models.PROTECT,
+        related_name='keys'
+    )
+    signed_object = models.OneToOneField(
+        to=SignedObject,
+        on_delete=models.PROTECT,
+        related_name='trust_anchor_key_extension',
+        blank=True,
+        null=True
+    )
+    current_public_key = models.TextField(blank=True)
+    next_public_key = models.TextField(blank=True)
+    valid_from = models.DateField(blank=True, null=True)
+    valid_to = models.DateField(blank=True, null=True)
+    publication_uri = models.CharField(max_length=255, blank=True)
+    supersedes = models.ForeignKey(
+        to='self',
+        on_delete=models.PROTECT,
+        related_name='successors',
+        blank=True,
+        null=True
+    )
+
+    class Meta:
+        ordering = ("name",)
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:trustanchorkey", args=[self.pk])
+
+
+class ASPA(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='aspas',
+        blank=True,
+        null=True
+    )
+    signed_object = models.OneToOneField(
+        to=SignedObject,
+        on_delete=models.PROTECT,
+        related_name='aspa_extension',
+        blank=True,
+        null=True
+    )
+    customer_as = models.ForeignKey(
+        to=ASN,
+        on_delete=models.PROTECT,
+        related_name='customer_aspas',
+        blank=True,
+        null=True
+    )
+    valid_from = models.DateField(blank=True, null=True)
+    valid_to = models.DateField(blank=True, null=True)
+    validation_state = models.CharField(
+        max_length=32,
+        choices=ValidationState.choices,
+        default=ValidationState.UNKNOWN,
+    )
+
+    class Meta:
+        ordering = ("name",)
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:aspa", args=[self.pk])
+
+
+class ASPAProvider(RpkiStandardModel):
+    aspa = models.ForeignKey(
+        to=ASPA,
+        on_delete=models.PROTECT,
+        related_name='provider_authorizations'
+    )
+    provider_as = models.ForeignKey(
+        to=ASN,
+        on_delete=models.PROTECT,
+        related_name='provider_aspas'
+    )
+    is_current = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ("provider_as",)
+
+    def __str__(self):
+        return str(self.provider_as)
+
+
+class RSC(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='rscs',
+        blank=True,
+        null=True
+    )
+    signed_object = models.OneToOneField(
+        to=SignedObject,
+        on_delete=models.PROTECT,
+        related_name='rsc_extension',
+        blank=True,
+        null=True
+    )
+    version = models.CharField(max_length=64, blank=True)
+    digest_algorithm = models.CharField(max_length=64, blank=True)
+
+    class Meta:
+        ordering = ("name",)
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:rsc", args=[self.pk])
+
+
+class RSCFileHash(RpkiStandardModel):
+    rsc = models.ForeignKey(
+        to=RSC,
+        on_delete=models.PROTECT,
+        related_name='file_hashes'
+    )
+    filename = models.CharField(max_length=255)
+    hash_algorithm = models.CharField(max_length=64, blank=True)
+    hash_value = models.CharField(max_length=255, blank=True)
+    artifact_reference = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        ordering = ("filename",)
+
+    def __str__(self):
+        return self.filename
+
+
+class RouterCertificate(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='router_certificates',
+        blank=True,
+        null=True
+    )
+    resource_certificate = models.ForeignKey(
+        to=Certificate,
+        on_delete=models.PROTECT,
+        related_name='router_certificates',
+        blank=True,
+        null=True
+    )
+    publication_point = models.ForeignKey(
+        to=PublicationPoint,
+        on_delete=models.PROTECT,
+        related_name='router_certificates',
+        blank=True,
+        null=True
+    )
+    asn = models.ForeignKey(
+        to=ASN,
+        on_delete=models.PROTECT,
+        related_name='router_certificates',
+        blank=True,
+        null=True
+    )
+    subject = models.CharField(max_length=255, blank=True)
+    issuer = models.CharField(max_length=255, blank=True)
+    serial = models.CharField(max_length=200, blank=True)
+    ski = models.CharField(max_length=255, blank=True)
+    router_public_key = models.TextField(blank=True)
+    valid_from = models.DateField(blank=True, null=True)
+    valid_to = models.DateField(blank=True, null=True)
+    status = models.CharField(
+        max_length=32,
+        choices=ValidationState.choices,
+        default=ValidationState.UNKNOWN,
+    )
+
+    class Meta:
+        ordering = ("name",)
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:routercertificate", args=[self.pk])
+
+
+class ValidatorInstance(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='validator_instances',
+        blank=True,
+        null=True
+    )
+    software_name = models.CharField(max_length=128, blank=True)
+    software_version = models.CharField(max_length=128, blank=True)
+    base_url = models.CharField(max_length=255, blank=True)
+    status = models.CharField(
+        max_length=32,
+        choices=ValidationRunStatus.choices,
+        default=ValidationRunStatus.PENDING,
+    )
+    last_run_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        ordering = ("name",)
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:validatorinstance", args=[self.pk])
+
+
+class ValidationRun(NamedRpkiStandardModel):
+    validator = models.ForeignKey(
+        to=ValidatorInstance,
+        on_delete=models.PROTECT,
+        related_name='validation_runs'
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=ValidationRunStatus.choices,
+        default=ValidationRunStatus.PENDING,
+    )
+    started_at = models.DateTimeField(blank=True, null=True)
+    completed_at = models.DateTimeField(blank=True, null=True)
+    repository_serial = models.CharField(max_length=128, blank=True)
+
+    class Meta:
+        ordering = ("name",)
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:validationrun", args=[self.pk])
+
+
+class ObjectValidationResult(NamedRpkiStandardModel):
+    validation_run = models.ForeignKey(
+        to=ValidationRun,
+        on_delete=models.PROTECT,
+        related_name='object_results'
+    )
+    signed_object = models.ForeignKey(
+        to=SignedObject,
+        on_delete=models.PROTECT,
+        related_name='validation_results',
+        blank=True,
+        null=True
+    )
+    validation_state = models.CharField(
+        max_length=32,
+        choices=ValidationState.choices,
+        default=ValidationState.UNKNOWN,
+    )
+    disposition = models.CharField(
+        max_length=32,
+        choices=ValidationDisposition.choices,
+        default=ValidationDisposition.NOTED,
+    )
+    observed_at = models.DateTimeField(blank=True, null=True)
+    reason = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ("name",)
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:objectvalidationresult", args=[self.pk])
+
+
+class ValidatedRoaPayload(NamedRpkiStandardModel):
+    validation_run = models.ForeignKey(
+        to=ValidationRun,
+        on_delete=models.PROTECT,
+        related_name='validated_roa_payloads'
+    )
+    roa = models.ForeignKey(
+        to=Roa,
+        on_delete=models.PROTECT,
+        related_name='validated_payloads',
+        blank=True,
+        null=True
+    )
+    prefix = models.ForeignKey(
+        to=Prefix,
+        on_delete=models.PROTECT,
+        related_name='validated_roa_payloads'
+    )
+    origin_as = models.ForeignKey(
+        to=ASN,
+        on_delete=models.PROTECT,
+        related_name='validated_roa_payloads',
+        blank=True,
+        null=True
+    )
+    max_length = models.IntegerField(blank=True, null=True)
+
+    class Meta:
+        ordering = ("name",)
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:validatedroapayload", args=[self.pk])
+
+
+class ValidatedAspaPayload(NamedRpkiStandardModel):
+    validation_run = models.ForeignKey(
+        to=ValidationRun,
+        on_delete=models.PROTECT,
+        related_name='validated_aspa_payloads'
+    )
+    aspa = models.ForeignKey(
+        to=ASPA,
+        on_delete=models.PROTECT,
+        related_name='validated_payloads',
+        blank=True,
+        null=True
+    )
+    customer_as = models.ForeignKey(
+        to=ASN,
+        on_delete=models.PROTECT,
+        related_name='validated_customer_aspa_payloads',
+        blank=True,
+        null=True
+    )
+    provider_as = models.ForeignKey(
+        to=ASN,
+        on_delete=models.PROTECT,
+        related_name='validated_provider_aspa_payloads',
+        blank=True,
+        null=True
+    )
+
+    class Meta:
+        ordering = ("name",)
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:validatedaspapayload", args=[self.pk])
+
+
+class RoutingIntentProfile(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='routing_intent_profiles'
+    )
+    is_default = models.BooleanField(default=False)
+    status = models.CharField(
+        max_length=32,
+        choices=RoutingIntentProfileStatus.choices,
+        default=RoutingIntentProfileStatus.DRAFT,
+    )
+    description = models.TextField(blank=True)
+    selector_mode = models.CharField(
+        max_length=32,
+        choices=RoutingIntentSelectorMode.choices,
+        default=RoutingIntentSelectorMode.FILTERED,
+    )
+    prefix_selector_query = models.TextField(blank=True)
+    asn_selector_query = models.TextField(blank=True)
+    default_max_length_policy = models.CharField(
+        max_length=32,
+        choices=DefaultMaxLengthPolicy.choices,
+        default=DefaultMaxLengthPolicy.EXACT,
+    )
+    allow_as0 = models.BooleanField(default=False)
+    enabled = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ("name",)
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:routingintentprofile", args=[self.pk])
+
+
+class RoutingIntentRule(NamedRpkiStandardModel):
+    intent_profile = models.ForeignKey(
+        to='RoutingIntentProfile',
+        on_delete=models.PROTECT,
+        related_name='rules'
+    )
+    weight = models.PositiveIntegerField(default=100)
+    action = models.CharField(
+        max_length=32,
+        choices=RoutingIntentRuleAction.choices,
+        default=RoutingIntentRuleAction.INCLUDE,
+    )
+    address_family = models.CharField(
+        max_length=8,
+        choices=AddressFamily.choices,
+        blank=True,
+    )
+    match_tenant = models.ForeignKey(
+        to='tenancy.Tenant',
+        on_delete=models.PROTECT,
+        related_name='routing_intent_rules',
+        blank=True,
+        null=True
+    )
+    match_vrf = models.ForeignKey(
+        to='ipam.VRF',
+        on_delete=models.PROTECT,
+        related_name='routing_intent_rules',
+        blank=True,
+        null=True
+    )
+    match_site = models.ForeignKey(
+        to='dcim.Site',
+        on_delete=models.PROTECT,
+        related_name='routing_intent_rules',
+        blank=True,
+        null=True
+    )
+    match_region = models.ForeignKey(
+        to='dcim.Region',
+        on_delete=models.PROTECT,
+        related_name='routing_intent_rules',
+        blank=True,
+        null=True
+    )
+    match_role = models.CharField(max_length=100, blank=True)
+    match_tag = models.CharField(max_length=100, blank=True)
+    match_custom_field = models.CharField(max_length=255, blank=True)
+    origin_asn = models.ForeignKey(
+        to=ASN,
+        on_delete=models.PROTECT,
+        related_name='routing_intent_rules',
+        blank=True,
+        null=True
+    )
+    max_length_mode = models.CharField(
+        max_length=32,
+        choices=RoutingIntentRuleMaxLengthMode.choices,
+        default=RoutingIntentRuleMaxLengthMode.INHERIT,
+    )
+    max_length_value = models.PositiveSmallIntegerField(blank=True, null=True)
+    enabled = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ("intent_profile", "weight", "name")
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:routingintentrule", args=[self.pk])
+
+
+class ROAIntentOverride(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='roa_intent_overrides'
+    )
+    intent_profile = models.ForeignKey(
+        to='RoutingIntentProfile',
+        on_delete=models.PROTECT,
+        related_name='overrides',
+        blank=True,
+        null=True
+    )
+    action = models.CharField(
+        max_length=32,
+        choices=ROAIntentOverrideAction.choices,
+        default=ROAIntentOverrideAction.FORCE_INCLUDE,
+    )
+    prefix = models.ForeignKey(
+        to=Prefix,
+        on_delete=models.PROTECT,
+        related_name='roa_intent_overrides',
+        blank=True,
+        null=True
+    )
+    prefix_cidr_text = models.CharField(max_length=64, blank=True)
+    origin_asn = models.ForeignKey(
+        to=ASN,
+        on_delete=models.PROTECT,
+        related_name='roa_intent_overrides',
+        blank=True,
+        null=True
+    )
+    origin_asn_value = models.PositiveBigIntegerField(blank=True, null=True)
+    max_length = models.PositiveSmallIntegerField(blank=True, null=True)
+    tenant_scope = models.ForeignKey(
+        to='tenancy.Tenant',
+        on_delete=models.PROTECT,
+        related_name='roa_intent_overrides',
+        blank=True,
+        null=True
+    )
+    vrf_scope = models.ForeignKey(
+        to='ipam.VRF',
+        on_delete=models.PROTECT,
+        related_name='roa_intent_overrides',
+        blank=True,
+        null=True
+    )
+    site_scope = models.ForeignKey(
+        to='dcim.Site',
+        on_delete=models.PROTECT,
+        related_name='roa_intent_overrides',
+        blank=True,
+        null=True
+    )
+    region_scope = models.ForeignKey(
+        to='dcim.Region',
+        on_delete=models.PROTECT,
+        related_name='roa_intent_overrides',
+        blank=True,
+        null=True
+    )
+    reason = models.TextField(blank=True)
+    starts_at = models.DateTimeField(blank=True, null=True)
+    ends_at = models.DateTimeField(blank=True, null=True)
+    enabled = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ("name",)
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:roaintentoverride", args=[self.pk])
+
+
+class IntentDerivationRun(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='intent_derivation_runs'
+    )
+    intent_profile = models.ForeignKey(
+        to='RoutingIntentProfile',
+        on_delete=models.PROTECT,
+        related_name='derivation_runs'
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=ValidationRunStatus.choices,
+        default=ValidationRunStatus.PENDING,
+    )
+    trigger_mode = models.CharField(
+        max_length=32,
+        choices=IntentRunTriggerMode.choices,
+        default=IntentRunTriggerMode.MANUAL,
+    )
+    started_at = models.DateTimeField(blank=True, null=True)
+    completed_at = models.DateTimeField(blank=True, null=True)
+    input_fingerprint = models.CharField(max_length=128, blank=True)
+    prefix_count_scanned = models.PositiveIntegerField(default=0)
+    intent_count_emitted = models.PositiveIntegerField(default=0)
+    warning_count = models.PositiveIntegerField(default=0)
+    error_summary = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ("-started_at", "name")
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:intentderivationrun", args=[self.pk])
+
+
+class ROAIntent(NamedRpkiStandardModel):
+    derivation_run = models.ForeignKey(
+        to='IntentDerivationRun',
+        on_delete=models.PROTECT,
+        related_name='roa_intents'
+    )
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='roa_intents'
+    )
+    intent_profile = models.ForeignKey(
+        to='RoutingIntentProfile',
+        on_delete=models.PROTECT,
+        related_name='roa_intents'
+    )
+    intent_key = models.CharField(max_length=64)
+    prefix = models.ForeignKey(
+        to=Prefix,
+        on_delete=models.PROTECT,
+        related_name='roa_intents',
+        blank=True,
+        null=True
+    )
+    prefix_cidr_text = models.CharField(max_length=64, blank=True)
+    address_family = models.CharField(max_length=8, choices=AddressFamily.choices)
+    origin_asn = models.ForeignKey(
+        to=ASN,
+        on_delete=models.PROTECT,
+        related_name='roa_intents',
+        blank=True,
+        null=True
+    )
+    origin_asn_value = models.PositiveBigIntegerField(blank=True, null=True)
+    is_as0 = models.BooleanField(default=False)
+    max_length = models.PositiveSmallIntegerField(blank=True, null=True)
+    scope_tenant = models.ForeignKey(
+        to='tenancy.Tenant',
+        on_delete=models.PROTECT,
+        related_name='roa_intents',
+        blank=True,
+        null=True
+    )
+    scope_vrf = models.ForeignKey(
+        to='ipam.VRF',
+        on_delete=models.PROTECT,
+        related_name='roa_intents',
+        blank=True,
+        null=True
+    )
+    scope_site = models.ForeignKey(
+        to='dcim.Site',
+        on_delete=models.PROTECT,
+        related_name='roa_intents',
+        blank=True,
+        null=True
+    )
+    scope_region = models.ForeignKey(
+        to='dcim.Region',
+        on_delete=models.PROTECT,
+        related_name='roa_intents',
+        blank=True,
+        null=True
+    )
+    source_rule = models.ForeignKey(
+        to='RoutingIntentRule',
+        on_delete=models.SET_NULL,
+        related_name='derived_intents',
+        blank=True,
+        null=True
+    )
+    applied_override = models.ForeignKey(
+        to='ROAIntentOverride',
+        on_delete=models.SET_NULL,
+        related_name='derived_intents',
+        blank=True,
+        null=True
+    )
+    derived_state = models.CharField(
+        max_length=32,
+        choices=ROAIntentDerivedState.choices,
+        default=ROAIntentDerivedState.ACTIVE,
+    )
+    exposure_state = models.CharField(
+        max_length=32,
+        choices=ROAIntentExposureState.choices,
+        default=ROAIntentExposureState.ELIGIBLE_NOT_ADVERTISED,
+    )
+    explanation = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ("name",)
+        constraints = (
+            models.UniqueConstraint(
+                fields=("derivation_run", "intent_key"),
+                name="netbox_rpki_roaintent_derivation_run_intent_key_unique",
+            ),
+        )
+        indexes = (
+            models.Index(fields=("organization", "intent_profile"), name="nb_rpki_ri_org_prof_idx"),
+            models.Index(fields=("prefix", "origin_asn"), name="nb_rpki_ri_pfx_org_idx"),
+            models.Index(fields=("scope_tenant", "scope_site"), name="nb_rpki_ri_ten_site_idx"),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:roaintent", args=[self.pk])
+
+    @classmethod
+    def build_intent_key(
+        cls,
+        *,
+        prefix_cidr_text: str,
+        address_family: str,
+        origin_asn_value: int | None,
+        max_length: int | None,
+        tenant_id: int | None = None,
+        vrf_id: int | None = None,
+        site_id: int | None = None,
+        region_id: int | None = None,
+    ) -> str:
+        normalized = "|".join(
+            str(value)
+            for value in (
+                prefix_cidr_text.strip().lower(),
+                address_family,
+                origin_asn_value if origin_asn_value is not None else "",
+                max_length if max_length is not None else "",
+                tenant_id if tenant_id is not None else "",
+                vrf_id if vrf_id is not None else "",
+                site_id if site_id is not None else "",
+                region_id if region_id is not None else "",
+            )
+        )
+        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+class ROAIntentMatch(NamedRpkiStandardModel):
+    roa_intent = models.ForeignKey(
+        to='ROAIntent',
+        on_delete=models.PROTECT,
+        related_name='candidate_matches'
+    )
+    roa = models.ForeignKey(
+        to=Roa,
+        on_delete=models.PROTECT,
+        related_name='intent_matches'
+    )
+    match_kind = models.CharField(
+        max_length=32,
+        choices=ROAIntentMatchKind.choices,
+        default=ROAIntentMatchKind.EXACT,
+    )
+    is_best_match = models.BooleanField(default=False)
+    details_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("name",)
+        constraints = (
+            models.UniqueConstraint(
+                fields=("roa_intent", "roa"),
+                name="netbox_rpki_roaintentmatch_roa_intent_roa_unique",
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:roaintentmatch", args=[self.pk])
+
+
+class ROAReconciliationRun(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='roa_reconciliation_runs'
+    )
+    intent_profile = models.ForeignKey(
+        to='RoutingIntentProfile',
+        on_delete=models.PROTECT,
+        related_name='reconciliation_runs'
+    )
+    basis_derivation_run = models.ForeignKey(
+        to='IntentDerivationRun',
+        on_delete=models.PROTECT,
+        related_name='reconciliation_runs'
+    )
+    comparison_scope = models.CharField(
+        max_length=32,
+        choices=ReconciliationComparisonScope.choices,
+        default=ReconciliationComparisonScope.LOCAL_ROA_RECORDS,
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=ValidationRunStatus.choices,
+        default=ValidationRunStatus.PENDING,
+    )
+    started_at = models.DateTimeField(blank=True, null=True)
+    completed_at = models.DateTimeField(blank=True, null=True)
+    published_roa_count = models.PositiveIntegerField(default=0)
+    intent_count = models.PositiveIntegerField(default=0)
+    result_summary_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("-started_at", "name")
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:roareconciliationrun", args=[self.pk])
+
+
+class ROAIntentResult(NamedRpkiStandardModel):
+    reconciliation_run = models.ForeignKey(
+        to='ROAReconciliationRun',
+        on_delete=models.PROTECT,
+        related_name='intent_results'
+    )
+    roa_intent = models.ForeignKey(
+        to='ROAIntent',
+        on_delete=models.PROTECT,
+        related_name='reconciliation_results'
+    )
+    result_type = models.CharField(
+        max_length=32,
+        choices=ROAIntentResultType.choices,
+        default=ROAIntentResultType.MATCH,
+    )
+    severity = models.CharField(
+        max_length=16,
+        choices=ReconciliationSeverity.choices,
+        default=ReconciliationSeverity.INFO,
+    )
+    best_roa = models.ForeignKey(
+        to=Roa,
+        on_delete=models.SET_NULL,
+        related_name='intent_result_matches',
+        blank=True,
+        null=True
+    )
+    match_count = models.PositiveIntegerField(default=0)
+    details_json = models.JSONField(default=dict, blank=True)
+    computed_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        ordering = ("name",)
+        constraints = (
+            models.UniqueConstraint(
+                fields=("reconciliation_run", "roa_intent"),
+                name="netbox_rpki_roaintentresult_run_intent_unique",
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:roaintentresult", args=[self.pk])
+
+
+class PublishedROAResult(NamedRpkiStandardModel):
+    reconciliation_run = models.ForeignKey(
+        to='ROAReconciliationRun',
+        on_delete=models.PROTECT,
+        related_name='published_roa_results'
+    )
+    roa = models.ForeignKey(
+        to=Roa,
+        on_delete=models.PROTECT,
+        related_name='published_reconciliation_results'
+    )
+    result_type = models.CharField(
+        max_length=32,
+        choices=PublishedROAResultType.choices,
+        default=PublishedROAResultType.MATCHED,
+    )
+    severity = models.CharField(
+        max_length=16,
+        choices=ReconciliationSeverity.choices,
+        default=ReconciliationSeverity.INFO,
+    )
+    matched_intent_count = models.PositiveIntegerField(default=0)
+    details_json = models.JSONField(default=dict, blank=True)
+    computed_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        ordering = ("name",)
+        constraints = (
+            models.UniqueConstraint(
+                fields=("reconciliation_run", "roa"),
+                name="netbox_rpki_publishedroaresult_run_roa_unique",
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:publishedroaresult", args=[self.pk])

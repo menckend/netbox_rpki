@@ -14,9 +14,10 @@ class NavigationTestCase(SimpleTestCase):
 
     def test_navigation_specs_use_structured_metadata(self):
         groups = dict(get_navigation_groups())
-        self.assertEqual(groups['Resources'][0].navigation.label, 'RIR Customer Orgs')
-        self.assertEqual(groups['ROAs'][0].navigation.order, 10)
-        self.assertEqual(groups['ROAs'][0].routes.add_url_name, 'plugins:netbox_rpki:roa_add')
+        for group_name, specs in groups.items():
+            with self.subTest(group_name=group_name):
+                self.assertTrue(specs)
+                self.assertTrue(all(spec.navigation is not None for spec in specs))
 
     def test_resource_menu_items_match_expected_links(self):
         self.assertEqual(
@@ -40,5 +41,5 @@ class NavigationTestCase(SimpleTestCase):
 
     def test_default_navigation_exports_top_level_menu(self):
         self.assertEqual(navigation.menu.label, 'RPKI')
-        self.assertEqual([group.label for group in navigation.menu.groups], ['Resources', 'ROAs'])
+        self.assertEqual([group.label for group in navigation.menu.groups], [group_name for group_name, _ in EXPECTED_NAVIGATION_GROUPS])
         self.assertEqual(navigation.menu.icon_class, 'mdi mdi-bootstrap')
