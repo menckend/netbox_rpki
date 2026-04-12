@@ -6,7 +6,7 @@ from django.utils.formats import date_format
 
 from netbox_rpki import filtersets, forms, tables, views
 from netbox_rpki.models import Certificate, CertificateAsn, CertificatePrefix, Organization, Roa, RoaPrefix
-from netbox_rpki.object_registry import SIMPLE_DETAIL_VIEW_OBJECT_SPECS, VIEW_OBJECT_SPECS
+from netbox_rpki.object_registry import SIMPLE_DETAIL_VIEW_OBJECT_SPECS, VIEW_OBJECT_SPECS, get_object_spec
 from netbox_rpki.tests.registry_scenarios import _build_instance_for_spec
 from netbox_rpki.tests.base import PluginViewTestCase
 from netbox_rpki.tests.utils import (
@@ -98,6 +98,69 @@ class GeneratedListViewActionLinkTestCase(PluginViewTestCase):
         self.assertHttpStatus(response, 200)
         self.assertContains(response, reverse('plugins:netbox_rpki:provideraccount_add'))
         self.assertNotContains(response, '/plugins/netbox_rpki/provideraccounts/None')
+
+    def test_read_only_generated_lists_expose_only_export_and_changelog(self):
+        for registry_key in ('roachangeplanitem', 'providersyncrun', 'publishedroaresult'):
+            spec = get_object_spec(registry_key)
+            instance = _build_instance_for_spec(spec, token=f'{registry_key}-list-actions')
+            self.add_permissions(
+                f'netbox_rpki.view_{spec.model._meta.model_name}',
+                f'netbox_rpki.add_{spec.model._meta.model_name}',
+                f'netbox_rpki.change_{spec.model._meta.model_name}',
+                f'netbox_rpki.delete_{spec.model._meta.model_name}',
+            )
+
+            response = self.client.get(reverse(spec.list_url_name))
+
+            with self.subTest(object_key=registry_key, instance=instance.pk):
+                self.assertHttpStatus(response, 200)
+                self.assertEqual([action.name for action in response.context['actions']], ['export'])
+                self.assertEqual(
+                    tuple(response.context['table'].base_columns['actions'].actions.keys()),
+                    ('changelog',),
+                )
+                self.assertNotContains(response, '/None')
+
+
+class GeneratedSurfaceContractTestCase(PluginViewTestCase):
+    def _add_maximum_object_permissions(self, spec):
+        self.add_permissions(
+            f'netbox_rpki.view_{spec.model._meta.model_name}',
+            f'netbox_rpki.add_{spec.model._meta.model_name}',
+            f'netbox_rpki.change_{spec.model._meta.model_name}',
+            f'netbox_rpki.delete_{spec.model._meta.model_name}',
+        )
+
+    def test_all_generated_list_views_match_registry_action_contract(self):
+        for spec in VIEW_OBJECT_SPECS:
+            instance = _build_instance_for_spec(spec, token=f'{spec.registry_key}-surface-list')
+            self._add_maximum_object_permissions(spec)
+
+            response = self.client.get(reverse(spec.list_url_name))
+
+            with self.subTest(object_key=spec.registry_key, instance=instance.pk):
+                self.assertHttpStatus(response, 200)
+                expected_list_actions = ['add', 'export'] if spec.view.supports_create else ['export']
+                expected_row_actions = ('edit', 'delete', 'changelog') if spec.view.supports_create else ('changelog',)
+                self.assertEqual([action.name for action in response.context['actions']], expected_list_actions)
+                self.assertEqual(
+                    tuple(response.context['table'].base_columns['actions'].actions.keys()),
+                    expected_row_actions,
+                )
+                self.assertNotContains(response, '/None')
+
+    def test_all_generated_detail_views_match_registry_action_contract(self):
+        for spec in VIEW_OBJECT_SPECS:
+            instance = _build_instance_for_spec(spec, token=f'{spec.registry_key}-surface-detail')
+            self._add_maximum_object_permissions(spec)
+
+            response = self.client.get(instance.get_absolute_url())
+
+            with self.subTest(object_key=spec.registry_key, instance=instance.pk):
+                self.assertHttpStatus(response, 200)
+                expected_detail_actions = ['add', 'edit', 'delete'] if spec.view.supports_create else []
+                self.assertEqual([action.name for action in response.context['actions']], expected_detail_actions)
+                self.assertNotContains(response, '/None')
 
 
 class ReconciliationDetailViewTestCase(PluginViewTestCase):
@@ -202,6 +265,32 @@ class ReconciliationDetailViewTestCase(PluginViewTestCase):
         self.assertContains(response, 'Dashboard Override')
         self.assertContains(response, 'Dashboard Derivation Run')
         self.assertContains(response, 'Dashboard Reconciliation Run')
+
+    def test_routing_intent_profile_detail_renders_with_read_only_child_change_permissions(self):
+        self.add_permissions(
+            'netbox_rpki.view_routingintentprofile',
+            'netbox_rpki.change_intentderivationrun',
+            'netbox_rpki.delete_intentderivationrun',
+            'netbox_rpki.change_roareconciliationrun',
+            'netbox_rpki.delete_roareconciliationrun',
+            'netbox_rpki.change_roaintent',
+            'netbox_rpki.delete_roaintent',
+        )
+
+        response = self.client.get(self.profile.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertEqual(
+            {
+                section['title']: tuple(section['table'].base_columns['actions'].actions.keys())
+                for section in response.context['detail_bottom_sections']
+            },
+            {
+                'Intent Derivation Runs': ('changelog',),
+                'ROA Reconciliation Runs': ('changelog',),
+                'Derived ROA Intents': ('changelog',),
+            },
+        )
 
     def test_reconciliation_run_detail_renders_drilldown_sections(self):
         self.add_permissions('netbox_rpki.view_roareconciliationrun')

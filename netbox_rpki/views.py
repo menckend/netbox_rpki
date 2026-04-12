@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from urllib.parse import urlencode
 
 from django.urls import reverse
+from netbox.object_actions import AddObject, BulkExport, CloneObject, DeleteObject, EditObject
 from netbox.views import generic
 
 from netbox_rpki import models, forms, tables, filtersets
@@ -150,6 +151,22 @@ def build_generated_detail_spec(spec: ObjectSpec):
     )
 
 
+def build_list_actions(spec: ObjectSpec):
+    actions = [BulkExport]
+    if spec.view.supports_create:
+        actions.insert(0, AddObject)
+    return tuple(actions)
+
+
+def build_detail_actions(spec: ObjectSpec):
+    actions = []
+    if spec.view.supports_create:
+        actions.extend((CloneObject, EditObject))
+    if spec.view.supports_delete:
+        actions.append(DeleteObject)
+    return tuple(actions)
+
+
 def build_list_view_class(spec: ObjectSpec) -> type[generic.ObjectListView]:
     return type(
         spec.view.list_class_name,
@@ -160,6 +177,7 @@ def build_list_view_class(spec: ObjectSpec) -> type[generic.ObjectListView]:
             'filterset': getattr(filtersets, spec.filterset.class_name),
             'filterset_form': getattr(forms, spec.filter_form.class_name),
             'table': getattr(tables, spec.table.class_name),
+            'actions': build_list_actions(spec),
         },
     )
 
@@ -172,6 +190,7 @@ def build_detail_view_class(spec: ObjectSpec) -> type[MetadataDrivenDetailView]:
             '__module__': __name__,
             'queryset': spec.model.objects.all(),
             'detail_spec': build_generated_detail_spec(spec),
+            'actions': build_detail_actions(spec),
         },
     )
 

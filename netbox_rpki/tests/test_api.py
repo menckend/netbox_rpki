@@ -1,4 +1,5 @@
 from django.test import SimpleTestCase
+from django.urls import reverse
 
 from netbox_rpki import filtersets
 from netbox_rpki.api import serializers as api_serializers
@@ -32,9 +33,12 @@ from netbox_rpki.tests.utils import (
     create_test_certificate_prefix,
     create_test_organization,
     create_test_prefix,
+    create_test_provider_account,
     create_test_rir,
     create_test_roa,
     create_test_roa_prefix,
+    create_test_roa_reconciliation_run,
+    create_test_routing_intent_profile,
 )
 
 
@@ -109,6 +113,33 @@ class ViewSetSmokeTestCase(SimpleTestCase):
                 self.assertIs(viewset_class.serializer_class, serializer_class)
                 self.assertIs(viewset_class.filterset_class, filterset_class)
 
+    def test_viewsets_expose_expected_http_method_contract(self):
+        read_only_post_exceptions = {'roareconciliationrun'}
+
+        for spec in API_OBJECT_SPECS:
+            viewset_class = getattr(api_views, spec.api.viewset_name)
+            allowed_methods = set(viewset_class.http_method_names)
+
+            with self.subTest(object_key=spec.registry_key):
+                self.assertTrue({'get', 'head', 'options'}.issubset(allowed_methods))
+                if spec.api.read_only and spec.registry_key not in read_only_post_exceptions:
+                    self.assertEqual(allowed_methods, {'get', 'head', 'options'})
+                elif spec.api.read_only:
+                    self.assertEqual(allowed_methods, {'get', 'head', 'options', 'post'})
+                else:
+                    self.assertTrue({'post', 'patch', 'delete'}.issubset(allowed_methods))
+
+    def test_viewsets_expose_expected_custom_actions_only(self):
+        for spec in API_OBJECT_SPECS:
+            viewset_class = getattr(api_views, spec.api.viewset_name)
+            expected_actions = CUSTOM_ACTION_CONTRACTS.get(spec.registry_key, {}).get('actions', ())
+
+            with self.subTest(object_key=spec.registry_key):
+                self.assertEqual(
+                    tuple(action.__name__ for action in viewset_class.get_extra_actions()),
+                    expected_actions,
+                )
+
 
 class RouterSmokeTestCase(SimpleTestCase):
     def test_root_view_name_remains_stable(self):
@@ -126,6 +157,33 @@ class RouterSmokeTestCase(SimpleTestCase):
 
 
 OBJECT_SPEC_BY_REGISTRY_KEY = {spec.registry_key: spec for spec in API_OBJECT_SPECS}
+
+CUSTOM_ACTION_CONTRACTS = {
+    'routingintentprofile': {
+        'actions': ('run',),
+        'route_name': 'plugins-api:netbox_rpki-api:routingintentprofile-run',
+        'denied_status': 404,
+        'view_permissions': ('netbox_rpki.view_routingintentprofile',),
+        'allowed_permissions': ('netbox_rpki.view_routingintentprofile', 'netbox_rpki.change_routingintentprofile'),
+        'instance_attr': 'routing_intent_profile',
+    },
+    'rpkiprovideraccount': {
+        'actions': ('sync',),
+        'route_name': 'plugins-api:netbox_rpki-api:provideraccount-sync',
+        'denied_status': 404,
+        'view_permissions': ('netbox_rpki.view_rpkiprovideraccount',),
+        'allowed_permissions': ('netbox_rpki.view_rpkiprovideraccount', 'netbox_rpki.change_rpkiprovideraccount'),
+        'instance_attr': 'provider_account',
+    },
+    'roareconciliationrun': {
+        'actions': ('create_plan',),
+        'route_name': 'plugins-api:netbox_rpki-api:roareconciliationrun-create-plan',
+        'denied_status': 403,
+        'view_permissions': ('netbox_rpki.view_roareconciliationrun',),
+        'allowed_permissions': ('netbox_rpki.view_roareconciliationrun', 'netbox_rpki.change_routingintentprofile'),
+        'instance_attr': 'reconciliation_run',
+    },
+}
 
 
 def _resolve_api_test_value(value, test_case):
@@ -407,6 +465,58 @@ class RegistryDrivenObjectAPITestCase(PluginAPITestCase):
 
         self.assertHttpStatus(response, 204)
         self.assertFalse(self.model.objects.filter(pk=instance.pk).exists())
+
+
+class CustomActionSurfaceContractTestCase(PluginAPITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='custom-action-org', name='Custom Action Org')
+        cls.routing_intent_profile = create_test_routing_intent_profile(
+            name='Custom Action Profile',
+            organization=cls.organization,
+        )
+        cls.provider_account = create_test_provider_account(
+            name='Custom Action Provider',
+            organization=cls.organization,
+            org_handle='ORG-CUSTOM-ACTION',
+        )
+        cls.reconciliation_run = create_test_roa_reconciliation_run(
+            name='Custom Action Reconciliation',
+            organization=cls.organization,
+            intent_profile=cls.routing_intent_profile,
+        )
+
+    def test_custom_action_routes_reverse(self):
+        for registry_key, contract in CUSTOM_ACTION_CONTRACTS.items():
+            instance = getattr(self, contract['instance_attr'])
+
+            with self.subTest(object_key=registry_key):
+                self.assertTrue(reverse(contract['route_name'], kwargs={'pk': instance.pk}))
+
+    def test_custom_actions_reject_get_requests(self):
+        for registry_key, contract in CUSTOM_ACTION_CONTRACTS.items():
+            self.add_permissions(*contract['allowed_permissions'])
+            instance = getattr(self, contract['instance_attr'])
+
+            response = self.client.get(reverse(contract['route_name'], kwargs={'pk': instance.pk}), **self.header)
+
+            with self.subTest(object_key=registry_key):
+                self.assertHttpStatus(response, 405)
+
+    def test_custom_actions_require_elevated_permissions(self):
+        for registry_key, contract in CUSTOM_ACTION_CONTRACTS.items():
+            self.add_permissions(*contract['view_permissions'])
+            instance = getattr(self, contract['instance_attr'])
+
+            response = self.client.post(
+                reverse(contract['route_name'], kwargs={'pk': instance.pk}),
+                {},
+                format='json',
+                **self.header,
+            )
+
+            with self.subTest(object_key=registry_key):
+                self.assertHttpStatus(response, contract['denied_status'])
 
 
 @_install_registry_api_tests

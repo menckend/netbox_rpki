@@ -20,7 +20,11 @@ from netbox_rpki.models import (
     RoaPrefix,
 )
 from netbox_rpki.object_registry import GRAPHQL_OBJECT_SPECS
-from netbox_rpki.tests.registry_scenarios import EXPECTED_GRAPHQL_FIELD_NAMES_BY_KEY, EXPECTED_GRAPHQL_FIELD_ORDER
+from netbox_rpki.tests.registry_scenarios import (
+    EXPECTED_GRAPHQL_FIELD_NAMES_BY_KEY,
+    EXPECTED_GRAPHQL_FIELD_ORDER,
+    _build_instance_for_spec,
+)
 from netbox_rpki.tests.utils import (
     create_test_asn,
     create_test_certificate,
@@ -92,6 +96,32 @@ class GraphQLSchemaRegistrationTestCase(SimpleTestCase):
     def test_plugin_query_is_registered_with_netbox_schema(self):
         self.assertIn(NetBoxRpkiQuery, registry['plugins']['graphql_schemas'])
         self.assertTrue(issubclass(Query, NetBoxRpkiQuery))
+
+
+class GraphQLSurfaceContractTestCase(APITestCase):
+    def graphql_request(self, query):
+        response = self.client.post(reverse('graphql'), data={'query': query}, format='json', **self.header)
+        self.assertHttpStatus(response, 200)
+        return json.loads(response.content)
+
+    def test_every_registered_graphql_object_supports_minimal_detail_and_list_queries(self):
+        for spec in GRAPHQL_OBJECT_SPECS:
+            instance = _build_instance_for_spec(spec, token=f'{spec.registry_key}-graphql-surface')
+            self.add_permissions(f'netbox_rpki.view_{spec.model._meta.model_name}')
+            detail_field = spec.graphql.detail_field_name
+            list_field = spec.graphql.list_field_name
+
+            data = self.graphql_request(
+                f'{{{detail_field}(id: {instance.pk}) {{id}} {list_field} {{id}}}}'
+            )
+
+            with self.subTest(object_key=spec.registry_key, instance=instance.pk):
+                self.assertNotIn('errors', data)
+                self.assertEqual(int(data['data'][detail_field]['id']), instance.pk)
+                self.assertIn(
+                    instance.pk,
+                    [int(item['id']) for item in data['data'][list_field]],
+                )
 
 
 class PluginGraphQLTestMixin:
