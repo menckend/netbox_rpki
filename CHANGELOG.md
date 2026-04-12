@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.1.6.2 (2026-04-11)
+
+* Documentation: expand the README feature and model coverage summary to describe the implemented standards-aligned object families and Priority 1 intent/reconciliation model layer.
+* Release metadata: align the plugin manifest with the `0.1.6.2` patch release.
+
 ## 0.1.6.1 (2026-04-11)
 
 * Dev/test fixtures: seed the devrun NetBox database and fixture-backed test helpers with at least a dozen rows across core NetBox dependency tables and plugin tables.

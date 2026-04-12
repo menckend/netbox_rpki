@@ -1,7 +1,7 @@
-version: 0.1.6.1
+version: 0.1.6.2
 package_name: netbox_rpki
 compatibility:
-- release: 0.1.6.1
+- release: 0.1.6.2
   netbox_min: 4.5.0
   netbox_max: 4.5.99
 

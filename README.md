@@ -9,50 +9,158 @@ Netbox plugin for adding BGP RPKI elements.
 
 ## Features
 
-Implements data models and forms for modeling Resource Public Key Infrastructure (RPKI) items.  On organization the publishes ROAs (either self-hosted, or through a RIR's hosted-RPKI service) can use this plugin to create a self-hosted record of the critical RPKI elements such as resource certificates and ROAs 
+Implements NetBox models, forms, API endpoints, GraphQL types, tables, and standard UI views for modeling Resource Public Key Infrastructure (RPKI) data.
+
+The plugin still covers the original core inventory objects for organizations, resource certificates, ROAs, and their prefix or ASN relationships, and now also includes the implemented standards-aligned data-model expansion for:
+
+- repositories and publication points
+- trust anchors, trust anchor locators, and trust anchor keys
+- end-entity certificates and a generic signed-object layer
+- certificate revocation lists, revoked certificate references, manifests, and manifest entries
+- ASPAs, RSCs, and router certificates
+- validator instances, validation runs, object validation results, and validated ROA or ASPA payload views
+- routing-intent profiles, rules, overrides, and the initial ROA intent and reconciliation result model family
+
+This newer model layer is implemented as schema plus registry-driven plugin surfaces. The writable intent-policy objects are available now, while derivation and reconciliation run or result objects are currently read-only reporting surfaces.
 
 ### Models / DB tables
 
+#### Core inventory models
+
 #### Organization
-   - Represents a customer/consumer of Regional Internet Registrar (RIR) RPKI services
-   - Fields
-      - org-id, name, ext_url, parent_rir (foreign key to IPAM ASN)
+   - Represents a customer or consumer of Regional Internet Registry (RIR) RPKI services.
+   - Fields include `org_id`, `name`, `ext_url`, and `parent_rir`.
 
 #### Resource Certificate
-   - Represents the "Resource Certificate" element of the RPKI architecture
-     - An X.509 certificate with RFC3779-style extensions for IPs/ASNs
-     - Signed by an RIR's RPKI trust-anchor certificate
-     - Attests to authority for at least one ASN and at least one IP netblock
-     - Used to sign the RPKI End Entity (EE) certificates which are used to sign individual ROAs
-   - May be either self-hosted/managed/published (managed by customer) or managed by the RIR (as part of a "managed" RPKI service)
-   - Fields
-      - name, issuer, subject, serial, valid_from, valid_to, auto_renews, public_key, private_key, publication_url, ca_repository, self_hosted, rpki_org (foreign key to rpki organization)
+   - Represents the resource certificate element of the RPKI architecture.
+   - Tracks certificate identity and lifecycle fields such as `issuer`, `subject`, `serial`, `valid_from`, `valid_to`, `auto_renews`, `public_key`, `publication_url`, `ca_repository`, `self_hosted`, and `rpki_org`.
+   - Now links into the newer architecture through optional trust-anchor and publication-point references.
 
 #### Route Origination Authorization (ROA)
-   - Represents the RPKI Route Origination Authorization (ROA) object
-   - An artifact attesting that a specific ASN is authorized to originate a specific set of IP prefixes into BGP on the Internet
-   - Is signed by an ephemeral "EE" certificate, which was signed by a more durable resource certificate.
-   - When a non-zero ASN value is specified, the ROA is interpreted as authorizing origination
-   - When an ASN of zero is specified, the ROA is interpreted as indicating that there is NO ASN that is authorized to originate routes for the specified prefix
-     - Netbox does not permit an ASN value of zero, though -- I suggest earmarking AS 99999999 and commenting it as a place-holder for ASN 0
-   - Fields
-      - name, origin_as (foreign key to IPAM ASN model), valid_from, valid_to, auto_renews, signed_by (foreign key to rpki customer certificate)
+   - Represents an RPKI ROA authorizing origination of one or more prefixes by an ASN.
+   - Tracks `origin_as`, validity dates, `auto_renews`, and the signing resource certificate.
+   - Now links into the generic signed-object layer through an optional signed-object reference.
 
-#### ROA prefix
-   - Represents the attestion relationship between an ROA and a prefix.
-   - This model/table is not explicitly accessible via the UI menu
+#### ROA Prefix
+   - Represents the attestation relationship between a ROA and a prefix, including `max_length`.
+   - This model is available through the plugin but is not a top-level menu item.
 
-#### ROA ASN
-   - Represents the attestion relationship between an ROA and an ASN.
-   - This model/table is not explicitly accessible via the UI menu
-
-#### Certificate prefix
-   - Represents the attestion relationship between an ROA and a prefix.
-   - This model/table is not explicitly accessible via the UI menu
+#### Certificate Prefix
+   - Represents the relationship between a resource certificate and a prefix.
+   - This model is available through the plugin but is not a top-level menu item.
 
 #### Certificate ASN
-   - Represents the attestion relationship between an ROA's EE certificate and an ASN.
-   - This model/table is not explicitly accessible via the UI menu
+   - Represents the relationship between a resource certificate and an ASN.
+   - This model is available through the plugin but is not a top-level menu item.
+
+#### Repository and publication models
+
+#### Repository
+   - Represents an rsync, RRDP, or mixed repository endpoint used to hold RPKI publication data.
+
+#### Publication Point
+   - Represents a publication location within a repository and tracks retrieval and validation state.
+
+#### Trust and certificate hierarchy models
+
+#### Trust Anchor
+   - Represents a trust anchor and its rollover state.
+
+#### Trust Anchor Locator
+   - Stores TAL-style discovery information for a trust anchor.
+
+#### Trust Anchor Key
+   - Represents a published trust-anchor key object and rollover relationships.
+
+#### End-Entity Certificate
+   - Represents the EE certificate used to sign individual RPKI signed objects.
+
+#### Signed object and repository-integrity models
+
+#### Signed Object
+   - Generic model for published RPKI signed objects such as ROAs, manifests, ASPAs, RSCs, and trust-anchor keys.
+   - Tracks object type, publication metadata, manifest linkage, CMS metadata, validity, and validation state.
+
+#### Certificate Revocation List
+   - Represents a CRL issued by a resource certificate and linked to publication and manifest state.
+
+#### Revoked Certificate
+   - Represents an individual revoked certificate or EE certificate reference carried by a CRL.
+
+#### Manifest
+   - Represents an RPKI manifest object.
+
+#### Manifest Entry
+   - Represents an individual manifest member and can link to the referenced signed object, certificate, EE certificate, or CRL.
+
+#### Additional signed-object families
+
+#### ASPA
+   - Represents an Autonomous System Provider Authorization object.
+
+#### ASPA Provider
+   - Represents a provider ASN authorized by an ASPA.
+
+#### RSC
+   - Represents an RPKI Signed Checklist object.
+
+#### RSC File Hash
+   - Represents an individual file-hash member of an RSC.
+
+#### Router Certificate
+   - Represents a BGPsec router certificate tied to an ASN, resource certificate, and publication point.
+
+#### Validation and validated-payload models
+
+#### Validator Instance
+   - Represents an external validator and its current run state.
+
+#### Validation Run
+   - Represents one validation execution against repository content.
+
+#### Object Validation Result
+   - Stores validation outcome and disposition for an individual signed object.
+
+#### Validated ROA Payload
+   - Represents a validated prefix-origin payload produced from a ROA.
+
+#### Validated ASPA Payload
+   - Represents a validated customer-provider authorization payload produced from an ASPA.
+
+#### Intent and reconciliation models
+
+#### Routing Intent Profile
+   - Defines routing-intent policy defaults and prefix or ASN selection behavior.
+
+#### Routing Intent Rule
+   - Represents an ordered rule used to include, exclude, or modify derived ROA intent.
+
+#### ROA Intent Override
+   - Represents an explicit per-prefix or per-scope exception to derived ROA intent.
+
+#### Intent Derivation Run
+   - Stores metadata for a derived-intent calculation run.
+   - This is currently exposed as a read-only reporting surface.
+
+#### ROA Intent
+   - Represents a derived ROA intent row tied to a derivation run, profile, scope, and optional override.
+   - This is currently exposed as a read-only reporting surface.
+
+#### ROA Intent Match
+   - Stores a candidate match between a derived intent row and a locally recorded ROA.
+   - This is currently exposed as a read-only reporting surface.
+
+#### ROA Reconciliation Run
+   - Stores metadata for a reconciliation comparison between intent and published ROA records.
+   - This is currently exposed as a read-only reporting surface.
+
+#### ROA Intent Result
+   - Stores the intent-side reconciliation result for a derived ROA intent row.
+   - This is currently exposed as a read-only reporting surface.
+
+#### Published ROA Result
+   - Stores the published-side reconciliation result for a recorded ROA.
+   - This is currently exposed as a read-only reporting surface.
 
 
 
