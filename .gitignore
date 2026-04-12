@@ -13,6 +13,7 @@ tests/e2e/.state/
 
 # General
 .DS_Store
+.codex
 .AppleDouble
 .LSOverride
 .venv/
