@@ -1,0 +1,46 @@
+{% extends 'generic/_base.html' %}
+
+{% block title %}Preview {{ change_plan }}{% endblock %}
+
+{% block content %}
+  <div class="row mt-4">
+    <div class="col col-md-10 offset-md-1">
+      <form action="" method="post" class="form">
+        {% csrf_token %}
+        {% for field in form.hidden_fields %}
+          {{ field }}
+        {% endfor %}
+        <div class="card border-primary">
+          <h2 class="card-header">Preview Provider Delta</h2>
+          <div class="card-body">
+            <p>
+              This page shows the exact provider delta for <strong>{{ change_plan }}</strong>.
+              Submitting the form records an auditable preview execution without applying any provider changes.
+            </p>
+
+            {% if error_text %}
+              <div class="alert alert-danger" role="alert">{{ error_text }}</div>
+            {% endif %}
+
+            {% if execution %}
+              <div class="alert alert-success" role="alert">
+                Recorded preview execution <strong>{{ execution.name }}</strong>.
+              </div>
+            {% endif %}
+
+            {% if delta %}
+              <h5>Outbound Delta</h5>
+              <pre class="mb-0"><code>{{ delta }}</code></pre>
+            {% endif %}
+          </div>
+          <div class="card-footer text-end">
+            <a href="{{ return_url }}" class="btn btn-outline-secondary">Back</a>
+            {% if not error_text %}
+              <button type="submit" name="_confirm" class="btn btn-primary">Record Preview</button>
+            {% endif %}
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endblock %}

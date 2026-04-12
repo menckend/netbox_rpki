@@ -1,5 +1,5 @@
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.routers import APIRootView
 
@@ -11,7 +11,13 @@ from netbox_rpki.api.serializers import SERIALIZER_CLASS_MAP
 from netbox_rpki.jobs import RunRoutingIntentProfileJob, SyncProviderAccountJob
 from netbox_rpki.object_registry import API_OBJECT_SPECS
 from netbox_rpki.object_specs import ObjectSpec
-from netbox_rpki.services import create_roa_change_plan
+from netbox_rpki.services import (
+    ProviderWriteError,
+    apply_roa_change_plan_provider_write,
+    approve_roa_change_plan,
+    create_roa_change_plan,
+    preview_roa_change_plan_provider_write,
+)
 
 
 class RootView(APIRootView):
@@ -97,7 +103,6 @@ class RpkiProviderAccountViewSet(VIEWSET_CLASS_MAP['rpkiprovideraccount']):
             raise PermissionDenied('This user does not have permission to sync this provider account.')
 
         job = SyncProviderAccountJob.enqueue(
-            instance=provider_account,
             user=request.user,
             provider_account_pk=provider_account.pk,
         )
@@ -136,12 +141,91 @@ class ROAReconciliationRunViewSet(VIEWSET_CLASS_MAP['roareconciliationrun']):
         return Response(payload)
 
 
+class ROAChangePlanViewSet(VIEWSET_CLASS_MAP['roachangeplan']):
+    http_method_names = ['get', 'head', 'options', 'post']
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+
+        if getattr(self, 'action', None) in {'preview', 'approve', 'apply'} and self.request.user.is_authenticated:
+            return self.queryset.model.objects.restrict(self.request.user, 'change')
+
+        return queryset
+
+    def _require_change_permission(self, plan):
+        if not self.request.user.has_perm('netbox_rpki.change_roachangeplan', plan):
+            raise PermissionDenied('This user does not have permission to execute actions on this ROA change plan.')
+
+    def _serialize_plan_payload(self, request, plan):
+        serializer = SERIALIZER_CLASS_MAP['roachangeplan'](plan, context={'request': request})
+        payload = dict(serializer.data)
+        payload['item_count'] = plan.items.count()
+        return payload
+
+    @action(detail=True, methods=['post'], permission_classes=[TokenWritePermission])
+    def preview(self, request, pk=None):
+        plan = self.get_object()
+        self._require_change_permission(plan)
+
+        try:
+            execution, delta = preview_roa_change_plan_provider_write(
+                plan,
+                requested_by=getattr(request.user, 'username', ''),
+            )
+        except ProviderWriteError as exc:
+            raise ValidationError(str(exc)) from exc
+
+        payload = self._serialize_plan_payload(request, plan)
+        payload['delta'] = delta
+        payload['execution'] = SERIALIZER_CLASS_MAP['providerwriteexecution'](
+            execution,
+            context={'request': request},
+        ).data
+        return Response(payload)
+
+    @action(detail=True, methods=['post'], permission_classes=[TokenWritePermission])
+    def approve(self, request, pk=None):
+        plan = self.get_object()
+        self._require_change_permission(plan)
+
+        try:
+            plan = approve_roa_change_plan(plan, approved_by=getattr(request.user, 'username', ''))
+        except ProviderWriteError as exc:
+            raise ValidationError(str(exc)) from exc
+
+        return Response(self._serialize_plan_payload(request, plan))
+
+    @action(detail=True, methods=['post'], permission_classes=[TokenWritePermission])
+    def apply(self, request, pk=None):
+        plan = self.get_object()
+        self._require_change_permission(plan)
+
+        try:
+            execution, delta = apply_roa_change_plan_provider_write(
+                plan,
+                requested_by=getattr(request.user, 'username', ''),
+            )
+        except ProviderWriteError as exc:
+            raise ValidationError(str(exc)) from exc
+
+        plan.refresh_from_db()
+        payload = self._serialize_plan_payload(request, plan)
+        payload['delta'] = delta
+        payload['execution'] = SERIALIZER_CLASS_MAP['providerwriteexecution'](
+            execution,
+            context={'request': request},
+        ).data
+        return Response(payload)
+
+
 VIEWSET_CLASS_MAP['routingintentprofile'] = RoutingIntentProfileViewSet
 globals()['RoutingIntentProfileViewSet'] = RoutingIntentProfileViewSet
 VIEWSET_CLASS_MAP['rpkiprovideraccount'] = RpkiProviderAccountViewSet
 globals()['RpkiProviderAccountViewSet'] = RpkiProviderAccountViewSet
 VIEWSET_CLASS_MAP['roareconciliationrun'] = ROAReconciliationRunViewSet
 globals()['ROAReconciliationRunViewSet'] = ROAReconciliationRunViewSet
+VIEWSET_CLASS_MAP['roachangeplan'] = ROAChangePlanViewSet
+globals()['ROAChangePlanViewSet'] = ROAChangePlanViewSet
 
 
 __all__ = ("RootView",) + tuple(spec.api.viewset_name for spec in API_OBJECT_SPECS)

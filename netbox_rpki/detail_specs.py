@@ -5,6 +5,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from django.urls import reverse
+
 from netbox_rpki import models
 
 
@@ -29,9 +31,11 @@ class DetailFieldSpec:
 class DetailActionSpec:
     permission: str
     label: str
-    url_name: str
-    query_param: str
+    url_name: str | None = None
+    query_param: str | None = None
     value: ValueGetter = get_pk
+    direct_url: ValueGetter | None = None
+    visible: ValueGetter | None = None
 
 
 @dataclass(frozen=True)
@@ -150,6 +154,155 @@ def get_result_best_roa_max_lengths(result: models.ROAIntentResult) -> str | Non
         return None
     max_lengths = [str(prefix.max_length) for prefix in result.best_roa.RoaToPrefixTable.all()]
     return ', '.join(max_lengths) or None
+
+
+def get_plan_summary(plan: models.ROAChangePlan) -> str | None:
+    return get_pretty_json(plan.summary_json)
+
+
+def get_plan_provider_capability(plan: models.ROAChangePlan) -> str | None:
+    if not plan.provider_account_id:
+        return None
+    return get_pretty_json(plan.provider_account.roa_write_capability)
+
+
+def get_write_execution_request_payload(execution: models.ProviderWriteExecution) -> str | None:
+    return get_pretty_json(execution.request_payload_json)
+
+
+def get_write_execution_response_payload(execution: models.ProviderWriteExecution) -> str | None:
+    return get_pretty_json(execution.response_payload_json)
+
+
+def get_provider_last_sync_summary(account: models.RpkiProviderAccount) -> str | None:
+    return get_pretty_json(account.last_sync_summary_json)
+
+
+ROA_CHANGE_PLAN_DETAIL_SPEC = DetailSpec(
+    model=models.ROAChangePlan,
+    list_url_name='plugins:netbox_rpki:roachangeplan_list',
+    breadcrumb_label='ROA Change Plans',
+    card_title='ROA Change Plan',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Organization', value=lambda obj: obj.organization, kind='link'),
+        DetailFieldSpec(label='Source Reconciliation Run', value=lambda obj: obj.source_reconciliation_run, kind='link'),
+        DetailFieldSpec(
+            label='Provider Account',
+            value=lambda obj: obj.provider_account,
+            kind='link',
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='Provider Snapshot',
+            value=lambda obj: obj.provider_snapshot,
+            kind='link',
+            empty_text='None',
+        ),
+        DetailFieldSpec(label='Status', value=lambda obj: obj.status),
+        DetailFieldSpec(label='Approved At', value=lambda obj: obj.approved_at, empty_text='None'),
+        DetailFieldSpec(label='Approved By', value=lambda obj: obj.approved_by, empty_text='None'),
+        DetailFieldSpec(label='Apply Started At', value=lambda obj: obj.apply_started_at, empty_text='None'),
+        DetailFieldSpec(label='Apply Requested By', value=lambda obj: obj.apply_requested_by, empty_text='None'),
+        DetailFieldSpec(label='Applied At', value=lambda obj: obj.applied_at, empty_text='None'),
+        DetailFieldSpec(label='Failed At', value=lambda obj: obj.failed_at, empty_text='None'),
+        DetailFieldSpec(
+            label='Provider Write Capability',
+            value=get_plan_provider_capability,
+            kind='code',
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='Plan Summary',
+            value=get_plan_summary,
+            kind='code',
+            empty_text='None',
+        ),
+    ),
+    actions=(
+        DetailActionSpec(
+            permission='netbox_rpki.change_roachangeplan',
+            label='Preview',
+            direct_url=lambda obj: reverse('plugins:netbox_rpki:roachangeplan_preview', kwargs={'pk': obj.pk}),
+            visible=lambda obj: obj.can_preview,
+        ),
+        DetailActionSpec(
+            permission='netbox_rpki.change_roachangeplan',
+            label='Approve',
+            direct_url=lambda obj: reverse('plugins:netbox_rpki:roachangeplan_approve', kwargs={'pk': obj.pk}),
+            visible=lambda obj: obj.can_approve,
+        ),
+        DetailActionSpec(
+            permission='netbox_rpki.change_roachangeplan',
+            label='Apply',
+            direct_url=lambda obj: reverse('plugins:netbox_rpki:roachangeplan_apply', kwargs={'pk': obj.pk}),
+            visible=lambda obj: obj.can_apply,
+        ),
+    ),
+    bottom_tables=(
+        DetailTableSpec(
+            title='ROA Change Plan Items',
+            table_class_name='ROAChangePlanItemTable',
+            queryset=lambda obj: obj.items.all(),
+        ),
+        DetailTableSpec(
+            title='Provider Write Executions',
+            table_class_name='ProviderWriteExecutionTable',
+            queryset=lambda obj: obj.provider_write_executions.all(),
+        ),
+    ),
+)
+
+
+PROVIDER_WRITE_EXECUTION_DETAIL_SPEC = DetailSpec(
+    model=models.ProviderWriteExecution,
+    list_url_name='plugins:netbox_rpki:providerwriteexecution_list',
+    breadcrumb_label='Provider Write Executions',
+    card_title='Provider Write Execution',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Organization', value=lambda obj: obj.organization, kind='link'),
+        DetailFieldSpec(label='Provider Account', value=lambda obj: obj.provider_account, kind='link'),
+        DetailFieldSpec(
+            label='Provider Snapshot',
+            value=lambda obj: obj.provider_snapshot,
+            kind='link',
+            empty_text='None',
+        ),
+        DetailFieldSpec(label='Change Plan', value=lambda obj: obj.change_plan, kind='link'),
+        DetailFieldSpec(label='Execution Mode', value=lambda obj: obj.execution_mode),
+        DetailFieldSpec(label='Status', value=lambda obj: obj.status),
+        DetailFieldSpec(label='Requested By', value=lambda obj: obj.requested_by, empty_text='None'),
+        DetailFieldSpec(label='Started At', value=lambda obj: obj.started_at, empty_text='None'),
+        DetailFieldSpec(label='Completed At', value=lambda obj: obj.completed_at, empty_text='None'),
+        DetailFieldSpec(label='Item Count', value=lambda obj: obj.item_count),
+        DetailFieldSpec(
+            label='Follow-Up Sync Run',
+            value=lambda obj: obj.followup_sync_run,
+            kind='link',
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='Follow-Up Provider Snapshot',
+            value=lambda obj: obj.followup_provider_snapshot,
+            kind='link',
+            empty_text='None',
+        ),
+        DetailFieldSpec(label='Error', value=lambda obj: obj.error, empty_text='None'),
+        DetailFieldSpec(
+            label='Request Payload',
+            value=get_write_execution_request_payload,
+            kind='code',
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='Response Payload',
+            value=get_write_execution_response_payload,
+            kind='code',
+            empty_text='None',
+        ),
+    ),
+)
 
 
 ROUTING_INTENT_PROFILE_DETAIL_SPEC = DetailSpec(
@@ -426,11 +579,61 @@ ROA_DETAIL_SPEC = DetailSpec(
 )
 
 
+PROVIDER_ACCOUNT_DETAIL_SPEC = DetailSpec(
+    model=models.RpkiProviderAccount,
+    list_url_name='plugins:netbox_rpki:provideraccount_list',
+    breadcrumb_label='Provider Accounts',
+    card_title='Provider Account',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Organization', value=lambda obj: obj.organization, kind='link'),
+        DetailFieldSpec(label='Provider Type', value=lambda obj: obj.provider_type),
+        DetailFieldSpec(label='Transport', value=lambda obj: obj.transport),
+        DetailFieldSpec(label='Organization Handle', value=lambda obj: obj.org_handle),
+        DetailFieldSpec(label='CA Handle', value=lambda obj: obj.ca_handle, empty_text='None'),
+        DetailFieldSpec(label='API Key', value=lambda obj: obj.api_key),
+        DetailFieldSpec(label='API Base URL', value=lambda obj: obj.api_base_url, kind='url'),
+        DetailFieldSpec(label='Sync Enabled', value=lambda obj: obj.sync_enabled),
+        DetailFieldSpec(label='Last Successful Sync', value=lambda obj: obj.last_successful_sync, empty_text='None'),
+        DetailFieldSpec(label='Last Sync Status', value=lambda obj: obj.last_sync_status),
+        DetailFieldSpec(
+            label='Last Sync Summary',
+            value=get_provider_last_sync_summary,
+            kind='code',
+            empty_text='None',
+        ),
+    ),
+    actions=(
+        DetailActionSpec(
+            permission='netbox_rpki.change_rpkiprovideraccount',
+            label='Sync',
+            direct_url=lambda obj: reverse('plugins:netbox_rpki:provideraccount_sync', kwargs={'pk': obj.pk}),
+            visible=lambda obj: obj.sync_enabled,
+        ),
+    ),
+    bottom_tables=(
+        DetailTableSpec(
+            title='Provider Snapshots',
+            table_class_name='ProviderSnapshotTable',
+            queryset=lambda obj: obj.snapshots.all(),
+        ),
+        DetailTableSpec(
+            title='Provider Sync Runs',
+            table_class_name='ProviderSyncRunTable',
+            queryset=lambda obj: obj.sync_runs.all(),
+        ),
+    ),
+)
+
+
 DETAIL_SPEC_BY_MODEL = {
     models.Organization: ORGANIZATION_DETAIL_SPEC,
     models.Certificate: CERTIFICATE_DETAIL_SPEC,
     models.Roa: ROA_DETAIL_SPEC,
+    models.RpkiProviderAccount: PROVIDER_ACCOUNT_DETAIL_SPEC,
     models.RoutingIntentProfile: ROUTING_INTENT_PROFILE_DETAIL_SPEC,
     models.ROAReconciliationRun: ROA_RECONCILIATION_RUN_DETAIL_SPEC,
+    models.ROAChangePlan: ROA_CHANGE_PLAN_DETAIL_SPEC,
     models.ROAIntentResult: ROA_INTENT_RESULT_DETAIL_SPEC,
+    models.ProviderWriteExecution: PROVIDER_WRITE_EXECUTION_DETAIL_SPEC,
 }

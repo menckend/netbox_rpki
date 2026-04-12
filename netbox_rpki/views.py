@@ -1,11 +1,15 @@
 from types import SimpleNamespace
 from urllib.parse import urlencode
 
+from django.contrib import messages
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from netbox.object_actions import AddObject, BulkExport, CloneObject, DeleteObject, EditObject
 from netbox.views import generic
+from utilities.forms import ConfirmationForm
 
 from netbox_rpki import models, forms, tables, filtersets
+from netbox_rpki.jobs import SyncProviderAccountJob
 from netbox_rpki.detail_specs import (
     CERTIFICATE_DETAIL_SPEC,
     DETAIL_SPEC_BY_MODEL,
@@ -15,6 +19,13 @@ from netbox_rpki.detail_specs import (
 )
 from netbox_rpki.object_registry import SIMPLE_DETAIL_VIEW_OBJECT_SPECS, VIEW_OBJECT_SPECS
 from netbox_rpki.object_specs import ObjectSpec
+from netbox_rpki.services import (
+    ProviderWriteError,
+    apply_roa_change_plan_provider_write,
+    approve_roa_change_plan,
+    build_roa_change_plan_delta,
+    preview_roa_change_plan_provider_write,
+)
 
 
 class MetadataDrivenDetailView(generic.ObjectView):
@@ -54,6 +65,12 @@ class MetadataDrivenDetailView(generic.ObjectView):
         return None
 
     def build_detail_action_button(self, action_spec, instance):
+        if action_spec.direct_url is not None:
+            return {
+                'label': action_spec.label,
+                'url': action_spec.direct_url(instance),
+            }
+
         query_string = urlencode({action_spec.query_param: action_spec.value(instance)})
         return {
             'label': action_spec.label,
@@ -90,6 +107,7 @@ class MetadataDrivenDetailView(generic.ObjectView):
             'detail_action_buttons': [
                 self.build_detail_action_button(action_spec, instance)
                 for action_spec in detail_spec.actions
+                if action_spec.visible is None or action_spec.visible(instance)
                 if request.user.has_perm(action_spec.permission)
             ],
             'detail_side_sections': side_sections,
@@ -232,3 +250,194 @@ for object_spec in VIEW_OBJECT_SPECS:
 
 for object_spec in SIMPLE_DETAIL_VIEW_OBJECT_SPECS:
     globals()[object_spec.view.detail_class_name] = build_detail_view_class(object_spec)
+
+
+class ROAChangePlanActionView(generic.ObjectEditView):
+    queryset = models.ROAChangePlan.objects.all()
+
+    def get_required_permission(self):
+        return 'netbox_rpki.change_roachangeplan'
+
+    def get_plan(self, pk):
+        return get_object_or_404(self.queryset, pk=pk)
+
+    def get_requested_by(self, request) -> str:
+        return getattr(request.user, 'username', '') if getattr(request.user, 'is_authenticated', False) else ''
+
+
+class ProviderAccountSyncView(generic.ObjectEditView):
+    queryset = models.RpkiProviderAccount.objects.all()
+    template_name = 'netbox_rpki/provideraccount_sync.html'
+
+    def get_required_permission(self):
+        return 'netbox_rpki.change_rpkiprovideraccount'
+
+    def get_provider_account(self, pk):
+        return get_object_or_404(self.queryset, pk=pk)
+
+    def _render(self, request, provider_account, *, form=None, status=200):
+        return render(request, self.template_name, {
+            'object': provider_account,
+            'provider_account': provider_account,
+            'form': form or ConfirmationForm(),
+            'return_url': self.get_return_url(request, provider_account),
+        }, status=status)
+
+    def get(self, request, pk):
+        provider_account = self.get_provider_account(pk)
+        return self._render(request, provider_account)
+
+    def post(self, request, pk):
+        provider_account = self.get_provider_account(pk)
+        form = ConfirmationForm(request.POST)
+        if not form.is_valid():
+            return self._render(request, provider_account, form=form, status=400)
+
+        if not provider_account.sync_enabled:
+            messages.error(request, f'Provider account {provider_account.name} is disabled for sync.')
+            return redirect(provider_account.get_absolute_url())
+
+        job = SyncProviderAccountJob.enqueue(
+            user=request.user,
+            provider_account_pk=provider_account.pk,
+        )
+        messages.success(
+            request,
+            f'Enqueued provider sync job {job.pk} for {provider_account.name}.',
+        )
+        return redirect(provider_account.get_absolute_url())
+
+
+class ROAChangePlanPreviewView(ROAChangePlanActionView):
+    template_name = 'netbox_rpki/roachangeplan_preview.html'
+
+    def _render(self, request, plan, *, execution=None, error_text=None, status=200):
+        try:
+            delta = build_roa_change_plan_delta(plan)
+        except ProviderWriteError as exc:
+            delta = None
+            error_text = error_text or str(exc)
+            status = 400
+
+        return render(request, self.template_name, {
+            'object': plan,
+            'change_plan': plan,
+            'delta': delta,
+            'execution': execution,
+            'error_text': error_text,
+            'form': ConfirmationForm(),
+            'return_url': self.get_return_url(request, plan),
+        }, status=status)
+
+    def get(self, request, pk):
+        plan = self.get_plan(pk)
+        return self._render(request, plan)
+
+    def post(self, request, pk):
+        plan = self.get_plan(pk)
+        form = ConfirmationForm(request.POST)
+        if not form.is_valid():
+            return self._render(request, plan, status=400)
+
+        try:
+            execution, _ = preview_roa_change_plan_provider_write(
+                plan,
+                requested_by=self.get_requested_by(request),
+            )
+        except ProviderWriteError as exc:
+            return self._render(request, plan, error_text=str(exc), status=400)
+
+        messages.success(request, f'Recorded provider preview execution {execution.name}.')
+        return self._render(request, plan, execution=execution)
+
+
+class ROAChangePlanApproveView(ROAChangePlanActionView):
+    template_name = 'netbox_rpki/roachangeplan_confirm.html'
+    action_label = 'Approve'
+    button_class = 'primary'
+
+    def get(self, request, pk):
+        plan = self.get_plan(pk)
+        return render(request, self.template_name, {
+            'object': plan,
+            'change_plan': plan,
+            'form': ConfirmationForm(),
+            'return_url': self.get_return_url(request, plan),
+            'action_label': self.action_label,
+            'button_class': self.button_class,
+        })
+
+    def post(self, request, pk):
+        plan = self.get_plan(pk)
+        form = ConfirmationForm(request.POST)
+        if not form.is_valid():
+            return render(request, self.template_name, {
+                'object': plan,
+                'change_plan': plan,
+                'form': form,
+                'return_url': self.get_return_url(request, plan),
+                'action_label': self.action_label,
+                'button_class': self.button_class,
+            }, status=400)
+
+        try:
+            approve_roa_change_plan(plan, approved_by=self.get_requested_by(request))
+        except ProviderWriteError as exc:
+            messages.error(request, str(exc))
+            return redirect(plan.get_absolute_url())
+
+        messages.success(request, f'Approved ROA change plan {plan.name}.')
+        return redirect(plan.get_absolute_url())
+
+
+class ROAChangePlanApplyView(ROAChangePlanActionView):
+    template_name = 'netbox_rpki/roachangeplan_confirm.html'
+    action_label = 'Apply'
+    button_class = 'success'
+
+    def get(self, request, pk):
+        plan = self.get_plan(pk)
+        try:
+            delta = build_roa_change_plan_delta(plan)
+        except ProviderWriteError:
+            delta = None
+        return render(request, self.template_name, {
+            'object': plan,
+            'change_plan': plan,
+            'delta': delta,
+            'form': ConfirmationForm(),
+            'return_url': self.get_return_url(request, plan),
+            'action_label': self.action_label,
+            'button_class': self.button_class,
+        })
+
+    def post(self, request, pk):
+        plan = self.get_plan(pk)
+        form = ConfirmationForm(request.POST)
+        if not form.is_valid():
+            return render(request, self.template_name, {
+                'object': plan,
+                'change_plan': plan,
+                'form': form,
+                'return_url': self.get_return_url(request, plan),
+                'action_label': self.action_label,
+                'button_class': self.button_class,
+            }, status=400)
+
+        try:
+            execution, _ = apply_roa_change_plan_provider_write(
+                plan,
+                requested_by=self.get_requested_by(request),
+            )
+        except ProviderWriteError as exc:
+            messages.error(request, str(exc))
+            return redirect(plan.get_absolute_url())
+
+        if execution.status == models.ValidationRunStatus.COMPLETED:
+            messages.success(request, f'Applied ROA change plan {plan.name}.')
+        else:
+            messages.warning(
+                request,
+                f'Applied ROA change plan {plan.name}, but the follow-up provider sync did not complete successfully.',
+            )
+        return redirect(plan.get_absolute_url())

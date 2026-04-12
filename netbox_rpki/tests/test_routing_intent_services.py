@@ -15,6 +15,7 @@ from netbox_rpki.tests.utils import (
     create_test_imported_roa_authorization,
     create_test_organization,
     create_test_prefix,
+    create_test_provider_account,
     create_test_provider_snapshot,
     create_test_roa,
     create_test_roa_change_plan,
@@ -114,9 +115,18 @@ class RoutingIntentServiceTestCase(TestCase):
 
     def test_change_plan_creates_create_and_withdraw_actions(self):
         derivation_run = derive_roa_intents(self.profile)
+        provider_account = create_test_provider_account(
+            name='Plan Provider Account',
+            organization=self.organization,
+            provider_type=rpki_models.ProviderType.KRILL,
+            org_handle='ORG-PLAN',
+            ca_handle='ca-plan',
+            api_base_url='https://krill.example.invalid',
+        )
         provider_snapshot = create_test_provider_snapshot(
             name='Plan Snapshot',
             organization=self.organization,
+            provider_account=provider_account,
             status=rpki_models.ValidationRunStatus.COMPLETED,
         )
         orphaned_prefix = create_test_prefix('10.99.0.0/24')

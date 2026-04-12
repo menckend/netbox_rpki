@@ -36,6 +36,7 @@ from netbox_rpki.tests.utils import (
     create_test_provider_account,
     create_test_rir,
     create_test_roa,
+    create_test_roa_change_plan,
     create_test_roa_prefix,
     create_test_roa_reconciliation_run,
     create_test_routing_intent_profile,
@@ -114,7 +115,7 @@ class ViewSetSmokeTestCase(SimpleTestCase):
                 self.assertIs(viewset_class.filterset_class, filterset_class)
 
     def test_viewsets_expose_expected_http_method_contract(self):
-        read_only_post_exceptions = {'roareconciliationrun'}
+        read_only_post_exceptions = {'roareconciliationrun', 'roachangeplan'}
 
         for spec in API_OBJECT_SPECS:
             viewset_class = getattr(api_views, spec.api.viewset_name)
@@ -158,6 +159,13 @@ class RouterSmokeTestCase(SimpleTestCase):
 
 OBJECT_SPEC_BY_REGISTRY_KEY = {spec.registry_key: spec for spec in API_OBJECT_SPECS}
 
+
+def _get_custom_action_route_names(contract):
+    route_names = contract.get('route_names')
+    if route_names is not None:
+        return route_names
+    return (contract['route_name'],)
+
 CUSTOM_ACTION_CONTRACTS = {
     'routingintentprofile': {
         'actions': ('run',),
@@ -177,11 +185,23 @@ CUSTOM_ACTION_CONTRACTS = {
     },
     'roareconciliationrun': {
         'actions': ('create_plan',),
-        'route_name': 'plugins-api:netbox_rpki-api:roareconciliationrun-create-plan',
+        'route_names': ('plugins-api:netbox_rpki-api:roareconciliationrun-create-plan',),
         'denied_status': 403,
         'view_permissions': ('netbox_rpki.view_roareconciliationrun',),
         'allowed_permissions': ('netbox_rpki.view_roareconciliationrun', 'netbox_rpki.change_routingintentprofile'),
         'instance_attr': 'reconciliation_run',
+    },
+    'roachangeplan': {
+        'actions': ('apply', 'approve', 'preview'),
+        'route_names': (
+            'plugins-api:netbox_rpki-api:roachangeplan-preview',
+            'plugins-api:netbox_rpki-api:roachangeplan-approve',
+            'plugins-api:netbox_rpki-api:roachangeplan-apply',
+        ),
+        'denied_status': 404,
+        'view_permissions': ('netbox_rpki.view_roachangeplan',),
+        'allowed_permissions': ('netbox_rpki.view_roachangeplan', 'netbox_rpki.change_roachangeplan'),
+        'instance_attr': 'change_plan',
     },
 }
 
@@ -485,38 +505,48 @@ class CustomActionSurfaceContractTestCase(PluginAPITestCase):
             organization=cls.organization,
             intent_profile=cls.routing_intent_profile,
         )
+        cls.change_plan = create_test_roa_change_plan(
+            name='Custom Action Change Plan',
+            organization=cls.organization,
+            source_reconciliation_run=cls.reconciliation_run,
+        )
 
     def test_custom_action_routes_reverse(self):
         for registry_key, contract in CUSTOM_ACTION_CONTRACTS.items():
             instance = getattr(self, contract['instance_attr'])
 
             with self.subTest(object_key=registry_key):
-                self.assertTrue(reverse(contract['route_name'], kwargs={'pk': instance.pk}))
+                for route_name in _get_custom_action_route_names(contract):
+                    self.assertTrue(reverse(route_name, kwargs={'pk': instance.pk}))
 
     def test_custom_actions_reject_get_requests(self):
         for registry_key, contract in CUSTOM_ACTION_CONTRACTS.items():
             self.add_permissions(*contract['allowed_permissions'])
             instance = getattr(self, contract['instance_attr'])
 
-            response = self.client.get(reverse(contract['route_name'], kwargs={'pk': instance.pk}), **self.header)
 
-            with self.subTest(object_key=registry_key):
-                self.assertHttpStatus(response, 405)
+            for route_name in _get_custom_action_route_names(contract):
+                response = self.client.get(reverse(route_name, kwargs={'pk': instance.pk}), **self.header)
+
+                with self.subTest(object_key=registry_key, route_name=route_name):
+                    self.assertHttpStatus(response, 405)
 
     def test_custom_actions_require_elevated_permissions(self):
         for registry_key, contract in CUSTOM_ACTION_CONTRACTS.items():
             self.add_permissions(*contract['view_permissions'])
             instance = getattr(self, contract['instance_attr'])
 
-            response = self.client.post(
-                reverse(contract['route_name'], kwargs={'pk': instance.pk}),
-                {},
-                format='json',
-                **self.header,
-            )
 
-            with self.subTest(object_key=registry_key):
-                self.assertHttpStatus(response, contract['denied_status'])
+            for route_name in _get_custom_action_route_names(contract):
+                response = self.client.post(
+                    reverse(route_name, kwargs={'pk': instance.pk}),
+                    {},
+                    format='json',
+                    **self.header,
+                )
+
+                with self.subTest(object_key=registry_key, route_name=route_name):
+                    self.assertHttpStatus(response, contract['denied_status'])
 
 
 @_install_registry_api_tests

@@ -25,6 +25,28 @@ else
 	printf 'Runserver: stopped\n\n'
 fi
 
+if worker_is_running; then
+	mapfile -t worker_pids < <(find_worker_pids)
+	printf 'Worker: running ('
+	printf '%s' "${worker_pids[*]}" | tr ' ' ','
+	printf ')\n\n'
+else
+	printf 'Worker: stopped\n\n'
+fi
+
+if krill_is_installed; then
+	if krill_is_running; then
+		mapfile -t krill_pids < <(find_krill_pids)
+		printf 'Krill: running ('
+		printf '%s' "${krill_pids[*]}" | tr ' ' ','
+		printf ')\n\n'
+	else
+		printf 'Krill: installed but stopped\n\n'
+	fi
+else
+	printf 'Krill: not installed under %s\n\n' "$KRILL_ROOT"
+fi
+
 docker_compose ps
 printf '\nPostgreSQL: '
 pg_isready -h 127.0.0.1 -p 5432 || true

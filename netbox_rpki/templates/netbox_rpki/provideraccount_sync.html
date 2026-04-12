@@ -1,0 +1,46 @@
+{% extends 'generic/_base.html' %}
+
+{% block title %}Sync {{ provider_account }}{% endblock %}
+
+{% block content %}
+  <div class="row mt-5">
+    <div class="col col-md-8 offset-md-2">
+      <form action="" method="post" class="form">
+        {% csrf_token %}
+        {% for field in form.hidden_fields %}
+          {{ field }}
+        {% endfor %}
+        <div class="card border-primary">
+          <h2 class="card-header">Sync Provider Account</h2>
+          <div class="card-body">
+            <p>
+              Queue a provider sync for <strong>{{ provider_account }}</strong>.
+              This uses the same background job flow exposed by the API sync action.
+            </p>
+            <dl class="row mb-0">
+              <dt class="col-sm-4">Provider Type</dt>
+              <dd class="col-sm-8">{{ provider_account.provider_type }}</dd>
+              <dt class="col-sm-4">Transport</dt>
+              <dd class="col-sm-8">{{ provider_account.transport }}</dd>
+              <dt class="col-sm-4">Sync Enabled</dt>
+              <dd class="col-sm-8">{{ provider_account.sync_enabled }}</dd>
+              <dt class="col-sm-4">Last Sync Status</dt>
+              <dd class="col-sm-8">{{ provider_account.last_sync_status }}</dd>
+            </dl>
+            {% if not provider_account.sync_enabled %}
+              <div class="alert alert-warning mt-3 mb-0" role="alert">
+                This provider account is currently disabled for sync.
+              </div>
+            {% endif %}
+          </div>
+          <div class="card-footer text-end">
+            <a href="{{ return_url }}" class="btn btn-outline-secondary">Cancel</a>
+            {% if provider_account.sync_enabled %}
+              <button type="submit" name="_confirm" class="btn btn-primary">Queue Sync</button>
+            {% endif %}
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endblock %}

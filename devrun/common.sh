@@ -11,6 +11,11 @@ CREDENTIALS_FILE="${CREDENTIALS_FILE:-$STATE_DIR/credentials.env}"
 CONFIG_FILE="${CONFIG_FILE:-$NETBOX_PROJECT_DIR/netbox/configuration.py}"
 ENV_FILE="${ENV_FILE:-$DEVRUN_DIR/.env}"
 PLUGIN_NAME="netbox_rpki"
+KRILL_ROOT="${KRILL_ROOT:-$HOME/src/krill_for_netbox_rpki}"
+KRILL_START_SCRIPT="${KRILL_START_SCRIPT:-$KRILL_ROOT/scripts/start-krill.sh}"
+KRILL_STOP_SCRIPT="${KRILL_STOP_SCRIPT:-$KRILL_ROOT/scripts/stop-krill.sh}"
+KRILL_PID_FILE="${KRILL_PID_FILE:-$KRILL_ROOT/var/run/krill.pid}"
+KRILL_CMD_PATTERN="${KRILL_CMD_PATTERN:-$KRILL_ROOT/cargo-root/bin/krill -c $KRILL_ROOT/etc/krill.conf}"
 
 find_runserver_pids() {
     local pid
@@ -25,6 +30,28 @@ find_runserver_pids() {
     done < <(pgrep -u "$USER" -f 'manage.py runserver' || true)
 }
 
+find_worker_pids() {
+    local pid
+    local cwd
+
+    while IFS= read -r pid; do
+        [ -n "$pid" ] || continue
+        cwd="$(readlink -f "/proc/$pid/cwd" 2>/dev/null || true)"
+        if [ "$cwd" = "$NETBOX_PROJECT_DIR" ]; then
+            printf '%s\n' "$pid"
+        fi
+    done < <(pgrep -u "$USER" -f 'manage.py rqworker default' || true)
+}
+
+find_krill_pids() {
+    local pid
+
+    while IFS= read -r pid; do
+        [ -n "$pid" ] || continue
+        printf '%s\n' "$pid"
+    done < <(pgrep -u "$USER" -f "$KRILL_CMD_PATTERN" || true)
+}
+
 runserver_is_running() {
     local pid
 
@@ -33,6 +60,34 @@ runserver_is_running() {
             return 0
         fi
     done < <(find_runserver_pids)
+
+    return 1
+}
+
+krill_is_installed() {
+    [ -x "$KRILL_START_SCRIPT" ] && [ -x "$KRILL_STOP_SCRIPT" ]
+}
+
+worker_is_running() {
+    local pid
+
+    while IFS= read -r pid; do
+        if [ -n "$pid" ]; then
+            return 0
+        fi
+    done < <(find_worker_pids)
+
+    return 1
+}
+
+krill_is_running() {
+    local pid
+
+    while IFS= read -r pid; do
+        if [ -n "$pid" ]; then
+            return 0
+        fi
+    done < <(find_krill_pids)
 
     return 1
 }
@@ -48,6 +103,33 @@ stop_runserver() {
     done < <(find_runserver_pids)
 
     return "$stopped"
+}
+
+start_krill() {
+    if ! krill_is_installed; then
+        return 1
+    fi
+    "$KRILL_START_SCRIPT"
+}
+
+stop_worker() {
+    local pid
+    local stopped=1
+
+    while IFS= read -r pid; do
+        [ -n "$pid" ] || continue
+        kill "$pid" >/dev/null 2>&1 || true
+        stopped=0
+    done < <(find_worker_pids)
+
+    return "$stopped"
+}
+
+stop_krill() {
+    if ! krill_is_installed; then
+        return 1
+    fi
+    "$KRILL_STOP_SCRIPT"
 }
 
 require_command() {

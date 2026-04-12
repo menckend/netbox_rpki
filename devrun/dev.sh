@@ -7,8 +7,8 @@ usage() {
     cat <<'EOF'
 Usage: ./dev.sh <start|stop|status|seed|e2e>
 
-  start   Ensure containers, config, migrations, static assets, and run the NetBox dev server
-  stop    Stop the NetBox dev server and container stack
+  start   Ensure containers, config, migrations, worker, optional Krill, and run the NetBox dev server
+  stop    Stop the NetBox dev server, worker, optional Krill, and container stack
   status  Show the current NetBox dev environment and process status
     seed    Populate the local dev database with reusable RPKI sample data
     e2e     Run Playwright browser tests through the local WSL wrapper
@@ -22,6 +22,13 @@ start_dev() {
     fi
 
     "$DEVRUN_DIR/bootstrap-netbox.sh"
+    ensure_state_dir
+    if krill_is_installed && ! krill_is_running; then
+        "$KRILL_START_SCRIPT"
+    fi
+    if ! worker_is_running; then
+        nohup "$DEVRUN_DIR/worker.sh" >"$STATE_DIR/worker.log" 2>&1 &
+    fi
     exec "$DEVRUN_DIR/runserver.sh"
 }
 

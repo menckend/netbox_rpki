@@ -219,7 +219,6 @@ class ProviderAccountSyncActionAPITestCase(PluginAPITestCase):
         self.assertHttpStatus(response, 200)
         self.assertEqual(response.data['job']['id'], 777)
         enqueue_mock.assert_called_once_with(
-            instance=self.provider_account,
             user=self.user,
             provider_account_pk=self.provider_account.pk,
         )

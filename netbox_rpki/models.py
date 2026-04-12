@@ -176,6 +176,11 @@ class ProviderType(models.TextChoices):
     KRILL = "krill", "Krill"
 
 
+class ProviderRoaWriteMode(models.TextChoices):
+    UNSUPPORTED = "unsupported", "Unsupported"
+    KRILL_ROUTE_DELTA = "krill_route_delta", "Krill Route Delta"
+
+
 class ProviderSyncTransport(models.TextChoices):
     PRODUCTION = "production", "Production"
     OTE = "ote", "OT&E"
@@ -213,12 +218,24 @@ class PublishedROAResultType(models.TextChoices):
 class ROAChangePlanStatus(models.TextChoices):
     DRAFT = "draft", "Draft"
     APPROVED = "approved", "Approved"
+    APPLYING = "applying", "Applying"
     APPLIED = "applied", "Applied"
+    FAILED = "failed", "Failed"
 
 
 class ROAChangePlanAction(models.TextChoices):
     CREATE = "create", "Create"
     WITHDRAW = "withdraw", "Withdraw"
+
+
+class ProviderWriteOperation(models.TextChoices):
+    ADD_ROUTE = "add_route", "Add Route"
+    REMOVE_ROUTE = "remove_route", "Remove Route"
+
+
+class ProviderWriteExecutionMode(models.TextChoices):
+    PREVIEW = "preview", "Preview"
+    APPLY = "apply", "Apply"
 
 
 class RpkiStandardModel(NetBoxModel):
@@ -1642,6 +1659,27 @@ class RpkiProviderAccount(NamedRpkiStandardModel):
             return self.ca_handle.strip()
         return self.org_handle.strip()
 
+    @property
+    def roa_write_mode(self) -> str:
+        if self.provider_type == ProviderType.KRILL:
+            return ProviderRoaWriteMode.KRILL_ROUTE_DELTA
+        return ProviderRoaWriteMode.UNSUPPORTED
+
+    @property
+    def supports_roa_write(self) -> bool:
+        return self.roa_write_mode != ProviderRoaWriteMode.UNSUPPORTED
+
+    @property
+    def roa_write_capability(self) -> dict:
+        supported_actions = []
+        if self.supports_roa_write:
+            supported_actions = [ROAChangePlanAction.CREATE, ROAChangePlanAction.WITHDRAW]
+        return {
+            'supports_roa_write': self.supports_roa_write,
+            'roa_write_mode': self.roa_write_mode,
+            'supported_roa_plan_actions': supported_actions,
+        }
+
 
 class ProviderSyncRun(NamedRpkiStandardModel):
     organization = models.ForeignKey(
@@ -2025,11 +2063,31 @@ class ROAChangePlan(NamedRpkiStandardModel):
         on_delete=models.PROTECT,
         related_name='change_plans'
     )
+    provider_account = models.ForeignKey(
+        to='RpkiProviderAccount',
+        on_delete=models.PROTECT,
+        related_name='roa_change_plans',
+        blank=True,
+        null=True,
+    )
+    provider_snapshot = models.ForeignKey(
+        to='ProviderSnapshot',
+        on_delete=models.PROTECT,
+        related_name='roa_change_plans',
+        blank=True,
+        null=True,
+    )
     status = models.CharField(
         max_length=16,
         choices=ROAChangePlanStatus.choices,
         default=ROAChangePlanStatus.DRAFT,
     )
+    approved_at = models.DateTimeField(blank=True, null=True)
+    approved_by = models.CharField(max_length=150, blank=True)
+    apply_started_at = models.DateTimeField(blank=True, null=True)
+    apply_requested_by = models.CharField(max_length=150, blank=True)
+    applied_at = models.DateTimeField(blank=True, null=True)
+    failed_at = models.DateTimeField(blank=True, null=True)
     summary_json = models.JSONField(default=dict, blank=True)
 
     class Meta:
@@ -2040,6 +2098,94 @@ class ROAChangePlan(NamedRpkiStandardModel):
 
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:roachangeplan", args=[self.pk])
+
+    @property
+    def is_provider_backed(self) -> bool:
+        return self.provider_account_id is not None and self.provider_snapshot_id is not None
+
+    @property
+    def supports_provider_write(self) -> bool:
+        return self.is_provider_backed and self.provider_account.supports_roa_write
+
+    @property
+    def can_preview(self) -> bool:
+        return self.supports_provider_write and self.status in {
+            ROAChangePlanStatus.DRAFT,
+            ROAChangePlanStatus.APPROVED,
+            ROAChangePlanStatus.FAILED,
+        }
+
+    @property
+    def can_approve(self) -> bool:
+        return self.supports_provider_write and self.status == ROAChangePlanStatus.DRAFT
+
+    @property
+    def can_apply(self) -> bool:
+        return self.supports_provider_write and self.status == ROAChangePlanStatus.APPROVED
+
+
+class ProviderWriteExecution(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='provider_write_executions'
+    )
+    provider_account = models.ForeignKey(
+        to='RpkiProviderAccount',
+        on_delete=models.PROTECT,
+        related_name='write_executions'
+    )
+    provider_snapshot = models.ForeignKey(
+        to='ProviderSnapshot',
+        on_delete=models.PROTECT,
+        related_name='write_executions',
+        blank=True,
+        null=True,
+    )
+    change_plan = models.ForeignKey(
+        to='ROAChangePlan',
+        on_delete=models.PROTECT,
+        related_name='provider_write_executions'
+    )
+    execution_mode = models.CharField(
+        max_length=16,
+        choices=ProviderWriteExecutionMode.choices,
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=ValidationRunStatus.choices,
+        default=ValidationRunStatus.PENDING,
+    )
+    requested_by = models.CharField(max_length=150, blank=True)
+    started_at = models.DateTimeField(blank=True, null=True)
+    completed_at = models.DateTimeField(blank=True, null=True)
+    item_count = models.PositiveIntegerField(default=0)
+    request_payload_json = models.JSONField(default=dict, blank=True)
+    response_payload_json = models.JSONField(default=dict, blank=True)
+    error = models.TextField(blank=True)
+    followup_sync_run = models.ForeignKey(
+        to='ProviderSyncRun',
+        on_delete=models.PROTECT,
+        related_name='provider_write_executions',
+        blank=True,
+        null=True,
+    )
+    followup_provider_snapshot = models.ForeignKey(
+        to='ProviderSnapshot',
+        on_delete=models.PROTECT,
+        related_name='followup_write_executions',
+        blank=True,
+        null=True,
+    )
+
+    class Meta:
+        ordering = ("-started_at", "name")
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:providerwriteexecution", args=[self.pk])
 
 
 class ROAChangePlanItem(NamedRpkiStandardModel):
@@ -2073,6 +2219,12 @@ class ROAChangePlanItem(NamedRpkiStandardModel):
         blank=True,
         null=True
     )
+    provider_operation = models.CharField(
+        max_length=32,
+        choices=ProviderWriteOperation.choices,
+        blank=True,
+    )
+    provider_payload_json = models.JSONField(default=dict, blank=True)
     before_state_json = models.JSONField(default=dict, blank=True)
     after_state_json = models.JSONField(default=dict, blank=True)
     reason = models.TextField(blank=True)

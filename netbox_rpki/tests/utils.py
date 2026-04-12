@@ -1196,7 +1196,15 @@ def create_test_roa_change_plan(
     name='ROA Change Plan 1',
     organization=None,
     source_reconciliation_run=None,
+    provider_account=None,
+    provider_snapshot=None,
     status=None,
+    approved_at=None,
+    approved_by='',
+    apply_started_at=None,
+    apply_requested_by='',
+    applied_at=None,
+    failed_at=None,
     summary_json=None,
     **kwargs,
 ):
@@ -1215,7 +1223,15 @@ def create_test_roa_change_plan(
         name=name,
         organization=organization,
         source_reconciliation_run=source_reconciliation_run,
+        provider_account=provider_account,
+        provider_snapshot=provider_snapshot,
         status=status or rpki_models.ROAChangePlanStatus.DRAFT,
+        approved_at=approved_at,
+        approved_by=approved_by,
+        apply_started_at=apply_started_at,
+        apply_requested_by=apply_requested_by,
+        applied_at=applied_at,
+        failed_at=failed_at,
         summary_json=summary_json or {},
         **kwargs,
     )
@@ -1228,6 +1244,8 @@ def create_test_roa_change_plan_item(
     roa_intent=None,
     roa=None,
     imported_authorization=None,
+    provider_operation='',
+    provider_payload_json=None,
     before_state_json=None,
     after_state_json=None,
     reason='',
@@ -1242,9 +1260,66 @@ def create_test_roa_change_plan_item(
         roa_intent=roa_intent,
         roa=roa,
         imported_authorization=imported_authorization,
+        provider_operation=provider_operation,
+        provider_payload_json=provider_payload_json or {},
         before_state_json=before_state_json or {},
         after_state_json=after_state_json or {},
         reason=reason,
+        **kwargs,
+    )
+
+
+def create_test_provider_write_execution(
+    name='Provider Write Execution 1',
+    organization=None,
+    provider_account=None,
+    provider_snapshot=None,
+    change_plan=None,
+    execution_mode=None,
+    status=None,
+    requested_by='',
+    started_at=None,
+    completed_at=None,
+    item_count=0,
+    request_payload_json=None,
+    response_payload_json=None,
+    error='',
+    followup_sync_run=None,
+    followup_provider_snapshot=None,
+    **kwargs,
+):
+    if organization is None:
+        organization = create_test_organization()
+    if provider_account is None:
+        provider_account = create_test_provider_account(organization=organization)
+    if provider_snapshot is None:
+        provider_snapshot = create_test_provider_snapshot(
+            organization=organization,
+            provider_account=provider_account,
+        )
+    if change_plan is None:
+        change_plan = create_test_roa_change_plan(
+            organization=organization,
+            provider_account=provider_account,
+            provider_snapshot=provider_snapshot,
+        )
+    return rpki_models.ProviderWriteExecution.objects.create(
+        name=name,
+        organization=organization,
+        provider_account=provider_account,
+        provider_snapshot=provider_snapshot,
+        change_plan=change_plan,
+        execution_mode=execution_mode or rpki_models.ProviderWriteExecutionMode.PREVIEW,
+        status=status or rpki_models.ValidationRunStatus.COMPLETED,
+        requested_by=requested_by,
+        started_at=started_at,
+        completed_at=completed_at,
+        item_count=item_count,
+        request_payload_json=request_payload_json or {},
+        response_payload_json=response_payload_json or {},
+        error=error,
+        followup_sync_run=followup_sync_run,
+        followup_provider_snapshot=followup_provider_snapshot,
         **kwargs,
     )
 

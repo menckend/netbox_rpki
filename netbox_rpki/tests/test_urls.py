@@ -58,3 +58,22 @@ class UrlRegistrationTestCase(SimpleTestCase):
                 self.assertEqual(get_action_url(spec.model, action='list'), reverse(spec.routes.list_url_name))
                 if spec.view.supports_create:
                     self.assertEqual(get_action_url(spec.model, action='add'), reverse(spec.routes.add_url_name))
+
+    def test_roa_change_plan_custom_action_routes_reverse_and_resolve(self):
+        expected_routes = {
+            'plugins:netbox_rpki:roachangeplan_preview': '/plugins/netbox_rpki/roachangeplans/1/preview/',
+            'plugins:netbox_rpki:roachangeplan_approve': '/plugins/netbox_rpki/roachangeplans/1/approve/',
+            'plugins:netbox_rpki:roachangeplan_apply': '/plugins/netbox_rpki/roachangeplans/1/apply/',
+        }
+
+        for view_name, path in expected_routes.items():
+            with self.subTest(view_name=view_name):
+                self.assertEqual(reverse(view_name, kwargs={'pk': 1}), path)
+                self.assertEqual(resolve(path).view_name, view_name)
+
+    def test_provider_account_sync_route_reverses_and_resolves(self):
+        view_name = 'plugins:netbox_rpki:provideraccount_sync'
+        path = '/plugins/netbox_rpki/provideraccounts/1/sync/'
+
+        self.assertEqual(reverse(view_name, kwargs={'pk': 1}), path)
+        self.assertEqual(resolve(path).view_name, view_name)

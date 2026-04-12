@@ -758,6 +758,28 @@ def _serialize_published_source_for_plan(published_result: rpki_models.Published
     }
 
 
+def _serialize_provider_route_payload_for_intent(intent: rpki_models.ROAIntent) -> dict:
+    return {
+        'asn': intent.origin_asn_value,
+        'prefix': intent.prefix_cidr_text,
+        'max_length': intent.max_length,
+    }
+
+
+def _serialize_provider_route_payload_for_imported(
+    imported: rpki_models.ImportedRoaAuthorization,
+) -> dict:
+    payload = {
+        'asn': imported.origin_asn_value,
+        'prefix': imported.prefix_cidr_text,
+        'max_length': imported.max_length,
+    }
+    comment = imported.payload_json.get('comment') if isinstance(imported.payload_json, dict) else None
+    if comment:
+        payload['comment'] = comment
+    return payload
+
+
 def create_roa_change_plan(
     reconciliation_run: rpki_models.ROAReconciliationRun,
     *,
@@ -767,10 +789,26 @@ def create_roa_change_plan(
         raise RoutingIntentExecutionError('ROA change plans can only be created from completed reconciliation runs.')
 
     now = timezone.now()
+    provider_account = None
+    provider_snapshot = None
+    if reconciliation_run.comparison_scope == rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED:
+        provider_snapshot = reconciliation_run.provider_snapshot
+        if provider_snapshot is None:
+            raise RoutingIntentExecutionError(
+                'Provider-imported reconciliation runs must reference the source provider snapshot.'
+            )
+        provider_account = provider_snapshot.provider_account
+        if provider_account is None:
+            raise RoutingIntentExecutionError(
+                'Provider-imported reconciliation runs must reference a provider snapshot with a provider account.'
+            )
+
     plan = rpki_models.ROAChangePlan.objects.create(
         name=name or f'{reconciliation_run.name} Change Plan {now:%Y-%m-%d %H:%M:%S}',
         organization=reconciliation_run.organization,
         source_reconciliation_run=reconciliation_run,
+        provider_account=provider_account,
+        provider_snapshot=provider_snapshot,
         tenant=reconciliation_run.tenant,
         status=rpki_models.ROAChangePlanStatus.DRAFT,
     )
@@ -790,6 +828,16 @@ def create_roa_change_plan(
                 tenant=intent_result.tenant,
                 action_type=rpki_models.ROAChangePlanAction.CREATE,
                 roa_intent=intent_result.roa_intent,
+                provider_operation=(
+                    rpki_models.ProviderWriteOperation.ADD_ROUTE
+                    if provider_account is not None
+                    else ''
+                ),
+                provider_payload_json=(
+                    _serialize_provider_route_payload_for_intent(intent_result.roa_intent)
+                    if provider_account is not None
+                    else {}
+                ),
                 after_state_json=_serialize_intent_for_plan(intent_result.roa_intent),
                 reason='Intent is active but no published authorization matched.',
             )
@@ -806,6 +854,16 @@ def create_roa_change_plan(
                 action_type=rpki_models.ROAChangePlanAction.WITHDRAW,
                 roa=published_result.roa,
                 imported_authorization=published_result.imported_authorization,
+                provider_operation=(
+                    rpki_models.ProviderWriteOperation.REMOVE_ROUTE
+                    if provider_account is not None and published_result.imported_authorization_id is not None
+                    else ''
+                ),
+                provider_payload_json=(
+                    _serialize_provider_route_payload_for_imported(published_result.imported_authorization)
+                    if provider_account is not None and published_result.imported_authorization_id is not None
+                    else {}
+                ),
                 before_state_json=_serialize_published_source_for_plan(published_result),
                 reason='Published authorization is orphaned relative to current intent.',
             )
@@ -817,6 +875,9 @@ def create_roa_change_plan(
     plan.summary_json = {
         'create_count': create_count,
         'withdraw_count': withdraw_count,
+        'provider_backed': provider_account is not None,
+        'provider_account_id': getattr(provider_account, 'pk', None),
+        'provider_snapshot_id': getattr(provider_snapshot, 'pk', None),
         'skipped_counts': skipped_counts,
     }
     plan.save(update_fields=('summary_json',))

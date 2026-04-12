@@ -25,7 +25,6 @@ class Command(BaseCommand):
 
         if options['enqueue']:
             job = SyncProviderAccountJob.enqueue(
-                instance=provider_account,
                 provider_account_pk=provider_account.pk,
             )
             self.stdout.write(self.style.SUCCESS(f'Enqueued job {job.pk} for provider account {provider_account.pk}.'))

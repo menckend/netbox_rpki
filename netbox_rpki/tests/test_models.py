@@ -23,6 +23,7 @@ from netbox_rpki.tests.utils import (
     create_test_provider_account,
     create_test_provider_snapshot,
     create_test_provider_sync_run,
+    create_test_provider_write_execution,
     create_test_published_roa_result,
     create_test_revoked_certificate,
     create_test_roa_change_plan,
@@ -252,6 +253,13 @@ class PriorityOneModelBehaviorTestCase(TestCase):
             action_type=rpki_models.ROAChangePlanAction.CREATE,
             roa_intent=cls.roa_intent,
         )
+        cls.provider_write_execution = create_test_provider_write_execution(
+            name='Provider Write Execution 1',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+            provider_snapshot=cls.provider_snapshot,
+            change_plan=cls.change_plan,
+        )
 
     def test_priority_one_models_stringify_cleanly(self):
         for instance in (
@@ -267,6 +275,7 @@ class PriorityOneModelBehaviorTestCase(TestCase):
             self.provider_account,
             self.provider_snapshot,
             self.provider_sync_run,
+            self.provider_write_execution,
             self.imported_authorization,
             self.change_plan,
             self.change_plan_item,
@@ -288,6 +297,7 @@ class PriorityOneModelBehaviorTestCase(TestCase):
             self.provider_account: 'provideraccount',
             self.provider_snapshot: 'providersnapshot',
             self.provider_sync_run: 'providersyncrun',
+            self.provider_write_execution: 'providerwriteexecution',
             self.imported_authorization: 'importedroaauthorization',
             self.change_plan: 'roachangeplan',
             self.change_plan_item: 'roachangeplanitem',
@@ -326,6 +336,52 @@ class PriorityOneModelBehaviorTestCase(TestCase):
 
         self.assertEqual(key_a, key_b)
         self.assertNotEqual(key_a, key_c)
+
+    def test_provider_account_exposes_explicit_roa_write_capability(self):
+        krill_account = create_test_provider_account(
+            name='Krill Capability Account',
+            organization=self.organization,
+            provider_type=rpki_models.ProviderType.KRILL,
+            org_handle='ORG-KRILL-CAP',
+            ca_handle='ca-krill-cap',
+            api_base_url='https://krill.example.invalid',
+        )
+
+        self.assertFalse(self.provider_account.supports_roa_write)
+        self.assertEqual(self.provider_account.roa_write_mode, rpki_models.ProviderRoaWriteMode.UNSUPPORTED)
+        self.assertTrue(krill_account.supports_roa_write)
+        self.assertEqual(krill_account.roa_write_mode, rpki_models.ProviderRoaWriteMode.KRILL_ROUTE_DELTA)
+        self.assertEqual(
+            krill_account.roa_write_capability['supported_roa_plan_actions'],
+            [rpki_models.ROAChangePlanAction.CREATE, rpki_models.ROAChangePlanAction.WITHDRAW],
+        )
+
+    def test_roa_change_plan_state_helpers_reflect_execution_lifecycle(self):
+        provider_account = create_test_provider_account(
+            name='Failed Plan Krill Account',
+            organization=self.organization,
+            provider_type=rpki_models.ProviderType.KRILL,
+            org_handle='ORG-FAILED-PLAN',
+            ca_handle='ca-failed-plan',
+            api_base_url='https://krill.example.invalid',
+        )
+        failed_plan = create_test_roa_change_plan(
+            name='Failed Change Plan',
+            organization=self.organization,
+            source_reconciliation_run=self.reconciliation_run,
+            provider_account=provider_account,
+            provider_snapshot=create_test_provider_snapshot(
+                name='Failed Plan Snapshot',
+                organization=self.organization,
+                provider_account=provider_account,
+            ),
+            status=rpki_models.ROAChangePlanStatus.FAILED,
+        )
+
+        self.assertFalse(self.change_plan.can_preview)
+        self.assertFalse(self.change_plan.can_apply)
+        self.assertTrue(failed_plan.can_preview)
+        self.assertFalse(failed_plan.can_apply)
 
     def test_roa_intent_enforces_unique_intent_key_per_derivation_run(self):
         with transaction.atomic():

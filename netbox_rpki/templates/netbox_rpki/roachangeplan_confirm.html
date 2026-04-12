@@ -1,0 +1,36 @@
+{% extends 'generic/_base.html' %}
+
+{% block title %}{{ action_label }} {{ change_plan }}{% endblock %}
+
+{% block content %}
+  <div class="row mt-5">
+    <div class="col col-md-8 offset-md-2">
+      <form action="" method="post" class="form">
+        {% csrf_token %}
+        {% for field in form.hidden_fields %}
+          {{ field }}
+        {% endfor %}
+        <div class="card border-warning">
+          <h2 class="card-header">{{ action_label }} ROA Change Plan</h2>
+          <div class="card-body">
+            <p>
+              {% if action_label == 'Approve' %}
+                Approve <strong>{{ change_plan }}</strong> for provider execution.
+              {% else %}
+                Apply <strong>{{ change_plan }}</strong> to the configured provider and trigger a follow-up provider sync.
+              {% endif %}
+            </p>
+            {% if delta %}
+              <h5>Outbound Delta</h5>
+              <pre class="mb-0"><code>{{ delta }}</code></pre>
+            {% endif %}
+          </div>
+          <div class="card-footer text-end">
+            <a href="{{ return_url }}" class="btn btn-outline-secondary">Cancel</a>
+            <button type="submit" name="_confirm" class="btn btn-{{ button_class|default:'primary' }}">{{ action_label }}</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endblock %}

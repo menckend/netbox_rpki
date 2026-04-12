@@ -31,6 +31,7 @@ from netbox_rpki.tests.utils import (
     create_test_provider_account,
 )
 from utilities.testing.utils import post_data
+from unittest.mock import patch
 
 
 class ViewRegistrySmokeTestCase(TestCase):
@@ -120,6 +121,83 @@ class GeneratedListViewActionLinkTestCase(PluginViewTestCase):
                     ('changelog',),
                 )
                 self.assertNotContains(response, '/None')
+
+
+class ProviderAccountSyncViewTestCase(PluginViewTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='provider-sync-ui-org', name='Provider Sync UI Org')
+        cls.provider_account = create_test_provider_account(
+            name='Provider Sync UI Account',
+            organization=cls.organization,
+            org_handle='ORG-SYNC-UI',
+        )
+        cls.disabled_provider_account = create_test_provider_account(
+            name='Provider Sync Disabled UI Account',
+            organization=cls.organization,
+            org_handle='ORG-SYNC-UI-DISABLED',
+            sync_enabled=False,
+        )
+
+    def test_provider_account_detail_shows_sync_button_when_enabled(self):
+        self.add_permissions('netbox_rpki.view_rpkiprovideraccount', 'netbox_rpki.change_rpkiprovideraccount')
+
+        response = self.client.get(self.provider_account.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, reverse('plugins:netbox_rpki:provideraccount_sync', kwargs={'pk': self.provider_account.pk}))
+
+    def test_provider_account_detail_hides_sync_button_when_disabled(self):
+        self.add_permissions('netbox_rpki.view_rpkiprovideraccount', 'netbox_rpki.change_rpkiprovideraccount')
+
+        response = self.client.get(self.disabled_provider_account.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertNotContains(response, reverse('plugins:netbox_rpki:provideraccount_sync', kwargs={'pk': self.disabled_provider_account.pk}))
+
+    def test_provider_account_sync_view_renders_confirmation(self):
+        self.add_permissions('netbox_rpki.view_rpkiprovideraccount', 'netbox_rpki.change_rpkiprovideraccount')
+
+        response = self.client.get(reverse('plugins:netbox_rpki:provideraccount_sync', kwargs={'pk': self.provider_account.pk}))
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'Sync Provider Account')
+        self.assertContains(response, self.provider_account.name)
+
+    def test_provider_account_sync_view_enqueues_job(self):
+        self.add_permissions('netbox_rpki.view_rpkiprovideraccount', 'netbox_rpki.change_rpkiprovideraccount')
+
+        class StubJob:
+            pk = 778
+            status = 'queued'
+
+            @staticmethod
+            def get_absolute_url():
+                return '/core/jobs/778/'
+
+        with patch('netbox_rpki.views.SyncProviderAccountJob.enqueue', return_value=StubJob()) as enqueue_mock:
+            response = self.client.post(
+                reverse('plugins:netbox_rpki:provideraccount_sync', kwargs={'pk': self.provider_account.pk}),
+                {'confirm': True},
+            )
+
+        self.assertRedirects(response, self.provider_account.get_absolute_url())
+        enqueue_mock.assert_called_once_with(
+            user=self.user,
+            provider_account_pk=self.provider_account.pk,
+        )
+
+    def test_provider_account_sync_view_does_not_enqueue_when_disabled(self):
+        self.add_permissions('netbox_rpki.view_rpkiprovideraccount', 'netbox_rpki.change_rpkiprovideraccount')
+
+        with patch('netbox_rpki.views.SyncProviderAccountJob.enqueue') as enqueue_mock:
+            response = self.client.post(
+                reverse('plugins:netbox_rpki:provideraccount_sync', kwargs={'pk': self.disabled_provider_account.pk}),
+                {'confirm': True},
+            )
+
+        self.assertRedirects(response, self.disabled_provider_account.get_absolute_url())
+        enqueue_mock.assert_not_called()
 
 
 class GeneratedSurfaceContractTestCase(PluginViewTestCase):

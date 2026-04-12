@@ -16,6 +16,34 @@ def build_object_urlpatterns(spec):
         path(f'{path_prefix}/', list_view.as_view(), name=f'{route_slug}_list'),
         path(f'{path_prefix}/<int:pk>/', detail_view.as_view(), name=route_slug),
     ]
+    if spec.registry_key == 'rpkiprovideraccount':
+        urlpatterns.append(
+            path(
+                f'{path_prefix}/<int:pk>/sync/',
+                views.ProviderAccountSyncView.as_view(),
+                name='provideraccount_sync',
+            )
+        )
+    if spec.registry_key == 'roachangeplan':
+        urlpatterns.extend(
+            (
+                path(
+                    f'{path_prefix}/<int:pk>/preview/',
+                    views.ROAChangePlanPreviewView.as_view(),
+                    name='roachangeplan_preview',
+                ),
+                path(
+                    f'{path_prefix}/<int:pk>/approve/',
+                    views.ROAChangePlanApproveView.as_view(),
+                    name='roachangeplan_approve',
+                ),
+                path(
+                    f'{path_prefix}/<int:pk>/apply/',
+                    views.ROAChangePlanApplyView.as_view(),
+                    name='roachangeplan_apply',
+                ),
+            )
+        )
     if spec.view.edit_class_name is not None:
         edit_view = getattr(views, spec.view.edit_class_name)
         urlpatterns.append(path(f'{path_prefix}/add/', edit_view.as_view(), name=f'{route_slug}_add'))
