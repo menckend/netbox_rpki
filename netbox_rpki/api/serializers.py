@@ -171,4 +171,12 @@ class ASPAReconciliationRunActionSerializer(serializers.Serializer):
         return attrs
 
 
+class ProviderSnapshotCompareActionSerializer(serializers.Serializer):
+    base_snapshot = serializers.PrimaryKeyRelatedField(
+        queryset=models.ProviderSnapshot.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+
+
 __all__ = tuple(spec.api.serializer_name for spec in API_OBJECT_SPECS)

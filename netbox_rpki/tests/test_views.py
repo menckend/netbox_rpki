@@ -23,8 +23,15 @@ from netbox_rpki.tests.utils import (
     create_test_intent_derivation_run,
     create_test_organization,
     create_test_prefix,
+    create_test_provider_snapshot_diff,
+    create_test_provider_snapshot_diff_item,
     create_test_published_roa_result,
     create_test_rir,
+    create_test_imported_ca_metadata,
+    create_test_imported_child_link,
+    create_test_imported_parent_link,
+    create_test_imported_publication_point,
+    create_test_imported_resource_entitlement,
     create_test_roa,
     create_test_roa_change_plan_matrix,
     create_test_roa_intent,
@@ -246,6 +253,150 @@ class ProviderAccountSyncViewTestCase(PluginViewTestCase):
         self.assertHttpStatus(response, 200)
         self.assertContains(response, 'Sync Health')
         self.assertContains(response, 'Stale')
+
+
+class ProviderSnapshotDetailViewTestCase(PluginViewTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='provider-snapshot-view-org', name='Provider Snapshot View Org')
+        cls.provider_account = create_test_provider_account(
+            name='Provider Snapshot View Account',
+            organization=cls.organization,
+            provider_type='krill',
+            org_handle='ORG-SNAPSHOT-VIEW',
+            ca_handle='snapshot-view',
+        )
+        cls.base_snapshot = create_test_provider_snapshot(
+            name='Provider Snapshot View Base',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+            provider_name='Krill',
+        )
+        cls.snapshot = create_test_provider_snapshot(
+            name='Provider Snapshot View Comparison',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+            provider_name='Krill',
+            summary_json={'families': {'ca_metadata': {'records_imported': 1}}},
+        )
+        create_test_imported_roa_authorization(
+            name='Provider Snapshot Imported ROA',
+            organization=cls.organization,
+            provider_snapshot=cls.snapshot,
+        )
+        create_test_imported_ca_metadata(
+            name='Provider Snapshot Imported CA Metadata',
+            organization=cls.organization,
+            provider_snapshot=cls.snapshot,
+        )
+        create_test_imported_parent_link(
+            name='Provider Snapshot Imported Parent Link',
+            organization=cls.organization,
+            provider_snapshot=cls.snapshot,
+        )
+        create_test_imported_child_link(
+            name='Provider Snapshot Imported Child Link',
+            organization=cls.organization,
+            provider_snapshot=cls.snapshot,
+        )
+        create_test_imported_resource_entitlement(
+            name='Provider Snapshot Imported Resource Entitlement',
+            organization=cls.organization,
+            provider_snapshot=cls.snapshot,
+        )
+        create_test_imported_publication_point(
+            name='Provider Snapshot Imported Publication Point',
+            organization=cls.organization,
+            provider_snapshot=cls.snapshot,
+        )
+        create_test_provider_snapshot_diff(
+            name='Provider Snapshot View Diff',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+            base_snapshot=cls.base_snapshot,
+            comparison_snapshot=cls.snapshot,
+        )
+
+    def test_provider_snapshot_detail_shows_family_tables_and_diffs(self):
+        self.add_permissions(
+            'netbox_rpki.view_providersnapshot',
+            'netbox_rpki.view_providersnapshotdiff',
+            'netbox_rpki.view_importedroaauthorization',
+            'netbox_rpki.view_importedcametadata',
+            'netbox_rpki.view_importedparentlink',
+            'netbox_rpki.view_importedchildlink',
+            'netbox_rpki.view_importedresourceentitlement',
+            'netbox_rpki.view_importedpublicationpoint',
+        )
+
+        response = self.client.get(self.snapshot.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'Snapshot Comparison Diffs')
+        self.assertContains(response, 'Imported CA Metadata')
+        self.assertContains(response, 'Imported Parent Links')
+        self.assertContains(response, 'Imported Child Links')
+        self.assertContains(response, 'Imported Resource Entitlements')
+        self.assertContains(response, 'Imported Publication Points')
+        self.assertContains(response, 'Provider Snapshot View Diff')
+        self.assertContains(response, 'Provider Snapshot Imported CA Metadata')
+
+
+class ProviderSnapshotDiffDetailViewTestCase(PluginViewTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='provider-diff-view-org', name='Provider Diff View Org')
+        cls.provider_account = create_test_provider_account(
+            name='Provider Diff View Account',
+            organization=cls.organization,
+            provider_type='krill',
+            org_handle='ORG-DIFF-VIEW',
+            ca_handle='diff-view',
+        )
+        cls.base_snapshot = create_test_provider_snapshot(
+            name='Provider Diff Base Snapshot',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+        )
+        cls.comparison_snapshot = create_test_provider_snapshot(
+            name='Provider Diff Comparison Snapshot',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+        )
+        cls.snapshot_diff = create_test_provider_snapshot_diff(
+            name='Provider Diff View',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+            base_snapshot=cls.base_snapshot,
+            comparison_snapshot=cls.comparison_snapshot,
+            summary_json={'totals': {'records_changed': 1}},
+        )
+        cls.snapshot_diff_item = create_test_provider_snapshot_diff_item(
+            name='Provider Diff View Item',
+            snapshot_diff=cls.snapshot_diff,
+            provider_identity='provider:diff:item',
+            before_state_json={'state': 'before'},
+            after_state_json={'state': 'after'},
+        )
+
+    def test_provider_snapshot_diff_detail_shows_diff_items(self):
+        self.add_permissions('netbox_rpki.view_providersnapshotdiff', 'netbox_rpki.view_providersnapshotdiffitem')
+
+        response = self.client.get(self.snapshot_diff.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'Provider Snapshot Diff Items')
+        self.assertContains(response, self.snapshot_diff_item.name)
+
+    def test_provider_snapshot_diff_item_detail_shows_state_payloads(self):
+        self.add_permissions('netbox_rpki.view_providersnapshotdiffitem', 'netbox_rpki.view_providersnapshotdiff')
+
+        response = self.client.get(self.snapshot_diff_item.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'provider:diff:item')
+        self.assertContains(response, '&quot;state&quot;: &quot;before&quot;')
+        self.assertContains(response, '&quot;state&quot;: &quot;after&quot;')
 
 
 class OrganizationAspaReconciliationViewTestCase(PluginViewTestCase):

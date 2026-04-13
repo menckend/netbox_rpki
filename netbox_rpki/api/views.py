@@ -10,12 +10,17 @@ from netbox_rpki import models as rpki_models
 from netbox_rpki import filtersets as filterset_module
 from netbox_rpki.api.serializers import (
     ASPAReconciliationRunActionSerializer,
+    ProviderSnapshotCompareActionSerializer,
     ROAChangePlanApproveActionSerializer,
     SERIALIZER_CLASS_MAP,
 )
 from netbox_rpki.jobs import RunAspaReconciliationJob, RunRoutingIntentProfileJob, SyncProviderAccountJob
 from netbox_rpki.object_registry import API_OBJECT_SPECS
 from netbox_rpki.object_specs import ObjectSpec
+from netbox_rpki.services.provider_sync_diff import (
+    build_latest_provider_snapshot_diff,
+    build_provider_snapshot_diff,
+)
 from netbox_rpki.services import (
     ProviderWriteError,
     apply_roa_change_plan_provider_write,
@@ -175,6 +180,95 @@ class RpkiProviderAccountViewSet(VIEWSET_CLASS_MAP['rpkiprovideraccount']):
             }
         payload['sync_in_progress'] = not created
         return Response(payload)
+
+    @action(detail=False, methods=['get'])
+    def summary(self, request):
+        queryset = self.filter_queryset(self.get_queryset())
+        by_provider_type: dict[str, int] = {}
+        by_sync_health: dict[str, int] = {}
+        sync_due_count = 0
+        roa_write_supported_count = 0
+
+        for provider_account in queryset:
+            by_provider_type[provider_account.provider_type] = by_provider_type.get(provider_account.provider_type, 0) + 1
+            by_sync_health[provider_account.sync_health] = by_sync_health.get(provider_account.sync_health, 0) + 1
+            if provider_account.is_sync_due():
+                sync_due_count += 1
+            if provider_account.supports_roa_write:
+                roa_write_supported_count += 1
+
+        return Response({
+            'total_accounts': queryset.count(),
+            'by_provider_type': by_provider_type,
+            'by_sync_health': by_sync_health,
+            'sync_due_count': sync_due_count,
+            'roa_write_supported_count': roa_write_supported_count,
+        })
+
+
+class ProviderSnapshotViewSet(VIEWSET_CLASS_MAP['providersnapshot']):
+    http_method_names = ['get', 'head', 'options', 'post']
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+
+        if getattr(self, 'action', None) == 'compare' and self.request.user.is_authenticated:
+            return self.queryset.model.objects.restrict(self.request.user, 'view')
+
+        return queryset
+
+    @action(detail=True, methods=['post'], permission_classes=[TokenWritePermission])
+    def compare(self, request, pk=None):
+        comparison_snapshot = self.get_object()
+
+        if not request.user.has_perm('netbox_rpki.view_providersnapshot', comparison_snapshot):
+            raise PermissionDenied('This user does not have permission to compare this provider snapshot.')
+
+        input_serializer = ProviderSnapshotCompareActionSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+        base_snapshot = input_serializer.validated_data.get('base_snapshot')
+
+        try:
+            if base_snapshot is None:
+                snapshot_diff = build_latest_provider_snapshot_diff(comparison_snapshot)
+                if snapshot_diff is None:
+                    raise ValidationError(
+                        {'base_snapshot': 'No earlier completed snapshot is available for comparison.'}
+                    )
+            else:
+                snapshot_diff = build_provider_snapshot_diff(
+                    base_snapshot=base_snapshot,
+                    comparison_snapshot=comparison_snapshot,
+                )
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+
+        serializer = SERIALIZER_CLASS_MAP['providersnapshotdiff'](snapshot_diff, context={'request': request})
+        payload = dict(serializer.data)
+        payload['item_count'] = snapshot_diff.items.count()
+        return Response(payload)
+
+    @action(detail=False, methods=['get'])
+    def summary(self, request):
+        queryset = self.filter_queryset(self.get_queryset())
+        by_status: dict[str, int] = {}
+        latest_completed_at = None
+        with_diff_count = 0
+
+        for snapshot in queryset:
+            by_status[snapshot.status] = by_status.get(snapshot.status, 0) + 1
+            if snapshot.completed_at is not None and (latest_completed_at is None or snapshot.completed_at > latest_completed_at):
+                latest_completed_at = snapshot.completed_at
+            if snapshot.diffs_as_comparison.exists():
+                with_diff_count += 1
+
+        return Response({
+            'total_snapshots': queryset.count(),
+            'completed_snapshots': by_status.get(rpki_models.ValidationRunStatus.COMPLETED, 0),
+            'by_status': by_status,
+            'with_diff_count': with_diff_count,
+            'latest_completed_at': latest_completed_at,
+        })
 
 
 class ROAReconciliationRunViewSet(VIEWSET_CLASS_MAP['roareconciliationrun']):
@@ -364,6 +458,8 @@ VIEWSET_CLASS_MAP['organization'] = OrganizationViewSet
 globals()['OrganizationViewSet'] = OrganizationViewSet
 VIEWSET_CLASS_MAP['rpkiprovideraccount'] = RpkiProviderAccountViewSet
 globals()['RpkiProviderAccountViewSet'] = RpkiProviderAccountViewSet
+VIEWSET_CLASS_MAP['providersnapshot'] = ProviderSnapshotViewSet
+globals()['ProviderSnapshotViewSet'] = ProviderSnapshotViewSet
 VIEWSET_CLASS_MAP['roareconciliationrun'] = ROAReconciliationRunViewSet
 globals()['ROAReconciliationRunViewSet'] = ROAReconciliationRunViewSet
 VIEWSET_CLASS_MAP['roachangeplan'] = ROAChangePlanViewSet

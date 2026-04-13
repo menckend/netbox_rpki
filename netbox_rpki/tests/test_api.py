@@ -39,6 +39,7 @@ from netbox_rpki.tests.utils import (
     create_test_prefix,
     create_test_provider_account,
     create_test_provider_snapshot,
+    create_test_provider_snapshot_diff,
     create_test_rir,
     create_test_roa,
     create_test_roa_change_plan,
@@ -139,7 +140,7 @@ class ViewSetSmokeTestCase(SimpleTestCase):
                 self.assertIs(viewset_class.filterset_class, filterset_class)
 
     def test_viewsets_expose_expected_http_method_contract(self):
-        read_only_post_exceptions = {'roareconciliationrun', 'roachangeplan'}
+        read_only_post_exceptions = {'providersnapshot', 'roareconciliationrun', 'roachangeplan'}
 
         for spec in API_OBJECT_SPECS:
             viewset_class = getattr(api_views, spec.api.viewset_name)
@@ -192,8 +193,9 @@ def _get_custom_action_route_names(contract):
 
 EXTRA_ACTION_NAME_CONTRACTS = {
     'organization': ('run_aspa_reconciliation',),
+    'providersnapshot': ('compare', 'summary'),
     'routingintentprofile': ('run',),
-    'rpkiprovideraccount': ('sync',),
+    'rpkiprovideraccount': ('summary', 'sync'),
     'roareconciliationrun': ('create_plan', 'summary'),
     'roachangeplan': ('apply', 'approve', 'preview', 'simulate', 'summary'),
 }
@@ -669,6 +671,126 @@ class OrganizationAspaReconciliationActionAPITestCase(PluginAPITestCase):
             provider_snapshot=snapshot,
             user=self.user,
         )
+
+
+class ProviderAccountSummaryAPITestCase(PluginAPITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='provider-summary-org', name='Provider Summary Org')
+        cls.healthy_account = create_test_provider_account(
+            name='Provider Summary Healthy',
+            organization=cls.organization,
+            provider_type='krill',
+            org_handle='ORG-SUMMARY-HEALTHY',
+            ca_handle='summary-healthy',
+            sync_interval=60,
+            last_successful_sync=timezone.now(),
+            last_sync_status='completed',
+        )
+        cls.stale_account = create_test_provider_account(
+            name='Provider Summary Stale',
+            organization=cls.organization,
+            provider_type='arin',
+            org_handle='ORG-SUMMARY-STALE',
+            sync_interval=60,
+            last_successful_sync=timezone.now() - timedelta(hours=3),
+            last_sync_status='completed',
+        )
+        cls.failed_account = create_test_provider_account(
+            name='Provider Summary Failed',
+            organization=cls.organization,
+            provider_type='arin',
+            org_handle='ORG-SUMMARY-FAILED',
+            sync_interval=60,
+            last_sync_status='failed',
+        )
+
+    def test_provider_account_summary_reports_health_and_capabilities(self):
+        self.add_permissions('netbox_rpki.view_rpkiprovideraccount')
+
+        response = self.client.get(
+            reverse('plugins-api:netbox_rpki-api:provideraccount-summary'),
+            **self.header,
+        )
+
+        self.assertHttpStatus(response, 200)
+        self.assertEqual(response.data['total_accounts'], 3)
+        self.assertEqual(response.data['by_provider_type']['arin'], 2)
+        self.assertEqual(response.data['by_provider_type']['krill'], 1)
+        self.assertEqual(response.data['by_sync_health']['healthy'], 1)
+        self.assertEqual(response.data['by_sync_health']['stale'], 1)
+        self.assertEqual(response.data['by_sync_health']['failed'], 1)
+        self.assertEqual(response.data['sync_due_count'], 2)
+        self.assertEqual(response.data['roa_write_supported_count'], 1)
+
+
+class ProviderSnapshotActionAPITestCase(PluginAPITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='provider-snapshot-action-org', name='Provider Snapshot Action Org')
+        cls.provider_account = create_test_provider_account(
+            name='Provider Snapshot Action Account',
+            organization=cls.organization,
+            provider_type='krill',
+            org_handle='ORG-SNAPSHOT-ACTION',
+            ca_handle='snapshot-action',
+        )
+        cls.base_snapshot = create_test_provider_snapshot(
+            name='Provider Snapshot Base',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+            fetched_at=timezone.now() - timedelta(hours=2),
+            completed_at=timezone.now() - timedelta(hours=2),
+            status='completed',
+        )
+        cls.comparison_snapshot = create_test_provider_snapshot(
+            name='Provider Snapshot Comparison',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+            fetched_at=timezone.now() - timedelta(hours=1),
+            completed_at=timezone.now() - timedelta(hours=1),
+            status='completed',
+        )
+
+    def test_provider_snapshot_compare_action_returns_persisted_diff(self):
+        self.add_permissions('netbox_rpki.view_providersnapshot', 'netbox_rpki.view_providersnapshotdiff')
+
+        response = self.client.post(
+            reverse(
+                'plugins-api:netbox_rpki-api:providersnapshot-compare',
+                kwargs={'pk': self.comparison_snapshot.pk},
+            ),
+            {'base_snapshot': self.base_snapshot.pk},
+            format='json',
+            **self.header,
+        )
+
+        self.assertHttpStatus(response, 200)
+        self.assertEqual(response.data['base_snapshot'], self.base_snapshot.pk)
+        self.assertEqual(response.data['comparison_snapshot'], self.comparison_snapshot.pk)
+        self.assertEqual(response.data['item_count'], 0)
+
+    def test_provider_snapshot_summary_reports_status_and_diff_coverage(self):
+        self.add_permissions('netbox_rpki.view_providersnapshot', 'netbox_rpki.view_providersnapshotdiff')
+        create_test_provider_snapshot_diff(
+            name='Provider Snapshot Existing Diff',
+            organization=self.organization,
+            provider_account=self.provider_account,
+            base_snapshot=self.base_snapshot,
+            comparison_snapshot=self.comparison_snapshot,
+        )
+
+        response = self.client.get(
+            reverse('plugins-api:netbox_rpki-api:providersnapshot-summary'),
+            **self.header,
+        )
+
+        self.assertHttpStatus(response, 200)
+        self.assertEqual(response.data['total_snapshots'], 2)
+        self.assertEqual(response.data['completed_snapshots'], 2)
+        self.assertEqual(response.data['by_status']['completed'], 2)
+        self.assertEqual(response.data['with_diff_count'], 1)
+        self.assertIsNotNone(response.data['latest_completed_at'])
 
 
 @_install_registry_api_tests

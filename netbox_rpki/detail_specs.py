@@ -237,6 +237,37 @@ def get_provider_last_sync_summary(account: models.RpkiProviderAccount) -> str |
     return get_pretty_json(account.last_sync_summary_json)
 
 
+def get_provider_sync_run_summary(run: models.ProviderSyncRun) -> str | None:
+    return get_pretty_json(run.summary_json)
+
+
+def get_provider_snapshot_summary(snapshot: models.ProviderSnapshot) -> str | None:
+    return get_pretty_json(snapshot.summary_json)
+
+
+def get_provider_snapshot_diff_summary(snapshot_diff: models.ProviderSnapshotDiff) -> str | None:
+    return get_pretty_json(snapshot_diff.summary_json)
+
+
+def get_provider_snapshot_diff_before_state(item: models.ProviderSnapshotDiffItem) -> str | None:
+    return get_pretty_json(item.before_state_json)
+
+
+def get_provider_snapshot_diff_after_state(item: models.ProviderSnapshotDiffItem) -> str | None:
+    return get_pretty_json(item.after_state_json)
+
+
+def get_provider_snapshot_sync_run(snapshot: models.ProviderSnapshot):
+    try:
+        return snapshot.sync_run
+    except models.ProviderSyncRun.DoesNotExist:
+        return None
+
+
+def get_latest_provider_snapshot_diff(snapshot: models.ProviderSnapshot):
+    return snapshot.diffs_as_comparison.order_by('-compared_at', '-pk').first()
+
+
 IMPORTED_ASPA_DETAIL_SPEC = DetailSpec(
     model=models.ImportedAspa,
     list_url_name='plugins:netbox_rpki:importedaspa_list',
@@ -270,6 +301,130 @@ IMPORTED_ASPA_DETAIL_SPEC = DetailSpec(
             table_class_name='ImportedAspaProviderTable',
             queryset=lambda obj: obj.provider_authorizations.select_related('provider_as', 'tenant').all(),
         ),
+    ),
+)
+
+
+IMPORTED_CA_METADATA_DETAIL_SPEC = DetailSpec(
+    model=models.ImportedCaMetadata,
+    list_url_name='plugins:netbox_rpki:importedcametadata_list',
+    breadcrumb_label='Imported CA Metadata',
+    card_title='Imported CA Metadata',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Provider Snapshot', value=lambda obj: obj.provider_snapshot, kind='link'),
+        DetailFieldSpec(label='Organization', value=lambda obj: obj.organization, kind='link'),
+        DetailFieldSpec(label='Metadata Key', value=lambda obj: obj.metadata_key),
+        DetailFieldSpec(label='CA Handle', value=lambda obj: obj.ca_handle),
+        DetailFieldSpec(label='ID Certificate Hash', value=lambda obj: obj.id_cert_hash, empty_text='None'),
+        DetailFieldSpec(label='Publication URI', value=lambda obj: obj.publication_uri, kind='url', empty_text='None'),
+        DetailFieldSpec(label='RRDP Notification URI', value=lambda obj: obj.rrdp_notification_uri, kind='url', empty_text='None'),
+        DetailFieldSpec(label='Parent Count', value=lambda obj: obj.parent_count),
+        DetailFieldSpec(label='Child Count', value=lambda obj: obj.child_count),
+        DetailFieldSpec(label='Suspended Child Count', value=lambda obj: obj.suspended_child_count),
+        DetailFieldSpec(label='Resource Class Count', value=lambda obj: obj.resource_class_count),
+        DetailFieldSpec(label='External Object ID', value=lambda obj: obj.external_object_id, empty_text='None'),
+        DetailFieldSpec(label='External Reference', value=lambda obj: obj.external_reference, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Is Stale', value=lambda obj: obj.is_stale),
+        DetailFieldSpec(label='Payload', value=lambda obj: get_pretty_json(obj.payload_json), kind='code', empty_text='None'),
+    ),
+)
+
+
+IMPORTED_PARENT_LINK_DETAIL_SPEC = DetailSpec(
+    model=models.ImportedParentLink,
+    list_url_name='plugins:netbox_rpki:importedparentlink_list',
+    breadcrumb_label='Imported Parent Links',
+    card_title='Imported Parent Link',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Provider Snapshot', value=lambda obj: obj.provider_snapshot, kind='link'),
+        DetailFieldSpec(label='Organization', value=lambda obj: obj.organization, kind='link'),
+        DetailFieldSpec(label='Link Key', value=lambda obj: obj.link_key),
+        DetailFieldSpec(label='Parent Handle', value=lambda obj: obj.parent_handle),
+        DetailFieldSpec(label='Relationship Type', value=lambda obj: obj.relationship_type, empty_text='None'),
+        DetailFieldSpec(label='Service URI', value=lambda obj: obj.service_uri, kind='url', empty_text='None'),
+        DetailFieldSpec(label='Last Exchange At', value=lambda obj: obj.last_exchange_at, empty_text='None'),
+        DetailFieldSpec(label='Last Exchange Result', value=lambda obj: obj.last_exchange_result, empty_text='None'),
+        DetailFieldSpec(label='Last Success At', value=lambda obj: obj.last_success_at, empty_text='None'),
+        DetailFieldSpec(label='External Object ID', value=lambda obj: obj.external_object_id, empty_text='None'),
+        DetailFieldSpec(label='External Reference', value=lambda obj: obj.external_reference, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Is Stale', value=lambda obj: obj.is_stale),
+        DetailFieldSpec(label='Payload', value=lambda obj: get_pretty_json(obj.payload_json), kind='code', empty_text='None'),
+    ),
+)
+
+
+IMPORTED_CHILD_LINK_DETAIL_SPEC = DetailSpec(
+    model=models.ImportedChildLink,
+    list_url_name='plugins:netbox_rpki:importedchildlink_list',
+    breadcrumb_label='Imported Child Links',
+    card_title='Imported Child Link',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Provider Snapshot', value=lambda obj: obj.provider_snapshot, kind='link'),
+        DetailFieldSpec(label='Organization', value=lambda obj: obj.organization, kind='link'),
+        DetailFieldSpec(label='Link Key', value=lambda obj: obj.link_key),
+        DetailFieldSpec(label='Child Handle', value=lambda obj: obj.child_handle),
+        DetailFieldSpec(label='State', value=lambda obj: obj.state),
+        DetailFieldSpec(label='ID Certificate Hash', value=lambda obj: obj.id_cert_hash, empty_text='None'),
+        DetailFieldSpec(label='User Agent', value=lambda obj: obj.user_agent, empty_text='None'),
+        DetailFieldSpec(label='Last Exchange At', value=lambda obj: obj.last_exchange_at, empty_text='None'),
+        DetailFieldSpec(label='Last Exchange Result', value=lambda obj: obj.last_exchange_result, empty_text='None'),
+        DetailFieldSpec(label='External Object ID', value=lambda obj: obj.external_object_id, empty_text='None'),
+        DetailFieldSpec(label='External Reference', value=lambda obj: obj.external_reference, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Is Stale', value=lambda obj: obj.is_stale),
+        DetailFieldSpec(label='Payload', value=lambda obj: get_pretty_json(obj.payload_json), kind='code', empty_text='None'),
+    ),
+)
+
+
+IMPORTED_RESOURCE_ENTITLEMENT_DETAIL_SPEC = DetailSpec(
+    model=models.ImportedResourceEntitlement,
+    list_url_name='plugins:netbox_rpki:importedresourceentitlement_list',
+    breadcrumb_label='Imported Resource Entitlements',
+    card_title='Imported Resource Entitlement',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Provider Snapshot', value=lambda obj: obj.provider_snapshot, kind='link'),
+        DetailFieldSpec(label='Organization', value=lambda obj: obj.organization, kind='link'),
+        DetailFieldSpec(label='Entitlement Key', value=lambda obj: obj.entitlement_key),
+        DetailFieldSpec(label='Entitlement Source', value=lambda obj: obj.entitlement_source),
+        DetailFieldSpec(label='Related Handle', value=lambda obj: obj.related_handle, empty_text='None'),
+        DetailFieldSpec(label='Class Name', value=lambda obj: obj.class_name, empty_text='None'),
+        DetailFieldSpec(label='ASN Resources', value=lambda obj: obj.asn_resources, empty_text='None'),
+        DetailFieldSpec(label='IPv4 Resources', value=lambda obj: obj.ipv4_resources, empty_text='None'),
+        DetailFieldSpec(label='IPv6 Resources', value=lambda obj: obj.ipv6_resources, empty_text='None'),
+        DetailFieldSpec(label='Not After', value=lambda obj: obj.not_after, empty_text='None'),
+        DetailFieldSpec(label='External Object ID', value=lambda obj: obj.external_object_id, empty_text='None'),
+        DetailFieldSpec(label='External Reference', value=lambda obj: obj.external_reference, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Is Stale', value=lambda obj: obj.is_stale),
+        DetailFieldSpec(label='Payload', value=lambda obj: get_pretty_json(obj.payload_json), kind='code', empty_text='None'),
+    ),
+)
+
+
+IMPORTED_PUBLICATION_POINT_DETAIL_SPEC = DetailSpec(
+    model=models.ImportedPublicationPoint,
+    list_url_name='plugins:netbox_rpki:importedpublicationpoint_list',
+    breadcrumb_label='Imported Publication Points',
+    card_title='Imported Publication Point',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Provider Snapshot', value=lambda obj: obj.provider_snapshot, kind='link'),
+        DetailFieldSpec(label='Organization', value=lambda obj: obj.organization, kind='link'),
+        DetailFieldSpec(label='Publication Key', value=lambda obj: obj.publication_key),
+        DetailFieldSpec(label='Service URI', value=lambda obj: obj.service_uri, kind='url', empty_text='None'),
+        DetailFieldSpec(label='Publication URI', value=lambda obj: obj.publication_uri, kind='url', empty_text='None'),
+        DetailFieldSpec(label='RRDP Notification URI', value=lambda obj: obj.rrdp_notification_uri, kind='url', empty_text='None'),
+        DetailFieldSpec(label='Last Exchange At', value=lambda obj: obj.last_exchange_at, empty_text='None'),
+        DetailFieldSpec(label='Last Exchange Result', value=lambda obj: obj.last_exchange_result, empty_text='None'),
+        DetailFieldSpec(label='Next Exchange Before', value=lambda obj: obj.next_exchange_before, empty_text='None'),
+        DetailFieldSpec(label='Published Object Count', value=lambda obj: obj.published_object_count),
+        DetailFieldSpec(label='External Object ID', value=lambda obj: obj.external_object_id, empty_text='None'),
+        DetailFieldSpec(label='External Reference', value=lambda obj: obj.external_reference, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Is Stale', value=lambda obj: obj.is_stale),
+        DetailFieldSpec(label='Payload', value=lambda obj: get_pretty_json(obj.payload_json), kind='code', empty_text='None'),
     ),
 )
 
@@ -1080,6 +1235,158 @@ PROVIDER_ACCOUNT_DETAIL_SPEC = DetailSpec(
             table_class_name='ProviderSyncRunTable',
             queryset=lambda obj: obj.sync_runs.all(),
         ),
+        DetailTableSpec(
+            title='Provider Snapshot Diffs',
+            table_class_name='ProviderSnapshotDiffTable',
+            queryset=lambda obj: obj.snapshot_diffs.select_related('base_snapshot', 'comparison_snapshot').all(),
+        ),
+        DetailTableSpec(
+            title='Provider Write Executions',
+            table_class_name='ProviderWriteExecutionTable',
+            queryset=lambda obj: obj.write_executions.select_related('provider_snapshot', 'change_plan').all(),
+        ),
+    ),
+)
+
+
+PROVIDER_SYNC_RUN_DETAIL_SPEC = DetailSpec(
+    model=models.ProviderSyncRun,
+    list_url_name='plugins:netbox_rpki:providersyncrun_list',
+    breadcrumb_label='Provider Sync Runs',
+    card_title='Provider Sync Run',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Organization', value=lambda obj: obj.organization, kind='link'),
+        DetailFieldSpec(label='Provider Account', value=lambda obj: obj.provider_account, kind='link'),
+        DetailFieldSpec(label='Provider Snapshot', value=lambda obj: obj.provider_snapshot, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Status', value=lambda obj: obj.status),
+        DetailFieldSpec(label='Started At', value=lambda obj: obj.started_at, empty_text='None'),
+        DetailFieldSpec(label='Completed At', value=lambda obj: obj.completed_at, empty_text='None'),
+        DetailFieldSpec(label='Records Fetched', value=lambda obj: obj.records_fetched),
+        DetailFieldSpec(label='Records Imported', value=lambda obj: obj.records_imported),
+        DetailFieldSpec(label='Error', value=lambda obj: obj.error, empty_text='None'),
+        DetailFieldSpec(label='Summary', value=get_provider_sync_run_summary, kind='code', empty_text='None'),
+    ),
+)
+
+
+PROVIDER_SNAPSHOT_DETAIL_SPEC = DetailSpec(
+    model=models.ProviderSnapshot,
+    list_url_name='plugins:netbox_rpki:providersnapshot_list',
+    breadcrumb_label='Provider Snapshots',
+    card_title='Provider Snapshot',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Provider Account', value=lambda obj: obj.provider_account, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Organization', value=lambda obj: obj.organization, kind='link'),
+        DetailFieldSpec(label='Provider Name', value=lambda obj: obj.provider_name),
+        DetailFieldSpec(label='Status', value=lambda obj: obj.status),
+        DetailFieldSpec(label='Fetched At', value=lambda obj: obj.fetched_at, empty_text='None'),
+        DetailFieldSpec(label='Completed At', value=lambda obj: obj.completed_at, empty_text='None'),
+        DetailFieldSpec(label='Sync Run', value=get_provider_snapshot_sync_run, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Latest Diff', value=get_latest_provider_snapshot_diff, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Summary', value=get_provider_snapshot_summary, kind='code', empty_text='None'),
+    ),
+    bottom_tables=(
+        DetailTableSpec(
+            title='Snapshot Comparison Diffs',
+            table_class_name='ProviderSnapshotDiffTable',
+            queryset=lambda obj: obj.diffs_as_comparison.select_related('base_snapshot', 'comparison_snapshot').all(),
+        ),
+        DetailTableSpec(
+            title='Later Snapshot Diffs',
+            table_class_name='ProviderSnapshotDiffTable',
+            queryset=lambda obj: obj.diffs_as_base.select_related('base_snapshot', 'comparison_snapshot').all(),
+        ),
+        DetailTableSpec(
+            title='Imported ROA Authorizations',
+            table_class_name='ImportedRoaAuthorizationTable',
+            queryset=lambda obj: obj.imported_roa_authorizations.select_related('prefix', 'origin_asn', 'external_reference').all(),
+        ),
+        DetailTableSpec(
+            title='Imported ASPAs',
+            table_class_name='ImportedAspaTable',
+            queryset=lambda obj: obj.imported_aspas.select_related('customer_as', 'external_reference').all(),
+        ),
+        DetailTableSpec(
+            title='Imported CA Metadata',
+            table_class_name='ImportedCaMetadataTable',
+            queryset=lambda obj: obj.imported_ca_metadata_records.select_related('external_reference').all(),
+        ),
+        DetailTableSpec(
+            title='Imported Parent Links',
+            table_class_name='ImportedParentLinkTable',
+            queryset=lambda obj: obj.imported_parent_links.select_related('external_reference').all(),
+        ),
+        DetailTableSpec(
+            title='Imported Child Links',
+            table_class_name='ImportedChildLinkTable',
+            queryset=lambda obj: obj.imported_child_links.select_related('external_reference').all(),
+        ),
+        DetailTableSpec(
+            title='Imported Resource Entitlements',
+            table_class_name='ImportedResourceEntitlementTable',
+            queryset=lambda obj: obj.imported_resource_entitlements.select_related('external_reference').all(),
+        ),
+        DetailTableSpec(
+            title='Imported Publication Points',
+            table_class_name='ImportedPublicationPointTable',
+            queryset=lambda obj: obj.imported_publication_points.select_related('external_reference').all(),
+        ),
+    ),
+)
+
+
+PROVIDER_SNAPSHOT_DIFF_DETAIL_SPEC = DetailSpec(
+    model=models.ProviderSnapshotDiff,
+    list_url_name='plugins:netbox_rpki:providersnapshotdiff_list',
+    breadcrumb_label='Provider Snapshot Diffs',
+    card_title='Provider Snapshot Diff',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Organization', value=lambda obj: obj.organization, kind='link'),
+        DetailFieldSpec(label='Provider Account', value=lambda obj: obj.provider_account, kind='link'),
+        DetailFieldSpec(label='Base Snapshot', value=lambda obj: obj.base_snapshot, kind='link'),
+        DetailFieldSpec(label='Comparison Snapshot', value=lambda obj: obj.comparison_snapshot, kind='link'),
+        DetailFieldSpec(label='Status', value=lambda obj: obj.status),
+        DetailFieldSpec(label='Compared At', value=lambda obj: obj.compared_at, empty_text='None'),
+        DetailFieldSpec(label='Error', value=lambda obj: obj.error, empty_text='None'),
+        DetailFieldSpec(label='Summary', value=get_provider_snapshot_diff_summary, kind='code', empty_text='None'),
+    ),
+    bottom_tables=(
+        DetailTableSpec(
+            title='Provider Snapshot Diff Items',
+            table_class_name='ProviderSnapshotDiffItemTable',
+            queryset=lambda obj: obj.items.select_related('external_reference').all(),
+        ),
+    ),
+)
+
+
+PROVIDER_SNAPSHOT_DIFF_ITEM_DETAIL_SPEC = DetailSpec(
+    model=models.ProviderSnapshotDiffItem,
+    list_url_name='plugins:netbox_rpki:providersnapshotdiffitem_list',
+    breadcrumb_label='Provider Snapshot Diff Items',
+    card_title='Provider Snapshot Diff Item',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Snapshot Diff', value=lambda obj: obj.snapshot_diff, kind='link'),
+        DetailFieldSpec(label='Object Family', value=lambda obj: obj.object_family),
+        DetailFieldSpec(label='Change Type', value=lambda obj: obj.change_type),
+        DetailFieldSpec(label='External Reference', value=lambda obj: obj.external_reference, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Provider Identity', value=lambda obj: obj.provider_identity, empty_text='None'),
+        DetailFieldSpec(label='External Object ID', value=lambda obj: obj.external_object_id, empty_text='None'),
+        DetailFieldSpec(label='Prefix', value=lambda obj: obj.prefix_cidr_text, empty_text='None'),
+        DetailFieldSpec(label='Origin ASN Value', value=lambda obj: obj.origin_asn_value, empty_text='None'),
+        DetailFieldSpec(label='Customer ASN Value', value=lambda obj: obj.customer_as_value, empty_text='None'),
+        DetailFieldSpec(label='Provider ASN Value', value=lambda obj: obj.provider_as_value, empty_text='None'),
+        DetailFieldSpec(label='Related Handle', value=lambda obj: obj.related_handle, empty_text='None'),
+        DetailFieldSpec(label='Certificate Identifier', value=lambda obj: obj.certificate_identifier, empty_text='None'),
+        DetailFieldSpec(label='Publication URI', value=lambda obj: obj.publication_uri, kind='url', empty_text='None'),
+        DetailFieldSpec(label='Signed Object URI', value=lambda obj: obj.signed_object_uri, kind='url', empty_text='None'),
+        DetailFieldSpec(label='Is Stale', value=lambda obj: obj.is_stale),
+        DetailFieldSpec(label='Before State', value=get_provider_snapshot_diff_before_state, kind='code', empty_text='None'),
+        DetailFieldSpec(label='After State', value=get_provider_snapshot_diff_after_state, kind='code', empty_text='None'),
     ),
 )
 
@@ -1090,7 +1397,16 @@ DETAIL_SPEC_BY_MODEL = {
     models.Roa: ROA_DETAIL_SPEC,
     models.ASPA: ASPA_DETAIL_SPEC,
     models.ImportedAspa: IMPORTED_ASPA_DETAIL_SPEC,
+    models.ImportedCaMetadata: IMPORTED_CA_METADATA_DETAIL_SPEC,
+    models.ImportedParentLink: IMPORTED_PARENT_LINK_DETAIL_SPEC,
+    models.ImportedChildLink: IMPORTED_CHILD_LINK_DETAIL_SPEC,
+    models.ImportedResourceEntitlement: IMPORTED_RESOURCE_ENTITLEMENT_DETAIL_SPEC,
+    models.ImportedPublicationPoint: IMPORTED_PUBLICATION_POINT_DETAIL_SPEC,
     models.RpkiProviderAccount: PROVIDER_ACCOUNT_DETAIL_SPEC,
+    models.ProviderSyncRun: PROVIDER_SYNC_RUN_DETAIL_SPEC,
+    models.ProviderSnapshot: PROVIDER_SNAPSHOT_DETAIL_SPEC,
+    models.ProviderSnapshotDiff: PROVIDER_SNAPSHOT_DIFF_DETAIL_SPEC,
+    models.ProviderSnapshotDiffItem: PROVIDER_SNAPSHOT_DIFF_ITEM_DETAIL_SPEC,
     models.RoutingIntentProfile: ROUTING_INTENT_PROFILE_DETAIL_SPEC,
     models.ASPAReconciliationRun: ASPA_RECONCILIATION_RUN_DETAIL_SPEC,
     models.ASPAIntentResult: ASPA_INTENT_RESULT_DETAIL_SPEC,

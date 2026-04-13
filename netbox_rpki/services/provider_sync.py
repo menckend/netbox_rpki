@@ -163,6 +163,40 @@ def _fetch_krill_aspas_json(provider_account: rpki_models.RpkiProviderAccount) -
     return provider_sync_krill.fetch_krill_aspas_json(provider_account)
 
 
+def _fetch_krill_ca_metadata_json(provider_account: rpki_models.RpkiProviderAccount) -> dict[str, object]:
+    return provider_sync_krill.fetch_krill_ca_metadata_json(provider_account)
+
+
+def _fetch_krill_parent_statuses_json(provider_account: rpki_models.RpkiProviderAccount) -> dict[str, object]:
+    return provider_sync_krill.fetch_krill_parent_statuses_json(provider_account)
+
+
+def _fetch_krill_parent_contact_payloads(
+    provider_account: rpki_models.RpkiProviderAccount,
+    parent_handles: Iterable[str],
+) -> dict[str, dict[str, object]]:
+    return provider_sync_krill.fetch_krill_parent_contact_payloads(provider_account, parent_handles)
+
+
+def _fetch_krill_child_info_payloads(
+    provider_account: rpki_models.RpkiProviderAccount,
+    child_handles: Iterable[str],
+) -> dict[str, dict[str, object]]:
+    return provider_sync_krill.fetch_krill_child_info_payloads(provider_account, child_handles)
+
+
+def _fetch_krill_child_connections_json(provider_account: rpki_models.RpkiProviderAccount) -> dict[str, object]:
+    return provider_sync_krill.fetch_krill_child_connections_json(provider_account)
+
+
+def _fetch_krill_repo_details_json(provider_account: rpki_models.RpkiProviderAccount) -> dict[str, object]:
+    return provider_sync_krill.fetch_krill_repo_details_json(provider_account)
+
+
+def _fetch_krill_repo_status_json(provider_account: rpki_models.RpkiProviderAccount) -> dict[str, object]:
+    return provider_sync_krill.fetch_krill_repo_status_json(provider_account)
+
+
 def _parse_krill_route_records(route_payload: list[dict]) -> list[provider_sync_krill.KrillRouteAuthorizationRecord]:
     return provider_sync_krill.parse_krill_route_records(route_payload)
 
@@ -189,6 +223,31 @@ def _resolve_asn(asn_value: int | None):
     if asn_value is None:
         return None
     return ASN.objects.filter(asn=asn_value).first()
+
+
+def _resource_set_payload(resource_set: provider_sync_krill.KrillResourceSetRecord) -> dict[str, str]:
+    return {
+        'asn': resource_set.asn_resources,
+        'ipv4': resource_set.ipv4_resources,
+        'ipv6': resource_set.ipv6_resources,
+    }
+
+
+def _parent_class_payload(class_record: provider_sync_krill.KrillParentClassRecord) -> dict[str, object]:
+    return {
+        'class_name': class_record.class_name,
+        'resources': _resource_set_payload(class_record.resources),
+        'not_after': class_record.not_after.isoformat() if class_record.not_after else '',
+        'signing_certificate_uri': class_record.signing_certificate_uri,
+        'issued_certificate_uris': list(class_record.issued_certificate_uris),
+    }
+
+
+def _published_object_payload(object_record: provider_sync_krill.KrillPublishedObjectRecord) -> dict[str, str]:
+    return {
+        'uri': object_record.uri,
+        'body_base64': object_record.body_base64,
+    }
 
 
 def _build_import_name(provider_account: rpki_models.RpkiProviderAccount, record: ArinRoaRecord) -> str:
@@ -243,6 +302,58 @@ def _build_external_reference_name(
     return f'{provider_account.name} {provider_account.get_provider_type_display()} {provider_identity}'
 
 
+def _build_generic_external_reference_identity(
+    external_object_id: str,
+    *fallback_parts: object,
+) -> str:
+    normalized_external_id = external_object_id.strip()
+    if normalized_external_id:
+        return normalized_external_id
+
+    normalized_parts = []
+    for value in fallback_parts:
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            normalized_parts.append(text)
+    return '|'.join(normalized_parts)
+
+
+def _bind_external_reference(
+    *,
+    provider_account: rpki_models.RpkiProviderAccount,
+    snapshot: rpki_models.ProviderSnapshot,
+    object_type: str,
+    provider_identity: str,
+    external_object_id: str,
+    imported_object,
+    imported_field_name: str | None = None,
+) -> rpki_models.ExternalObjectReference | None:
+    if not provider_identity:
+        return None
+
+    defaults = {
+        'name': _build_external_reference_name(provider_account, provider_identity),
+        'organization': provider_account.organization,
+        'external_object_id': external_object_id,
+        'last_seen_provider_snapshot': snapshot,
+        'last_seen_at': snapshot.fetched_at,
+    }
+    if imported_field_name:
+        defaults[imported_field_name] = imported_object
+
+    reference, _ = rpki_models.ExternalObjectReference.objects.update_or_create(
+        provider_account=provider_account,
+        object_type=object_type,
+        provider_identity=provider_identity,
+        defaults=defaults,
+    )
+    imported_object.external_reference = reference
+    imported_object.save(update_fields=('external_reference',))
+    return reference
+
+
 def _bind_roa_external_reference(
     *,
     provider_account: rpki_models.RpkiProviderAccount,
@@ -256,25 +367,15 @@ def _bind_roa_external_reference(
         origin_asn_value=imported_authorization.origin_asn_value,
         max_length=imported_authorization.max_length,
     )
-    if not provider_identity:
-        return None
-
-    reference, _ = rpki_models.ExternalObjectReference.objects.update_or_create(
+    return _bind_external_reference(
         provider_account=provider_account,
+        snapshot=snapshot,
         object_type=rpki_models.ExternalObjectType.ROA_AUTHORIZATION,
         provider_identity=provider_identity,
-        defaults={
-            'name': _build_external_reference_name(provider_account, provider_identity),
-            'organization': provider_account.organization,
-            'external_object_id': imported_authorization.external_object_id,
-            'last_seen_provider_snapshot': snapshot,
-            'last_seen_imported_authorization': imported_authorization,
-            'last_seen_at': snapshot.fetched_at,
-        },
+        external_object_id=imported_authorization.external_object_id,
+        imported_object=imported_authorization,
+        imported_field_name='last_seen_imported_authorization',
     )
-    imported_authorization.external_reference = reference
-    imported_authorization.save(update_fields=('external_reference',))
-    return reference
 
 
 def _bind_aspa_external_reference(
@@ -287,25 +388,118 @@ def _bind_aspa_external_reference(
         external_object_id=imported_aspa.external_object_id,
         customer_as_value=imported_aspa.customer_as_value,
     )
-    if not provider_identity:
-        return None
-
-    reference, _ = rpki_models.ExternalObjectReference.objects.update_or_create(
+    return _bind_external_reference(
         provider_account=provider_account,
+        snapshot=snapshot,
         object_type=rpki_models.ExternalObjectType.ASPA,
         provider_identity=provider_identity,
-        defaults={
-            'name': _build_external_reference_name(provider_account, provider_identity),
-            'organization': provider_account.organization,
-            'external_object_id': imported_aspa.external_object_id,
-            'last_seen_provider_snapshot': snapshot,
-            'last_seen_imported_aspa': imported_aspa,
-            'last_seen_at': snapshot.fetched_at,
-        },
+        external_object_id=imported_aspa.external_object_id,
+        imported_object=imported_aspa,
+        imported_field_name='last_seen_imported_aspa',
     )
-    imported_aspa.external_reference = reference
-    imported_aspa.save(update_fields=('external_reference',))
-    return reference
+
+
+def _bind_ca_metadata_external_reference(
+    *,
+    provider_account: rpki_models.RpkiProviderAccount,
+    snapshot: rpki_models.ProviderSnapshot,
+    imported_ca_metadata: rpki_models.ImportedCaMetadata,
+) -> rpki_models.ExternalObjectReference | None:
+    provider_identity = _build_generic_external_reference_identity(
+        imported_ca_metadata.external_object_id,
+        imported_ca_metadata.ca_handle,
+    )
+    return _bind_external_reference(
+        provider_account=provider_account,
+        snapshot=snapshot,
+        object_type=rpki_models.ExternalObjectType.CA_METADATA,
+        provider_identity=provider_identity,
+        external_object_id=imported_ca_metadata.external_object_id,
+        imported_object=imported_ca_metadata,
+    )
+
+
+def _bind_parent_link_external_reference(
+    *,
+    provider_account: rpki_models.RpkiProviderAccount,
+    snapshot: rpki_models.ProviderSnapshot,
+    imported_parent_link: rpki_models.ImportedParentLink,
+) -> rpki_models.ExternalObjectReference | None:
+    provider_identity = _build_generic_external_reference_identity(
+        imported_parent_link.external_object_id,
+        imported_parent_link.parent_handle,
+    )
+    return _bind_external_reference(
+        provider_account=provider_account,
+        snapshot=snapshot,
+        object_type=rpki_models.ExternalObjectType.PARENT_LINK,
+        provider_identity=provider_identity,
+        external_object_id=imported_parent_link.external_object_id,
+        imported_object=imported_parent_link,
+    )
+
+
+def _bind_child_link_external_reference(
+    *,
+    provider_account: rpki_models.RpkiProviderAccount,
+    snapshot: rpki_models.ProviderSnapshot,
+    imported_child_link: rpki_models.ImportedChildLink,
+) -> rpki_models.ExternalObjectReference | None:
+    provider_identity = _build_generic_external_reference_identity(
+        imported_child_link.external_object_id,
+        imported_child_link.child_handle,
+    )
+    return _bind_external_reference(
+        provider_account=provider_account,
+        snapshot=snapshot,
+        object_type=rpki_models.ExternalObjectType.CHILD_LINK,
+        provider_identity=provider_identity,
+        external_object_id=imported_child_link.external_object_id,
+        imported_object=imported_child_link,
+    )
+
+
+def _bind_resource_entitlement_external_reference(
+    *,
+    provider_account: rpki_models.RpkiProviderAccount,
+    snapshot: rpki_models.ProviderSnapshot,
+    imported_resource_entitlement: rpki_models.ImportedResourceEntitlement,
+) -> rpki_models.ExternalObjectReference | None:
+    provider_identity = _build_generic_external_reference_identity(
+        imported_resource_entitlement.external_object_id,
+        imported_resource_entitlement.entitlement_source,
+        imported_resource_entitlement.related_handle,
+        imported_resource_entitlement.class_name,
+    )
+    return _bind_external_reference(
+        provider_account=provider_account,
+        snapshot=snapshot,
+        object_type=rpki_models.ExternalObjectType.RESOURCE_ENTITLEMENT,
+        provider_identity=provider_identity,
+        external_object_id=imported_resource_entitlement.external_object_id,
+        imported_object=imported_resource_entitlement,
+    )
+
+
+def _bind_publication_point_external_reference(
+    *,
+    provider_account: rpki_models.RpkiProviderAccount,
+    snapshot: rpki_models.ProviderSnapshot,
+    imported_publication_point: rpki_models.ImportedPublicationPoint,
+) -> rpki_models.ExternalObjectReference | None:
+    provider_identity = _build_generic_external_reference_identity(
+        imported_publication_point.external_object_id,
+        imported_publication_point.service_uri,
+        imported_publication_point.publication_uri,
+    )
+    return _bind_external_reference(
+        provider_account=provider_account,
+        snapshot=snapshot,
+        object_type=rpki_models.ExternalObjectType.PUBLICATION_POINT,
+        provider_identity=provider_identity,
+        external_object_id=imported_publication_point.external_object_id,
+        imported_object=imported_publication_point,
+    )
 
 
 def _import_arin_records(
@@ -380,9 +574,48 @@ def _import_krill_records(
     records = _parse_krill_route_records(route_payload)
     aspa_payload = _fetch_krill_aspas_json(provider_account)
     aspa_records = _parse_krill_aspa_records(aspa_payload)
+    ca_metadata_payload = _fetch_krill_ca_metadata_json(provider_account)
+    ca_metadata_record = provider_sync_krill.parse_krill_ca_metadata_record(ca_metadata_payload)
+    parent_status_payload = _fetch_krill_parent_statuses_json(provider_account)
+    parent_handles = list(getattr(ca_metadata_record, 'parent_handles', ()) or ())
+    if isinstance(parent_status_payload, dict):
+        parent_handles.extend(parent_status_payload.keys())
+    parent_contact_payloads = {}
+    if parent_handles:
+        parent_contact_payloads = _fetch_krill_parent_contact_payloads(provider_account, parent_handles)
+    parent_records = provider_sync_krill.parse_krill_parent_link_records(
+        parent_status_payload,
+        parent_contact_payloads=parent_contact_payloads,
+    )
+    child_handles = tuple(getattr(ca_metadata_record, 'child_handles', ()) or ())
+    child_info_payloads = {}
+    if child_handles:
+        child_info_payloads = _fetch_krill_child_info_payloads(provider_account, child_handles)
+    child_connections_payload = _fetch_krill_child_connections_json(provider_account)
+    child_records = provider_sync_krill.parse_krill_child_link_records(
+        ca_metadata_payload,
+        child_info_payloads=child_info_payloads,
+        child_connections_payload=child_connections_payload,
+    )
+    resource_entitlement_records = provider_sync_krill.parse_krill_resource_entitlement_records(
+        ca_metadata_payload=ca_metadata_payload,
+        parent_status_payload=parent_status_payload,
+        child_info_payloads=child_info_payloads,
+    )
+    repo_details_payload = _fetch_krill_repo_details_json(provider_account)
+    repo_status_payload = _fetch_krill_repo_status_json(provider_account)
+    publication_point_records = provider_sync_krill.parse_krill_publication_point_records(
+        repo_details_payload=repo_details_payload,
+        repo_status_payload=repo_status_payload,
+    )
 
     imported_count = 0
     imported_aspa_count = 0
+    imported_ca_metadata_count = 0
+    imported_parent_link_count = 0
+    imported_child_link_count = 0
+    imported_resource_entitlement_count = 0
+    imported_publication_point_count = 0
     with transaction.atomic():
         for record in records:
             prefix = _resolve_prefix(record.prefix)
@@ -454,6 +687,188 @@ def _import_krill_records(
                     raw_provider_text=provider.raw_provider_text,
                 )
             imported_aspa_count += 1
+
+        if ca_metadata_record is not None:
+            imported_ca_metadata = rpki_models.ImportedCaMetadata.objects.create(
+                name=f'{provider_account.name} {ca_metadata_record.ca_handle} CA Metadata',
+                provider_snapshot=snapshot,
+                organization=provider_account.organization,
+                metadata_key=rpki_models.ImportedCaMetadata.build_metadata_key(
+                    ca_handle=ca_metadata_record.ca_handle,
+                    external_object_id=ca_metadata_record.external_object_id,
+                ),
+                ca_handle=ca_metadata_record.ca_handle,
+                id_cert_hash=ca_metadata_record.id_cert_hash,
+                publication_uri=ca_metadata_record.publication_uri,
+                rrdp_notification_uri=ca_metadata_record.rrdp_notification_uri,
+                parent_count=ca_metadata_record.parent_count,
+                child_count=ca_metadata_record.child_count,
+                suspended_child_count=ca_metadata_record.suspended_child_count,
+                resource_class_count=ca_metadata_record.resource_class_count,
+                external_object_id=ca_metadata_record.external_object_id,
+                payload_json={
+                    'provider_type': provider_account.provider_type,
+                    'ca_handle': provider_account.ca_handle,
+                    'parent_handles': list(ca_metadata_record.parent_handles),
+                    'child_handles': list(ca_metadata_record.child_handles),
+                    'suspended_child_handles': list(ca_metadata_record.suspended_child_handles),
+                    'resources': _resource_set_payload(ca_metadata_record.resources),
+                    'resource_classes': [
+                        {
+                            'class_name': class_record.class_name,
+                            'parent_handle': class_record.parent_handle,
+                            'key_identifier': class_record.key_identifier,
+                            'incoming_certificate_uri': class_record.incoming_certificate_uri,
+                            'resources': _resource_set_payload(class_record.resources),
+                        }
+                        for class_record in ca_metadata_record.resource_classes
+                    ],
+                },
+            )
+            _bind_ca_metadata_external_reference(
+                provider_account=provider_account,
+                snapshot=snapshot,
+                imported_ca_metadata=imported_ca_metadata,
+            )
+            imported_ca_metadata_count += 1
+
+        for record in parent_records:
+            imported_parent_link = rpki_models.ImportedParentLink.objects.create(
+                name=f'{provider_account.name} Parent {record.parent_handle}',
+                provider_snapshot=snapshot,
+                organization=provider_account.organization,
+                link_key=rpki_models.ImportedParentLink.build_link_key(
+                    parent_handle=record.parent_handle,
+                    external_object_id=record.external_object_id,
+                ),
+                parent_handle=record.parent_handle,
+                relationship_type=record.relationship_type,
+                service_uri=record.service_uri,
+                last_exchange_at=record.last_exchange_at,
+                last_exchange_result=record.last_exchange_result,
+                last_success_at=record.last_success_at,
+                external_object_id=record.external_object_id,
+                payload_json={
+                    'provider_type': provider_account.provider_type,
+                    'ca_handle': provider_account.ca_handle,
+                    'child_handle': record.child_handle,
+                    'id_cert': record.id_cert,
+                    'all_resources': _resource_set_payload(record.all_resources),
+                    'classes': [_parent_class_payload(class_record) for class_record in record.classes],
+                },
+            )
+            _bind_parent_link_external_reference(
+                provider_account=provider_account,
+                snapshot=snapshot,
+                imported_parent_link=imported_parent_link,
+            )
+            imported_parent_link_count += 1
+
+        for record in child_records:
+            imported_child_link = rpki_models.ImportedChildLink.objects.create(
+                name=f'{provider_account.name} Child {record.child_handle}',
+                provider_snapshot=snapshot,
+                organization=provider_account.organization,
+                link_key=rpki_models.ImportedChildLink.build_link_key(
+                    child_handle=record.child_handle,
+                    external_object_id=record.external_object_id,
+                ),
+                child_handle=record.child_handle,
+                state=record.state,
+                id_cert_hash=record.id_cert_hash,
+                user_agent=record.user_agent,
+                last_exchange_at=record.last_exchange_at,
+                last_exchange_result=record.last_exchange_result,
+                external_object_id=record.external_object_id,
+                payload_json={
+                    'provider_type': provider_account.provider_type,
+                    'ca_handle': provider_account.ca_handle,
+                    'entitled_resources': _resource_set_payload(record.entitled_resources),
+                    'listed_as_child': record.listed_as_child,
+                    'listed_as_suspended': record.listed_as_suspended,
+                },
+            )
+            _bind_child_link_external_reference(
+                provider_account=provider_account,
+                snapshot=snapshot,
+                imported_child_link=imported_child_link,
+            )
+            imported_child_link_count += 1
+
+        for record in resource_entitlement_records:
+            imported_resource_entitlement = rpki_models.ImportedResourceEntitlement.objects.create(
+                name=(
+                    f'{provider_account.name} Entitlement {record.entitlement_source} '
+                    f'{record.related_handle or provider_account.ca_handle}'
+                    f'{f" {record.class_name}" if record.class_name else ""}'
+                ),
+                provider_snapshot=snapshot,
+                organization=provider_account.organization,
+                entitlement_key=rpki_models.ImportedResourceEntitlement.build_entitlement_key(
+                    entitlement_source=record.entitlement_source,
+                    related_handle=record.related_handle,
+                    class_name=record.class_name,
+                    external_object_id=record.external_object_id,
+                ),
+                entitlement_source=record.entitlement_source,
+                related_handle=record.related_handle,
+                class_name=record.class_name,
+                asn_resources=record.asn_resources,
+                ipv4_resources=record.ipv4_resources,
+                ipv6_resources=record.ipv6_resources,
+                not_after=record.not_after,
+                external_object_id=record.external_object_id,
+                payload_json={
+                    'provider_type': provider_account.provider_type,
+                    'ca_handle': provider_account.ca_handle,
+                    'resources': {
+                        'asn': record.asn_resources,
+                        'ipv4': record.ipv4_resources,
+                        'ipv6': record.ipv6_resources,
+                    },
+                },
+            )
+            _bind_resource_entitlement_external_reference(
+                provider_account=provider_account,
+                snapshot=snapshot,
+                imported_resource_entitlement=imported_resource_entitlement,
+            )
+            imported_resource_entitlement_count += 1
+
+        for record in publication_point_records:
+            imported_publication_point = rpki_models.ImportedPublicationPoint.objects.create(
+                name=f'{provider_account.name} Publication Point {record.external_object_id or provider_account.ca_handle}',
+                provider_snapshot=snapshot,
+                organization=provider_account.organization,
+                publication_key=rpki_models.ImportedPublicationPoint.build_publication_key(
+                    service_uri=record.service_uri,
+                    publication_uri=record.publication_uri,
+                    external_object_id=record.external_object_id,
+                ),
+                service_uri=record.service_uri,
+                publication_uri=record.publication_uri,
+                rrdp_notification_uri=record.rrdp_notification_uri,
+                last_exchange_at=record.last_exchange_at,
+                last_exchange_result=record.last_exchange_result,
+                next_exchange_before=record.next_exchange_before,
+                published_object_count=record.published_object_count,
+                external_object_id=record.external_object_id,
+                payload_json={
+                    'provider_type': provider_account.provider_type,
+                    'ca_handle': provider_account.ca_handle,
+                    'published_objects': [
+                        _published_object_payload(object_record)
+                        for object_record in record.published_objects
+                    ],
+                },
+            )
+            _bind_publication_point_external_reference(
+                provider_account=provider_account,
+                snapshot=snapshot,
+                imported_publication_point=imported_publication_point,
+            )
+            imported_publication_point_count += 1
+
     return {
         rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS: build_family_summary(
             rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS,
@@ -469,6 +884,46 @@ def _import_krill_records(
             counts={
                 'records_fetched': len(aspa_records),
                 'records_imported': imported_aspa_count,
+            },
+        ),
+        rpki_models.ProviderSyncFamily.CA_METADATA: build_family_summary(
+            rpki_models.ProviderSyncFamily.CA_METADATA,
+            status=rpki_models.ProviderSyncFamilyStatus.COMPLETED,
+            counts={
+                'records_fetched': imported_ca_metadata_count,
+                'records_imported': imported_ca_metadata_count,
+            },
+        ),
+        rpki_models.ProviderSyncFamily.PARENT_LINKS: build_family_summary(
+            rpki_models.ProviderSyncFamily.PARENT_LINKS,
+            status=rpki_models.ProviderSyncFamilyStatus.COMPLETED,
+            counts={
+                'records_fetched': len(parent_records),
+                'records_imported': imported_parent_link_count,
+            },
+        ),
+        rpki_models.ProviderSyncFamily.CHILD_LINKS: build_family_summary(
+            rpki_models.ProviderSyncFamily.CHILD_LINKS,
+            status=rpki_models.ProviderSyncFamilyStatus.COMPLETED,
+            counts={
+                'records_fetched': len(child_records),
+                'records_imported': imported_child_link_count,
+            },
+        ),
+        rpki_models.ProviderSyncFamily.RESOURCE_ENTITLEMENTS: build_family_summary(
+            rpki_models.ProviderSyncFamily.RESOURCE_ENTITLEMENTS,
+            status=rpki_models.ProviderSyncFamilyStatus.COMPLETED,
+            counts={
+                'records_fetched': len(resource_entitlement_records),
+                'records_imported': imported_resource_entitlement_count,
+            },
+        ),
+        rpki_models.ProviderSyncFamily.PUBLICATION_POINTS: build_family_summary(
+            rpki_models.ProviderSyncFamily.PUBLICATION_POINTS,
+            status=rpki_models.ProviderSyncFamilyStatus.COMPLETED,
+            counts={
+                'records_fetched': len(publication_point_records),
+                'records_imported': imported_publication_point_count,
             },
         ),
     }

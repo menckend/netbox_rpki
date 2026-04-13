@@ -11,7 +11,17 @@ from netbox_rpki import models as rpki_models
 from netbox_rpki.services import ProviderSyncError, sync_provider_account
 from netbox_rpki.services.provider_sync_contract import PROVIDER_SYNC_SUMMARY_SCHEMA_VERSION
 from netbox_rpki.tests.base import PluginAPITestCase
-from netbox_rpki.tests.krill_payloads import KRILL_ASPAS_JSON, KRILL_ROUTES_JSON
+from netbox_rpki.tests.krill_payloads import (
+    KRILL_ASPAS_JSON,
+    KRILL_CA_METADATA_JSON,
+    KRILL_CHILD_CONNECTIONS_JSON,
+    KRILL_CHILD_INFO_JSON,
+    KRILL_PARENT_CONTACT_JSON,
+    KRILL_PARENT_STATUSES_JSON,
+    KRILL_REPO_DETAILS_JSON,
+    KRILL_REPO_STATUS_JSON,
+    KRILL_ROUTES_JSON,
+)
 from netbox_rpki.tests.utils import (
     create_test_asn,
     create_test_imported_roa_authorization,
@@ -117,14 +127,40 @@ class ProviderSyncServiceTestCase(TestCase):
         with patch('netbox_rpki.services.provider_sync._fetch_krill_routes_json', return_value=KRILL_ROUTES_JSON), patch(
             'netbox_rpki.services.provider_sync._fetch_krill_aspas_json',
             return_value=KRILL_ASPAS_JSON,
+        ), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_ca_metadata_json',
+            return_value=KRILL_CA_METADATA_JSON,
+        ), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_parent_statuses_json',
+            return_value=KRILL_PARENT_STATUSES_JSON,
+        ), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_parent_contact_payloads',
+            return_value={'testbed': KRILL_PARENT_CONTACT_JSON},
+        ), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_child_info_payloads',
+            return_value={'edge-customer-01': KRILL_CHILD_INFO_JSON},
+        ), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_child_connections_json',
+            return_value=KRILL_CHILD_CONNECTIONS_JSON,
+        ), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_repo_details_json',
+            return_value=KRILL_REPO_DETAILS_JSON,
+        ), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_repo_status_json',
+            return_value=KRILL_REPO_STATUS_JSON,
         ):
             sync_run, snapshot = sync_provider_account(provider_account)
 
         imported = list(snapshot.imported_roa_authorizations.select_related('external_reference').order_by('prefix_cidr_text'))
         imported_aspas = list(snapshot.imported_aspas.select_related('external_reference').order_by('customer_as_value'))
+        imported_ca_metadata = list(snapshot.imported_ca_metadata_records.select_related('external_reference'))
+        imported_parent_links = list(snapshot.imported_parent_links.select_related('external_reference'))
+        imported_child_links = list(snapshot.imported_child_links.select_related('external_reference').order_by('child_handle'))
+        imported_resource_entitlements = list(snapshot.imported_resource_entitlements.select_related('external_reference').order_by('entitlement_source', 'related_handle', 'class_name'))
+        imported_publication_points = list(snapshot.imported_publication_points.select_related('external_reference'))
         self.assertEqual(sync_run.status, rpki_models.ValidationRunStatus.COMPLETED)
-        self.assertEqual(sync_run.records_fetched, 4)
-        self.assertEqual(sync_run.records_imported, 4)
+        self.assertEqual(sync_run.records_fetched, 13)
+        self.assertEqual(sync_run.records_imported, 13)
         self.assertEqual(imported[0].prefix, prefix_v4)
         self.assertEqual(imported[0].origin_asn, origin_asn)
         self.assertEqual(imported[0].external_object_id, '10.10.0.0/24|24|65000')
@@ -143,6 +179,17 @@ class ProviderSyncServiceTestCase(TestCase):
         self.assertEqual([provider.address_family for provider in imported_providers], ['', rpki_models.AddressFamily.IPV4, rpki_models.AddressFamily.IPV6])
         self.assertEqual(imported_aspas[1].customer_as, customer_as)
         self.assertEqual(imported_aspas[1].provider_authorizations.count(), 0)
+        self.assertEqual(len(imported_ca_metadata), 1)
+        self.assertEqual(imported_ca_metadata[0].ca_handle, 'netbox-rpki-dev')
+        self.assertIsNotNone(imported_ca_metadata[0].external_reference)
+        self.assertEqual(len(imported_parent_links), 1)
+        self.assertEqual(imported_parent_links[0].parent_handle, 'testbed')
+        self.assertEqual(len(imported_child_links), 2)
+        self.assertEqual([row.child_handle for row in imported_child_links], ['edge-customer-01', 'edge-customer-archive'])
+        self.assertEqual(len(imported_resource_entitlements), 4)
+        self.assertEqual(imported_resource_entitlements[0].external_reference.object_type, rpki_models.ExternalObjectType.RESOURCE_ENTITLEMENT)
+        self.assertEqual(len(imported_publication_points), 1)
+        self.assertEqual(imported_publication_points[0].published_object_count, 2)
         provider_account.refresh_from_db()
         self.assertEqual(snapshot.summary_json['summary_schema_version'], PROVIDER_SYNC_SUMMARY_SCHEMA_VERSION)
         self.assertEqual(
@@ -153,7 +200,27 @@ class ProviderSyncServiceTestCase(TestCase):
             snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.ASPAS]['records_imported'],
             2,
         )
-        self.assertEqual(snapshot.summary_json['records_imported'], 4)
+        self.assertEqual(
+            snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.CA_METADATA]['records_imported'],
+            1,
+        )
+        self.assertEqual(
+            snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.PARENT_LINKS]['records_imported'],
+            1,
+        )
+        self.assertEqual(
+            snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.CHILD_LINKS]['records_imported'],
+            2,
+        )
+        self.assertEqual(
+            snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.RESOURCE_ENTITLEMENTS]['records_imported'],
+            4,
+        )
+        self.assertEqual(
+            snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.PUBLICATION_POINTS]['records_imported'],
+            1,
+        )
+        self.assertEqual(snapshot.summary_json['records_imported'], 13)
         self.assertEqual(snapshot.summary_json['route_records_imported'], 2)
         self.assertEqual(provider_account.last_sync_summary_json['ca_handle'], 'netbox-rpki-dev')
         self.assertEqual(provider_account.last_sync_summary_json['aspa_records_imported'], 2)
@@ -179,6 +246,27 @@ class ProviderSyncServiceTestCase(TestCase):
         with patch('netbox_rpki.services.provider_sync._fetch_krill_routes_json', return_value=KRILL_ROUTES_JSON), patch(
             'netbox_rpki.services.provider_sync._fetch_krill_aspas_json',
             return_value=KRILL_ASPAS_JSON,
+        ), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_ca_metadata_json',
+            return_value=KRILL_CA_METADATA_JSON,
+        ), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_parent_statuses_json',
+            return_value=KRILL_PARENT_STATUSES_JSON,
+        ), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_parent_contact_payloads',
+            return_value={'testbed': KRILL_PARENT_CONTACT_JSON},
+        ), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_child_info_payloads',
+            return_value={'edge-customer-01': KRILL_CHILD_INFO_JSON},
+        ), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_child_connections_json',
+            return_value=KRILL_CHILD_CONNECTIONS_JSON,
+        ), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_repo_details_json',
+            return_value=KRILL_REPO_DETAILS_JSON,
+        ), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_repo_status_json',
+            return_value=KRILL_REPO_STATUS_JSON,
         ):
             _, first_snapshot = sync_provider_account(provider_account)
         first_import = first_snapshot.imported_roa_authorizations.get(prefix_cidr_text='10.10.0.0/24')
@@ -189,12 +277,33 @@ class ProviderSyncServiceTestCase(TestCase):
         with patch('netbox_rpki.services.provider_sync._fetch_krill_routes_json', return_value=KRILL_ROUTES_JSON), patch(
             'netbox_rpki.services.provider_sync._fetch_krill_aspas_json',
             return_value=KRILL_ASPAS_JSON,
+        ), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_ca_metadata_json',
+            return_value=KRILL_CA_METADATA_JSON,
+        ), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_parent_statuses_json',
+            return_value=KRILL_PARENT_STATUSES_JSON,
+        ), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_parent_contact_payloads',
+            return_value={'testbed': KRILL_PARENT_CONTACT_JSON},
+        ), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_child_info_payloads',
+            return_value={'edge-customer-01': KRILL_CHILD_INFO_JSON},
+        ), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_child_connections_json',
+            return_value=KRILL_CHILD_CONNECTIONS_JSON,
+        ), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_repo_details_json',
+            return_value=KRILL_REPO_DETAILS_JSON,
+        ), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_repo_status_json',
+            return_value=KRILL_REPO_STATUS_JSON,
         ):
             _, second_snapshot = sync_provider_account(provider_account)
         second_import = second_snapshot.imported_roa_authorizations.get(prefix_cidr_text='10.10.0.0/24')
         second_aspa_import = second_snapshot.imported_aspas.get(customer_as_value=65000)
 
-        self.assertEqual(rpki_models.ExternalObjectReference.objects.count(), 4)
+        self.assertEqual(rpki_models.ExternalObjectReference.objects.count(), 13)
         self.assertEqual(second_import.external_reference_id, first_reference.pk)
         first_reference.refresh_from_db()
         self.assertEqual(first_reference.last_seen_provider_snapshot, second_snapshot)
@@ -210,7 +319,7 @@ class ProviderSyncServiceTestCase(TestCase):
         self.assertEqual(snapshot_diff.status, rpki_models.ValidationRunStatus.COMPLETED)
         self.assertEqual(
             snapshot_diff.summary_json['totals']['records_unchanged'],
-            4,
+            13,
         )
         self.assertEqual(snapshot_diff.items.count(), 0)
         self.assertEqual(second_snapshot.summary_json['latest_diff_id'], snapshot_diff.pk)
@@ -236,6 +345,27 @@ class ProviderSyncServiceTestCase(TestCase):
         with patch('netbox_rpki.services.provider_sync._fetch_krill_routes_json', return_value=KRILL_ROUTES_JSON), patch(
             'netbox_rpki.services.provider_sync._fetch_krill_aspas_json',
             return_value=KRILL_ASPAS_JSON,
+        ), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_ca_metadata_json',
+            return_value=KRILL_CA_METADATA_JSON,
+        ), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_parent_statuses_json',
+            return_value=KRILL_PARENT_STATUSES_JSON,
+        ), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_parent_contact_payloads',
+            return_value={'testbed': KRILL_PARENT_CONTACT_JSON},
+        ), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_child_info_payloads',
+            return_value={'edge-customer-01': KRILL_CHILD_INFO_JSON},
+        ), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_child_connections_json',
+            return_value=KRILL_CHILD_CONNECTIONS_JSON,
+        ), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_repo_details_json',
+            return_value=KRILL_REPO_DETAILS_JSON,
+        ), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_repo_status_json',
+            return_value=KRILL_REPO_STATUS_JSON,
         ):
             _, first_snapshot = sync_provider_account(provider_account)
 
@@ -243,10 +373,44 @@ class ProviderSyncServiceTestCase(TestCase):
         changed_routes[0] = dict(changed_routes[0])
         changed_routes[0]['comment'] = 'netbox_rpki sample IPv4 ROA changed'
         changed_aspas = [dict(row) for row in KRILL_ASPAS_JSON[:-1]]
+        changed_ca_metadata = dict(KRILL_CA_METADATA_JSON)
+        changed_ca_metadata['repo_info'] = dict(KRILL_CA_METADATA_JSON['repo_info'])
+        changed_ca_metadata['repo_info']['sia_base'] = 'rsync://testbed.krill.cloud/repo/netbox-rpki-dev-alt/'
+        changed_parent_statuses = dict(KRILL_PARENT_STATUSES_JSON)
+        changed_parent_statuses['testbed'] = dict(KRILL_PARENT_STATUSES_JSON['testbed'])
+        changed_parent_statuses['testbed']['last_exchange'] = dict(KRILL_PARENT_STATUSES_JSON['testbed']['last_exchange'])
+        changed_parent_statuses['testbed']['last_exchange']['result'] = 'Warning'
+        changed_child_info = dict(KRILL_CHILD_INFO_JSON)
+        changed_child_info['entitled_resources'] = dict(KRILL_CHILD_INFO_JSON['entitled_resources'])
+        changed_child_info['entitled_resources']['ipv4'] = '10.30.0.0/24'
+        changed_repo_status = dict(KRILL_REPO_STATUS_JSON)
+        changed_repo_status['last_exchange'] = dict(KRILL_REPO_STATUS_JSON['last_exchange'])
+        changed_repo_status['next_exchange_before'] = KRILL_REPO_STATUS_JSON['next_exchange_before'] + 900
 
         with patch('netbox_rpki.services.provider_sync._fetch_krill_routes_json', return_value=changed_routes), patch(
             'netbox_rpki.services.provider_sync._fetch_krill_aspas_json',
             return_value=changed_aspas,
+        ), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_ca_metadata_json',
+            return_value=changed_ca_metadata,
+        ), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_parent_statuses_json',
+            return_value=changed_parent_statuses,
+        ), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_parent_contact_payloads',
+            return_value={'testbed': KRILL_PARENT_CONTACT_JSON},
+        ), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_child_info_payloads',
+            return_value={'edge-customer-01': changed_child_info},
+        ), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_child_connections_json',
+            return_value=KRILL_CHILD_CONNECTIONS_JSON,
+        ), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_repo_details_json',
+            return_value=KRILL_REPO_DETAILS_JSON,
+        ), patch(
+            'netbox_rpki.services.provider_sync._fetch_krill_repo_status_json',
+            return_value=changed_repo_status,
         ):
             _, second_snapshot = sync_provider_account(provider_account)
 
@@ -263,11 +427,40 @@ class ProviderSyncServiceTestCase(TestCase):
             1,
         )
         self.assertEqual(
+            snapshot_diff.summary_json['families'][rpki_models.ProviderSyncFamily.CA_METADATA]['records_changed'],
+            1,
+        )
+        self.assertEqual(
+            snapshot_diff.summary_json['families'][rpki_models.ProviderSyncFamily.PARENT_LINKS]['records_changed'],
+            1,
+        )
+        self.assertEqual(
+            snapshot_diff.summary_json['families'][rpki_models.ProviderSyncFamily.CHILD_LINKS]['records_changed'],
+            1,
+        )
+        self.assertEqual(
+            snapshot_diff.summary_json['families'][rpki_models.ProviderSyncFamily.RESOURCE_ENTITLEMENTS]['records_changed'],
+            1,
+        )
+        self.assertEqual(
+            snapshot_diff.summary_json['families'][rpki_models.ProviderSyncFamily.PUBLICATION_POINTS]['records_changed'],
+            1,
+        )
+        self.assertEqual(
             set(snapshot_diff.items.values_list('change_type', flat=True)),
             {
                 rpki_models.ProviderSnapshotDiffChangeType.CHANGED,
                 rpki_models.ProviderSnapshotDiffChangeType.REMOVED,
             },
+        )
+        self.assertTrue(
+            {
+                rpki_models.ProviderSyncFamily.CA_METADATA,
+                rpki_models.ProviderSyncFamily.PARENT_LINKS,
+                rpki_models.ProviderSyncFamily.CHILD_LINKS,
+                rpki_models.ProviderSyncFamily.RESOURCE_ENTITLEMENTS,
+                rpki_models.ProviderSyncFamily.PUBLICATION_POINTS,
+            }.issubset(set(snapshot_diff.items.values_list('object_family', flat=True)))
         )
 
     def test_sync_provider_account_requires_krill_ca_handle(self):

@@ -34,6 +34,11 @@ def supported_sync_families(provider_account: rpki_models.RpkiProviderAccount) -
         return (
             rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS,
             rpki_models.ProviderSyncFamily.ASPAS,
+            rpki_models.ProviderSyncFamily.CA_METADATA,
+            rpki_models.ProviderSyncFamily.PARENT_LINKS,
+            rpki_models.ProviderSyncFamily.CHILD_LINKS,
+            rpki_models.ProviderSyncFamily.RESOURCE_ENTITLEMENTS,
+            rpki_models.ProviderSyncFamily.PUBLICATION_POINTS,
         )
     if provider_account.provider_type == rpki_models.ProviderType.ARIN:
         return (rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS,)

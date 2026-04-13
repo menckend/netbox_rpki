@@ -66,6 +66,12 @@ def _normalized_json(value: dict[str, object]) -> str:
     return json.dumps(value, sort_keys=True, separators=(',', ':'))
 
 
+def _datetime_text(value) -> str:
+    if value is None:
+        return ''
+    return value.isoformat()
+
+
 def _create_diff_item(
     snapshot_diff: rpki_models.ProviderSnapshotDiff,
     *,
@@ -204,6 +210,208 @@ def _build_aspa_item(snapshot_diff, *, family, change_type, before, after):
     )
 
 
+def _ca_metadata_identity(row: rpki_models.ImportedCaMetadata) -> str:
+    if row.external_reference_id and row.external_reference is not None:
+        return row.external_reference.provider_identity
+    if row.external_object_id:
+        return row.external_object_id
+    return row.metadata_key
+
+
+def _ca_metadata_state(row: rpki_models.ImportedCaMetadata) -> dict[str, object]:
+    return {
+        'ca_handle': row.ca_handle,
+        'id_cert_hash': row.id_cert_hash,
+        'publication_uri': row.publication_uri,
+        'rrdp_notification_uri': row.rrdp_notification_uri,
+        'parent_count': row.parent_count,
+        'child_count': row.child_count,
+        'suspended_child_count': row.suspended_child_count,
+        'resource_class_count': row.resource_class_count,
+        'external_object_id': row.external_object_id,
+        'is_stale': row.is_stale,
+        'payload_json': dict(row.payload_json or {}),
+    }
+
+
+def _build_ca_metadata_item(snapshot_diff, *, family, change_type, before, after):
+    row = after or before
+    _create_diff_item(
+        snapshot_diff,
+        family=family,
+        change_type=change_type,
+        name=f'{row.name} {change_type.title()}',
+        provider_identity=_ca_metadata_identity(row),
+        external_reference=getattr(row, 'external_reference', None),
+        external_object_id=row.external_object_id,
+        before_state=_ca_metadata_state(before) if before is not None else {},
+        after_state=_ca_metadata_state(after) if after is not None else {},
+        related_handle=row.ca_handle,
+        publication_uri=row.publication_uri,
+        is_stale=row.is_stale,
+    )
+
+
+def _parent_link_identity(row: rpki_models.ImportedParentLink) -> str:
+    if row.external_reference_id and row.external_reference is not None:
+        return row.external_reference.provider_identity
+    if row.external_object_id:
+        return row.external_object_id
+    return row.link_key
+
+
+def _parent_link_state(row: rpki_models.ImportedParentLink) -> dict[str, object]:
+    return {
+        'parent_handle': row.parent_handle,
+        'relationship_type': row.relationship_type,
+        'service_uri': row.service_uri,
+        'last_exchange_at': _datetime_text(row.last_exchange_at),
+        'last_exchange_result': row.last_exchange_result,
+        'last_success_at': _datetime_text(row.last_success_at),
+        'external_object_id': row.external_object_id,
+        'is_stale': row.is_stale,
+        'payload_json': dict(row.payload_json or {}),
+    }
+
+
+def _build_parent_link_item(snapshot_diff, *, family, change_type, before, after):
+    row = after or before
+    _create_diff_item(
+        snapshot_diff,
+        family=family,
+        change_type=change_type,
+        name=f'{row.name} {change_type.title()}',
+        provider_identity=_parent_link_identity(row),
+        external_reference=getattr(row, 'external_reference', None),
+        external_object_id=row.external_object_id,
+        before_state=_parent_link_state(before) if before is not None else {},
+        after_state=_parent_link_state(after) if after is not None else {},
+        related_handle=row.parent_handle,
+        publication_uri=row.service_uri,
+        is_stale=row.is_stale,
+    )
+
+
+def _child_link_identity(row: rpki_models.ImportedChildLink) -> str:
+    if row.external_reference_id and row.external_reference is not None:
+        return row.external_reference.provider_identity
+    if row.external_object_id:
+        return row.external_object_id
+    return row.link_key
+
+
+def _child_link_state(row: rpki_models.ImportedChildLink) -> dict[str, object]:
+    return {
+        'child_handle': row.child_handle,
+        'state': row.state,
+        'id_cert_hash': row.id_cert_hash,
+        'user_agent': row.user_agent,
+        'last_exchange_at': _datetime_text(row.last_exchange_at),
+        'last_exchange_result': row.last_exchange_result,
+        'external_object_id': row.external_object_id,
+        'is_stale': row.is_stale,
+        'payload_json': dict(row.payload_json or {}),
+    }
+
+
+def _build_child_link_item(snapshot_diff, *, family, change_type, before, after):
+    row = after or before
+    _create_diff_item(
+        snapshot_diff,
+        family=family,
+        change_type=change_type,
+        name=f'{row.name} {change_type.title()}',
+        provider_identity=_child_link_identity(row),
+        external_reference=getattr(row, 'external_reference', None),
+        external_object_id=row.external_object_id,
+        before_state=_child_link_state(before) if before is not None else {},
+        after_state=_child_link_state(after) if after is not None else {},
+        related_handle=row.child_handle,
+        certificate_identifier=row.id_cert_hash,
+        is_stale=row.is_stale,
+    )
+
+
+def _resource_entitlement_identity(row: rpki_models.ImportedResourceEntitlement) -> str:
+    if row.external_reference_id and row.external_reference is not None:
+        return row.external_reference.provider_identity
+    if row.external_object_id:
+        return row.external_object_id
+    return row.entitlement_key
+
+
+def _resource_entitlement_state(row: rpki_models.ImportedResourceEntitlement) -> dict[str, object]:
+    return {
+        'entitlement_source': row.entitlement_source,
+        'related_handle': row.related_handle,
+        'class_name': row.class_name,
+        'asn_resources': row.asn_resources,
+        'ipv4_resources': row.ipv4_resources,
+        'ipv6_resources': row.ipv6_resources,
+        'not_after': _datetime_text(row.not_after),
+        'external_object_id': row.external_object_id,
+        'is_stale': row.is_stale,
+        'payload_json': dict(row.payload_json or {}),
+    }
+
+
+def _build_resource_entitlement_item(snapshot_diff, *, family, change_type, before, after):
+    row = after or before
+    _create_diff_item(
+        snapshot_diff,
+        family=family,
+        change_type=change_type,
+        name=f'{row.name} {change_type.title()}',
+        provider_identity=_resource_entitlement_identity(row),
+        external_reference=getattr(row, 'external_reference', None),
+        external_object_id=row.external_object_id,
+        before_state=_resource_entitlement_state(before) if before is not None else {},
+        after_state=_resource_entitlement_state(after) if after is not None else {},
+        related_handle=row.related_handle,
+        is_stale=row.is_stale,
+    )
+
+
+def _publication_point_identity(row: rpki_models.ImportedPublicationPoint) -> str:
+    if row.external_reference_id and row.external_reference is not None:
+        return row.external_reference.provider_identity
+    if row.external_object_id:
+        return row.external_object_id
+    return row.publication_key
+
+
+def _publication_point_state(row: rpki_models.ImportedPublicationPoint) -> dict[str, object]:
+    return {
+        'service_uri': row.service_uri,
+        'publication_uri': row.publication_uri,
+        'rrdp_notification_uri': row.rrdp_notification_uri,
+        'last_exchange_at': _datetime_text(row.last_exchange_at),
+        'last_exchange_result': row.last_exchange_result,
+        'next_exchange_before': _datetime_text(row.next_exchange_before),
+        'published_object_count': row.published_object_count,
+        'external_object_id': row.external_object_id,
+        'is_stale': row.is_stale,
+        'payload_json': dict(row.payload_json or {}),
+    }
+
+
+def _build_publication_point_item(snapshot_diff, *, family, change_type, before, after):
+    row = after or before
+    _create_diff_item(
+        snapshot_diff,
+        family=family,
+        change_type=change_type,
+        name=f'{row.name} {change_type.title()}',
+        provider_identity=_publication_point_identity(row),
+        external_reference=getattr(row, 'external_reference', None),
+        external_object_id=row.external_object_id,
+        before_state=_publication_point_state(before) if before is not None else {},
+        after_state=_publication_point_state(after) if after is not None else {},
+        publication_uri=row.publication_uri,
+        is_stale=row.is_stale,
+    )
+
+
 def build_provider_snapshot_diff(
     *,
     base_snapshot: rpki_models.ProviderSnapshot,
@@ -251,6 +459,46 @@ def build_provider_snapshot_diff(
             _aspa_identity(row): row
             for row in comparison_snapshot.imported_aspas.select_related('external_reference').prefetch_related('provider_authorizations').all()
         }
+        before_ca_metadata = {
+            _ca_metadata_identity(row): row
+            for row in base_snapshot.imported_ca_metadata_records.select_related('external_reference').all()
+        }
+        after_ca_metadata = {
+            _ca_metadata_identity(row): row
+            for row in comparison_snapshot.imported_ca_metadata_records.select_related('external_reference').all()
+        }
+        before_parent_links = {
+            _parent_link_identity(row): row
+            for row in base_snapshot.imported_parent_links.select_related('external_reference').all()
+        }
+        after_parent_links = {
+            _parent_link_identity(row): row
+            for row in comparison_snapshot.imported_parent_links.select_related('external_reference').all()
+        }
+        before_child_links = {
+            _child_link_identity(row): row
+            for row in base_snapshot.imported_child_links.select_related('external_reference').all()
+        }
+        after_child_links = {
+            _child_link_identity(row): row
+            for row in comparison_snapshot.imported_child_links.select_related('external_reference').all()
+        }
+        before_resource_entitlements = {
+            _resource_entitlement_identity(row): row
+            for row in base_snapshot.imported_resource_entitlements.select_related('external_reference').all()
+        }
+        after_resource_entitlements = {
+            _resource_entitlement_identity(row): row
+            for row in comparison_snapshot.imported_resource_entitlements.select_related('external_reference').all()
+        }
+        before_publication_points = {
+            _publication_point_identity(row): row
+            for row in base_snapshot.imported_publication_points.select_related('external_reference').all()
+        }
+        after_publication_points = {
+            _publication_point_identity(row): row
+            for row in comparison_snapshot.imported_publication_points.select_related('external_reference').all()
+        }
 
         family_summaries = {
             rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS: _diff_family(
@@ -269,14 +517,49 @@ def build_provider_snapshot_diff(
                 state_builder=_aspa_state,
                 item_builder=_build_aspa_item,
             ),
+            rpki_models.ProviderSyncFamily.CA_METADATA: _diff_family(
+                diff,
+                family=rpki_models.ProviderSyncFamily.CA_METADATA,
+                before_rows=before_ca_metadata,
+                after_rows=after_ca_metadata,
+                state_builder=_ca_metadata_state,
+                item_builder=_build_ca_metadata_item,
+            ),
+            rpki_models.ProviderSyncFamily.PARENT_LINKS: _diff_family(
+                diff,
+                family=rpki_models.ProviderSyncFamily.PARENT_LINKS,
+                before_rows=before_parent_links,
+                after_rows=after_parent_links,
+                state_builder=_parent_link_state,
+                item_builder=_build_parent_link_item,
+            ),
+            rpki_models.ProviderSyncFamily.CHILD_LINKS: _diff_family(
+                diff,
+                family=rpki_models.ProviderSyncFamily.CHILD_LINKS,
+                before_rows=before_child_links,
+                after_rows=after_child_links,
+                state_builder=_child_link_state,
+                item_builder=_build_child_link_item,
+            ),
+            rpki_models.ProviderSyncFamily.RESOURCE_ENTITLEMENTS: _diff_family(
+                diff,
+                family=rpki_models.ProviderSyncFamily.RESOURCE_ENTITLEMENTS,
+                before_rows=before_resource_entitlements,
+                after_rows=after_resource_entitlements,
+                state_builder=_resource_entitlement_state,
+                item_builder=_build_resource_entitlement_item,
+            ),
+            rpki_models.ProviderSyncFamily.PUBLICATION_POINTS: _diff_family(
+                diff,
+                family=rpki_models.ProviderSyncFamily.PUBLICATION_POINTS,
+                before_rows=before_publication_points,
+                after_rows=after_publication_points,
+                state_builder=_publication_point_state,
+                item_builder=_build_publication_point_item,
+            ),
         }
 
         for family in (
-            rpki_models.ProviderSyncFamily.CA_METADATA,
-            rpki_models.ProviderSyncFamily.PARENT_LINKS,
-            rpki_models.ProviderSyncFamily.CHILD_LINKS,
-            rpki_models.ProviderSyncFamily.RESOURCE_ENTITLEMENTS,
-            rpki_models.ProviderSyncFamily.PUBLICATION_POINTS,
             rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY,
             rpki_models.ProviderSyncFamily.SIGNED_OBJECT_INVENTORY,
         ):
