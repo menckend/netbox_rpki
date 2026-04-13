@@ -970,6 +970,56 @@ def create_test_provider_snapshot(
     )
 
 
+def create_test_imported_signed_object(
+    name='Imported Signed Object 1',
+    provider_snapshot=None,
+    organization=None,
+    publication_point=None,
+    signed_object_key='',
+    signed_object_type=None,
+    publication_uri='rsync://example.invalid/repo/',
+    signed_object_uri='rsync://example.invalid/repo/object.mft',
+    object_hash='',
+    body_base64='ZHVtbXk=',
+    external_object_id='',
+    is_stale=False,
+    payload_json=None,
+    **kwargs,
+):
+    if organization is None:
+        organization = create_test_organization()
+    if provider_snapshot is None:
+        provider_snapshot = create_test_provider_snapshot(organization=organization)
+    if publication_point is None:
+        publication_point = create_test_imported_publication_point(
+            organization=organization,
+            provider_snapshot=provider_snapshot,
+            publication_uri=publication_uri,
+        )
+    if not signed_object_key:
+        signed_object_key = rpki_models.ImportedSignedObject.build_signed_object_key(
+            publication_uri=publication_uri,
+            signed_object_uri=signed_object_uri,
+            object_hash=object_hash,
+        )
+    return rpki_models.ImportedSignedObject.objects.create(
+        name=name,
+        provider_snapshot=provider_snapshot,
+        organization=organization,
+        publication_point=publication_point,
+        signed_object_key=signed_object_key,
+        signed_object_type=signed_object_type or rpki_models.SignedObjectType.MANIFEST,
+        publication_uri=publication_uri,
+        signed_object_uri=signed_object_uri,
+        object_hash=object_hash,
+        body_base64=body_base64,
+        external_object_id=external_object_id,
+        is_stale=is_stale,
+        payload_json=payload_json or {},
+        **kwargs,
+    )
+
+
 def create_test_provider_account(
     name='Provider Account 1',
     organization=None,

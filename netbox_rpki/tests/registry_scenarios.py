@@ -58,6 +58,7 @@ from netbox_rpki.tests.utils import (
     create_test_imported_child_link,
     create_test_imported_resource_entitlement,
     create_test_imported_publication_point,
+    create_test_imported_signed_object,
     create_test_repository,
     create_test_rir,
     create_test_revoked_certificate,
@@ -612,6 +613,9 @@ def _register_scenario_builders() -> None:
             ),
             "importedpublicationpoint": lambda: create_test_imported_publication_point(
                 name=f"Imported Publication Point {unique_token('imported-publication-point')}"
+            ),
+            "importedsignedobject": lambda: create_test_imported_signed_object(
+                name=f"Imported Signed Object {unique_token('imported-signed-object')}"
             ),
             "roachangeplan": lambda: build_roa_change_plan_matrix_instance(),
             "roachangeplanitem": lambda: build_roa_change_plan_matrix_item_instance(),

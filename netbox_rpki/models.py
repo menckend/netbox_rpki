@@ -217,6 +217,7 @@ class ProviderSyncFamilyStatus(models.TextChoices):
     COMPLETED = "completed", "Completed"
     FAILED = "failed", "Failed"
     SKIPPED = "skipped", "Skipped"
+    LIMITED = "limited", "Limited"
     NOT_IMPLEMENTED = "not_implemented", "Not Implemented"
 
 
@@ -2554,6 +2555,72 @@ class ImportedPublicationPoint(NamedRpkiStandardModel):
         primary_identity = service_uri.strip() or publication_uri.strip() or external_object_id.strip()
         secondary_identity = publication_uri.strip() if primary_identity != publication_uri.strip() else ''
         return _build_import_key(primary_identity, secondary_identity)
+
+
+class ImportedSignedObject(NamedRpkiStandardModel):
+    provider_snapshot = models.ForeignKey(
+        to='ProviderSnapshot',
+        on_delete=models.PROTECT,
+        related_name='imported_signed_objects'
+    )
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='imported_signed_objects'
+    )
+    publication_point = models.ForeignKey(
+        to='ImportedPublicationPoint',
+        on_delete=models.PROTECT,
+        related_name='imported_signed_objects'
+    )
+    signed_object_key = models.CharField(max_length=64)
+    signed_object_type = models.CharField(
+        max_length=32,
+        choices=SignedObjectType.choices,
+        default=SignedObjectType.OTHER,
+    )
+    publication_uri = models.CharField(max_length=500, blank=True)
+    signed_object_uri = models.CharField(max_length=500, blank=True)
+    object_hash = models.CharField(max_length=64, blank=True)
+    body_base64 = models.TextField(blank=True)
+    external_object_id = models.CharField(max_length=200, blank=True)
+    external_reference = models.ForeignKey(
+        to='ExternalObjectReference',
+        on_delete=models.PROTECT,
+        related_name='imported_signed_objects',
+        blank=True,
+        null=True,
+    )
+    is_stale = models.BooleanField(default=False)
+    payload_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("name",)
+        constraints = (
+            models.UniqueConstraint(
+                fields=("provider_snapshot", "signed_object_key"),
+                name="nb_rpki_impsignedobj_snap_key_uniq",
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:importedsignedobject", args=[self.pk])
+
+    @classmethod
+    def build_signed_object_key(
+        cls,
+        *,
+        publication_uri: str = '',
+        signed_object_uri: str = '',
+        object_hash: str = '',
+    ) -> str:
+        primary_identity = signed_object_uri.strip() or object_hash.strip() or publication_uri.strip()
+        secondary_identity = publication_uri.strip() if primary_identity != publication_uri.strip() else ''
+        tertiary_identity = object_hash.strip() if primary_identity != object_hash.strip() else ''
+        return _build_import_key(primary_identity, secondary_identity, tertiary_identity)
 
 
 class ASPAIntent(NamedRpkiStandardModel):

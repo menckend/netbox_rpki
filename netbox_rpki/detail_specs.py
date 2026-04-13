@@ -429,6 +429,30 @@ IMPORTED_PUBLICATION_POINT_DETAIL_SPEC = DetailSpec(
 )
 
 
+IMPORTED_SIGNED_OBJECT_DETAIL_SPEC = DetailSpec(
+    model=models.ImportedSignedObject,
+    list_url_name='plugins:netbox_rpki:importedsignedobject_list',
+    breadcrumb_label='Imported Signed Objects',
+    card_title='Imported Signed Object',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Provider Snapshot', value=lambda obj: obj.provider_snapshot, kind='link'),
+        DetailFieldSpec(label='Organization', value=lambda obj: obj.organization, kind='link'),
+        DetailFieldSpec(label='Publication Point', value=lambda obj: obj.publication_point, kind='link'),
+        DetailFieldSpec(label='Signed Object Key', value=lambda obj: obj.signed_object_key),
+        DetailFieldSpec(label='Signed Object Type', value=lambda obj: obj.signed_object_type),
+        DetailFieldSpec(label='Publication URI', value=lambda obj: obj.publication_uri, kind='url', empty_text='None'),
+        DetailFieldSpec(label='Signed Object URI', value=lambda obj: obj.signed_object_uri, kind='url', empty_text='None'),
+        DetailFieldSpec(label='Object Hash', value=lambda obj: obj.object_hash, empty_text='None'),
+        DetailFieldSpec(label='Body Base64', value=lambda obj: obj.body_base64, kind='code', empty_text='None'),
+        DetailFieldSpec(label='External Object ID', value=lambda obj: obj.external_object_id, empty_text='None'),
+        DetailFieldSpec(label='External Reference', value=lambda obj: obj.external_reference, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Is Stale', value=lambda obj: obj.is_stale),
+        DetailFieldSpec(label='Payload', value=lambda obj: get_pretty_json(obj.payload_json), kind='code', empty_text='None'),
+    ),
+)
+
+
 ASPA_DETAIL_SPEC = DetailSpec(
     model=models.ASPA,
     list_url_name='plugins:netbox_rpki:aspa_list',
@@ -1333,6 +1357,11 @@ PROVIDER_SNAPSHOT_DETAIL_SPEC = DetailSpec(
             table_class_name='ImportedPublicationPointTable',
             queryset=lambda obj: obj.imported_publication_points.select_related('external_reference').all(),
         ),
+        DetailTableSpec(
+            title='Imported Signed Objects',
+            table_class_name='ImportedSignedObjectTable',
+            queryset=lambda obj: obj.imported_signed_objects.select_related('external_reference', 'publication_point').all(),
+        ),
     ),
 )
 
@@ -1402,6 +1431,7 @@ DETAIL_SPEC_BY_MODEL = {
     models.ImportedChildLink: IMPORTED_CHILD_LINK_DETAIL_SPEC,
     models.ImportedResourceEntitlement: IMPORTED_RESOURCE_ENTITLEMENT_DETAIL_SPEC,
     models.ImportedPublicationPoint: IMPORTED_PUBLICATION_POINT_DETAIL_SPEC,
+    models.ImportedSignedObject: IMPORTED_SIGNED_OBJECT_DETAIL_SPEC,
     models.RpkiProviderAccount: PROVIDER_ACCOUNT_DETAIL_SPEC,
     models.ProviderSyncRun: PROVIDER_SYNC_RUN_DETAIL_SPEC,
     models.ProviderSnapshot: PROVIDER_SNAPSHOT_DETAIL_SPEC,

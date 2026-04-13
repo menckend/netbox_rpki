@@ -16,6 +16,7 @@ from netbox_rpki.services.provider_sync_krill import (
     parse_krill_child_link_records,
     parse_krill_parent_link_records,
     parse_krill_publication_point_records,
+    parse_krill_signed_object_records,
     parse_krill_resource_entitlement_records,
 )
 from netbox_rpki.tests.krill_payloads import (
@@ -214,3 +215,17 @@ class KrillProviderSyncParserTestCase(SimpleTestCase):
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0].service_uri, 'https://testbed.krill.cloud/rfc8181/netbox-rpki-dev/')
         self.assertEqual(records[0].published_object_count, 0)
+
+    def test_parse_krill_signed_object_records_normalizes_fixture(self):
+        records = parse_krill_signed_object_records(
+            repo_details_payload=KRILL_REPO_DETAILS_JSON,
+            repo_status_payload=KRILL_REPO_STATUS_JSON,
+        )
+
+        self.assertEqual(len(records), 2)
+        self.assertEqual(records[0].publication_uri, 'rsync://testbed.krill.cloud/repo/netbox-rpki-dev/')
+        self.assertEqual(records[0].signed_object_uri, 'rsync://testbed.krill.cloud/repo/netbox-rpki-dev/0/netbox-rpki-dev.mft')
+        self.assertEqual(records[0].signed_object_type, rpki_models.SignedObjectType.MANIFEST)
+        self.assertTrue(records[0].object_hash)
+        self.assertEqual(records[1].signed_object_type, rpki_models.SignedObjectType.OTHER)
+        self.assertNotEqual(records[0].object_hash, records[1].object_hash)

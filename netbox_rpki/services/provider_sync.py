@@ -250,6 +250,25 @@ def _published_object_payload(object_record: provider_sync_krill.KrillPublishedO
     }
 
 
+def _bind_signed_object_external_reference(
+    *,
+    provider_account: rpki_models.RpkiProviderAccount,
+    snapshot: rpki_models.ProviderSnapshot,
+    imported_signed_object: rpki_models.ImportedSignedObject,
+) -> rpki_models.ExternalObjectReference | None:
+    provider_identity = imported_signed_object.signed_object_uri.strip()
+    if not provider_identity:
+        provider_identity = imported_signed_object.object_hash
+    return _bind_external_reference(
+        provider_account=provider_account,
+        snapshot=snapshot,
+        object_type=rpki_models.ExternalObjectType.SIGNED_OBJECT,
+        provider_identity=provider_identity,
+        external_object_id=imported_signed_object.external_object_id,
+        imported_object=imported_signed_object,
+    )
+
+
 def _build_import_name(provider_account: rpki_models.RpkiProviderAccount, record: ArinRoaRecord) -> str:
     label = record.roa_name or record.roa_handle or record.prefix_cidr_text
     asn_value = f'AS{record.origin_asn_value}' if record.origin_asn_value is not None else 'AS?'
@@ -608,6 +627,10 @@ def _import_krill_records(
         repo_details_payload=repo_details_payload,
         repo_status_payload=repo_status_payload,
     )
+    signed_object_records = provider_sync_krill.parse_krill_signed_object_records(
+        repo_details_payload=repo_details_payload,
+        repo_status_payload=repo_status_payload,
+    )
 
     imported_count = 0
     imported_aspa_count = 0
@@ -616,6 +639,8 @@ def _import_krill_records(
     imported_child_link_count = 0
     imported_resource_entitlement_count = 0
     imported_publication_point_count = 0
+    imported_signed_object_count = 0
+    imported_publication_points: dict[str, rpki_models.ImportedPublicationPoint] = {}
     with transaction.atomic():
         for record in records:
             prefix = _resolve_prefix(record.prefix)
@@ -867,7 +892,50 @@ def _import_krill_records(
                 snapshot=snapshot,
                 imported_publication_point=imported_publication_point,
             )
+            if imported_publication_point.publication_uri:
+                imported_publication_points[imported_publication_point.publication_uri] = imported_publication_point
+            if imported_publication_point.service_uri:
+                imported_publication_points[imported_publication_point.service_uri] = imported_publication_point
             imported_publication_point_count += 1
+
+        for record in signed_object_records:
+            publication_point = imported_publication_points.get(record.publication_uri)
+            if publication_point is None and imported_publication_point_count == 1:
+                publication_point = next(iter(imported_publication_points.values()))
+            if publication_point is None:
+                raise ProviderSyncError('Krill signed object inventory could not be linked to a publication point.')
+            imported_signed_object = rpki_models.ImportedSignedObject.objects.create(
+                name=f'{provider_account.name} Signed Object {record.signed_object_uri or record.object_hash or record.publication_uri}',
+                provider_snapshot=snapshot,
+                organization=provider_account.organization,
+                publication_point=publication_point,
+                signed_object_key=rpki_models.ImportedSignedObject.build_signed_object_key(
+                    publication_uri=record.publication_uri,
+                    signed_object_uri=record.signed_object_uri,
+                    object_hash=record.object_hash,
+                ),
+                signed_object_type=record.signed_object_type,
+                publication_uri=record.publication_uri,
+                signed_object_uri=record.signed_object_uri,
+                object_hash=record.object_hash,
+                body_base64=record.body_base64,
+                external_object_id=record.external_object_id,
+                payload_json={
+                    'provider_type': provider_account.provider_type,
+                    'ca_handle': provider_account.ca_handle,
+                    'publication_uri': record.publication_uri,
+                    'signed_object_uri': record.signed_object_uri,
+                    'signed_object_type': record.signed_object_type,
+                    'object_hash': record.object_hash,
+                    'body_base64': record.body_base64,
+                },
+            )
+            _bind_signed_object_external_reference(
+                provider_account=provider_account,
+                snapshot=snapshot,
+                imported_signed_object=imported_signed_object,
+            )
+            imported_signed_object_count += 1
 
     return {
         rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS: build_family_summary(
@@ -924,6 +992,14 @@ def _import_krill_records(
             counts={
                 'records_fetched': len(publication_point_records),
                 'records_imported': imported_publication_point_count,
+            },
+        ),
+        rpki_models.ProviderSyncFamily.SIGNED_OBJECT_INVENTORY: build_family_summary(
+            rpki_models.ProviderSyncFamily.SIGNED_OBJECT_INVENTORY,
+            status=rpki_models.ProviderSyncFamilyStatus.COMPLETED,
+            counts={
+                'records_fetched': len(signed_object_records),
+                'records_imported': imported_signed_object_count,
             },
         ),
     }

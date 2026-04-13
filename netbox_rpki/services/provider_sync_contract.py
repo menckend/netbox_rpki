@@ -24,6 +24,11 @@ PROVIDER_SYNC_FAMILY_LABELS = {
     for choice in rpki_models.ProviderSyncFamily
 }
 
+KRILL_CERTIFICATE_INVENTORY_LIMITATION_REASON = (
+    'Krill does not expose a documented first-class certificate inventory endpoint; '
+    'only nested certificate-bearing fields are available in CA metadata, parent status, and repo-status payloads.'
+)
+
 
 def empty_sync_counts() -> dict[str, int]:
     return {key: 0 for key in PROVIDER_SYNC_COUNT_KEYS}
@@ -39,10 +44,32 @@ def supported_sync_families(provider_account: rpki_models.RpkiProviderAccount) -
             rpki_models.ProviderSyncFamily.CHILD_LINKS,
             rpki_models.ProviderSyncFamily.RESOURCE_ENTITLEMENTS,
             rpki_models.ProviderSyncFamily.PUBLICATION_POINTS,
+            rpki_models.ProviderSyncFamily.SIGNED_OBJECT_INVENTORY,
         )
     if provider_account.provider_type == rpki_models.ProviderType.ARIN:
         return (rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS,)
     return ()
+
+
+def family_capability_extra(
+    provider_account: rpki_models.RpkiProviderAccount,
+    family: str,
+) -> dict[str, object]:
+    if (
+        provider_account.provider_type == rpki_models.ProviderType.KRILL
+        and family == rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY
+    ):
+        return {
+            'capability_status': rpki_models.ProviderSyncFamilyStatus.LIMITED,
+            'capability_mode': 'placeholder',
+            'capability_sources': [
+                'ca_metadata',
+                'parent_links',
+                'publication_points',
+            ],
+            'capability_reason': KRILL_CERTIFICATE_INVENTORY_LIMITATION_REASON,
+        }
+    return {}
 
 
 def build_family_summary(
@@ -92,11 +119,26 @@ def build_provider_sync_summary(
             resolved_family_summaries[family] = dict(family_summaries[family])
             continue
 
+        if (
+            provider_account.provider_type == rpki_models.ProviderType.KRILL
+            and family == rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY
+        ):
+            resolved_family_summaries[family] = build_family_summary(
+                family,
+                status=rpki_models.ProviderSyncFamilyStatus.LIMITED,
+                extra=family_capability_extra(provider_account, family),
+            )
+            continue
+
         if family in supported_families:
             resolved_status = default_supported_status or rpki_models.ProviderSyncFamilyStatus.PENDING
         else:
             resolved_status = rpki_models.ProviderSyncFamilyStatus.NOT_IMPLEMENTED
-        resolved_family_summaries[family] = build_family_summary(family, status=resolved_status)
+        resolved_family_summaries[family] = build_family_summary(
+            family,
+            status=resolved_status,
+            extra=family_capability_extra(provider_account, family),
+        )
 
     totals = combine_family_counts(resolved_family_summaries)
     summary: dict[str, object] = {
@@ -130,6 +172,9 @@ def build_provider_sync_summary(
         aspa_family = resolved_family_summaries[rpki_models.ProviderSyncFamily.ASPAS]
         summary['aspa_records_fetched'] = aspa_family['records_fetched']
         summary['aspa_records_imported'] = aspa_family['records_imported']
+        signed_object_family = resolved_family_summaries[rpki_models.ProviderSyncFamily.SIGNED_OBJECT_INVENTORY]
+        summary['signed_object_records_fetched'] = signed_object_family['records_fetched']
+        summary['signed_object_records_imported'] = signed_object_family['records_imported']
 
     if extra:
         summary.update(dict(extra))

@@ -9,6 +9,7 @@ from netbox_rpki import models as rpki_models
 from netbox_rpki.services.provider_sync_contract import (
     build_family_summary,
     combine_family_counts,
+    family_capability_extra,
     empty_sync_counts,
 )
 
@@ -412,6 +413,48 @@ def _build_publication_point_item(snapshot_diff, *, family, change_type, before,
     )
 
 
+def _signed_object_identity(row: rpki_models.ImportedSignedObject) -> str:
+    if row.external_reference_id and row.external_reference is not None:
+        return row.external_reference.provider_identity
+    if row.external_object_id:
+        return row.external_object_id
+    if row.signed_object_uri:
+        return row.signed_object_uri
+    return row.signed_object_key
+
+
+def _signed_object_state(row: rpki_models.ImportedSignedObject) -> dict[str, object]:
+    return {
+        'publication_uri': row.publication_uri,
+        'signed_object_uri': row.signed_object_uri,
+        'signed_object_type': row.signed_object_type,
+        'object_hash': row.object_hash,
+        'body_base64': row.body_base64,
+        'external_object_id': row.external_object_id,
+        'is_stale': row.is_stale,
+        'payload_json': dict(row.payload_json or {}),
+    }
+
+
+def _build_signed_object_item(snapshot_diff, *, family, change_type, before, after):
+    row = after or before
+    _create_diff_item(
+        snapshot_diff,
+        family=family,
+        change_type=change_type,
+        name=f'{row.name} {change_type.title()}',
+        provider_identity=_signed_object_identity(row),
+        external_reference=getattr(row, 'external_reference', None),
+        external_object_id=row.external_object_id,
+        before_state=_signed_object_state(before) if before is not None else {},
+        after_state=_signed_object_state(after) if after is not None else {},
+        publication_uri=row.publication_uri,
+        signed_object_uri=row.signed_object_uri,
+        certificate_identifier=row.object_hash or row.signed_object_uri,
+        is_stale=row.is_stale,
+    )
+
+
 def build_provider_snapshot_diff(
     *,
     base_snapshot: rpki_models.ProviderSnapshot,
@@ -499,6 +542,14 @@ def build_provider_snapshot_diff(
             _publication_point_identity(row): row
             for row in comparison_snapshot.imported_publication_points.select_related('external_reference').all()
         }
+        before_signed_objects = {
+            _signed_object_identity(row): row
+            for row in base_snapshot.imported_signed_objects.select_related('external_reference', 'publication_point').all()
+        }
+        after_signed_objects = {
+            _signed_object_identity(row): row
+            for row in comparison_snapshot.imported_signed_objects.select_related('external_reference', 'publication_point').all()
+        }
 
         family_summaries = {
             rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS: _diff_family(
@@ -557,12 +608,26 @@ def build_provider_snapshot_diff(
                 state_builder=_publication_point_state,
                 item_builder=_build_publication_point_item,
             ),
+            rpki_models.ProviderSyncFamily.SIGNED_OBJECT_INVENTORY: _diff_family(
+                diff,
+                family=rpki_models.ProviderSyncFamily.SIGNED_OBJECT_INVENTORY,
+                before_rows=before_signed_objects,
+                after_rows=after_signed_objects,
+                state_builder=_signed_object_state,
+                item_builder=_build_signed_object_item,
+            ),
         }
 
         for family in (
             rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY,
-            rpki_models.ProviderSyncFamily.SIGNED_OBJECT_INVENTORY,
         ):
+            if family == rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY:
+                family_summaries[family] = build_family_summary(
+                    family,
+                    status=rpki_models.ProviderSyncFamilyStatus.LIMITED,
+                    extra=family_capability_extra(comparison_snapshot.provider_account, family),
+                )
+                continue
             family_summaries[family] = build_family_summary(
                 family,
                 status=rpki_models.ProviderSyncFamilyStatus.NOT_IMPLEMENTED,

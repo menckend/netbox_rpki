@@ -158,9 +158,12 @@ class ProviderSyncServiceTestCase(TestCase):
         imported_child_links = list(snapshot.imported_child_links.select_related('external_reference').order_by('child_handle'))
         imported_resource_entitlements = list(snapshot.imported_resource_entitlements.select_related('external_reference').order_by('entitlement_source', 'related_handle', 'class_name'))
         imported_publication_points = list(snapshot.imported_publication_points.select_related('external_reference'))
+        imported_signed_objects = list(
+            snapshot.imported_signed_objects.select_related('external_reference', 'publication_point').order_by('signed_object_uri')
+        )
         self.assertEqual(sync_run.status, rpki_models.ValidationRunStatus.COMPLETED)
-        self.assertEqual(sync_run.records_fetched, 13)
-        self.assertEqual(sync_run.records_imported, 13)
+        self.assertEqual(sync_run.records_fetched, 15)
+        self.assertEqual(sync_run.records_imported, 15)
         self.assertEqual(imported[0].prefix, prefix_v4)
         self.assertEqual(imported[0].origin_asn, origin_asn)
         self.assertEqual(imported[0].external_object_id, '10.10.0.0/24|24|65000')
@@ -190,6 +193,18 @@ class ProviderSyncServiceTestCase(TestCase):
         self.assertEqual(imported_resource_entitlements[0].external_reference.object_type, rpki_models.ExternalObjectType.RESOURCE_ENTITLEMENT)
         self.assertEqual(len(imported_publication_points), 1)
         self.assertEqual(imported_publication_points[0].published_object_count, 2)
+        self.assertEqual(len(imported_signed_objects), 2)
+        self.assertEqual(
+            {row.signed_object_type for row in imported_signed_objects},
+            {
+                rpki_models.SignedObjectType.MANIFEST,
+                rpki_models.SignedObjectType.OTHER,
+            },
+        )
+        manifest_signed_object = next(
+            row for row in imported_signed_objects if row.signed_object_type == rpki_models.SignedObjectType.MANIFEST
+        )
+        self.assertEqual(manifest_signed_object.publication_point, imported_publication_points[0])
         provider_account.refresh_from_db()
         self.assertEqual(snapshot.summary_json['summary_schema_version'], PROVIDER_SYNC_SUMMARY_SCHEMA_VERSION)
         self.assertEqual(
@@ -220,8 +235,29 @@ class ProviderSyncServiceTestCase(TestCase):
             snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.PUBLICATION_POINTS]['records_imported'],
             1,
         )
-        self.assertEqual(snapshot.summary_json['records_imported'], 13)
+        self.assertEqual(
+            snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.SIGNED_OBJECT_INVENTORY]['records_imported'],
+            2,
+        )
+        self.assertEqual(
+            snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY]['status'],
+            rpki_models.ProviderSyncFamilyStatus.LIMITED,
+        )
+        self.assertEqual(
+            snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY]['capability_status'],
+            rpki_models.ProviderSyncFamilyStatus.LIMITED,
+        )
+        self.assertEqual(
+            snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY]['capability_mode'],
+            'placeholder',
+        )
+        self.assertIn(
+            'first-class certificate inventory endpoint',
+            snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY]['capability_reason'],
+        )
+        self.assertEqual(snapshot.summary_json['records_imported'], 15)
         self.assertEqual(snapshot.summary_json['route_records_imported'], 2)
+        self.assertEqual(snapshot.summary_json['signed_object_records_imported'], 2)
         self.assertEqual(provider_account.last_sync_summary_json['ca_handle'], 'netbox-rpki-dev')
         self.assertEqual(provider_account.last_sync_summary_json['aspa_records_imported'], 2)
 
@@ -303,7 +339,7 @@ class ProviderSyncServiceTestCase(TestCase):
         second_import = second_snapshot.imported_roa_authorizations.get(prefix_cidr_text='10.10.0.0/24')
         second_aspa_import = second_snapshot.imported_aspas.get(customer_as_value=65000)
 
-        self.assertEqual(rpki_models.ExternalObjectReference.objects.count(), 13)
+        self.assertEqual(rpki_models.ExternalObjectReference.objects.count(), 15)
         self.assertEqual(second_import.external_reference_id, first_reference.pk)
         first_reference.refresh_from_db()
         self.assertEqual(first_reference.last_seen_provider_snapshot, second_snapshot)
@@ -319,7 +355,7 @@ class ProviderSyncServiceTestCase(TestCase):
         self.assertEqual(snapshot_diff.status, rpki_models.ValidationRunStatus.COMPLETED)
         self.assertEqual(
             snapshot_diff.summary_json['totals']['records_unchanged'],
-            13,
+            15,
         )
         self.assertEqual(snapshot_diff.items.count(), 0)
         self.assertEqual(second_snapshot.summary_json['latest_diff_id'], snapshot_diff.pk)
@@ -386,6 +422,8 @@ class ProviderSyncServiceTestCase(TestCase):
         changed_repo_status = dict(KRILL_REPO_STATUS_JSON)
         changed_repo_status['last_exchange'] = dict(KRILL_REPO_STATUS_JSON['last_exchange'])
         changed_repo_status['next_exchange_before'] = KRILL_REPO_STATUS_JSON['next_exchange_before'] + 900
+        changed_repo_status['published'] = [dict(row) for row in KRILL_REPO_STATUS_JSON['published']]
+        changed_repo_status['published'][0]['base64'] = 'MIIKRILLMFT-ALT=='
 
         with patch('netbox_rpki.services.provider_sync._fetch_krill_routes_json', return_value=changed_routes), patch(
             'netbox_rpki.services.provider_sync._fetch_krill_aspas_json',
@@ -447,6 +485,22 @@ class ProviderSyncServiceTestCase(TestCase):
             1,
         )
         self.assertEqual(
+            snapshot_diff.summary_json['families'][rpki_models.ProviderSyncFamily.SIGNED_OBJECT_INVENTORY]['status'],
+            rpki_models.ProviderSyncFamilyStatus.COMPLETED,
+        )
+        self.assertEqual(
+            snapshot_diff.summary_json['families'][rpki_models.ProviderSyncFamily.SIGNED_OBJECT_INVENTORY]['records_changed'],
+            1,
+        )
+        self.assertEqual(
+            snapshot_diff.summary_json['families'][rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY]['status'],
+            rpki_models.ProviderSyncFamilyStatus.LIMITED,
+        )
+        self.assertEqual(
+            snapshot_diff.summary_json['families'][rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY]['capability_status'],
+            rpki_models.ProviderSyncFamilyStatus.LIMITED,
+        )
+        self.assertEqual(
             set(snapshot_diff.items.values_list('change_type', flat=True)),
             {
                 rpki_models.ProviderSnapshotDiffChangeType.CHANGED,
@@ -460,6 +514,7 @@ class ProviderSyncServiceTestCase(TestCase):
                 rpki_models.ProviderSyncFamily.CHILD_LINKS,
                 rpki_models.ProviderSyncFamily.RESOURCE_ENTITLEMENTS,
                 rpki_models.ProviderSyncFamily.PUBLICATION_POINTS,
+                rpki_models.ProviderSyncFamily.SIGNED_OBJECT_INVENTORY,
             }.issubset(set(snapshot_diff.items.values_list('object_family', flat=True)))
         )
 

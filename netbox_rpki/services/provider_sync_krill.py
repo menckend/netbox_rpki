@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import binascii
+import hashlib
 from collections.abc import Iterable, Mapping
 import json
 import ssl
@@ -184,6 +187,19 @@ class KrillResourceEntitlementRecord:
 class KrillPublishedObjectRecord:
     uri: str
     body_base64: str
+
+
+@dataclass(frozen=True)
+class KrillSignedObjectRecord:
+    publication_uri: str
+    signed_object_uri: str
+    signed_object_type: str
+    object_hash: str
+    body_base64: str
+
+    @property
+    def external_object_id(self) -> str:
+        return self.signed_object_uri or self.object_hash
 
 
 @dataclass(frozen=True)
@@ -829,6 +845,58 @@ def parse_krill_publication_point_records(
             published_objects=tuple(published_objects),
         )
     ]
+
+
+def _infer_signed_object_type(uri: str) -> str:
+    normalized_uri = uri.lower()
+    if normalized_uri.endswith('.roa'):
+        return rpki_models.SignedObjectType.ROA
+    if normalized_uri.endswith('.mft'):
+        return rpki_models.SignedObjectType.MANIFEST
+    if normalized_uri.endswith('.asa') or normalized_uri.endswith('.aspa'):
+        return rpki_models.SignedObjectType.ASPA
+    if normalized_uri.endswith('.rsc'):
+        return rpki_models.SignedObjectType.RSC
+    if normalized_uri.endswith('.tak'):
+        return rpki_models.SignedObjectType.TAK
+    return rpki_models.SignedObjectType.OTHER
+
+
+def _published_object_hash(body_base64: str) -> str:
+    if not body_base64:
+        return ''
+    try:
+        decoded_body = base64.b64decode(body_base64.encode('ascii'), validate=True)
+    except (ValueError, UnicodeEncodeError, binascii.Error):
+        decoded_body = body_base64.encode('utf-8')
+    return hashlib.sha256(decoded_body).hexdigest()
+
+
+def parse_krill_signed_object_records(
+    repo_details_payload=None,
+    repo_status_payload=None,
+) -> list[KrillSignedObjectRecord]:
+    repo_details = _mapping(repo_details_payload)
+    repo_status = _mapping(repo_status_payload)
+    repo_info = _mapping(repo_details.get('repo_info'))
+    publication_uri = _normalized_text(repo_info.get('sia_base'))
+    published_objects = []
+    for raw_object in _sequence(repo_status.get('published')):
+        published_object = _mapping(raw_object)
+        signed_object_uri = _normalized_text(published_object.get('uri'))
+        body_base64 = _normalized_text(published_object.get('base64'))
+        if not signed_object_uri and not body_base64:
+            continue
+        published_objects.append(
+            KrillSignedObjectRecord(
+                publication_uri=publication_uri,
+                signed_object_uri=signed_object_uri,
+                signed_object_type=_infer_signed_object_type(signed_object_uri),
+                object_hash=_published_object_hash(body_base64),
+                body_base64=body_base64,
+            )
+        )
+    return published_objects
 
 
 def build_krill_import_name(
