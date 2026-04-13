@@ -402,20 +402,22 @@ The schema already includes `ValidatorInstance`, `ValidationRun`, `ObjectValidat
 
 ### 9.11 What this should change in the plugin’s core schema direction
 
-Taken together, the current section 9 status points to a more specific conclusion than “add more tables.” The codebase already contains most of the major standards-aligned model families. The real remaining task is to normalize the schema so the older legacy objects and the newer standards-oriented objects form one coherent architecture.
+**Implementation status:** First-wave compatibility-preserving normalization is now implemented and release-gate verified.
 
-The right direction here is therefore **compatibility-preserving normalization**, not a second schema reset.
+Taken together, the current section 9 status pointed to a more specific conclusion than “add more tables.” The codebase already contained most of the major standards-aligned model families. The remaining task was to normalize the schema so the older legacy objects and the newer standards-oriented objects formed one coherent architecture.
 
-That means three things.
+That work has now been executed as a **compatibility-preserving normalization** effort rather than a second schema reset.
 
-1. **Unify object semantics around `SignedObject`.**  
-   The plugin already has a generic `SignedObject` layer plus typed extensions such as `Manifest`, `ASPA`, `RSC`, and `TrustAnchorKey`, and the legacy `Roa` model already has a compatibility link to it. The next step is to keep moving shared publication, signature, and lifecycle semantics onto `SignedObject` so new and existing object families stop drifting into separate patterns.
-2. **Clean up certificate-role boundaries.**  
-   The schema already distinguishes legacy resource certificates, `EndEntityCertificate`, and `RouterCertificate`, but those roles are not yet expressed as cleanly or consistently as they should be. The goal is not to invent a brand-new certificate subsystem; it is to make certificate purpose, signing role, and publication or revocation relationships clearer and more uniform.
-3. **Tighten publication and observation linkage.**  
-   The schema already has `Repository`, `PublicationPoint`, provider-imported publication-observation families, and validator-output families. The next step is to align authored state, imported state, and validated state around clearer identity and relationship rules so one object can be followed cleanly across publication, sync, and validation views.
+The completed first wave delivered three things.
 
-The most useful way to think about the target architecture is still as five layers, but now as a normalization target built on top of what already exists rather than as a hypothetical future redesign:
+1. **Object semantics were moved further toward `SignedObject`.**  
+   The plugin already had a generic `SignedObject` layer plus typed extensions such as `Manifest`, `ASPA`, `RSC`, and `TrustAnchorKey`, and the legacy `Roa` model already had a compatibility link to it. The first wave made that normalization path more explicit by tightening ROA linkage, exposing `SignedObject`-centric reverse relationships through the generated UI/API/GraphQL surfaces, and making the normalized object layer visible rather than implicit.
+2. **Certificate-role boundaries were cleaned up.**  
+   The schema already distinguished legacy resource certificates, `EndEntityCertificate`, and `RouterCertificate`, but those roles were not expressed as cleanly or consistently as they should be. The first wave kept the existing multi-model split, added additive guardrails, linked router certificates more explicitly through EE certificates, and exposed certificate-role relationships more intentionally in the generated surfaces.
+3. **Publication, imported observation, and validation linkage were tightened.**  
+   The schema already had `Repository`, `PublicationPoint`, provider-imported publication-observation families, and validator-output families. The first wave aligned authored state, imported state, and validated state through explicit foreign-key linkage so one object can now be followed more cleanly across publication, sync, and validation views.
+
+The most useful way to think about the target architecture is still as five layers, but now as an implemented first-wave normalization target built on top of what already existed rather than as a hypothetical redesign:
 
 1. **Authority layer:** trust anchors, parent or child CA relationships, resource certificates, router certificates.  
 2. **Publication layer:** repositories, publication points, URIs, RRDP or rsync metadata, and imported publication observation.  
@@ -423,14 +425,29 @@ The most useful way to think about the target architecture is still as five laye
 4. **Integrity layer:** EE certificates, CRLs, manifest membership, revocation state, freshness state, and related certificate observations.  
 5. **Validation layer:** relying-party observations, validated payloads, reconciliation artifacts, and related operator evidence.
 
-For implementation planning, this section should explicitly bias toward:
+The first wave followed these implementation rules:
 
 - additive migrations and compatibility shims rather than destructive renames
 - keeping the explicit Django model layer as the source of truth
 - preserving stable UI, API, and GraphQL contracts while the internals are normalized
 - reducing special-case legacy ROA and certificate assumptions over time instead of trying to replace them in one pass
 
-In short, section 9.11 should now be read as a normalization roadmap: make the existing standards-aligned layers coherent, reduce legacy-versus-new-model duplication, and converge future work on the explicit five-layer architecture already emerging in the codebase.
+The implemented first wave includes, at minimum:
+
+- additive schema slices for CRL-to-`SignedObject`, router-certificate-to-EE-certificate, legacy ROA-to-`SignedObject`, validated-payload-to-object-validation, and authored-to-imported publication linkage
+- provider-sync updates that populate the new imported-observation relationships
+- certificate-role guardrails and clearer certificate-role surfaces
+- explicit `SignedObject` detail, API, and GraphQL exposure for normalized reverse relationships
+- release-gate verification with clean schema-drift checks and a full plugin-suite pass
+
+What remains after this point is no longer first-wave 9.11 implementation. Remaining work is second-wave refinement, such as:
+
+- deciding whether certificate-role guardrails should tighten further for newly created data
+- deciding whether any additional authored-to-validation linkage is worth adding beyond the current joins
+- deciding whether some now-proven compatibility links should become stronger creation-time defaults
+- continuing longer-term convergence where CRLs and other legacy seams still do not follow a perfectly uniform typed-`SignedObject` extension model
+
+In short, section 9.11 should now be read as **first-wave completed**: the existing standards-aligned layers have been materially normalized into a more coherent architecture without a schema reset, and any remaining work is follow-on refinement rather than the initial normalization push itself.
 
 ---
 
