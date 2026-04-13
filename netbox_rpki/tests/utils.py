@@ -59,10 +59,36 @@ def create_test_asn(asn=65001, rir=None, **kwargs):
     )[0]
 
 
-def create_test_roa(name='ROA 1', signed_by=None, auto_renews=True, **kwargs):
+def create_test_roa(name='ROA 1', signed_by=None, auto_renews=True, signed_object=None, **kwargs):
     if signed_by is None:
         signed_by = create_test_certificate()
-    return rpki_models.Roa.objects.create(name=name, signed_by=signed_by, auto_renews=auto_renews, **kwargs)
+    if signed_object is None and kwargs.pop('link_signed_object', False):
+        organization = signed_by.rpki_org
+        publication_point = create_test_publication_point(organization=organization)
+        ee_certificate = create_test_end_entity_certificate(
+            organization=organization,
+            resource_certificate=signed_by,
+            publication_point=publication_point,
+            valid_from=kwargs.get('valid_from'),
+            valid_to=kwargs.get('valid_to'),
+        )
+        signed_object = create_test_signed_object(
+            name=f'{name} Signed Object',
+            organization=organization,
+            object_type=rpki_models.SignedObjectType.ROA,
+            resource_certificate=signed_by,
+            ee_certificate=ee_certificate,
+            publication_point=publication_point,
+            valid_from=kwargs.get('valid_from'),
+            valid_to=kwargs.get('valid_to'),
+        )
+    return rpki_models.Roa.objects.create(
+        name=name,
+        signed_by=signed_by,
+        signed_object=signed_object,
+        auto_renews=auto_renews,
+        **kwargs,
+    )
 
 
 def create_test_roa_prefix(prefix=None, roa=None, max_length=24, **kwargs):
@@ -220,12 +246,16 @@ def create_test_end_entity_certificate(
     status=None,
     **kwargs,
 ):
-    if organization is None:
-        organization = create_test_organization()
     if resource_certificate is None:
+        if organization is None:
+            organization = create_test_organization()
         resource_certificate = create_test_certificate(rpki_org=organization)
+    if organization is None:
+        organization = resource_certificate.rpki_org
     if publication_point is None:
-        publication_point = create_test_publication_point(organization=organization)
+        publication_point = resource_certificate.publication_point
+        if publication_point is None:
+            publication_point = create_test_publication_point(organization=organization)
     return rpki_models.EndEntityCertificate.objects.create(
         name=name,
         organization=organization,
@@ -267,6 +297,13 @@ def create_test_signed_object(
     raw_payload_reference='',
     **kwargs,
 ):
+    if ee_certificate is not None:
+        if organization is None:
+            organization = ee_certificate.organization
+        if resource_certificate is None:
+            resource_certificate = ee_certificate.resource_certificate
+        if publication_point is None:
+            publication_point = ee_certificate.publication_point
     if organization is None:
         organization = create_test_organization()
     if resource_certificate is None:
@@ -274,7 +311,9 @@ def create_test_signed_object(
     if ee_certificate is None:
         ee_certificate = create_test_end_entity_certificate(organization=organization, resource_certificate=resource_certificate)
     if publication_point is None:
-        publication_point = create_test_publication_point(organization=organization)
+        publication_point = ee_certificate.publication_point
+        if publication_point is None:
+            publication_point = create_test_publication_point(organization=organization)
     return rpki_models.SignedObject.objects.create(
         name=name,
         organization=organization,
@@ -304,6 +343,7 @@ def create_test_certificate_revocation_list(
     name='Certificate Revocation List 1',
     organization=None,
     issuing_certificate=None,
+    signed_object=None,
     publication_point=None,
     manifest=None,
     crl_number='',
@@ -324,6 +364,7 @@ def create_test_certificate_revocation_list(
         name=name,
         organization=organization,
         issuing_certificate=issuing_certificate,
+        signed_object=signed_object,
         publication_point=publication_point,
         manifest=manifest,
         crl_number=crl_number,
@@ -559,6 +600,7 @@ def create_test_router_certificate(
     organization=None,
     resource_certificate=None,
     publication_point=None,
+    ee_certificate=None,
     asn=None,
     subject='',
     issuer='',
@@ -576,6 +618,18 @@ def create_test_router_certificate(
         resource_certificate = create_test_certificate(rpki_org=organization)
     if publication_point is None:
         publication_point = create_test_publication_point(organization=organization)
+    if ee_certificate is None and kwargs.pop('link_ee_certificate', False):
+        ee_certificate = create_test_end_entity_certificate(
+            organization=organization,
+            resource_certificate=resource_certificate,
+            publication_point=publication_point,
+            subject=subject,
+            issuer=issuer,
+            serial=serial,
+            ski=ski,
+            valid_from=valid_from,
+            valid_to=valid_to,
+        )
     if asn is None:
         asn = create_test_asn()
     return rpki_models.RouterCertificate.objects.create(
@@ -583,6 +637,7 @@ def create_test_router_certificate(
         organization=organization,
         resource_certificate=resource_certificate,
         publication_point=publication_point,
+        ee_certificate=ee_certificate,
         asn=asn,
         subject=subject,
         issuer=issuer,
@@ -670,6 +725,7 @@ def create_test_validated_roa_payload(
     name='Validated ROA Payload 1',
     validation_run=None,
     roa=None,
+    object_validation_result=None,
     prefix=None,
     origin_as=None,
     max_length=None,
@@ -687,6 +743,7 @@ def create_test_validated_roa_payload(
         name=name,
         validation_run=validation_run,
         roa=roa,
+        object_validation_result=object_validation_result,
         prefix=prefix,
         origin_as=origin_as,
         max_length=max_length,
@@ -698,6 +755,7 @@ def create_test_validated_aspa_payload(
     name='Validated ASPA Payload 1',
     validation_run=None,
     aspa=None,
+    object_validation_result=None,
     customer_as=None,
     provider_as=None,
     **kwargs,
@@ -714,6 +772,7 @@ def create_test_validated_aspa_payload(
         name=name,
         validation_run=validation_run,
         aspa=aspa,
+        object_validation_result=object_validation_result,
         customer_as=customer_as,
         provider_as=provider_as,
         **kwargs,
@@ -975,6 +1034,7 @@ def create_test_imported_signed_object(
     provider_snapshot=None,
     organization=None,
     publication_point=None,
+    authored_signed_object=None,
     signed_object_key='',
     signed_object_type=None,
     publication_uri='rsync://example.invalid/repo/',
@@ -1007,6 +1067,7 @@ def create_test_imported_signed_object(
         provider_snapshot=provider_snapshot,
         organization=organization,
         publication_point=publication_point,
+        authored_signed_object=authored_signed_object,
         signed_object_key=signed_object_key,
         signed_object_type=signed_object_type or rpki_models.SignedObjectType.MANIFEST,
         publication_uri=publication_uri,
@@ -1527,6 +1588,7 @@ def create_test_imported_publication_point(
     name='Imported Publication Point 1',
     provider_snapshot=None,
     organization=None,
+    authored_publication_point=None,
     publication_key='',
     service_uri='https://testbed.krill.cloud/rfc8181/netbox-rpki-dev/',
     publication_uri='rsync://testbed.krill.cloud/repo/netbox-rpki-dev/',
@@ -1555,6 +1617,7 @@ def create_test_imported_publication_point(
         name=name,
         provider_snapshot=provider_snapshot,
         organization=organization,
+        authored_publication_point=authored_publication_point,
         publication_key=publication_key,
         service_uri=service_uri,
         publication_uri=publication_uri,
@@ -1577,6 +1640,8 @@ def create_test_imported_certificate_observation(
     organization=None,
     certificate_key='deadbeef',
     observation_source=None,
+    publication_point=None,
+    signed_object=None,
     certificate_uri='rsync://example.invalid/repo/example.cer',
     publication_uri='rsync://example.invalid/repo/',
     signed_object_uri='',
@@ -1607,6 +1672,8 @@ def create_test_imported_certificate_observation(
             certificate_key=certificate_key,
         ),
         observation_source=observation_source or rpki_models.CertificateObservationSource.SIGNED_OBJECT_EE,
+        publication_point=publication_point,
+        signed_object=signed_object,
         certificate_uri=certificate_uri,
         publication_uri=publication_uri,
         signed_object_uri=signed_object_uri,

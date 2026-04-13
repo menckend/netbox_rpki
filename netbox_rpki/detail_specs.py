@@ -5,6 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from django.core.exceptions import ObjectDoesNotExist
 from django.urls import reverse
 
 from netbox_rpki import models
@@ -257,6 +258,44 @@ def get_provider_snapshot_diff_after_state(item: models.ProviderSnapshotDiffItem
     return get_pretty_json(item.after_state_json)
 
 
+def get_router_certificate_extension(ee_certificate: models.EndEntityCertificate):
+    try:
+        return ee_certificate.router_certificate_extension
+    except models.RouterCertificate.DoesNotExist:
+        return None
+
+
+def get_optional_related(instance: Any, attribute_name: str):
+    try:
+        return getattr(instance, attribute_name)
+    except (AttributeError, ObjectDoesNotExist):
+        return None
+
+
+def get_signed_object_legacy_roa(signed_object: models.SignedObject):
+    return get_optional_related(signed_object, 'legacy_roa')
+
+
+def get_signed_object_crl(signed_object: models.SignedObject):
+    return get_optional_related(signed_object, 'crl_extension')
+
+
+def get_signed_object_manifest(signed_object: models.SignedObject):
+    return get_optional_related(signed_object, 'manifest_extension')
+
+
+def get_signed_object_trust_anchor_key(signed_object: models.SignedObject):
+    return get_optional_related(signed_object, 'trust_anchor_key_extension')
+
+
+def get_signed_object_aspa(signed_object: models.SignedObject):
+    return get_optional_related(signed_object, 'aspa_extension')
+
+
+def get_signed_object_rsc(signed_object: models.SignedObject):
+    return get_optional_related(signed_object, 'rsc_extension')
+
+
 def get_provider_snapshot_sync_run(snapshot: models.ProviderSnapshot):
     try:
         return snapshot.sync_run
@@ -423,6 +462,12 @@ IMPORTED_PUBLICATION_POINT_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(label='Published Object Count', value=lambda obj: obj.published_object_count),
         DetailFieldSpec(label='External Object ID', value=lambda obj: obj.external_object_id, empty_text='None'),
         DetailFieldSpec(label='External Reference', value=lambda obj: obj.external_reference, kind='link', empty_text='None'),
+        DetailFieldSpec(
+            label='Authored Publication Point',
+            value=lambda obj: obj.authored_publication_point,
+            kind='link',
+            empty_text='None',
+        ),
         DetailFieldSpec(label='Is Stale', value=lambda obj: obj.is_stale),
         DetailFieldSpec(label='Payload', value=lambda obj: get_pretty_json(obj.payload_json), kind='code', empty_text='None'),
     ),
@@ -447,6 +492,12 @@ IMPORTED_SIGNED_OBJECT_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(label='Body Base64', value=lambda obj: obj.body_base64, kind='code', empty_text='None'),
         DetailFieldSpec(label='External Object ID', value=lambda obj: obj.external_object_id, empty_text='None'),
         DetailFieldSpec(label='External Reference', value=lambda obj: obj.external_reference, kind='link', empty_text='None'),
+        DetailFieldSpec(
+            label='Authored Signed Object',
+            value=lambda obj: obj.authored_signed_object,
+            kind='link',
+            empty_text='None',
+        ),
         DetailFieldSpec(label='Is Stale', value=lambda obj: obj.is_stale),
         DetailFieldSpec(label='Payload', value=lambda obj: get_pretty_json(obj.payload_json), kind='code', empty_text='None'),
     ),
@@ -462,6 +513,8 @@ IMPORTED_CERTIFICATE_OBSERVATION_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(label='Name', value=lambda obj: obj.name),
         DetailFieldSpec(label='Provider Snapshot', value=lambda obj: obj.provider_snapshot, kind='link'),
         DetailFieldSpec(label='Organization', value=lambda obj: obj.organization, kind='link'),
+        DetailFieldSpec(label='Publication Point', value=lambda obj: obj.publication_point, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Signed Object', value=lambda obj: obj.signed_object, kind='link', empty_text='None'),
         DetailFieldSpec(label='Certificate Key', value=lambda obj: obj.certificate_key),
         DetailFieldSpec(label='Observation Source', value=lambda obj: obj.observation_source),
         DetailFieldSpec(label='Certificate URI', value=lambda obj: obj.certificate_uri, kind='url', empty_text='None'),
@@ -531,7 +584,7 @@ ASPA_DETAIL_SPEC = DetailSpec(
         DetailTableSpec(
             title='Validated ASPA Payloads',
             table_class_name='ValidatedAspaPayloadTable',
-            queryset=lambda obj: obj.validated_payloads.select_related('validation_run', 'customer_as', 'provider_as').all(),
+            queryset=lambda obj: obj.validated_payloads.select_related('validation_run', 'object_validation_result', 'customer_as', 'provider_as').all(),
         ),
     ),
 )
@@ -1120,6 +1173,119 @@ ROA_VALIDATION_SIMULATION_RESULT_DETAIL_SPEC = DetailSpec(
 )
 
 
+SIGNED_OBJECT_DETAIL_SPEC = DetailSpec(
+    model=models.SignedObject,
+    list_url_name='plugins:netbox_rpki:signedobject_list',
+    breadcrumb_label='Signed Objects',
+    card_title='Signed Object',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(
+            label='Tenant',
+            value=lambda obj: obj.tenant,
+            kind='link',
+            use_header=False,
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='Organization',
+            value=lambda obj: obj.organization,
+            kind='link',
+            empty_text='None',
+        ),
+        DetailFieldSpec(label='Object Type', value=lambda obj: obj.object_type),
+        DetailFieldSpec(label='Display Label', value=lambda obj: obj.display_label, empty_text='None'),
+        DetailFieldSpec(
+            label='Resource Certificate',
+            value=lambda obj: obj.resource_certificate,
+            kind='link',
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='EE Certificate',
+            value=lambda obj: obj.ee_certificate,
+            kind='link',
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='Publication Point',
+            value=lambda obj: obj.publication_point,
+            kind='link',
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='Current Manifest',
+            value=lambda obj: obj.current_manifest,
+            kind='link',
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='Legacy ROA',
+            value=get_signed_object_legacy_roa,
+            kind='link',
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='Certificate Revocation List',
+            value=get_signed_object_crl,
+            kind='link',
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='Manifest',
+            value=get_signed_object_manifest,
+            kind='link',
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='Trust Anchor Key',
+            value=get_signed_object_trust_anchor_key,
+            kind='link',
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='ASPA',
+            value=get_signed_object_aspa,
+            kind='link',
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='RSC',
+            value=get_signed_object_rsc,
+            kind='link',
+            empty_text='None',
+        ),
+        DetailFieldSpec(label='Filename', value=lambda obj: obj.filename, empty_text='None'),
+        DetailFieldSpec(label='Object URI', value=lambda obj: obj.object_uri, kind='url', empty_text='None'),
+        DetailFieldSpec(label='Repository URI', value=lambda obj: obj.repository_uri, kind='url', empty_text='None'),
+        DetailFieldSpec(label='Content Hash', value=lambda obj: obj.content_hash, empty_text='None'),
+        DetailFieldSpec(label='Serial or Version', value=lambda obj: obj.serial_or_version, empty_text='None'),
+        DetailFieldSpec(label='CMS Digest Algorithm', value=lambda obj: obj.cms_digest_algorithm, empty_text='None'),
+        DetailFieldSpec(label='CMS Signature Algorithm', value=lambda obj: obj.cms_signature_algorithm, empty_text='None'),
+        DetailFieldSpec(label='Publication Status', value=lambda obj: obj.publication_status),
+        DetailFieldSpec(label='Validation State', value=lambda obj: obj.validation_state),
+        DetailFieldSpec(label='Valid From', value=lambda obj: obj.valid_from, empty_text='None'),
+        DetailFieldSpec(label='Valid To', value=lambda obj: obj.valid_to, empty_text='None'),
+        DetailFieldSpec(label='Raw Payload Reference', value=lambda obj: obj.raw_payload_reference, empty_text='None'),
+    ),
+    bottom_tables=(
+        DetailTableSpec(
+            title='Imported Signed Object Observations',
+            table_class_name='ImportedSignedObjectTable',
+            queryset=lambda obj: obj.imported_signed_object_observations.select_related(
+                'provider_snapshot',
+                'publication_point',
+            ).all(),
+        ),
+        DetailTableSpec(
+            title='Object Validation Results',
+            table_class_name='ObjectValidationResultTable',
+            queryset=lambda obj: obj.validation_results.select_related('validation_run').all(),
+        ),
+    ),
+)
+
+
 CERTIFICATE_DETAIL_SPEC = DetailSpec(
     model=models.Certificate,
     list_url_name='plugins:netbox_rpki:certificate_list',
@@ -1149,6 +1315,18 @@ CERTIFICATE_DETAIL_SPEC = DetailSpec(
             label='Parent RPKI customer/org',
             value=lambda obj: obj.rpki_org,
             kind='link',
+        ),
+        DetailFieldSpec(
+            label='Trust Anchor',
+            value=lambda obj: obj.trust_anchor,
+            kind='link',
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='Publication Point',
+            value=lambda obj: obj.publication_point,
+            kind='link',
+            empty_text='None',
         ),
     ),
     actions=(
@@ -1185,9 +1363,77 @@ CERTIFICATE_DETAIL_SPEC = DetailSpec(
     ),
     bottom_tables=(
         DetailTableSpec(
+            title='Issued End-Entity Certificates',
+            table_class_name='EndEntityCertificateTable',
+            queryset=lambda obj: obj.ee_certificates.select_related('organization', 'publication_point').all(),
+        ),
+        DetailTableSpec(
+            title='Signed Objects',
+            table_class_name='SignedObjectTable',
+            queryset=lambda obj: obj.signed_objects.select_related('ee_certificate', 'publication_point').all(),
+        ),
+        DetailTableSpec(
             title='ROAs',
             table_class_name='RoaTable',
             queryset=lambda obj: obj.roas.all(),
+        ),
+    ),
+)
+
+
+END_ENTITY_CERTIFICATE_DETAIL_SPEC = DetailSpec(
+    model=models.EndEntityCertificate,
+    list_url_name='plugins:netbox_rpki:endentitycertificate_list',
+    breadcrumb_label='End-Entity Certificates',
+    card_title='End-Entity Certificate',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(
+            label='Tenant',
+            value=lambda obj: obj.tenant,
+            kind='link',
+            use_header=False,
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='Organization',
+            value=lambda obj: obj.organization,
+            kind='link',
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='Resource Certificate',
+            value=lambda obj: obj.resource_certificate,
+            kind='link',
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='Publication Point',
+            value=lambda obj: obj.publication_point,
+            kind='link',
+            empty_text='None',
+        ),
+        DetailFieldSpec(label='Subject', value=lambda obj: obj.subject, empty_text='None'),
+        DetailFieldSpec(label='Issuer', value=lambda obj: obj.issuer, empty_text='None'),
+        DetailFieldSpec(label='Serial', value=lambda obj: obj.serial, empty_text='None'),
+        DetailFieldSpec(label='SKI', value=lambda obj: obj.ski, empty_text='None'),
+        DetailFieldSpec(label='AKI', value=lambda obj: obj.aki, empty_text='None'),
+        DetailFieldSpec(label='Valid From', value=lambda obj: obj.valid_from, empty_text='None'),
+        DetailFieldSpec(label='Valid To', value=lambda obj: obj.valid_to, empty_text='None'),
+        DetailFieldSpec(label='Public Key', value=lambda obj: obj.public_key, empty_text='None'),
+        DetailFieldSpec(label='Status', value=lambda obj: obj.status),
+        DetailFieldSpec(
+            label='Router Certificate Extension',
+            value=get_router_certificate_extension,
+            kind='link',
+            empty_text='None',
+        ),
+    ),
+    bottom_tables=(
+        DetailTableSpec(
+            title='Signed Objects',
+            table_class_name='SignedObjectTable',
+            queryset=lambda obj: obj.signed_objects.select_related('resource_certificate', 'publication_point').all(),
         ),
     ),
 )
@@ -1221,6 +1467,12 @@ ROA_DETAIL_SPEC = DetailSpec(
             value=lambda obj: obj.signed_by.name if obj.signed_by else None,
             kind='link',
             url=lambda obj: obj.signed_by.get_absolute_url() if obj.signed_by else None,
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='Signed Object',
+            value=lambda obj: obj.signed_object,
+            kind='link',
             empty_text='None',
         ),
     ),
@@ -1384,17 +1636,24 @@ PROVIDER_SNAPSHOT_DETAIL_SPEC = DetailSpec(
         DetailTableSpec(
             title='Imported Publication Points',
             table_class_name='ImportedPublicationPointTable',
-            queryset=lambda obj: obj.imported_publication_points.select_related('external_reference').all(),
+            queryset=lambda obj: obj.imported_publication_points.select_related(
+                'external_reference',
+                'authored_publication_point',
+            ).all(),
         ),
         DetailTableSpec(
             title='Imported Signed Objects',
             table_class_name='ImportedSignedObjectTable',
-            queryset=lambda obj: obj.imported_signed_objects.select_related('external_reference', 'publication_point').all(),
+            queryset=lambda obj: obj.imported_signed_objects.select_related(
+                'external_reference',
+                'publication_point',
+                'authored_signed_object',
+            ).all(),
         ),
         DetailTableSpec(
             title='Imported Certificate Observations',
             table_class_name='ImportedCertificateObservationTable',
-            queryset=lambda obj: obj.imported_certificate_observations.select_related('external_reference').all(),
+            queryset=lambda obj: obj.imported_certificate_observations.select_related('external_reference', 'publication_point', 'signed_object').all(),
         ),
     ),
 )
@@ -1456,7 +1715,9 @@ PROVIDER_SNAPSHOT_DIFF_ITEM_DETAIL_SPEC = DetailSpec(
 
 DETAIL_SPEC_BY_MODEL = {
     models.Organization: ORGANIZATION_DETAIL_SPEC,
+    models.SignedObject: SIGNED_OBJECT_DETAIL_SPEC,
     models.Certificate: CERTIFICATE_DETAIL_SPEC,
+    models.EndEntityCertificate: END_ENTITY_CERTIFICATE_DETAIL_SPEC,
     models.Roa: ROA_DETAIL_SPEC,
     models.ASPA: ASPA_DETAIL_SPEC,
     models.ImportedAspa: IMPORTED_ASPA_DETAIL_SPEC,

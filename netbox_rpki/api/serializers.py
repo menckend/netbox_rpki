@@ -1,3 +1,4 @@
+from django.core.exceptions import ObjectDoesNotExist
 from netbox.api.serializers import NetBoxModelSerializer
 from rest_framework.serializers import HyperlinkedIdentityField
 from rest_framework import serializers
@@ -154,11 +155,13 @@ class ProviderSnapshotSerializer(SERIALIZER_CLASS_MAP['providersnapshot']):
         view = parser_context.get('view')
         return getattr(view, 'action', '') == 'retrieve'
 
-    def _serialize_nested_collection(self, obj, *, related_name, serializer_key):
+    def _serialize_nested_collection(self, obj, *, related_name, serializer_key, select_related_fields=()):
         if not self._is_detail_view():
             return []
         serializer_class = SERIALIZER_CLASS_MAP[serializer_key]
         queryset = getattr(obj, related_name).all()
+        if select_related_fields:
+            queryset = queryset.select_related(*select_related_fields)
         return serializer_class(queryset, many=True, context=self.context).data
 
     def get_latest_diff(self, obj):
@@ -182,6 +185,7 @@ class ProviderSnapshotSerializer(SERIALIZER_CLASS_MAP['providersnapshot']):
             obj,
             related_name='imported_signed_objects',
             serializer_key='importedsignedobject',
+            select_related_fields=('external_reference', 'publication_point'),
         )
 
     def get_imported_certificate_observations(self, obj):
@@ -189,11 +193,102 @@ class ProviderSnapshotSerializer(SERIALIZER_CLASS_MAP['providersnapshot']):
             obj,
             related_name='imported_certificate_observations',
             serializer_key='importedcertificateobservation',
+            select_related_fields=('external_reference', 'publication_point', 'signed_object'),
         )
 
 
 SERIALIZER_CLASS_MAP['providersnapshot'] = ProviderSnapshotSerializer
 globals()['ProviderSnapshotSerializer'] = ProviderSnapshotSerializer
+
+
+class SignedObjectSerializer(SERIALIZER_CLASS_MAP['signedobject']):
+    legacy_roa = serializers.SerializerMethodField()
+    crl_extension = serializers.SerializerMethodField()
+    manifest_extension = serializers.SerializerMethodField()
+    trust_anchor_key_extension = serializers.SerializerMethodField()
+    aspa_extension = serializers.SerializerMethodField()
+    rsc_extension = serializers.SerializerMethodField()
+    imported_signed_object_observations = serializers.SerializerMethodField()
+    validation_results = serializers.SerializerMethodField()
+
+    class Meta(SERIALIZER_CLASS_MAP['signedobject'].Meta):
+        fields = SERIALIZER_CLASS_MAP['signedobject'].Meta.fields + (
+            'legacy_roa',
+            'crl_extension',
+            'manifest_extension',
+            'trust_anchor_key_extension',
+            'aspa_extension',
+            'rsc_extension',
+            'imported_signed_object_observations',
+            'validation_results',
+        )
+
+    def _is_detail_view(self):
+        request = self.context.get('request')
+        if request is None:
+            return False
+        parser_context = getattr(request, 'parser_context', None) or {}
+        view = parser_context.get('view')
+        return getattr(view, 'action', '') == 'retrieve'
+
+    def _serialize_related_object(self, obj, attribute_name, serializer_key):
+        if not self._is_detail_view():
+            return None
+        try:
+            related = getattr(obj, attribute_name)
+        except ObjectDoesNotExist:
+            return None
+        if related is None:
+            return None
+        serializer_class = SERIALIZER_CLASS_MAP[serializer_key]
+        return serializer_class(related, context=self.context).data
+
+    def _serialize_related_collection(self, obj, *, related_name, serializer_key, select_related_fields=()):
+        if not self._is_detail_view():
+            return []
+        serializer_class = SERIALIZER_CLASS_MAP[serializer_key]
+        queryset = getattr(obj, related_name).all()
+        if select_related_fields:
+            queryset = queryset.select_related(*select_related_fields)
+        return serializer_class(queryset, many=True, context=self.context).data
+
+    def get_legacy_roa(self, obj):
+        return self._serialize_related_object(obj, 'legacy_roa', 'roa')
+
+    def get_crl_extension(self, obj):
+        return self._serialize_related_object(obj, 'crl_extension', 'certificaterevocationlist')
+
+    def get_manifest_extension(self, obj):
+        return self._serialize_related_object(obj, 'manifest_extension', 'manifest')
+
+    def get_trust_anchor_key_extension(self, obj):
+        return self._serialize_related_object(obj, 'trust_anchor_key_extension', 'trustanchorkey')
+
+    def get_aspa_extension(self, obj):
+        return self._serialize_related_object(obj, 'aspa_extension', 'aspa')
+
+    def get_rsc_extension(self, obj):
+        return self._serialize_related_object(obj, 'rsc_extension', 'rsc')
+
+    def get_imported_signed_object_observations(self, obj):
+        return self._serialize_related_collection(
+            obj,
+            related_name='imported_signed_object_observations',
+            serializer_key='importedsignedobject',
+            select_related_fields=('provider_snapshot', 'publication_point', 'authored_signed_object'),
+        )
+
+    def get_validation_results(self, obj):
+        return self._serialize_related_collection(
+            obj,
+            related_name='validation_results',
+            serializer_key='objectvalidationresult',
+            select_related_fields=('validation_run', 'signed_object'),
+        )
+
+
+SERIALIZER_CLASS_MAP['signedobject'] = SignedObjectSerializer
+globals()['SignedObjectSerializer'] = SignedObjectSerializer
 
 
 class ROAChangePlanApproveActionSerializer(serializers.Serializer):

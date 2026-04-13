@@ -80,10 +80,65 @@ class ProviderSnapshotDiffReportingMixin:
         return self.items.count()
 
 
+@strawberry.type
+class SignedObjectSurfaceMixin:
+
+    @strawberry.field
+    def legacy_roa(self) -> Annotated["RoaType", strawberry.lazy('.types')] | None:
+        try:
+            return self.legacy_roa
+        except models.Roa.DoesNotExist:
+            return None
+
+    @strawberry.field
+    def crl_extension(self) -> Annotated["CertificateRevocationListType", strawberry.lazy('.types')] | None:
+        try:
+            return self.crl_extension
+        except models.CertificateRevocationList.DoesNotExist:
+            return None
+
+    @strawberry.field
+    def manifest_extension(self) -> Annotated["ManifestType", strawberry.lazy('.types')] | None:
+        try:
+            return self.manifest_extension
+        except models.Manifest.DoesNotExist:
+            return None
+
+    @strawberry.field
+    def trust_anchor_key_extension(self) -> Annotated["TrustAnchorKeyType", strawberry.lazy('.types')] | None:
+        try:
+            return self.trust_anchor_key_extension
+        except models.TrustAnchorKey.DoesNotExist:
+            return None
+
+    @strawberry.field
+    def aspa_extension(self) -> Annotated["ASPAType", strawberry.lazy('.types')] | None:
+        try:
+            return self.aspa_extension
+        except models.ASPA.DoesNotExist:
+            return None
+
+    @strawberry.field
+    def rsc_extension(self) -> Annotated["RSCType", strawberry.lazy('.types')] | None:
+        try:
+            return self.rsc_extension
+        except models.RSC.DoesNotExist:
+            return None
+
+    @strawberry.field
+    def imported_signed_object_observations(self) -> list[Annotated["ImportedSignedObjectType", strawberry.lazy('.types')]]:
+        return self.imported_signed_object_observations.all()
+
+    @strawberry.field
+    def validation_results(self) -> list[Annotated["ObjectValidationResultType", strawberry.lazy('.types')]]:
+        return self.validation_results.all()
+
+
 REPORTING_MIXINS = {
     'rpkiprovideraccount': ProviderAccountReportingMixin,
     'providersnapshot': ProviderSnapshotReportingMixin,
     'providersnapshotdiff': ProviderSnapshotDiffReportingMixin,
+    'signedobject': SignedObjectSurfaceMixin,
 }
 
 

@@ -19,10 +19,14 @@ from netbox_rpki.tests.utils import (
     create_test_certificate,
     create_test_certificate_asn,
     create_test_certificate_prefix,
+    create_test_certificate_revocation_list,
+    create_test_end_entity_certificate,
     create_test_imported_roa_authorization,
     create_test_intent_derivation_run,
     create_test_organization,
+    create_test_object_validation_result,
     create_test_prefix,
+    create_test_publication_point,
     create_test_provider_snapshot_diff,
     create_test_provider_snapshot_diff_item,
     create_test_published_roa_result,
@@ -33,6 +37,8 @@ from netbox_rpki.tests.utils import (
     create_test_imported_parent_link,
     create_test_imported_publication_point,
     create_test_imported_resource_entitlement,
+    create_test_imported_signed_object,
+    create_test_manifest,
     create_test_roa,
     create_test_roa_change_plan_matrix,
     create_test_roa_intent,
@@ -45,7 +51,12 @@ from netbox_rpki.tests.utils import (
     create_test_routing_intent_rule,
     create_test_provider_account,
     create_test_provider_snapshot,
+    create_test_router_certificate,
     create_test_validated_aspa_payload,
+    create_test_validated_roa_payload,
+    create_test_signed_object,
+    create_test_trust_anchor,
+    create_test_validation_run,
 )
 from utilities.testing.utils import post_data
 from unittest.mock import patch
@@ -350,6 +361,267 @@ class ProviderSnapshotDetailViewTestCase(PluginViewTestCase):
         self.assertContains(response, 'Provider Snapshot Imported CA Metadata')
 
 
+class SectionNineSurfaceDetailViewTestCase(PluginViewTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='section-nine-view-org', name='Section Nine View Org')
+        cls.trust_anchor = create_test_trust_anchor(
+            name='Section Nine View Trust Anchor',
+            organization=cls.organization,
+        )
+        cls.resource_publication_point = create_test_publication_point(
+            name='Section Nine View Resource Publication Point',
+            organization=cls.organization,
+            publication_uri='rsync://view.invalid/certs/',
+        )
+        cls.resource_certificate = create_test_certificate(
+            name='Section Nine View Resource Certificate',
+            rpki_org=cls.organization,
+            trust_anchor=cls.trust_anchor,
+            publication_point=cls.resource_publication_point,
+        )
+        cls.roa_signed_object = create_test_signed_object(
+            name='Section Nine View ROA Signed Object',
+            organization=cls.organization,
+            object_type='roa',
+            resource_certificate=cls.resource_certificate,
+        )
+        cls.roa = create_test_roa(
+            name='Section Nine View ROA',
+            origin_as=create_test_asn(65314),
+            signed_by=cls.resource_certificate,
+            signed_object=cls.roa_signed_object,
+        )
+        cls.router_ee_certificate = create_test_end_entity_certificate(
+            name='Section Nine View Router EE Certificate',
+            organization=cls.organization,
+            resource_certificate=cls.resource_certificate,
+            publication_point=cls.resource_publication_point,
+            subject='CN=View Router',
+            issuer='CN=View Issuer',
+            serial='view-router-serial',
+            ski='view-router-ski',
+        )
+        cls.router_certificate = create_test_router_certificate(
+            name='Section Nine View Router Certificate',
+            organization=cls.organization,
+            resource_certificate=cls.resource_certificate,
+            publication_point=cls.router_ee_certificate.publication_point,
+            ee_certificate=cls.router_ee_certificate,
+            asn=create_test_asn(65313),
+            subject='CN=View Router',
+            issuer='CN=View Issuer',
+            serial='view-router-serial',
+            ski='view-router-ski',
+        )
+        cls.crl_signed_object = create_test_signed_object(
+            name='Section Nine View CRL Signed Object',
+            organization=cls.organization,
+            filename='section-nine-view.crl',
+            object_uri='https://view.invalid/crl.crl',
+            repository_uri='https://view.invalid/',
+        )
+        cls.certificate_revocation_list = create_test_certificate_revocation_list(
+            name='Section Nine View CRL',
+            organization=cls.organization,
+            signed_object=cls.crl_signed_object,
+            publication_uri='https://view.invalid/crl.crl',
+            crl_number='42',
+        )
+        cls.provider_account = create_test_provider_account(
+            name='Section Nine View Provider Account',
+            organization=cls.organization,
+            provider_type='krill',
+            org_handle='ORG-SECTION-NINE-VIEW',
+            ca_handle='section-nine-view',
+        )
+        cls.snapshot = create_test_provider_snapshot(
+            name='Section Nine View Snapshot',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+        )
+        cls.authored_publication_point = create_test_publication_point(
+            name='Section Nine View Authored Publication Point',
+            organization=cls.organization,
+            publication_uri='rsync://view.invalid/repo/',
+        )
+        cls.authored_signed_object = create_test_signed_object(
+            name='Section Nine View Authored Signed Object',
+            organization=cls.organization,
+            publication_point=cls.authored_publication_point,
+            object_type='manifest',
+            object_uri='rsync://view.invalid/repo/example.mft',
+        )
+        cls.authored_manifest = create_test_manifest(
+            name='Section Nine View Authored Manifest',
+            signed_object=cls.authored_signed_object,
+            manifest_number='manifest-9',
+        )
+        cls.authored_signed_object.current_manifest = cls.authored_manifest
+        cls.authored_signed_object.save(update_fields=('current_manifest',))
+        cls.imported_publication_point = create_test_imported_publication_point(
+            name='Section Nine View Imported Publication Point',
+            organization=cls.organization,
+            provider_snapshot=cls.snapshot,
+            authored_publication_point=cls.authored_publication_point,
+            publication_uri='rsync://view.invalid/repo/',
+        )
+        cls.imported_signed_object = create_test_imported_signed_object(
+            name='Section Nine View Imported Signed Object',
+            organization=cls.organization,
+            provider_snapshot=cls.snapshot,
+            publication_point=cls.imported_publication_point,
+            authored_signed_object=cls.authored_signed_object,
+            signed_object_uri='rsync://view.invalid/repo/example.mft',
+        )
+        cls.imported_certificate_observation = create_test_imported_certificate_observation(
+            name='Section Nine View Imported Certificate Observation',
+            organization=cls.organization,
+            provider_snapshot=cls.snapshot,
+            publication_point=cls.imported_publication_point,
+            signed_object=cls.imported_signed_object,
+            certificate_uri='rsync://view.invalid/repo/example.cer',
+            publication_uri=cls.imported_publication_point.publication_uri,
+            signed_object_uri=cls.imported_signed_object.signed_object_uri,
+        )
+        cls.validation_run = create_test_validation_run(
+            name='Section Nine View Validation Run',
+        )
+        cls.object_validation_result = create_test_object_validation_result(
+            name='Section Nine View Object Validation Result',
+            validation_run=cls.validation_run,
+            signed_object=cls.authored_signed_object,
+        )
+
+    def test_certificate_revocation_list_detail_shows_signed_object_link(self):
+        self.add_permissions('netbox_rpki.view_certificaterevocationlist', 'netbox_rpki.view_signedobject')
+
+        response = self.client.get(self.certificate_revocation_list.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'Signed Object')
+        self.assertContains(response, self.crl_signed_object.get_absolute_url())
+        self.assertContains(response, self.crl_signed_object.name)
+
+    def test_roa_detail_shows_signed_object_link(self):
+        self.add_permissions('netbox_rpki.view_roa', 'netbox_rpki.view_signedobject')
+
+        response = self.client.get(self.roa.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, self.roa_signed_object.get_absolute_url())
+        self.assertContains(response, self.roa_signed_object.name)
+
+    def test_router_certificate_detail_shows_ee_certificate_link(self):
+        self.add_permissions('netbox_rpki.view_routercertificate', 'netbox_rpki.view_endentitycertificate')
+
+        response = self.client.get(self.router_certificate.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, self.router_ee_certificate.get_absolute_url())
+        self.assertContains(response, self.router_ee_certificate.name)
+
+    def test_certificate_detail_shows_trust_anchor_and_publication_point_links(self):
+        self.add_permissions(
+            'netbox_rpki.view_certificate',
+            'netbox_rpki.view_trustanchor',
+            'netbox_rpki.view_publicationpoint',
+        )
+
+        response = self.client.get(self.resource_certificate.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'Trust Anchor')
+        self.assertContains(response, self.trust_anchor.get_absolute_url())
+        self.assertContains(response, self.trust_anchor.name)
+        self.assertContains(response, 'Publication Point')
+        self.assertContains(response, self.resource_publication_point.get_absolute_url())
+        self.assertContains(response, self.resource_publication_point.name)
+
+    def test_end_entity_certificate_detail_shows_resource_certificate_and_publication_point_links(self):
+        self.add_permissions(
+            'netbox_rpki.view_endentitycertificate',
+            'netbox_rpki.view_certificate',
+            'netbox_rpki.view_publicationpoint',
+        )
+
+        response = self.client.get(self.router_ee_certificate.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'Resource Certificate')
+        self.assertContains(response, self.resource_certificate.get_absolute_url())
+        self.assertContains(response, self.resource_certificate.name)
+        self.assertContains(response, 'Publication Point')
+        self.assertContains(response, self.resource_publication_point.get_absolute_url())
+        self.assertContains(response, self.resource_publication_point.name)
+
+    def test_imported_certificate_observation_detail_shows_publication_and_signed_object_links(self):
+        self.add_permissions(
+            'netbox_rpki.view_importedcertificateobservation',
+            'netbox_rpki.view_importedpublicationpoint',
+            'netbox_rpki.view_importedsignedobject',
+        )
+
+        response = self.client.get(self.imported_certificate_observation.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'Publication Point')
+        self.assertContains(response, 'Signed Object')
+        self.assertContains(response, self.imported_publication_point.get_absolute_url())
+        self.assertContains(response, self.imported_signed_object.get_absolute_url())
+        self.assertContains(response, self.imported_publication_point.name)
+        self.assertContains(response, self.imported_signed_object.name)
+
+    def test_imported_publication_point_detail_shows_authored_publication_point_link(self):
+        self.add_permissions('netbox_rpki.view_importedpublicationpoint', 'netbox_rpki.view_publicationpoint')
+
+        response = self.client.get(self.imported_publication_point.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'Authored Publication Point')
+        self.assertContains(response, self.authored_publication_point.get_absolute_url())
+        self.assertContains(response, self.authored_publication_point.name)
+
+    def test_imported_signed_object_detail_shows_authored_signed_object_link(self):
+        self.add_permissions('netbox_rpki.view_importedsignedobject', 'netbox_rpki.view_signedobject')
+
+        response = self.client.get(self.imported_signed_object.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'Authored Signed Object')
+        self.assertContains(response, self.authored_signed_object.get_absolute_url())
+        self.assertContains(response, self.authored_signed_object.name)
+
+    def test_signed_object_detail_shows_legacy_roa_link(self):
+        self.add_permissions('netbox_rpki.view_signedobject', 'netbox_rpki.view_roa')
+
+        response = self.client.get(self.roa_signed_object.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'Legacy ROA')
+        self.assertContains(response, self.roa.get_absolute_url())
+        self.assertContains(response, self.roa.name)
+
+    def test_signed_object_detail_shows_manifest_imported_observations_and_validation_results(self):
+        self.add_permissions(
+            'netbox_rpki.view_signedobject',
+            'netbox_rpki.view_manifest',
+            'netbox_rpki.view_importedsignedobject',
+            'netbox_rpki.view_objectvalidationresult',
+        )
+
+        response = self.client.get(self.authored_signed_object.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'Manifest')
+        self.assertContains(response, self.authored_manifest.get_absolute_url())
+        self.assertContains(response, self.authored_manifest.name)
+        self.assertContains(response, 'Imported Signed Object Observations')
+        self.assertContains(response, self.imported_signed_object.name)
+        self.assertContains(response, 'Object Validation Results')
+        self.assertContains(response, self.object_validation_result.name)
+
+
 class ProviderSnapshotDiffDetailViewTestCase(PluginViewTestCase):
     @classmethod
     def setUpTestData(cls):
@@ -507,6 +779,77 @@ class AspaDetailViewTestCase(PluginViewTestCase):
         self.assertContains(response, str(self.provider_authorization.provider_as))
         self.assertContains(response, 'Validated ASPA Payloads')
         self.assertContains(response, self.validated_payload.name)
+
+
+class ValidatedPayloadDetailViewTestCase(PluginViewTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='validated-payload-view-org', name='Validated Payload View Org')
+        cls.validation_run = create_test_validation_run(
+            name='Validated Payload View Validation Run',
+        )
+        cls.roa_signing_certificate = create_test_certificate(
+            name='Validated Payload View ROA Certificate',
+            rpki_org=cls.organization,
+        )
+        cls.roa_signed_object = create_test_signed_object(
+            name='Validated Payload View ROA Signed Object',
+            organization=cls.organization,
+            object_type='roa',
+            resource_certificate=cls.roa_signing_certificate,
+        )
+        cls.roa = create_test_roa(
+            name='Validated Payload View ROA',
+            signed_by=cls.roa_signing_certificate,
+            signed_object=cls.roa_signed_object,
+        )
+        cls.roa_object_validation_result = create_test_object_validation_result(
+            name='Validated Payload View ROA Validation Result',
+            validation_run=cls.validation_run,
+            signed_object=cls.roa_signed_object,
+        )
+        cls.validated_roa_payload = create_test_validated_roa_payload(
+            name='Validated Payload View ROA Payload',
+            validation_run=cls.validation_run,
+            roa=cls.roa,
+            object_validation_result=cls.roa_object_validation_result,
+        )
+        cls.aspa = create_test_aspa(
+            name='Validated Payload View ASPA',
+            organization=cls.organization,
+            customer_as=create_test_asn(65430),
+        )
+        cls.aspa_object_validation_result = create_test_object_validation_result(
+            name='Validated Payload View ASPA Validation Result',
+            validation_run=cls.validation_run,
+            signed_object=cls.aspa.signed_object,
+        )
+        cls.validated_aspa_payload = create_test_validated_aspa_payload(
+            name='Validated Payload View ASPA Payload',
+            validation_run=cls.validation_run,
+            aspa=cls.aspa,
+            object_validation_result=cls.aspa_object_validation_result,
+            customer_as=cls.aspa.customer_as,
+            provider_as=create_test_asn(65431),
+        )
+
+    def test_validated_roa_payload_detail_shows_object_validation_result_link(self):
+        self.add_permissions('netbox_rpki.view_validatedroapayload', 'netbox_rpki.view_objectvalidationresult')
+
+        response = self.client.get(self.validated_roa_payload.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, self.roa_object_validation_result.get_absolute_url())
+        self.assertContains(response, self.roa_object_validation_result.name)
+
+    def test_validated_aspa_payload_detail_shows_object_validation_result_link(self):
+        self.add_permissions('netbox_rpki.view_validatedaspapayload', 'netbox_rpki.view_objectvalidationresult')
+
+        response = self.client.get(self.validated_aspa_payload.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, self.aspa_object_validation_result.get_absolute_url())
+        self.assertContains(response, self.aspa_object_validation_result.name)
 
 
 class RoutingIntentReplacementViewTestCase(PluginViewTestCase):

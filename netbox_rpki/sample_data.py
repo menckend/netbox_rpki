@@ -198,6 +198,7 @@ def seed_sample_data(
     certificates = []
     ee_certificates = []
     generic_signed_objects = []
+    roa_signed_objects = []
     manifest_signed_objects = []
     aspa_signed_objects = []
     rsc_signed_objects = []
@@ -358,6 +359,7 @@ def seed_sample_data(
             )
 
         generic_signed_object = create_signed_object("Signed Object", rpki_models.SignedObjectType.OTHER)
+        roa_signed_object = create_signed_object("ROA Signed Object", rpki_models.SignedObjectType.ROA)
         manifest_signed_object = create_signed_object("Manifest Signed Object", rpki_models.SignedObjectType.MANIFEST)
         aspa_signed_object = create_signed_object("ASPA Signed Object", rpki_models.SignedObjectType.ASPA)
         rsc_signed_object = create_signed_object("RSC Signed Object", rpki_models.SignedObjectType.RSC)
@@ -406,6 +408,7 @@ def seed_sample_data(
             name=f"{label_prefix} ROA {suffix}",
             origin_as=customer_asns[index],
             signed_by=certificate,
+            signed_object=roa_signed_object,
             valid_from=valid_from,
             valid_to=valid_to,
             auto_renews=True,
@@ -578,10 +581,33 @@ def seed_sample_data(
             tenant=tenants[index],
             **_seeded_text_kwargs(rpki_models.ObjectValidationResult, marker),
         )
+        roa_object_validation_result = rpki_models.ObjectValidationResult.objects.create(
+            name=f"{label_prefix} ROA Object Validation Result {suffix}",
+            validation_run=validation_run,
+            signed_object=roa_signed_object,
+            validation_state=rpki_models.ValidationState.VALID,
+            disposition=rpki_models.ValidationDisposition.ACCEPTED,
+            observed_at=completed_at,
+            reason=f"seed roa validation result {suffix}",
+            tenant=tenants[index],
+            **_seeded_text_kwargs(rpki_models.ObjectValidationResult, marker),
+        )
+        aspa_object_validation_result = rpki_models.ObjectValidationResult.objects.create(
+            name=f"{label_prefix} ASPA Object Validation Result {suffix}",
+            validation_run=validation_run,
+            signed_object=aspa_signed_object,
+            validation_state=rpki_models.ValidationState.VALID,
+            disposition=rpki_models.ValidationDisposition.ACCEPTED,
+            observed_at=completed_at,
+            reason=f"seed aspa validation result {suffix}",
+            tenant=tenants[index],
+            **_seeded_text_kwargs(rpki_models.ObjectValidationResult, marker),
+        )
         validated_roa_payload = rpki_models.ValidatedRoaPayload.objects.create(
             name=f"{label_prefix} Validated ROA Payload {suffix}",
             validation_run=validation_run,
             roa=roa,
+            object_validation_result=roa_object_validation_result,
             prefix=prefixes_v4[index],
             origin_as=customer_asns[index],
             max_length=24,
@@ -592,6 +618,7 @@ def seed_sample_data(
             name=f"{label_prefix} Validated ASPA Payload {suffix}",
             validation_run=validation_run,
             aspa=aspa,
+            object_validation_result=aspa_object_validation_result,
             customer_as=customer_asns[index],
             provider_as=provider_asns[index],
             tenant=tenants[index],
@@ -785,6 +812,7 @@ def seed_sample_data(
         certificates.append(certificate)
         ee_certificates.append(ee_certificate)
         generic_signed_objects.append(generic_signed_object)
+        roa_signed_objects.append(roa_signed_object)
         manifest_signed_objects.append(manifest_signed_object)
         aspa_signed_objects.append(aspa_signed_object)
         rsc_signed_objects.append(rsc_signed_object)
@@ -809,6 +837,8 @@ def seed_sample_data(
         validator_instances.append(validator_instance)
         validation_runs.append(validation_run)
         object_validation_results.append(object_validation_result)
+        object_validation_results.append(roa_object_validation_result)
+        object_validation_results.append(aspa_object_validation_result)
         validated_roa_payloads.append(validated_roa_payload)
         validated_aspa_payloads.append(validated_aspa_payload)
         routing_intent_profiles.append(routing_intent_profile)
@@ -841,6 +871,7 @@ def seed_sample_data(
         "certificates": certificates,
         "ee_certificates": ee_certificates,
         "generic_signed_objects": generic_signed_objects,
+        "roa_signed_objects": roa_signed_objects,
         "manifest_signed_objects": manifest_signed_objects,
         "aspa_signed_objects": aspa_signed_objects,
         "rsc_signed_objects": rsc_signed_objects,

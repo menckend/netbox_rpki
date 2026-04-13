@@ -1098,10 +1098,21 @@ def build_certificate_revocation_list_instance():
     organization = create_unique_organization("crl-org")
     certificate = create_unique_certificate("crl-certificate", rpki_org=organization)
     publication_point = create_publication_point_instance_for_section9(organization)
+    signed_object = create_test_signed_object(
+        name=f"Signed Object {unique_token('crl-signed-object')}",
+        organization=organization,
+        object_type=rpki_models.SignedObjectType.CRL,
+        resource_certificate=certificate,
+        publication_point=publication_point,
+        object_uri="https://publication.example.invalid/crl.crl",
+        repository_uri="https://publication.example.invalid/",
+        filename="crl.crl",
+    )
     return create_test_certificate_revocation_list(
         name=f"Certificate Revocation List {unique_token('crl')}",
         organization=organization,
         issuing_certificate=certificate,
+        signed_object=signed_object,
         publication_point=publication_point,
         crl_number="1",
         publication_uri="https://publication.example.invalid/crl.crl",
@@ -1160,11 +1171,23 @@ def build_rsc_instance():
 def build_router_certificate_instance():
     organization = create_unique_organization("router-certificate-org")
     publication_point = create_publication_point_instance_for_section9(organization)
+    resource_certificate = create_unique_certificate("router-certificate-resource", rpki_org=organization)
+    ee_certificate = create_test_end_entity_certificate(
+        name=f"End Entity Certificate {unique_token('router-certificate-ee')}",
+        organization=organization,
+        resource_certificate=resource_certificate,
+        publication_point=publication_point,
+        subject="CN=Router",
+        issuer="CN=Issuer",
+        serial="router-serial",
+        ski="router-ski",
+    )
     return create_test_router_certificate(
         name=f"Router Certificate {unique_token('router-certificate')}",
         organization=organization,
-        resource_certificate=create_unique_certificate("router-certificate-resource", rpki_org=organization),
+        resource_certificate=resource_certificate,
         publication_point=publication_point,
+        ee_certificate=ee_certificate,
         asn=create_unique_asn(),
         subject="CN=Router",
         issuer="CN=Issuer",

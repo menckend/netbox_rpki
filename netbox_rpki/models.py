@@ -502,6 +502,43 @@ class Roa(NetBoxModel):
     def __str__(self):
         return self.name
 
+    def clean(self):
+        super().clean()
+        if self.signed_object_id is None:
+            return
+
+        errors = []
+        if self.signed_object.object_type != SignedObjectType.ROA:
+            errors.append('Signed object must use the ROA object type.')
+        if (
+            self.signed_by_id is not None
+            and self.signed_object.resource_certificate_id is not None
+            and self.signed_by_id != self.signed_object.resource_certificate_id
+        ):
+            errors.append('Signed object must use the same resource certificate as the ROA signing certificate.')
+        if (
+            self.signed_by_id is not None
+            and self.signed_by.rpki_org_id is not None
+            and self.signed_object.organization_id is not None
+            and self.signed_by.rpki_org_id != self.signed_object.organization_id
+        ):
+            errors.append('Signed object must belong to the same organization as the ROA signing certificate.')
+        if (
+            self.valid_from is not None
+            and self.signed_object.valid_from is not None
+            and self.valid_from != self.signed_object.valid_from
+        ):
+            errors.append('Signed object valid-from date must match the ROA valid-from date.')
+        if (
+            self.valid_to is not None
+            and self.signed_object.valid_to is not None
+            and self.valid_to != self.signed_object.valid_to
+        ):
+            errors.append('Signed object valid-to date must match the ROA valid-to date.')
+
+        if errors:
+            raise ValidationError({'signed_object': errors})
+
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:roa", args=[self.pk])
 
@@ -770,6 +807,32 @@ class EndEntityCertificate(NamedRpkiStandardModel):
     def __str__(self):
         return self.name
 
+    def clean(self):
+        super().clean()
+
+        errors: dict[str, list[str]] = {}
+        if (
+            self.organization_id is not None
+            and self.resource_certificate_id is not None
+            and self.resource_certificate.rpki_org_id is not None
+            and self.organization_id != self.resource_certificate.rpki_org_id
+        ):
+            errors.setdefault('resource_certificate', []).append(
+                'Resource certificate must belong to the same organization as the end-entity certificate.'
+            )
+        if (
+            self.organization_id is not None
+            and self.publication_point_id is not None
+            and self.publication_point.organization_id is not None
+            and self.organization_id != self.publication_point.organization_id
+        ):
+            errors.setdefault('publication_point', []).append(
+                'Publication point must belong to the same organization as the end-entity certificate.'
+            )
+
+        if errors:
+            raise ValidationError(errors)
+
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:endentitycertificate", args=[self.pk])
 
@@ -843,6 +906,77 @@ class SignedObject(NamedRpkiStandardModel):
     def __str__(self):
         return self.name
 
+    def clean(self):
+        super().clean()
+
+        errors: dict[str, list[str]] = {}
+        if (
+            self.organization_id is not None
+            and self.resource_certificate_id is not None
+            and self.resource_certificate.rpki_org_id is not None
+            and self.organization_id != self.resource_certificate.rpki_org_id
+        ):
+            errors.setdefault('resource_certificate', []).append(
+                'Resource certificate must belong to the same organization as the signed object.'
+            )
+        if (
+            self.organization_id is not None
+            and self.ee_certificate_id is not None
+            and self.ee_certificate.organization_id is not None
+            and self.organization_id != self.ee_certificate.organization_id
+        ):
+            errors.setdefault('ee_certificate', []).append(
+                'EE certificate must belong to the same organization as the signed object.'
+            )
+        if (
+            self.organization_id is not None
+            and self.publication_point_id is not None
+            and self.publication_point.organization_id is not None
+            and self.organization_id != self.publication_point.organization_id
+        ):
+            errors.setdefault('publication_point', []).append(
+                'Publication point must belong to the same organization as the signed object.'
+            )
+        if (
+            self.ee_certificate_id is not None
+            and self.resource_certificate_id is not None
+            and self.ee_certificate.resource_certificate_id is not None
+            and self.resource_certificate_id != self.ee_certificate.resource_certificate_id
+        ):
+            errors.setdefault('ee_certificate', []).append(
+                'EE certificate must use the same resource certificate as the signed object.'
+            )
+        if (
+            self.ee_certificate_id is not None
+            and self.publication_point_id is not None
+            and self.ee_certificate.publication_point_id is not None
+            and self.publication_point_id != self.ee_certificate.publication_point_id
+        ):
+            errors.setdefault('ee_certificate', []).append(
+                'EE certificate must use the same publication point as the signed object.'
+            )
+        if (
+            self.ee_certificate_id is not None
+            and self.valid_from is not None
+            and self.ee_certificate.valid_from is not None
+            and self.valid_from != self.ee_certificate.valid_from
+        ):
+            errors.setdefault('ee_certificate', []).append(
+                'EE certificate valid-from date must match the signed object valid-from date.'
+            )
+        if (
+            self.ee_certificate_id is not None
+            and self.valid_to is not None
+            and self.ee_certificate.valid_to is not None
+            and self.valid_to != self.ee_certificate.valid_to
+        ):
+            errors.setdefault('ee_certificate', []).append(
+                'EE certificate valid-to date must match the signed object valid-to date.'
+            )
+
+        if errors:
+            raise ValidationError(errors)
+
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:signedobject", args=[self.pk])
 
@@ -859,6 +993,13 @@ class CertificateRevocationList(NamedRpkiStandardModel):
         to=Certificate,
         on_delete=models.PROTECT,
         related_name='certificate_revocation_lists'
+    )
+    signed_object = models.OneToOneField(
+        to=SignedObject,
+        on_delete=models.PROTECT,
+        related_name='crl_extension',
+        blank=True,
+        null=True
     )
     publication_point = models.ForeignKey(
         to=PublicationPoint,
@@ -1183,6 +1324,13 @@ class RouterCertificate(NamedRpkiStandardModel):
         blank=True,
         null=True
     )
+    ee_certificate = models.OneToOneField(
+        to=EndEntityCertificate,
+        on_delete=models.PROTECT,
+        related_name='router_certificate_extension',
+        blank=True,
+        null=True
+    )
     asn = models.ForeignKey(
         to=ASN,
         on_delete=models.PROTECT,
@@ -1208,6 +1356,34 @@ class RouterCertificate(NamedRpkiStandardModel):
 
     def __str__(self):
         return self.name
+
+    def clean(self):
+        super().clean()
+        if self.ee_certificate_id is None:
+            return
+
+        errors = []
+        if (
+            self.organization_id is not None
+            and self.ee_certificate.organization_id is not None
+            and self.organization_id != self.ee_certificate.organization_id
+        ):
+            errors.append('EE certificate must belong to the same organization as the router certificate.')
+        if (
+            self.resource_certificate_id is not None
+            and self.ee_certificate.resource_certificate_id is not None
+            and self.resource_certificate_id != self.ee_certificate.resource_certificate_id
+        ):
+            errors.append('EE certificate must use the same resource certificate as the router certificate.')
+        if (
+            self.publication_point_id is not None
+            and self.ee_certificate.publication_point_id is not None
+            and self.publication_point_id != self.ee_certificate.publication_point_id
+        ):
+            errors.append('EE certificate must use the same publication point as the router certificate.')
+
+        if errors:
+            raise ValidationError({'ee_certificate': errors})
 
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:routercertificate", args=[self.pk])
@@ -1315,6 +1491,13 @@ class ValidatedRoaPayload(NamedRpkiStandardModel):
         blank=True,
         null=True
     )
+    object_validation_result = models.ForeignKey(
+        to=ObjectValidationResult,
+        on_delete=models.PROTECT,
+        related_name='validated_roa_payloads',
+        blank=True,
+        null=True
+    )
     prefix = models.ForeignKey(
         to=Prefix,
         on_delete=models.PROTECT,
@@ -1335,6 +1518,25 @@ class ValidatedRoaPayload(NamedRpkiStandardModel):
     def __str__(self):
         return self.name
 
+    def clean(self):
+        super().clean()
+        if self.object_validation_result_id is None:
+            return
+
+        errors = []
+        if self.object_validation_result.validation_run_id != self.validation_run_id:
+            errors.append('Object validation result must belong to the same validation run as the validated ROA payload.')
+        if (
+            self.roa_id is not None
+            and self.roa.signed_object_id is not None
+            and self.object_validation_result.signed_object_id is not None
+            and self.roa.signed_object_id != self.object_validation_result.signed_object_id
+        ):
+            errors.append('Object validation result must reference the same signed object as the validated ROA payload.')
+
+        if errors:
+            raise ValidationError({'object_validation_result': errors})
+
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:validatedroapayload", args=[self.pk])
 
@@ -1349,6 +1551,13 @@ class ValidatedAspaPayload(NamedRpkiStandardModel):
         to=ASPA,
         on_delete=models.PROTECT,
         related_name='validated_payloads',
+        blank=True,
+        null=True
+    )
+    object_validation_result = models.ForeignKey(
+        to=ObjectValidationResult,
+        on_delete=models.PROTECT,
+        related_name='validated_aspa_payloads',
         blank=True,
         null=True
     )
@@ -1372,6 +1581,25 @@ class ValidatedAspaPayload(NamedRpkiStandardModel):
 
     def __str__(self):
         return self.name
+
+    def clean(self):
+        super().clean()
+        if self.object_validation_result_id is None:
+            return
+
+        errors = []
+        if self.object_validation_result.validation_run_id != self.validation_run_id:
+            errors.append('Object validation result must belong to the same validation run as the validated ASPA payload.')
+        if (
+            self.aspa_id is not None
+            and self.aspa.signed_object_id is not None
+            and self.object_validation_result.signed_object_id is not None
+            and self.aspa.signed_object_id != self.object_validation_result.signed_object_id
+        ):
+            errors.append('Object validation result must reference the same signed object as the validated ASPA payload.')
+
+        if errors:
+            raise ValidationError({'object_validation_result': errors})
 
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:validatedaspapayload", args=[self.pk])
@@ -2537,6 +2765,13 @@ class ImportedPublicationPoint(NamedRpkiStandardModel):
         blank=True,
         null=True,
     )
+    authored_publication_point = models.ForeignKey(
+        to='PublicationPoint',
+        on_delete=models.PROTECT,
+        related_name='imported_publication_observations',
+        blank=True,
+        null=True,
+    )
     is_stale = models.BooleanField(default=False)
     payload_json = models.JSONField(default=dict, blank=True)
 
@@ -2551,6 +2786,22 @@ class ImportedPublicationPoint(NamedRpkiStandardModel):
 
     def __str__(self):
         return self.name
+
+    def clean(self):
+        super().clean()
+        if (
+            self.authored_publication_point_id is not None
+            and self.organization_id is not None
+            and self.authored_publication_point.organization_id is not None
+            and self.authored_publication_point.organization_id != self.organization_id
+        ):
+            raise ValidationError(
+                {
+                    'authored_publication_point': (
+                        'Authored publication point must belong to the same organization as the imported publication point.'
+                    )
+                }
+            )
 
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:importedpublicationpoint", args=[self.pk])
@@ -2602,6 +2853,13 @@ class ImportedSignedObject(NamedRpkiStandardModel):
         blank=True,
         null=True,
     )
+    authored_signed_object = models.ForeignKey(
+        to='SignedObject',
+        on_delete=models.PROTECT,
+        related_name='imported_signed_object_observations',
+        blank=True,
+        null=True,
+    )
     is_stale = models.BooleanField(default=False)
     payload_json = models.JSONField(default=dict, blank=True)
 
@@ -2616,6 +2874,39 @@ class ImportedSignedObject(NamedRpkiStandardModel):
 
     def __str__(self):
         return self.name
+
+    def clean(self):
+        super().clean()
+
+        errors = []
+        if self.authored_signed_object_id is not None:
+            if (
+                self.organization_id is not None
+                and self.authored_signed_object.organization_id is not None
+                and self.authored_signed_object.organization_id != self.organization_id
+            ):
+                errors.append(
+                    'Authored signed object must belong to the same organization as the imported signed object.'
+                )
+            if (
+                self.signed_object_type
+                and self.authored_signed_object.object_type
+                and self.authored_signed_object.object_type != self.signed_object_type
+            ):
+                errors.append('Authored signed object must use the same object type as the imported signed object.')
+            if (
+                self.publication_point_id is not None
+                and self.publication_point.authored_publication_point_id is not None
+                and self.authored_signed_object.publication_point_id is not None
+                and self.authored_signed_object.publication_point_id
+                != self.publication_point.authored_publication_point_id
+            ):
+                errors.append(
+                    'Authored signed object must use the same authored publication point as the imported signed object.'
+                )
+
+        if errors:
+            raise ValidationError({'authored_signed_object': errors})
 
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:importedsignedobject", args=[self.pk])
@@ -2650,6 +2941,20 @@ class ImportedCertificateObservation(NamedRpkiStandardModel):
         max_length=32,
         choices=CertificateObservationSource.choices,
         default=CertificateObservationSource.SIGNED_OBJECT_EE,
+    )
+    publication_point = models.ForeignKey(
+        to='ImportedPublicationPoint',
+        on_delete=models.PROTECT,
+        related_name='certificate_observations',
+        blank=True,
+        null=True,
+    )
+    signed_object = models.ForeignKey(
+        to='ImportedSignedObject',
+        on_delete=models.PROTECT,
+        related_name='certificate_observations',
+        blank=True,
+        null=True,
     )
     certificate_uri = models.CharField(max_length=500, blank=True)
     publication_uri = models.CharField(max_length=500, blank=True)

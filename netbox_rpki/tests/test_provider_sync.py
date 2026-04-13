@@ -10,6 +10,7 @@ from django.utils import timezone
 from netbox_rpki import models as rpki_models
 from netbox_rpki.services import ProviderSyncError, sync_provider_account
 from netbox_rpki.services.provider_sync_contract import PROVIDER_SYNC_SUMMARY_SCHEMA_VERSION
+from netbox_rpki.services import provider_sync_diff as provider_sync_diff_service
 from netbox_rpki.tests.base import PluginAPITestCase
 from netbox_rpki.tests.krill_payloads import (
     KRILL_ASPAS_JSON,
@@ -24,12 +25,18 @@ from netbox_rpki.tests.krill_payloads import (
 )
 from netbox_rpki.tests.utils import (
     create_test_asn,
+    create_test_certificate,
     create_test_external_object_reference,
     create_test_imported_roa_authorization,
+    create_test_imported_certificate_observation,
+    create_test_imported_publication_point,
+    create_test_imported_signed_object,
     create_test_organization,
     create_test_prefix,
+    create_test_publication_point,
     create_test_provider_account,
     create_test_provider_snapshot,
+    create_test_signed_object,
 )
 
 
@@ -124,6 +131,33 @@ class ProviderSyncServiceTestCase(TestCase):
         provider_as_1 = create_test_asn(65001)
         provider_as_2 = create_test_asn(65002)
         provider_as_3 = create_test_asn(65003)
+        authored_resource_certificate = create_test_certificate(
+            name='Provider Sync Authored Resource Certificate',
+            rpki_org=provider_account.organization,
+        )
+        authored_publication_point = create_test_publication_point(
+            name='Provider Sync Authored Publication Point',
+            organization=provider_account.organization,
+            publication_uri='rsync://testbed.krill.cloud/repo/netbox-rpki-dev/',
+            rsync_base_uri='https://testbed.krill.cloud/rfc8181/netbox-rpki-dev/',
+            rrdp_notify_uri='https://testbed.krill.cloud/rrdp/notification.xml',
+        )
+        authored_manifest_signed_object = create_test_signed_object(
+            name='Provider Sync Authored Manifest',
+            organization=provider_account.organization,
+            publication_point=authored_publication_point,
+            resource_certificate=authored_resource_certificate,
+            object_type=rpki_models.SignedObjectType.MANIFEST,
+            object_uri='rsync://testbed.krill.cloud/repo/netbox-rpki-dev/0/netbox-rpki-dev.mft',
+        )
+        authored_crl_signed_object = create_test_signed_object(
+            name='Provider Sync Authored CRL',
+            organization=provider_account.organization,
+            publication_point=authored_publication_point,
+            resource_certificate=authored_resource_certificate,
+            object_type=rpki_models.SignedObjectType.CRL,
+            object_uri='rsync://testbed.krill.cloud/repo/netbox-rpki-dev/0/netbox-rpki-dev.crl',
+        )
 
         with patch('netbox_rpki.services.provider_sync._fetch_krill_routes_json', return_value=KRILL_ROUTES_JSON), patch(
             'netbox_rpki.services.provider_sync._fetch_krill_aspas_json',
@@ -163,7 +197,11 @@ class ProviderSyncServiceTestCase(TestCase):
             snapshot.imported_signed_objects.select_related('external_reference', 'publication_point').order_by('signed_object_uri')
         )
         imported_certificate_observations = list(
-            snapshot.imported_certificate_observations.select_related('external_reference').order_by('certificate_key')
+            snapshot.imported_certificate_observations.select_related(
+                'external_reference',
+                'publication_point',
+                'signed_object',
+            ).order_by('certificate_key')
         )
         self.assertEqual(sync_run.status, rpki_models.ValidationRunStatus.COMPLETED)
         self.assertEqual(sync_run.records_fetched, 18)
@@ -197,6 +235,7 @@ class ProviderSyncServiceTestCase(TestCase):
         self.assertEqual(imported_resource_entitlements[0].external_reference.object_type, rpki_models.ExternalObjectType.RESOURCE_ENTITLEMENT)
         self.assertEqual(len(imported_publication_points), 1)
         self.assertEqual(imported_publication_points[0].published_object_count, 2)
+        self.assertEqual(imported_publication_points[0].authored_publication_point, authored_publication_point)
         self.assertEqual(len(imported_signed_objects), 2)
         self.assertEqual(len(imported_certificate_observations), 3)
         self.assertEqual(
@@ -214,6 +253,30 @@ class ProviderSyncServiceTestCase(TestCase):
         )
         self.assertEqual(manifest_signed_object.publication_point, imported_publication_points[0])
         self.assertEqual(crl_signed_object.publication_point, imported_publication_points[0])
+        self.assertEqual(manifest_signed_object.authored_signed_object, authored_manifest_signed_object)
+        self.assertEqual(crl_signed_object.authored_signed_object, authored_crl_signed_object)
+        signed_object_certificate_observations = [
+            row
+            for row in imported_certificate_observations
+            if row.signed_object_uri
+        ]
+        self.assertGreaterEqual(len(signed_object_certificate_observations), 1)
+        self.assertTrue(all(row.signed_object is not None for row in signed_object_certificate_observations))
+        self.assertTrue(
+            {row.signed_object for row in signed_object_certificate_observations}.issubset(
+                {manifest_signed_object, crl_signed_object}
+            )
+        )
+        linked_publication_point_certificate_observations = [
+            row
+            for row in imported_certificate_observations
+            if row.publication_point is not None
+        ]
+        self.assertGreaterEqual(len(linked_publication_point_certificate_observations), 1)
+        self.assertEqual(
+            {row.publication_point for row in linked_publication_point_certificate_observations},
+            {imported_publication_points[0]},
+        )
         provider_account.refresh_from_db()
         self.assertEqual(snapshot.summary_json['summary_schema_version'], PROVIDER_SYNC_SUMMARY_SCHEMA_VERSION)
         self.assertEqual(
@@ -277,11 +340,19 @@ class ProviderSyncServiceTestCase(TestCase):
             'repository_publication',
         )
         self.assertIn(
-            'Repository-derived certificate observation is populated',
+            'Repository-derived certificate observation is linked to publication points and signed objects',
             snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY]['capability_reason'],
         )
         self.assertIn(
             'published_signed_objects',
+            snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY]['capability_sources'],
+        )
+        self.assertIn(
+            'publication_point_link',
+            snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY]['capability_sources'],
+        )
+        self.assertIn(
+            'signed_object_link',
             snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY]['capability_sources'],
         )
         self.assertIn(
@@ -291,6 +362,10 @@ class ProviderSyncServiceTestCase(TestCase):
         self.assertEqual(
             snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY]['records_imported'],
             3,
+        )
+        self.assertIn(
+            'linked to publication points and signed objects',
+            snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY]['capability_reason'],
         )
         self.assertEqual(snapshot.summary_json['records_imported'], 18)
         self.assertEqual(snapshot.summary_json['route_records_imported'], 2)
@@ -575,6 +650,107 @@ class ProviderSyncServiceTestCase(TestCase):
                 rpki_models.ProviderSyncFamily.SIGNED_OBJECT_INVENTORY,
             }.issubset(set(snapshot_diff.items.values_list('object_family', flat=True)))
         )
+
+    def test_build_provider_snapshot_diff_preserves_certificate_observation_linkage_state(self):
+        provider_account = create_test_provider_account(
+            name='Krill Observation Diff Account',
+            organization=self.organization,
+            provider_type=rpki_models.ProviderType.KRILL,
+            ca_handle='netbox-rpki-dev',
+            api_base_url='https://localhost:3001',
+            api_key='krill-token',
+            org_handle='ORG-KRILL-OBS-DIFF',
+        )
+        base_snapshot = create_test_provider_snapshot(
+            name='Observation Base Snapshot',
+            organization=self.organization,
+            provider_account=provider_account,
+            provider_name='Krill',
+        )
+        comparison_snapshot = create_test_provider_snapshot(
+            name='Observation Comparison Snapshot',
+            organization=self.organization,
+            provider_account=provider_account,
+            provider_name='Krill',
+        )
+
+        base_publication_point = create_test_imported_publication_point(
+            provider_snapshot=base_snapshot,
+            organization=self.organization,
+            publication_uri='rsync://example.invalid/repo/base/',
+            service_uri='rsync://example.invalid/repo/base/',
+            external_object_id='base-publication-point',
+        )
+        base_signed_object = create_test_imported_signed_object(
+            provider_snapshot=base_snapshot,
+            organization=self.organization,
+            publication_point=base_publication_point,
+            publication_uri=base_publication_point.publication_uri,
+            signed_object_uri='rsync://example.invalid/repo/base/example.mft',
+            signed_object_type=rpki_models.SignedObjectType.MANIFEST,
+            object_hash='base-object-hash',
+            external_object_id='base-signed-object',
+        )
+        create_test_imported_certificate_observation(
+            provider_snapshot=base_snapshot,
+            organization=self.organization,
+            publication_point=base_publication_point,
+            signed_object=base_signed_object,
+            certificate_key='base-certificate-key',
+            publication_uri=base_publication_point.publication_uri,
+            signed_object_uri=base_signed_object.signed_object_uri,
+            external_object_id='base-certificate-key',
+        )
+
+        comparison_publication_point = create_test_imported_publication_point(
+            provider_snapshot=comparison_snapshot,
+            organization=self.organization,
+            publication_uri='rsync://example.invalid/repo/base/',
+            service_uri='rsync://example.invalid/repo/base/',
+            external_object_id='comparison-publication-point',
+        )
+        comparison_signed_object = create_test_imported_signed_object(
+            provider_snapshot=comparison_snapshot,
+            organization=self.organization,
+            publication_point=comparison_publication_point,
+            publication_uri=comparison_publication_point.publication_uri,
+            signed_object_uri='rsync://example.invalid/repo/base/example.crl',
+            signed_object_type=rpki_models.SignedObjectType.CRL,
+            object_hash='comparison-object-hash',
+            external_object_id='comparison-signed-object',
+        )
+        create_test_imported_certificate_observation(
+            provider_snapshot=comparison_snapshot,
+            organization=self.organization,
+            publication_point=comparison_publication_point,
+            signed_object=comparison_signed_object,
+            certificate_key='base-certificate-key',
+            publication_uri=comparison_publication_point.publication_uri,
+            signed_object_uri=comparison_signed_object.signed_object_uri,
+            external_object_id='base-certificate-key',
+        )
+
+        snapshot_diff = provider_sync_diff_service.build_provider_snapshot_diff(
+            base_snapshot=base_snapshot,
+            comparison_snapshot=comparison_snapshot,
+        )
+
+        observation_item = snapshot_diff.items.get(
+            object_family=rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY,
+            change_type=rpki_models.ProviderSnapshotDiffChangeType.CHANGED,
+        )
+        self.assertEqual(observation_item.before_state_json['publication_point_key'], base_publication_point.publication_key)
+        self.assertEqual(
+            observation_item.after_state_json['publication_point_key'],
+            comparison_publication_point.publication_key,
+        )
+        self.assertEqual(observation_item.before_state_json['signed_object_key'], base_signed_object.signed_object_key)
+        self.assertEqual(
+            observation_item.after_state_json['signed_object_key'],
+            comparison_signed_object.signed_object_key,
+        )
+        self.assertEqual(observation_item.publication_uri, comparison_publication_point.publication_uri)
+        self.assertEqual(observation_item.signed_object_uri, comparison_signed_object.signed_object_uri)
 
     def test_sync_provider_account_requires_krill_ca_handle(self):
         provider_account = create_test_provider_account(

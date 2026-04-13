@@ -32,14 +32,20 @@ from netbox_rpki.object_registry import API_OBJECT_SPECS, GRAPHQL_OBJECT_SPECS
 from netbox_rpki.tests.base import PluginAPITestCase
 from netbox_rpki.tests.utils import (
     create_test_asn,
+    create_test_aspa,
     create_test_certificate,
     create_test_certificate_asn,
     create_test_certificate_prefix,
+    create_test_certificate_revocation_list,
+    create_test_end_entity_certificate,
     create_test_imported_certificate_observation,
     create_test_imported_publication_point,
     create_test_imported_signed_object,
+    create_test_manifest,
     create_test_organization,
+    create_test_object_validation_result,
     create_test_prefix,
+    create_test_publication_point,
     create_test_provider_account,
     create_test_provider_snapshot,
     create_test_provider_snapshot_diff,
@@ -50,6 +56,12 @@ from netbox_rpki.tests.utils import (
     create_test_roa_prefix,
     create_test_roa_reconciliation_run,
     create_test_routing_intent_profile,
+    create_test_router_certificate,
+    create_test_signed_object,
+    create_test_trust_anchor,
+    create_test_validated_aspa_payload,
+    create_test_validated_roa_payload,
+    create_test_validation_run,
 )
 
 
@@ -771,7 +783,11 @@ class ProviderSnapshotActionAPITestCase(PluginAPITestCase):
             name='Provider Snapshot API Certificate Observation',
             organization=cls.organization,
             provider_snapshot=cls.comparison_snapshot,
+            publication_point=cls.imported_publication_point,
+            signed_object=cls.imported_signed_object,
             certificate_uri='rsync://api-snapshot.invalid/repo/example.cer',
+            publication_uri=cls.imported_publication_point.publication_uri,
+            signed_object_uri=cls.imported_signed_object.signed_object_uri,
         )
 
     def test_provider_snapshot_compare_action_returns_persisted_diff(self):
@@ -849,6 +865,17 @@ class ProviderSnapshotActionAPITestCase(PluginAPITestCase):
             [row['id'] for row in response.data['imported_certificate_observations']],
             [self.imported_certificate_observation.pk],
         )
+        imported_certificate_observation = response.data['imported_certificate_observations'][0]
+        publication_point = imported_certificate_observation['publication_point']
+        signed_object = imported_certificate_observation['signed_object']
+        self.assertEqual(
+            publication_point['id'] if isinstance(publication_point, dict) else publication_point,
+            self.imported_publication_point.pk,
+        )
+        self.assertEqual(
+            signed_object['id'] if isinstance(signed_object, dict) else signed_object,
+            self.imported_signed_object.pk,
+        )
 
 
 class ImportedCertificateObservationAPITestCase(PluginAPITestCase):
@@ -871,15 +898,36 @@ class ImportedCertificateObservationAPITestCase(PluginAPITestCase):
             provider_account=cls.provider_account,
             status='completed',
         )
+        cls.imported_publication_point = create_test_imported_publication_point(
+            name='Imported Certificate Observation API Publication Point',
+            organization=cls.organization,
+            provider_snapshot=cls.snapshot,
+            publication_uri='rsync://api.invalid/repo/',
+        )
+        cls.imported_signed_object = create_test_imported_signed_object(
+            name='Imported Certificate Observation API Signed Object',
+            organization=cls.organization,
+            provider_snapshot=cls.snapshot,
+            publication_point=cls.imported_publication_point,
+            signed_object_uri='rsync://api.invalid/repo/example.mft',
+        )
         cls.certificate_observation = create_test_imported_certificate_observation(
             name='Imported Certificate Observation API Record',
             organization=cls.organization,
             provider_snapshot=cls.snapshot,
             certificate_uri='rsync://api.invalid/repo/example.cer',
+            publication_point=cls.imported_publication_point,
+            signed_object=cls.imported_signed_object,
+            publication_uri=cls.imported_publication_point.publication_uri,
+            signed_object_uri=cls.imported_signed_object.signed_object_uri,
         )
 
     def test_imported_certificate_observation_list_and_detail_are_exposed(self):
-        self.add_permissions('netbox_rpki.view_importedcertificateobservation')
+        self.add_permissions(
+            'netbox_rpki.view_importedcertificateobservation',
+            'netbox_rpki.view_importedpublicationpoint',
+            'netbox_rpki.view_importedsignedobject',
+        )
         spec = OBJECT_SPEC_BY_REGISTRY_KEY['importedcertificateobservation']
         list_url = reverse(f'plugins-api:netbox_rpki-api:{spec.api.basename}-list')
         detail_url = reverse(
@@ -896,6 +944,16 @@ class ImportedCertificateObservationAPITestCase(PluginAPITestCase):
         self.assertHttpStatus(detail_response, 200)
         self.assertEqual(detail_response.data['id'], self.certificate_observation.pk)
         self.assertEqual(detail_response.data['certificate_uri'], 'rsync://api.invalid/repo/example.cer')
+        publication_point = detail_response.data['publication_point']
+        signed_object = detail_response.data['signed_object']
+        self.assertEqual(
+            publication_point['id'] if isinstance(publication_point, dict) else publication_point,
+            self.imported_publication_point.pk,
+        )
+        self.assertEqual(
+            signed_object['id'] if isinstance(signed_object, dict) else signed_object,
+            self.imported_signed_object.pk,
+        )
 
     def test_imported_certificate_observation_endpoint_is_read_only(self):
         self.add_permissions('netbox_rpki.add_importedcertificateobservation')
@@ -915,6 +973,460 @@ class ImportedCertificateObservationAPITestCase(PluginAPITestCase):
         )
 
         self.assertHttpStatus(response, 405)
+
+
+class ImportedPublicationLinkAPITestCase(PluginAPITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(
+            org_id='imported-publication-link-api-org',
+            name='Imported Publication Link API Org',
+        )
+        cls.provider_account = create_test_provider_account(
+            name='Imported Publication Link API Account',
+            organization=cls.organization,
+            provider_type='krill',
+            org_handle='ORG-IMPORTED-LINK-API',
+            ca_handle='imported-link-api',
+        )
+        cls.snapshot = create_test_provider_snapshot(
+            name='Imported Publication Link API Snapshot',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+            status='completed',
+        )
+        cls.authored_publication_point = create_test_publication_point(
+            name='Imported Publication Link API Authored Publication Point',
+            organization=cls.organization,
+            publication_uri='rsync://api.invalid/repo/',
+        )
+        cls.authored_signed_object = create_test_signed_object(
+            name='Imported Publication Link API Authored Signed Object',
+            organization=cls.organization,
+            publication_point=cls.authored_publication_point,
+            object_type='manifest',
+            object_uri='rsync://api.invalid/repo/example.mft',
+        )
+        cls.imported_publication_point = create_test_imported_publication_point(
+            name='Imported Publication Link API Publication Point',
+            organization=cls.organization,
+            provider_snapshot=cls.snapshot,
+            authored_publication_point=cls.authored_publication_point,
+            publication_uri=cls.authored_publication_point.publication_uri,
+        )
+        cls.imported_signed_object = create_test_imported_signed_object(
+            name='Imported Publication Link API Signed Object',
+            organization=cls.organization,
+            provider_snapshot=cls.snapshot,
+            publication_point=cls.imported_publication_point,
+            authored_signed_object=cls.authored_signed_object,
+            signed_object_type='manifest',
+            signed_object_uri=cls.authored_signed_object.object_uri,
+            publication_uri=cls.imported_publication_point.publication_uri,
+        )
+
+    def test_imported_publication_point_detail_exposes_authored_publication_point(self):
+        self.add_permissions('netbox_rpki.view_importedpublicationpoint', 'netbox_rpki.view_publicationpoint')
+
+        spec = OBJECT_SPEC_BY_REGISTRY_KEY['importedpublicationpoint']
+        response = self.client.get(
+            reverse(spec.api.detail_view_name, kwargs={'pk': self.imported_publication_point.pk}),
+            **self.header,
+        )
+
+        self.assertHttpStatus(response, 200)
+        authored_publication_point = response.data['authored_publication_point']
+        self.assertEqual(
+            authored_publication_point['id'] if isinstance(authored_publication_point, dict) else authored_publication_point,
+            self.authored_publication_point.pk,
+        )
+
+    def test_imported_signed_object_detail_exposes_authored_signed_object(self):
+        self.add_permissions('netbox_rpki.view_importedsignedobject', 'netbox_rpki.view_signedobject')
+
+        spec = OBJECT_SPEC_BY_REGISTRY_KEY['importedsignedobject']
+        response = self.client.get(
+            reverse(spec.api.detail_view_name, kwargs={'pk': self.imported_signed_object.pk}),
+            **self.header,
+        )
+
+        self.assertHttpStatus(response, 200)
+        authored_signed_object = response.data['authored_signed_object']
+        self.assertEqual(
+            authored_signed_object['id'] if isinstance(authored_signed_object, dict) else authored_signed_object,
+            self.authored_signed_object.pk,
+        )
+
+
+class CertificateRoleLinkAPITestCase(PluginAPITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(
+            org_id='certificate-role-link-api-org',
+            name='Certificate Role Link API Org',
+        )
+        cls.trust_anchor = create_test_trust_anchor(
+            name='Certificate Role Link API Trust Anchor',
+            organization=cls.organization,
+        )
+        cls.publication_point = create_test_publication_point(
+            name='Certificate Role Link API Publication Point',
+            organization=cls.organization,
+            publication_uri='rsync://api.invalid/certs/',
+        )
+        cls.certificate = create_test_certificate(
+            name='Certificate Role Link API Resource Certificate',
+            rpki_org=cls.organization,
+            trust_anchor=cls.trust_anchor,
+            publication_point=cls.publication_point,
+        )
+        cls.ee_certificate = create_test_end_entity_certificate(
+            name='Certificate Role Link API EE Certificate',
+            organization=cls.organization,
+            resource_certificate=cls.certificate,
+            publication_point=cls.publication_point,
+        )
+
+    def test_certificate_detail_exposes_trust_anchor_and_publication_point(self):
+        self.add_permissions(
+            'netbox_rpki.view_certificate',
+            'netbox_rpki.view_trustanchor',
+            'netbox_rpki.view_publicationpoint',
+        )
+
+        spec = OBJECT_SPEC_BY_REGISTRY_KEY['certificate']
+        response = self.client.get(
+            reverse(spec.api.detail_view_name, kwargs={'pk': self.certificate.pk}),
+            **self.header,
+        )
+
+        self.assertHttpStatus(response, 200)
+        trust_anchor = response.data['trust_anchor']
+        publication_point = response.data['publication_point']
+        self.assertEqual(trust_anchor['id'] if isinstance(trust_anchor, dict) else trust_anchor, self.trust_anchor.pk)
+        self.assertEqual(
+            publication_point['id'] if isinstance(publication_point, dict) else publication_point,
+            self.publication_point.pk,
+        )
+
+    def test_end_entity_certificate_detail_exposes_resource_certificate_and_publication_point(self):
+        self.add_permissions(
+            'netbox_rpki.view_endentitycertificate',
+            'netbox_rpki.view_certificate',
+            'netbox_rpki.view_publicationpoint',
+        )
+
+        spec = OBJECT_SPEC_BY_REGISTRY_KEY['endentitycertificate']
+        response = self.client.get(
+            reverse(spec.api.detail_view_name, kwargs={'pk': self.ee_certificate.pk}),
+            **self.header,
+        )
+
+        self.assertHttpStatus(response, 200)
+        resource_certificate = response.data['resource_certificate']
+        publication_point = response.data['publication_point']
+        self.assertEqual(
+            resource_certificate['id'] if isinstance(resource_certificate, dict) else resource_certificate,
+            self.certificate.pk,
+        )
+        self.assertEqual(
+            publication_point['id'] if isinstance(publication_point, dict) else publication_point,
+            self.publication_point.pk,
+        )
+
+
+class CertificateRevocationListAPITestCase(PluginAPITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(
+            org_id='crl-api-org',
+            name='CRL API Org',
+        )
+        cls.signed_object = create_test_signed_object(
+            name='CRL API Signed Object',
+            organization=cls.organization,
+            filename='api.crl',
+            object_uri='https://api.invalid/crl.crl',
+            repository_uri='https://api.invalid/',
+        )
+        cls.certificate_revocation_list = create_test_certificate_revocation_list(
+            name='CRL API Record',
+            organization=cls.organization,
+            signed_object=cls.signed_object,
+            publication_uri='https://api.invalid/crl.crl',
+            crl_number='7',
+        )
+
+    def test_certificate_revocation_list_list_and_detail_expose_signed_object(self):
+        self.add_permissions(
+            'netbox_rpki.view_certificaterevocationlist',
+            'netbox_rpki.view_signedobject',
+        )
+        spec = OBJECT_SPEC_BY_REGISTRY_KEY['certificaterevocationlist']
+        list_url = reverse(f'plugins-api:netbox_rpki-api:{spec.api.basename}-list')
+        detail_url = reverse(
+            spec.api.detail_view_name,
+            kwargs={'pk': self.certificate_revocation_list.pk},
+        )
+
+        list_response = self.client.get(list_url, **self.header)
+        detail_response = self.client.get(detail_url, **self.header)
+
+        self.assertHttpStatus(list_response, 200)
+        self.assertEqual(len(list_response.data['results']), 1)
+        self.assertEqual(list_response.data['results'][0]['id'], self.certificate_revocation_list.pk)
+        signed_object = list_response.data['results'][0]['signed_object']
+        self.assertEqual(
+            signed_object['id'] if isinstance(signed_object, dict) else signed_object,
+            self.signed_object.pk,
+        )
+        self.assertHttpStatus(detail_response, 200)
+        self.assertEqual(detail_response.data['id'], self.certificate_revocation_list.pk)
+        signed_object = detail_response.data['signed_object']
+        self.assertEqual(
+            signed_object['id'] if isinstance(signed_object, dict) else signed_object,
+            self.signed_object.pk,
+        )
+
+
+class SignedObjectAPITestCase(PluginAPITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(
+            org_id='signed-object-api-org',
+            name='Signed Object API Org',
+        )
+        cls.signed_object = create_test_signed_object(
+            name='Signed Object API Record',
+            organization=cls.organization,
+            object_type='manifest',
+            object_uri='rsync://api.invalid/repo/object.mft',
+            repository_uri='rsync://api.invalid/repo/',
+        )
+        cls.manifest = create_test_manifest(
+            name='Signed Object API Manifest',
+            signed_object=cls.signed_object,
+            manifest_number='api-manifest-1',
+        )
+        cls.signed_object.current_manifest = cls.manifest
+        cls.signed_object.save(update_fields=('current_manifest',))
+        cls.provider_snapshot = create_test_provider_snapshot(
+            name='Signed Object API Snapshot',
+            organization=cls.organization,
+            provider_account=create_test_provider_account(
+                name='Signed Object API Provider Account',
+                organization=cls.organization,
+                provider_type='krill',
+                org_handle='ORG-SIGNED-OBJECT-API',
+                ca_handle='signed-object-api',
+            ),
+        )
+        cls.imported_publication_point = create_test_imported_publication_point(
+            name='Signed Object API Imported Publication Point',
+            organization=cls.organization,
+            provider_snapshot=cls.provider_snapshot,
+            authored_publication_point=cls.signed_object.publication_point,
+            publication_uri='rsync://api.invalid/repo/',
+        )
+        cls.imported_signed_object = create_test_imported_signed_object(
+            name='Signed Object API Imported Observation',
+            organization=cls.organization,
+            provider_snapshot=cls.provider_snapshot,
+            publication_point=cls.imported_publication_point,
+            authored_signed_object=cls.signed_object,
+            signed_object_type='manifest',
+            signed_object_uri=cls.signed_object.object_uri,
+        )
+        cls.validation_run = create_test_validation_run(
+            name='Signed Object API Validation Run',
+        )
+        cls.object_validation_result = create_test_object_validation_result(
+            name='Signed Object API Validation Result',
+            validation_run=cls.validation_run,
+            signed_object=cls.signed_object,
+        )
+
+    def test_signed_object_detail_exposes_normalized_reverse_relationships(self):
+        self.add_permissions(
+            'netbox_rpki.view_signedobject',
+            'netbox_rpki.view_manifest',
+            'netbox_rpki.view_importedsignedobject',
+            'netbox_rpki.view_objectvalidationresult',
+        )
+        spec = OBJECT_SPEC_BY_REGISTRY_KEY['signedobject']
+        detail_url = reverse(spec.api.detail_view_name, kwargs={'pk': self.signed_object.pk})
+
+        response = self.client.get(detail_url, **self.header)
+
+        self.assertHttpStatus(response, 200)
+        manifest_extension = response.data['manifest_extension']
+        self.assertEqual(
+            manifest_extension['id'] if isinstance(manifest_extension, dict) else manifest_extension,
+            self.manifest.pk,
+        )
+        self.assertEqual(
+            [row['id'] for row in response.data['imported_signed_object_observations']],
+            [self.imported_signed_object.pk],
+        )
+        self.assertEqual(
+            [row['id'] for row in response.data['validation_results']],
+            [self.object_validation_result.pk],
+        )
+
+
+class RouterCertificateAPITestCase(PluginAPITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(
+            org_id='router-certificate-api-org',
+            name='Router Certificate API Org',
+        )
+        cls.resource_certificate = create_test_certificate(
+            name='Router Certificate API Resource Certificate',
+            rpki_org=cls.organization,
+        )
+        cls.ee_certificate = create_test_end_entity_certificate(
+            name='Router Certificate API EE Certificate',
+            organization=cls.organization,
+            resource_certificate=cls.resource_certificate,
+            subject='CN=API Router',
+            issuer='CN=API Issuer',
+            serial='api-router-serial',
+            ski='api-router-ski',
+        )
+        cls.router_certificate = create_test_router_certificate(
+            name='Router Certificate API Record',
+            organization=cls.organization,
+            resource_certificate=cls.resource_certificate,
+            publication_point=cls.ee_certificate.publication_point,
+            ee_certificate=cls.ee_certificate,
+            asn=create_test_asn(65311),
+            subject='CN=API Router',
+            issuer='CN=API Issuer',
+            serial='api-router-serial',
+            ski='api-router-ski',
+        )
+
+    def test_router_certificate_list_and_detail_expose_ee_certificate(self):
+        self.add_permissions(
+            'netbox_rpki.view_routercertificate',
+            'netbox_rpki.view_endentitycertificate',
+        )
+        spec = OBJECT_SPEC_BY_REGISTRY_KEY['routercertificate']
+        list_url = reverse(f'plugins-api:netbox_rpki-api:{spec.api.basename}-list')
+        detail_url = reverse(
+            spec.api.detail_view_name,
+            kwargs={'pk': self.router_certificate.pk},
+        )
+
+        list_response = self.client.get(list_url, **self.header)
+        detail_response = self.client.get(detail_url, **self.header)
+
+        self.assertHttpStatus(list_response, 200)
+        self.assertEqual(len(list_response.data['results']), 1)
+        self.assertEqual(list_response.data['results'][0]['id'], self.router_certificate.pk)
+        ee_certificate = list_response.data['results'][0]['ee_certificate']
+        self.assertEqual(
+            ee_certificate['id'] if isinstance(ee_certificate, dict) else ee_certificate,
+            self.ee_certificate.pk,
+        )
+        self.assertHttpStatus(detail_response, 200)
+        self.assertEqual(detail_response.data['id'], self.router_certificate.pk)
+        ee_certificate = detail_response.data['ee_certificate']
+        self.assertEqual(
+            ee_certificate['id'] if isinstance(ee_certificate, dict) else ee_certificate,
+            self.ee_certificate.pk,
+        )
+
+
+class ValidatedPayloadValidationLinkAPITestCase(PluginAPITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(
+            org_id='validated-payload-api-org',
+            name='Validated Payload API Org',
+        )
+        cls.validation_run = create_test_validation_run(
+            name='Validated Payload API Validation Run',
+        )
+        cls.roa_signing_certificate = create_test_certificate(
+            name='Validated Payload API ROA Certificate',
+            rpki_org=cls.organization,
+        )
+        cls.roa_signed_object = create_test_signed_object(
+            name='Validated Payload API ROA Signed Object',
+            organization=cls.organization,
+            object_type='roa',
+            resource_certificate=cls.roa_signing_certificate,
+        )
+        cls.roa = create_test_roa(
+            name='Validated Payload API ROA',
+            signed_by=cls.roa_signing_certificate,
+            signed_object=cls.roa_signed_object,
+        )
+        cls.roa_object_validation_result = create_test_object_validation_result(
+            name='Validated Payload API ROA Validation Result',
+            validation_run=cls.validation_run,
+            signed_object=cls.roa_signed_object,
+        )
+        cls.validated_roa_payload = create_test_validated_roa_payload(
+            name='Validated Payload API ROA Payload',
+            validation_run=cls.validation_run,
+            roa=cls.roa,
+            object_validation_result=cls.roa_object_validation_result,
+        )
+        cls.aspa = create_test_aspa(
+            name='Validated Payload API ASPA',
+            organization=cls.organization,
+            customer_as=create_test_asn(65410),
+        )
+        cls.aspa_object_validation_result = create_test_object_validation_result(
+            name='Validated Payload API ASPA Validation Result',
+            validation_run=cls.validation_run,
+            signed_object=cls.aspa.signed_object,
+        )
+        cls.validated_aspa_payload = create_test_validated_aspa_payload(
+            name='Validated Payload API ASPA Payload',
+            validation_run=cls.validation_run,
+            aspa=cls.aspa,
+            object_validation_result=cls.aspa_object_validation_result,
+            customer_as=cls.aspa.customer_as,
+            provider_as=create_test_asn(65411),
+        )
+
+    def test_validated_roa_payload_detail_exposes_object_validation_result(self):
+        self.add_permissions(
+            'netbox_rpki.view_validatedroapayload',
+            'netbox_rpki.view_objectvalidationresult',
+        )
+        spec = OBJECT_SPEC_BY_REGISTRY_KEY['validatedroapayload']
+        detail_url = reverse(spec.api.detail_view_name, kwargs={'pk': self.validated_roa_payload.pk})
+
+        response = self.client.get(detail_url, **self.header)
+
+        self.assertHttpStatus(response, 200)
+        object_validation_result = response.data['object_validation_result']
+        self.assertEqual(
+            object_validation_result['id'] if isinstance(object_validation_result, dict) else object_validation_result,
+            self.roa_object_validation_result.pk,
+        )
+
+    def test_validated_aspa_payload_detail_exposes_object_validation_result(self):
+        self.add_permissions(
+            'netbox_rpki.view_validatedaspapayload',
+            'netbox_rpki.view_objectvalidationresult',
+        )
+        spec = OBJECT_SPEC_BY_REGISTRY_KEY['validatedaspapayload']
+        detail_url = reverse(spec.api.detail_view_name, kwargs={'pk': self.validated_aspa_payload.pk})
+
+        response = self.client.get(detail_url, **self.header)
+
+        self.assertHttpStatus(response, 200)
+        object_validation_result = response.data['object_validation_result']
+        self.assertEqual(
+            object_validation_result['id'] if isinstance(object_validation_result, dict) else object_validation_result,
+            self.aspa_object_validation_result.pk,
+        )
 
 
 @_install_registry_api_tests
@@ -977,6 +1489,41 @@ class RoaAPITestCase(RegistryDrivenObjectAPITestCase):
             create_test_roa(name='ROA 2', origin_as=cls.asns[1], signed_by=cls.certificates[1], auto_renews=False),
             create_test_roa(name='ROA 3', origin_as=cls.asns[2], signed_by=cls.certificates[2], auto_renews=True),
         ]
+        cls.roa_signed_object = create_test_signed_object(
+            name='ROA 1 Signed Object',
+            organization=cls.organizations[0],
+            object_type='roa',
+            resource_certificate=cls.certificates[0],
+        )
+        cls.roas[0].signed_object = cls.roa_signed_object
+        cls.roas[0].save(update_fields=('signed_object',))
+
+    def test_roa_list_and_detail_expose_signed_object(self):
+        self.add_permissions('netbox_rpki.view_roa', 'netbox_rpki.view_signedobject')
+        spec = OBJECT_SPEC_BY_REGISTRY_KEY['roa']
+        list_url = reverse(f'plugins-api:netbox_rpki-api:{spec.api.basename}-list')
+        detail_url = reverse(
+            spec.api.detail_view_name,
+            kwargs={'pk': self.roas[0].pk},
+        )
+
+        list_response = self.client.get(list_url, **self.header)
+        detail_response = self.client.get(detail_url, **self.header)
+
+        self.assertHttpStatus(list_response, 200)
+        self.assertEqual(list_response.data['results'][0]['id'], self.roas[0].pk)
+        signed_object = list_response.data['results'][0]['signed_object']
+        self.assertEqual(
+            signed_object['id'] if isinstance(signed_object, dict) else signed_object,
+            self.roa_signed_object.pk,
+        )
+        self.assertHttpStatus(detail_response, 200)
+        self.assertEqual(detail_response.data['id'], self.roas[0].pk)
+        signed_object = detail_response.data['signed_object']
+        self.assertEqual(
+            signed_object['id'] if isinstance(signed_object, dict) else signed_object,
+            self.roa_signed_object.pk,
+        )
 
 
 @_install_registry_api_tests

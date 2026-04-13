@@ -24,19 +24,26 @@ from netbox_rpki.tests.utils import (
     create_test_certificate,
     create_test_certificate_asn,
     create_test_certificate_prefix,
+    create_test_end_entity_certificate,
     create_test_model,
+    create_test_object_validation_result,
     create_test_intent_derivation_run,
     create_test_organization,
     create_test_aspa_provider,
     create_test_imported_aspa,
+    create_test_imported_certificate_observation,
+    create_test_imported_publication_point,
+    create_test_imported_signed_object,
     create_test_manifest_entry,
     create_test_prefix,
+    create_test_publication_point,
     create_test_provider_account,
     create_test_provider_snapshot,
     create_test_provider_sync_run,
     create_test_provider_write_execution,
     create_test_published_roa_result,
     create_test_published_aspa_result,
+    create_test_publication_point,
     create_test_revoked_certificate,
     create_test_roa_change_plan,
     create_test_roa_change_plan_item,
@@ -49,9 +56,14 @@ from netbox_rpki.tests.utils import (
     create_test_roa_intent_result,
     create_test_roa_reconciliation_run,
     create_test_roa_prefix,
+    create_test_router_certificate,
     create_test_routing_intent_profile,
     create_test_routing_intent_rule,
     create_test_sample_dataset,
+    create_test_signed_object,
+    create_test_trust_anchor,
+    create_test_validated_roa_payload,
+    create_test_validation_run,
 )
 
 
@@ -155,6 +167,339 @@ class SectionNineModelBehaviorTestCase(TestCase):
         for object_name, instance in self.section9_support_instances.items():
             with self.subTest(object_name=object_name):
                 self.assertEqual(str(instance), expected_strings[object_name])
+
+    def test_section_nine_crl_instance_uses_signed_object_extension(self):
+        crl = self.section9_instances['CertificateRevocationList']
+
+        self.assertIsNotNone(crl.signed_object)
+        self.assertEqual(crl.signed_object.object_type, rpki_models.SignedObjectType.CRL)
+
+
+class ImportedCertificateObservationModelLinkageTestCase(TestCase):
+    def test_imported_certificate_observation_can_link_to_publication_point_and_signed_object(self):
+        snapshot = create_test_provider_snapshot()
+        publication_point = create_test_imported_publication_point(
+            provider_snapshot=snapshot,
+            organization=snapshot.organization,
+            publication_uri='rsync://example.invalid/repo/',
+        )
+        signed_object = create_test_imported_signed_object(
+            provider_snapshot=snapshot,
+            organization=snapshot.organization,
+            publication_point=publication_point,
+            signed_object_uri='rsync://example.invalid/repo/example.mft',
+        )
+        observation = create_test_imported_certificate_observation(
+            provider_snapshot=snapshot,
+            organization=snapshot.organization,
+            publication_point=publication_point,
+            signed_object=signed_object,
+            publication_uri=publication_point.publication_uri,
+            signed_object_uri=signed_object.signed_object_uri,
+        )
+
+        self.assertEqual(observation.publication_point, publication_point)
+        self.assertEqual(observation.signed_object, signed_object)
+
+
+class RouterCertificateModelNormalizationTestCase(TestCase):
+    def test_router_certificate_can_link_to_matching_ee_certificate(self):
+        organization = create_test_organization(org_id='router-link-org', name='Router Link Org')
+        resource_certificate = create_test_certificate(
+            name='Router Resource Certificate',
+            rpki_org=organization,
+        )
+        publication_point = create_test_publication_point(
+            name='Router Publication Point',
+            organization=organization,
+        )
+        ee_certificate = create_test_end_entity_certificate(
+            name='Router EE Certificate',
+            organization=organization,
+            resource_certificate=resource_certificate,
+            publication_point=publication_point,
+            subject='CN=Router',
+            issuer='CN=Issuer',
+            serial='router-serial',
+            ski='router-ski',
+        )
+
+        router_certificate = create_test_router_certificate(
+            name='Router Certificate',
+            organization=organization,
+            resource_certificate=resource_certificate,
+            publication_point=publication_point,
+            ee_certificate=ee_certificate,
+            subject='CN=Router',
+            issuer='CN=Issuer',
+            serial='router-serial',
+            ski='router-ski',
+        )
+
+        self.assertEqual(router_certificate.ee_certificate, ee_certificate)
+        self.assertEqual(ee_certificate.router_certificate_extension, router_certificate)
+
+    def test_router_certificate_rejects_mismatched_ee_certificate_resource_certificate(self):
+        organization = create_test_organization(org_id='router-mismatch-org', name='Router Mismatch Org')
+        publication_point = create_test_publication_point(
+            name='Router Mismatch Publication Point',
+            organization=organization,
+        )
+        ee_certificate = create_test_end_entity_certificate(
+            name='Mismatched Router EE Certificate',
+            organization=organization,
+            resource_certificate=create_test_certificate(
+                name='EE Resource Certificate',
+                rpki_org=organization,
+            ),
+            publication_point=publication_point,
+        )
+        router_certificate = rpki_models.RouterCertificate(
+            name='Invalid Router Certificate',
+            organization=organization,
+            resource_certificate=create_test_certificate(
+                name='Router Resource Certificate',
+                rpki_org=organization,
+            ),
+            publication_point=publication_point,
+            ee_certificate=ee_certificate,
+        )
+
+        with self.assertRaises(ValidationError) as context:
+            router_certificate.full_clean()
+
+        self.assertEqual(
+            context.exception.message_dict,
+            {'ee_certificate': ['EE certificate must use the same resource certificate as the router certificate.']},
+        )
+
+
+class RoaSignedObjectModelNormalizationTestCase(TestCase):
+    def test_roa_can_link_to_matching_signed_object(self):
+        organization = create_test_organization(org_id='roa-link-org', name='ROA Link Org')
+        signing_certificate = create_test_certificate(
+            name='ROA Signing Certificate',
+            rpki_org=organization,
+        )
+        signed_object = create_test_signed_object(
+            name='ROA Signed Object',
+            organization=organization,
+            object_type=rpki_models.SignedObjectType.ROA,
+            resource_certificate=signing_certificate,
+            valid_from=timezone.now().date(),
+            valid_to=(timezone.now() + timedelta(days=30)).date(),
+        )
+        roa = create_test_roa(
+            name='Linked ROA',
+            signed_by=signing_certificate,
+            signed_object=signed_object,
+            valid_from=signed_object.valid_from,
+            valid_to=signed_object.valid_to,
+        )
+
+        self.assertEqual(roa.signed_object, signed_object)
+        self.assertEqual(signed_object.legacy_roa, roa)
+
+    def test_roa_rejects_non_roa_signed_object(self):
+        organization = create_test_organization(org_id='roa-invalid-org', name='ROA Invalid Org')
+        signing_certificate = create_test_certificate(
+            name='ROA Invalid Signing Certificate',
+            rpki_org=organization,
+        )
+        signed_object = create_test_signed_object(
+            name='Not A ROA Signed Object',
+            organization=organization,
+            object_type=rpki_models.SignedObjectType.MANIFEST,
+            resource_certificate=signing_certificate,
+        )
+        roa = rpki_models.Roa(
+            name='Invalid ROA',
+            signed_by=signing_certificate,
+            signed_object=signed_object,
+            auto_renews=True,
+        )
+
+        with self.assertRaises(ValidationError) as context:
+            roa.full_clean()
+
+        self.assertEqual(
+            context.exception.message_dict,
+            {'signed_object': ['Signed object must use the ROA object type.']},
+        )
+
+
+class ValidatedPayloadValidationLinkageTestCase(TestCase):
+    def test_validated_roa_payload_can_link_to_object_validation_result(self):
+        organization = create_test_organization(org_id='validated-roa-org', name='Validated ROA Org')
+        signing_certificate = create_test_certificate(name='Validated ROA Certificate', rpki_org=organization)
+        signed_object = create_test_signed_object(
+            name='Validated ROA Signed Object',
+            organization=organization,
+            object_type=rpki_models.SignedObjectType.ROA,
+            resource_certificate=signing_certificate,
+        )
+        roa = create_test_roa(name='Validated ROA', signed_by=signing_certificate, signed_object=signed_object)
+        validation_run = create_test_validation_run()
+        object_validation_result = create_test_object_validation_result(
+            validation_run=validation_run,
+            signed_object=signed_object,
+        )
+        payload = create_test_validated_roa_payload(
+            validation_run=validation_run,
+            roa=roa,
+            object_validation_result=object_validation_result,
+        )
+
+        self.assertEqual(payload.object_validation_result, object_validation_result)
+
+    def test_validated_aspa_payload_rejects_mismatched_object_validation_result(self):
+        validation_run = create_test_validation_run(name='Validation Run A')
+        other_validation_run = create_test_validation_run(name='Validation Run B')
+        aspa = create_test_aspa()
+        object_validation_result = create_test_object_validation_result(
+            validation_run=other_validation_run,
+            signed_object=aspa.signed_object,
+        )
+        payload = rpki_models.ValidatedAspaPayload(
+            name='Invalid Validated ASPA Payload',
+            validation_run=validation_run,
+            aspa=aspa,
+            object_validation_result=object_validation_result,
+            customer_as=aspa.customer_as,
+            provider_as=create_test_asn(65432),
+        )
+
+        with self.assertRaises(ValidationError) as context:
+            payload.full_clean()
+
+        self.assertEqual(
+            context.exception.message_dict,
+            {'object_validation_result': ['Object validation result must belong to the same validation run as the validated ASPA payload.']},
+        )
+
+
+class ImportedPublicationLinkageTestCase(TestCase):
+    def test_imported_publication_point_can_link_to_authored_publication_point(self):
+        organization = create_test_organization(org_id='imported-publication-org', name='Imported Publication Org')
+        authored_publication_point = create_test_publication_point(
+            organization=organization,
+            publication_uri='rsync://example.invalid/repo/',
+        )
+
+        imported_publication_point = create_test_imported_publication_point(
+            organization=organization,
+            authored_publication_point=authored_publication_point,
+            publication_uri=authored_publication_point.publication_uri,
+        )
+
+        self.assertEqual(imported_publication_point.authored_publication_point, authored_publication_point)
+
+    def test_imported_signed_object_rejects_mismatched_authored_publication_point(self):
+        organization = create_test_organization(org_id='imported-signed-object-org', name='Imported Signed Object Org')
+        authored_publication_point = create_test_publication_point(
+            organization=organization,
+            publication_uri='rsync://example.invalid/repo/',
+        )
+        other_authored_publication_point = create_test_publication_point(
+            organization=organization,
+            publication_uri='rsync://example.invalid/other/',
+        )
+        authored_signed_object = create_test_signed_object(
+            organization=organization,
+            publication_point=other_authored_publication_point,
+            object_type=rpki_models.SignedObjectType.MANIFEST,
+            object_uri='rsync://example.invalid/repo/example.mft',
+        )
+        imported_publication_point = create_test_imported_publication_point(
+            organization=organization,
+            authored_publication_point=authored_publication_point,
+            publication_uri=authored_publication_point.publication_uri,
+        )
+        imported_signed_object = rpki_models.ImportedSignedObject(
+            name='Imported Signed Object',
+            provider_snapshot=create_test_provider_snapshot(organization=organization),
+            organization=organization,
+            publication_point=imported_publication_point,
+            authored_signed_object=authored_signed_object,
+            signed_object_key='imported-signed-object-key',
+            signed_object_type=rpki_models.SignedObjectType.MANIFEST,
+            publication_uri=imported_publication_point.publication_uri,
+            signed_object_uri=authored_signed_object.object_uri,
+        )
+
+        with self.assertRaises(ValidationError) as context:
+            imported_signed_object.full_clean()
+
+        self.assertEqual(
+            context.exception.message_dict,
+            {
+                'authored_signed_object': [
+                    'Authored signed object must use the same authored publication point as the imported signed object.'
+                ]
+            },
+        )
+
+
+class CertificateRoleValidationTestCase(TestCase):
+    def test_end_entity_certificate_rejects_resource_certificate_from_other_organization(self):
+        certificate_organization = create_test_organization(org_id='resource-cert-org', name='Resource Cert Org')
+        ee_organization = create_test_organization(org_id='ee-org', name='EE Org')
+        resource_certificate = create_test_certificate(
+            name='Cross-Organization Resource Certificate',
+            rpki_org=certificate_organization,
+        )
+        ee_certificate = rpki_models.EndEntityCertificate(
+            name='Invalid EE Certificate',
+            organization=ee_organization,
+            resource_certificate=resource_certificate,
+            publication_point=create_test_publication_point(organization=ee_organization),
+        )
+
+        with self.assertRaises(ValidationError) as context:
+            ee_certificate.full_clean()
+
+        self.assertEqual(
+            context.exception.message_dict,
+            {
+                'resource_certificate': [
+                    'Resource certificate must belong to the same organization as the end-entity certificate.'
+                ]
+            },
+        )
+
+    def test_signed_object_rejects_mismatched_ee_certificate_resource_certificate(self):
+        organization = create_test_organization(org_id='signed-object-org', name='Signed Object Org')
+        resource_certificate = create_test_certificate(name='Signed Object Resource Certificate', rpki_org=organization)
+        other_resource_certificate = create_test_certificate(
+            name='Other Resource Certificate',
+            rpki_org=organization,
+        )
+        publication_point = create_test_publication_point(organization=organization)
+        ee_certificate = create_test_end_entity_certificate(
+            organization=organization,
+            resource_certificate=other_resource_certificate,
+            publication_point=publication_point,
+        )
+        signed_object = rpki_models.SignedObject(
+            name='Invalid Signed Object',
+            organization=organization,
+            object_type=rpki_models.SignedObjectType.MANIFEST,
+            resource_certificate=resource_certificate,
+            ee_certificate=ee_certificate,
+            publication_point=publication_point,
+        )
+
+        with self.assertRaises(ValidationError) as context:
+            signed_object.full_clean()
+
+        self.assertEqual(
+            context.exception.message_dict,
+            {
+                'ee_certificate': [
+                    'EE certificate must use the same resource certificate as the signed object.'
+                ]
+            },
+        )
 
 
 class ASPAProviderModelValidationTestCase(TestCase):

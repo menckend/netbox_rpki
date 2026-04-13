@@ -467,6 +467,8 @@ def _certificate_observation_state(row: rpki_models.ImportedCertificateObservati
     return {
         'certificate_key': row.certificate_key,
         'observation_source': row.observation_source,
+        'publication_point_key': row.publication_point.publication_key if row.publication_point_id and row.publication_point is not None else '',
+        'signed_object_key': row.signed_object.signed_object_key if row.signed_object_id and row.signed_object is not None else '',
         'certificate_uri': row.certificate_uri,
         'publication_uri': row.publication_uri,
         'signed_object_uri': row.signed_object_uri,
@@ -485,6 +487,16 @@ def _certificate_observation_state(row: rpki_models.ImportedCertificateObservati
 
 def _build_certificate_observation_item(snapshot_diff, *, family, change_type, before, after):
     row = after or before
+    publication_uri = (
+        row.publication_point.publication_uri
+        if row.publication_point_id and row.publication_point is not None and row.publication_point.publication_uri
+        else row.publication_uri
+    )
+    signed_object_uri = (
+        row.signed_object.signed_object_uri
+        if row.signed_object_id and row.signed_object is not None and row.signed_object.signed_object_uri
+        else row.signed_object_uri
+    )
     _create_diff_item(
         snapshot_diff,
         family=family,
@@ -497,8 +509,8 @@ def _build_certificate_observation_item(snapshot_diff, *, family, change_type, b
         after_state=_certificate_observation_state(after) if after is not None else {},
         related_handle=row.related_handle,
         certificate_identifier=row.certificate_key,
-        publication_uri=row.publication_uri,
-        signed_object_uri=row.signed_object_uri,
+        publication_uri=publication_uri,
+        signed_object_uri=signed_object_uri,
         is_stale=row.is_stale,
     )
 
@@ -600,11 +612,19 @@ def build_provider_snapshot_diff(
         }
         before_certificate_observations = {
             _certificate_observation_identity(row): row
-            for row in base_snapshot.imported_certificate_observations.select_related('external_reference').all()
+            for row in base_snapshot.imported_certificate_observations.select_related(
+                'external_reference',
+                'publication_point',
+                'signed_object',
+            ).all()
         }
         after_certificate_observations = {
             _certificate_observation_identity(row): row
-            for row in comparison_snapshot.imported_certificate_observations.select_related('external_reference').all()
+            for row in comparison_snapshot.imported_certificate_observations.select_related(
+                'external_reference',
+                'publication_point',
+                'signed_object',
+            ).all()
         }
 
         family_summaries = {

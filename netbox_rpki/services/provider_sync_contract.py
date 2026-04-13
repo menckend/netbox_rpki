@@ -64,9 +64,9 @@ PROVIDER_SYNC_FAMILY_METADATA = {
 }
 
 KRILL_CERTIFICATE_INVENTORY_LIMITATION_REASON = (
-    'Repository-derived certificate observation is populated from published signed objects and '
-    'certificate-bearing Krill metadata, but it is still not a full repository validator or canonical '
-    'certificate catalog.'
+    'Repository-derived certificate observation is linked to publication points and signed objects, '
+    'and it is populated from certificate-bearing Krill metadata, but it is still not a full repository '
+    'validator or canonical certificate catalog.'
 )
 
 
@@ -105,6 +105,8 @@ def family_capability_extra(
             'capability_mode': 'derived',
             'capability_sources': [
                 'published_signed_objects',
+                'publication_point_link',
+                'signed_object_link',
                 'ca_metadata',
                 'parent_links',
                 'repo_status',

@@ -21,6 +21,46 @@ The execution target is a schema and surface model that cleanly expresses the fi
 4. integrity
 5. validation
 
+## Status Snapshot
+
+Current execution status as of April 13, 2026:
+
+- Phase 0 is complete.
+- Phase 1 is complete and has expanded into several additive schema slices rather than one monolithic migration.
+- Phase 2 has been executed in serialized lead-owned slices instead of true parallel sub-agent waves because the shared surface files proved too conflict-prone.
+- Phase 3 is complete for the first normalization wave.
+- Phase 4 is complete for the first normalization wave.
+
+Landed normalization slices:
+
+1. `0024_schema_normalization_phase0.py`
+   - `CertificateRevocationList.signed_object`
+   - `ImportedCertificateObservation.publication_point`
+   - `ImportedCertificateObservation.signed_object`
+2. `0025_router_certificate_ee_link.py`
+   - `RouterCertificate.ee_certificate`
+3. `0026_roa_signed_object_normalization.py`
+   - intentional `Roa.signed_object` normalization
+4. `0027_validated_payload_object_validation_links.py`
+   - `ValidatedRoaPayload.object_validation_result`
+   - `ValidatedAspaPayload.object_validation_result`
+5. `0028_imported_publication_authored_links.py`
+   - `ImportedPublicationPoint.authored_publication_point`
+   - `ImportedSignedObject.authored_signed_object`
+6. non-migration certificate-role cleanup
+   - model-level `EndEntityCertificate` and `SignedObject` guardrails
+   - explicit generated-surface exposure of certificate role relationships
+   - explicit detail semantics for `Certificate` and `EndEntityCertificate`
+7. non-migration `SignedObject` surface cleanup
+   - explicit `SignedObject` detail semantics
+   - additive API exposure for normalized reverse relationships
+   - additive GraphQL exposure for normalized reverse relationships
+
+Current next seam:
+
+- no remaining code seam is required to close the first normalization wave
+- any next work is post-wave refinement or a second normalization wave, not a release-gate blocker
+
 ## Scope
 
 In scope:
@@ -85,10 +125,10 @@ Imported observation and sync layer:
 
 Primary seams to normalize:
 
-1. `Roa` still carries legacy object semantics even though it already has a compatibility link to `SignedObject`.
-2. `Certificate`, `EndEntityCertificate`, and `RouterCertificate` express distinct roles, but the taxonomy is still only partly normalized.
-3. Publication and observation exist in parallel but do not yet follow one clean identity and linkage model.
-4. The plugin surface layer is generated from explicit model metadata, so schema changes must keep the registry contract intact.
+1. `Roa` now has an intentional compatibility path through `SignedObject`, but broader object-family rendering is still not consistently centered on normalized signed-object semantics.
+2. `Certificate`, `EndEntityCertificate`, and `RouterCertificate` now have clearer additive role boundaries, but the surface layer still needs more deliberate `SignedObject`-family presentation.
+3. Publication, import, and validation now have several explicit joins, but the final traversal model still needs polish so the relationships feel intentional everywhere they are rendered.
+4. The plugin surface layer is generated from explicit model metadata, so every remaining normalization step must keep the registry contract intact.
 
 Execution constraint:
 
@@ -155,6 +195,12 @@ Required handoff format for every worker:
 
 ### Track A: Target-State Contract and Schema Substrate
 
+Status:
+
+- largely complete for the first wave
+- the lead has already landed the additive schema substrate and follow-on schema slices through `0028`
+- remaining work is limited to any final schema hooks needed by the next `SignedObject` surface-cleanup seam
+
 Owner:
 
 - GPT-5.4 lead agent or one designated schema worker under direct lead control
@@ -185,6 +231,13 @@ Dependency rule:
 - this track must land before any surface or provider-observation worker takes ownership of follow-on implementation
 
 ### Track B: `SignedObject` Convergence
+
+Status:
+
+- substantially complete for the first wave
+- `Roa.signed_object` has been normalized and surfaced intentionally
+- explicit `SignedObject` detail, API, and GraphQL reverse traversal is now landed
+- any remaining work here is compatibility polish rather than a missing normalization seam
 
 Owner:
 
@@ -221,6 +274,13 @@ Dependency rule:
 
 ### Track C: Certificate-Role Cleanup
 
+Status:
+
+- substantially complete for the first wave
+- `RouterCertificate.ee_certificate` is landed
+- certificate-role guardrails and clearer certificate detail semantics are landed
+- any remaining work here is incremental tightening, not a missing first-pass implementation
+
 Owner:
 
 - one GPT-5.4-mini worker after Track A lands, using the surface window
@@ -250,6 +310,14 @@ Dependency rule:
 
 ### Track D: Publication, Import, and Validation Linkage
 
+Status:
+
+- substantially complete for the current plan wave
+- imported certificate observations now link to imported publication and signed-object rows
+- imported publication rows now link back to authored publication objects when identity is clear
+- validated payload rows now link to object-level validation results
+- provider-sync contract and diff logic have already been updated to preserve the new relationships
+
 Owner:
 
 - one GPT-5.4-mini worker after Track A lands
@@ -278,6 +346,12 @@ Dependency rule:
 
 ### Track E: Migration and Compatibility Hardening
 
+Status:
+
+- partially complete
+- additive migrations and best-effort backfills have landed through `0028`
+- the remaining work is compatibility review and any final cleanup after the next `SignedObject` surface seam
+
 Owner:
 
 - GPT-5.4 lead agent after Tracks B through D merge
@@ -302,6 +376,12 @@ Expected outputs:
 - clear compatibility notes for legacy fields and relationships
 
 ### Track F: Surface Contract, Docs, and Release-Gate Hardening
+
+Status:
+
+- complete for the first normalization wave
+- backlog updates, the decision log, and this plan have been maintained during execution
+- focused and full-plugin regression runs have already been used as release-gate checks for the currently landed slices
 
 Owner:
 
@@ -331,6 +411,16 @@ Dependency rule:
 
 ### Phase 0: Freeze the Contract
 
+Status:
+
+- complete
+
+Completed work:
+
+1. section 9.11 target semantics were reframed as compatibility-preserving normalization
+2. the field-mapping decision log was created
+3. the first additive substrate slice was defined and landed
+
 Lead-only tasks:
 
 1. Reconfirm the target semantics of section 9.11.
@@ -347,6 +437,16 @@ Exit criteria:
 
 ### Phase 1: Land the Schema Substrate
 
+Status:
+
+- complete
+
+Completed work:
+
+1. landed `0024_schema_normalization_phase0.py`
+2. extended the substrate in subsequent additive migrations through `0028`
+3. updated factories, sample data, and registry scenarios so the normalized relationships can be built intentionally
+
 Lead-owned implementation slice:
 
 1. Add the minimum normalization fields, constraints, and compatibility hooks.
@@ -361,12 +461,32 @@ Exit criteria:
 
 ### Phase 2: Open Parallel Surface Work
 
-Parallel worker slices:
+Status:
+
+- effectively complete for the slices already landed, but executed serially by the lead instead of in parallel mini-agent waves
+
+Completed work:
+
+1. surfaced the initial substrate links through the generated contract
+2. surfaced router-certificate and ROA normalization links
+3. updated provider-sync contract and diff behavior for the new authored/imported/validated relationships
+4. expanded API, GraphQL, view, and provider-sync coverage alongside each slice
+
+Execution note:
+
+- the plan originally allowed parallel mini-agent work here, but the shared ownership pressure on `object_registry.py`, `detail_specs.py`, and related surface tests made serialized lead-owned slices the safer execution model
+
+Planned worker slices for this phase:
 
 1. Track B: `SignedObject` convergence at the surface layer.
 2. Track C: certificate-role cleanup at the surface layer.
 3. Track D: publication/import/validation linkage normalization.
 4. Track F: contract-test expansion and doc updates for the slices above.
+
+Adjusted execution result:
+
+- for the currently landed slices, the lead executed the shared surface work directly in serial order
+- mini-agent delegation remains appropriate only for future bounded sidecar work on disjoint files
 
 Exit criteria:
 
@@ -374,6 +494,22 @@ Exit criteria:
 - no worker edits `models.py` or migrations unless reassigned by the lead
 
 ### Phase 3: Integration and Hardening
+
+Status:
+
+- complete for the first normalization wave
+
+Completed work:
+
+1. the landed slices have been integrated across model, service, and generated-surface layers
+2. certificate-role guardrails and detail semantics are now explicit
+3. authored/imported/validated linkage is materially more coherent than the pre-plan baseline
+4. `SignedObject` now exposes normalized reverse relationships explicitly in the UI, API, and GraphQL surfaces
+5. the late-phase compatibility review found no remaining first-wave blockers
+
+Remaining work:
+
+- any remaining work is post-wave refinement, documentation polish, or a future second-wave normalization effort
 
 Lead-owned integration slice:
 
@@ -388,6 +524,22 @@ Exit criteria:
 - compatibility behavior is explicit, not accidental
 
 ### Phase 4: Release-Gate Verification
+
+Status:
+
+- complete for the first normalization wave
+
+Completed work:
+
+1. focused schema, provider-sync, UI, API, and GraphQL tests have been run repeatedly throughout implementation
+2. `manage.py makemigrations --check --dry-run netbox_rpki` is clean after the latest landed slice
+3. the full plugin suite most recently passed after certificate-role cleanup
+4. the `SignedObject` surface slice passed focused view/API/GraphQL verification and a broader API/GraphQL/view run with 270 passing tests
+5. the full first-wave release gate rerun passed with 412 tests across `netbox_rpki`
+
+Remaining work:
+
+- none for first-wave closure
 
 Required closure checks:
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable as IterableCollection
 from dataclasses import dataclass
 from typing import Iterable
 from urllib.parse import urlencode
@@ -141,6 +142,56 @@ def _fetch_arin_roa_xml(provider_account: rpki_models.RpkiProviderAccount) -> st
     )
     with urlopen(request, timeout=30) as response:
         return response.read().decode('utf-8')
+
+
+def _build_unique_uri_lookup(rows: IterableCollection[object], *field_names: str) -> dict[str, object]:
+    lookup: dict[str, object] = {}
+    ambiguous: set[str] = set()
+    for row in rows:
+        for field_name in field_names:
+            value = getattr(row, field_name, '')
+            if not isinstance(value, str):
+                continue
+            normalized = value.strip()
+            if not normalized or normalized in ambiguous:
+                continue
+            existing = lookup.get(normalized)
+            if existing is not None and existing != row:
+                ambiguous.add(normalized)
+                lookup.pop(normalized, None)
+                continue
+            lookup[normalized] = row
+    return lookup
+
+
+def _resolve_authored_publication_point(
+    publication_point_record,
+    *,
+    authored_publication_points_by_uri: dict[str, rpki_models.PublicationPoint],
+) -> rpki_models.PublicationPoint | None:
+    for candidate in (
+        publication_point_record.publication_uri,
+        publication_point_record.service_uri,
+        publication_point_record.rrdp_notification_uri,
+    ):
+        normalized = candidate.strip()
+        if not normalized:
+            continue
+        authored_publication_point = authored_publication_points_by_uri.get(normalized)
+        if authored_publication_point is not None:
+            return authored_publication_point
+    return None
+
+
+def _resolve_authored_signed_object(
+    signed_object_record,
+    *,
+    authored_signed_objects_by_uri: dict[str, rpki_models.SignedObject],
+) -> rpki_models.SignedObject | None:
+    signed_object_uri = signed_object_record.signed_object_uri.strip()
+    if not signed_object_uri:
+        return None
+    return authored_signed_objects_by_uri.get(signed_object_uri)
 
 
 def _krill_ssl_context(provider_account: rpki_models.RpkiProviderAccount):
@@ -695,7 +746,21 @@ def _import_krill_records(
     imported_publication_point_count = 0
     imported_signed_object_count = 0
     imported_certificate_observation_count = 0
+    authored_publication_points_by_uri: dict[str, rpki_models.PublicationPoint] = {}
+    authored_signed_objects_by_uri: dict[str, rpki_models.SignedObject] = {}
+    if provider_account.organization_id is not None:
+        authored_publication_points_by_uri = _build_unique_uri_lookup(
+            rpki_models.PublicationPoint.objects.filter(organization=provider_account.organization).all(),
+            'publication_uri',
+            'rsync_base_uri',
+            'rrdp_notify_uri',
+        )
+        authored_signed_objects_by_uri = _build_unique_uri_lookup(
+            rpki_models.SignedObject.objects.filter(organization=provider_account.organization).all(),
+            'object_uri',
+        )
     imported_publication_points: dict[str, rpki_models.ImportedPublicationPoint] = {}
+    imported_signed_objects_by_uri: dict[str, rpki_models.ImportedSignedObject] = {}
     with transaction.atomic():
         for record in records:
             prefix = _resolve_prefix(record.prefix)
@@ -916,6 +981,10 @@ def _import_krill_records(
             imported_resource_entitlement_count += 1
 
         for record in publication_point_records:
+            authored_publication_point = _resolve_authored_publication_point(
+                record,
+                authored_publication_points_by_uri=authored_publication_points_by_uri,
+            )
             imported_publication_point = rpki_models.ImportedPublicationPoint.objects.create(
                 name=f'{provider_account.name} Publication Point {record.external_object_id or provider_account.ca_handle}',
                 provider_snapshot=snapshot,
@@ -933,6 +1002,7 @@ def _import_krill_records(
                 next_exchange_before=record.next_exchange_before,
                 published_object_count=record.published_object_count,
                 external_object_id=record.external_object_id,
+                authored_publication_point=authored_publication_point,
                 payload_json={
                     'provider_type': provider_account.provider_type,
                     'ca_handle': provider_account.ca_handle,
@@ -959,6 +1029,10 @@ def _import_krill_records(
                 publication_point = next(iter(imported_publication_points.values()))
             if publication_point is None:
                 raise ProviderSyncError('Krill signed object inventory could not be linked to a publication point.')
+            authored_signed_object = _resolve_authored_signed_object(
+                record,
+                authored_signed_objects_by_uri=authored_signed_objects_by_uri,
+            )
             imported_signed_object = rpki_models.ImportedSignedObject.objects.create(
                 name=f'{provider_account.name} Signed Object {record.signed_object_uri or record.object_hash or record.publication_uri}',
                 provider_snapshot=snapshot,
@@ -975,6 +1049,7 @@ def _import_krill_records(
                 object_hash=record.object_hash,
                 body_base64=record.body_base64,
                 external_object_id=record.external_object_id,
+                authored_signed_object=authored_signed_object,
                 payload_json={
                     'provider_type': provider_account.provider_type,
                     'ca_handle': provider_account.ca_handle,
@@ -996,10 +1071,16 @@ def _import_krill_records(
                 snapshot=snapshot,
                 imported_signed_object=imported_signed_object,
             )
+            if imported_signed_object.signed_object_uri:
+                imported_signed_objects_by_uri[imported_signed_object.signed_object_uri] = imported_signed_object
             imported_signed_object_count += 1
 
         for record in certificate_observation_records:
             is_stale = bool(record.not_after and snapshot.fetched_at and record.not_after <= snapshot.fetched_at)
+            linked_signed_object = imported_signed_objects_by_uri.get(record.signed_object_uri)
+            linked_publication_point = imported_publication_points.get(record.publication_uri)
+            if linked_publication_point is None and linked_signed_object is not None:
+                linked_publication_point = linked_signed_object.publication_point
             imported_certificate_observation = rpki_models.ImportedCertificateObservation.objects.create(
                 name=f'{provider_account.name} Certificate {record.subject or record.certificate_key[:12]}',
                 provider_snapshot=snapshot,
@@ -1010,6 +1091,8 @@ def _import_krill_records(
                     if record.source_records
                     else rpki_models.CertificateObservationSource.SIGNED_OBJECT_EE
                 ),
+                publication_point=linked_publication_point,
+                signed_object=linked_signed_object,
                 certificate_uri=record.certificate_uri,
                 publication_uri=record.publication_uri,
                 signed_object_uri=record.signed_object_uri,

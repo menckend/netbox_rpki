@@ -10,6 +10,7 @@ from netbox.registry import registry
 from users.models import ObjectPermission
 from utilities.testing import APITestCase
 
+from netbox_rpki import models as rpki_models
 from netbox_rpki.graphql.schema import NetBoxRpkiQuery
 from netbox_rpki.models import (
     Certificate,
@@ -27,11 +28,16 @@ from netbox_rpki.tests.registry_scenarios import (
 )
 from netbox_rpki.tests.utils import (
     create_test_asn,
+    create_test_aspa,
     create_test_certificate,
     create_test_certificate_asn,
     create_test_certificate_prefix,
+    create_test_certificate_revocation_list,
+    create_test_end_entity_certificate,
     create_test_organization,
+    create_test_object_validation_result,
     create_test_prefix,
+    create_test_publication_point,
     create_test_rir,
     create_test_roa,
     create_test_roa_prefix,
@@ -45,10 +51,17 @@ from netbox_rpki.tests.utils import (
     create_test_imported_resource_entitlement,
     create_test_imported_roa_authorization,
     create_test_imported_signed_object,
+    create_test_manifest,
     create_test_provider_account,
     create_test_provider_snapshot,
     create_test_provider_snapshot_diff,
     create_test_provider_snapshot_diff_item,
+    create_test_router_certificate,
+    create_test_signed_object,
+    create_test_trust_anchor,
+    create_test_validated_aspa_payload,
+    create_test_validated_roa_payload,
+    create_test_validation_run,
 )
 
 
@@ -315,12 +328,23 @@ class CertificateGraphQLTestCase(PluginGraphQLTestMixin, APITestCase):
     def setUpTestData(cls):
         cls.organization_a = create_test_organization(org_id='cert-alpha-org', name='Cert Alpha Org')
         cls.organization_b = create_test_organization(org_id='cert-beta-org', name='Cert Beta Org')
+        cls.trust_anchor = create_test_trust_anchor(
+            name='Certificate GraphQL Trust Anchor',
+            organization=cls.organization_a,
+        )
+        cls.publication_point = create_test_publication_point(
+            name='Certificate GraphQL Publication Point',
+            organization=cls.organization_a,
+            publication_uri='rsync://graphql.invalid/certificates/',
+        )
         cls.certificate_alpha = create_test_certificate(
             name='Alpha Certificate',
             issuer='Alpha Issuer',
             rpki_org=cls.organization_a,
             auto_renews=True,
             self_hosted=False,
+            trust_anchor=cls.trust_anchor,
+            publication_point=cls.publication_point,
         )
         cls.certificate_beta = create_test_certificate(
             name='Beta Certificate',
@@ -340,6 +364,8 @@ class CertificateGraphQLTestCase(PluginGraphQLTestMixin, APITestCase):
             ('name: {i_contains: "Alpha"}', (cls.certificate_alpha,)),
             ('auto_renews: {exact: true}', (cls.certificate_alpha, cls.certificate_gamma)),
             (f'rpki_org_id: "{cls.organization_b.pk}"', (cls.certificate_beta,)),
+            (f'trust_anchor_id: "{cls.trust_anchor.pk}"', (cls.certificate_alpha,)),
+            (f'publication_point_id: "{cls.publication_point.pk}"', (cls.certificate_alpha,)),
         )
         cls.empty_result_filter = 'rpki_org_id: "999999"'
 
@@ -358,9 +384,16 @@ class RoaGraphQLTestCase(PluginGraphQLTestMixin, APITestCase):
         cls.signing_certificate_b = create_test_certificate(name='ROA Signing Cert B', rpki_org=cls.organization)
         cls.asn_a = create_test_asn(65101)
         cls.asn_b = create_test_asn(65102)
+        cls.signed_object_alpha = create_test_signed_object(
+            name='Alpha ROA Signed Object',
+            organization=cls.organization,
+            object_type=rpki_models.SignedObjectType.ROA,
+            resource_certificate=cls.signing_certificate_a,
+        )
         cls.roa_alpha = create_test_roa(
             name='Alpha ROA',
             signed_by=cls.signing_certificate_a,
+            signed_object=cls.signed_object_alpha,
             origin_as=cls.asn_a,
             auto_renews=True,
         )
@@ -381,6 +414,7 @@ class RoaGraphQLTestCase(PluginGraphQLTestMixin, APITestCase):
             ('auto_renews: {exact: true}', (cls.roa_alpha, cls.roa_gamma)),
             (f'origin_as_id: "{cls.asn_b.pk}"', (cls.roa_beta,)),
             (f'signed_by_id: "{cls.signing_certificate_a.pk}"', (cls.roa_alpha, cls.roa_gamma)),
+            (f'signed_object_id: "{cls.signed_object_alpha.pk}"', (cls.roa_alpha,)),
         )
         cls.empty_result_filter = 'signed_by_id: "999999"'
 
@@ -517,7 +551,11 @@ class ProviderReportingGraphQLTestCase(APITestCase):
             name='GraphQL Imported Certificate Observation',
             provider_snapshot=cls.comparison_snapshot,
             organization=cls.organization,
+            publication_point=cls.imported_publication_point,
+            signed_object=cls.imported_signed_object,
             certificate_uri='rsync://graphql.invalid/repo/example.cer',
+            publication_uri=cls.imported_publication_point.publication_uri,
+            signed_object_uri=cls.imported_signed_object.signed_object_uri,
         )
 
     def graphql_request(self, query):
@@ -652,6 +690,494 @@ class ProviderReportingGraphQLTestCase(APITestCase):
             [str(self.imported_certificate_observation.pk)],
         )
         self.assertEqual(data['data']['netbox_rpki_providersnapshot']['summary'], self.comparison_snapshot.summary_json)
+
+
+class CertificateRevocationListGraphQLTestCase(PluginGraphQLTestMixin, APITestCase):
+    model = rpki_models.CertificateRevocationList
+    view_permission = 'netbox_rpki.view_certificaterevocationlist'
+    detail_field = 'netbox_rpki_certificaterevocationlist'
+    list_field = 'netbox_rpki_certificaterevocationlist_list'
+    detail_selection = 'id'
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='crl-graphql-org', name='CRL GraphQL Org')
+        cls.signed_object = create_test_signed_object(
+            name='CRL GraphQL Signed Object',
+            organization=cls.organization,
+            filename='graphql.crl',
+            object_uri='https://graphql.invalid/crl.crl',
+            repository_uri='https://graphql.invalid/',
+        )
+        cls.certificate_revocation_list = create_test_certificate_revocation_list(
+            name='CRL GraphQL Record',
+            organization=cls.organization,
+            signed_object=cls.signed_object,
+            publication_uri='https://graphql.invalid/crl.crl',
+            crl_number='11',
+        )
+        cls.valid_filter_cases = (
+            (f'signed_object_id: "{cls.signed_object.pk}"', (cls.certificate_revocation_list,)),
+        )
+        cls.empty_result_filter = 'signed_object_id: "999999"'
+
+    def test_get_object_by_id(self):
+        self.add_permissions(self.view_permission)
+
+        data = self.graphql_request(self.build_detail_query(self.certificate_revocation_list.pk))
+
+        self.assert_graphql_success(data)
+        self.assertEqual(int(data['data'][self.detail_field]['id']), self.certificate_revocation_list.pk)
+
+    def test_get_object_with_invalid_id_returns_null_or_error(self):
+        self.add_permissions(self.view_permission)
+
+        data = self.graphql_request(self.build_detail_query(999999))
+
+        self.assert_missing_object_response(data, self.detail_field)
+
+
+class EndEntityCertificateGraphQLTestCase(PluginGraphQLTestMixin, APITestCase):
+    model = rpki_models.EndEntityCertificate
+    view_permission = 'netbox_rpki.view_endentitycertificate'
+    _spec = next(spec for spec in GRAPHQL_OBJECT_SPECS if spec.registry_key == 'endentitycertificate')
+    detail_field = _spec.graphql.detail_field_name
+    list_field = _spec.graphql.list_field_name
+    detail_selection = 'id'
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(
+            org_id='ee-certificate-graphql-org',
+            name='EE Certificate GraphQL Org',
+        )
+        cls.resource_certificate = create_test_certificate(
+            name='EE Certificate GraphQL Resource Certificate',
+            rpki_org=cls.organization,
+        )
+        cls.publication_point = create_test_publication_point(
+            name='EE Certificate GraphQL Publication Point',
+            organization=cls.organization,
+            publication_uri='rsync://graphql.invalid/ee/',
+        )
+        cls.ee_certificate = create_test_end_entity_certificate(
+            name='EE Certificate GraphQL Record',
+            organization=cls.organization,
+            resource_certificate=cls.resource_certificate,
+            publication_point=cls.publication_point,
+            serial='ee-graphql-serial',
+        )
+        cls.valid_filter_cases = (
+            (f'resource_certificate_id: "{cls.resource_certificate.pk}"', (cls.ee_certificate,)),
+            (f'publication_point_id: "{cls.publication_point.pk}"', (cls.ee_certificate,)),
+        )
+        cls.empty_result_filter = 'resource_certificate_id: "999999"'
+
+
+class SignedObjectGraphQLTestCase(PluginGraphQLTestMixin, APITestCase):
+    model = rpki_models.SignedObject
+    view_permission = 'netbox_rpki.view_signedobject'
+    _spec = next(spec for spec in GRAPHQL_OBJECT_SPECS if spec.registry_key == 'signedobject')
+    detail_field = _spec.graphql.detail_field_name
+    list_field = _spec.graphql.list_field_name
+    detail_selection = (
+        'id '
+        'manifest_extension { id } '
+        'imported_signed_object_observations { id } '
+        'validation_results { id }'
+    )
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(
+            org_id='signed-object-graphql-org',
+            name='Signed Object GraphQL Org',
+        )
+        cls.signed_object = create_test_signed_object(
+            name='Signed Object GraphQL Record',
+            organization=cls.organization,
+            object_type=rpki_models.SignedObjectType.MANIFEST,
+            object_uri='rsync://graphql.invalid/repo/object.mft',
+            repository_uri='rsync://graphql.invalid/repo/',
+        )
+        cls.manifest = create_test_manifest(
+            name='Signed Object GraphQL Manifest',
+            signed_object=cls.signed_object,
+            manifest_number='graphql-manifest-1',
+        )
+        cls.signed_object.current_manifest = cls.manifest
+        cls.signed_object.save(update_fields=('current_manifest',))
+        cls.provider_snapshot = create_test_provider_snapshot(
+            name='Signed Object GraphQL Snapshot',
+            organization=cls.organization,
+            provider_account=create_test_provider_account(
+                name='Signed Object GraphQL Provider Account',
+                organization=cls.organization,
+                provider_type='krill',
+                org_handle='ORG-SIGNED-OBJECT-GQL',
+                ca_handle='signed-object-gql',
+            ),
+        )
+        cls.imported_publication_point = create_test_imported_publication_point(
+            name='Signed Object GraphQL Imported Publication Point',
+            organization=cls.organization,
+            provider_snapshot=cls.provider_snapshot,
+            authored_publication_point=cls.signed_object.publication_point,
+            publication_uri='rsync://graphql.invalid/repo/',
+        )
+        cls.imported_signed_object = create_test_imported_signed_object(
+            name='Signed Object GraphQL Imported Observation',
+            organization=cls.organization,
+            provider_snapshot=cls.provider_snapshot,
+            publication_point=cls.imported_publication_point,
+            authored_signed_object=cls.signed_object,
+            signed_object_type=rpki_models.SignedObjectType.MANIFEST,
+            signed_object_uri=cls.signed_object.object_uri,
+        )
+        cls.validation_run = create_test_validation_run(
+            name='Signed Object GraphQL Validation Run',
+        )
+        cls.object_validation_result = create_test_object_validation_result(
+            name='Signed Object GraphQL Validation Result',
+            validation_run=cls.validation_run,
+            signed_object=cls.signed_object,
+        )
+        cls.valid_filter_cases = (
+            (f'object_type: {{exact: "{rpki_models.SignedObjectType.MANIFEST}"}}', (cls.signed_object,)),
+            (f'current_manifest_id: "{cls.manifest.pk}"', (cls.signed_object,)),
+        )
+        cls.empty_result_filter = 'current_manifest_id: "999999"'
+
+    def test_get_object_by_id(self):
+        self.add_permissions(
+            self.view_permission,
+            'netbox_rpki.view_manifest',
+            'netbox_rpki.view_importedsignedobject',
+            'netbox_rpki.view_objectvalidationresult',
+        )
+
+        data = self.graphql_request(self.build_detail_query(self.signed_object.pk))
+
+        self.assert_graphql_success(data)
+        payload = data['data'][self.detail_field]
+        self.assertEqual(int(payload['id']), self.signed_object.pk)
+        self.assertEqual(int(payload['manifest_extension']['id']), self.manifest.pk)
+        self.assertEqual(
+            [int(item['id']) for item in payload['imported_signed_object_observations']],
+            [self.imported_signed_object.pk],
+        )
+        self.assertEqual(
+            [int(item['id']) for item in payload['validation_results']],
+            [self.object_validation_result.pk],
+        )
+
+
+class RouterCertificateGraphQLTestCase(PluginGraphQLTestMixin, APITestCase):
+    model = rpki_models.RouterCertificate
+    view_permission = 'netbox_rpki.view_routercertificate'
+    _spec = next(spec for spec in GRAPHQL_OBJECT_SPECS if spec.registry_key == 'routercertificate')
+    detail_field = _spec.graphql.detail_field_name
+    list_field = _spec.graphql.list_field_name
+    detail_selection = 'id'
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(
+            org_id='router-cert-graphql-org',
+            name='Router Certificate GraphQL Org',
+        )
+        cls.resource_certificate = create_test_certificate(
+            name='Router Certificate GraphQL Resource Certificate',
+            rpki_org=cls.organization,
+        )
+        cls.ee_certificate = create_test_end_entity_certificate(
+            name='Router Certificate GraphQL EE Certificate',
+            organization=cls.organization,
+            resource_certificate=cls.resource_certificate,
+            subject='CN=GraphQL Router',
+            issuer='CN=GraphQL Issuer',
+            serial='graphql-router-serial',
+            ski='graphql-router-ski',
+        )
+        cls.router_certificate = create_test_router_certificate(
+            name='Router Certificate GraphQL Record',
+            organization=cls.organization,
+            resource_certificate=cls.resource_certificate,
+            publication_point=cls.ee_certificate.publication_point,
+            ee_certificate=cls.ee_certificate,
+            asn=create_test_asn(65312),
+            subject='CN=GraphQL Router',
+            issuer='CN=GraphQL Issuer',
+            serial='graphql-router-serial',
+            ski='graphql-router-ski',
+        )
+        cls.valid_filter_cases = (
+            (f'ee_certificate_id: "{cls.ee_certificate.pk}"', (cls.router_certificate,)),
+        )
+        cls.empty_result_filter = 'ee_certificate_id: "999999"'
+
+    def test_get_object_by_id(self):
+        self.add_permissions(self.view_permission)
+
+        data = self.graphql_request(self.build_detail_query(self.router_certificate.pk))
+
+        self.assert_graphql_success(data)
+        self.assertEqual(int(data['data'][self.detail_field]['id']), self.router_certificate.pk)
+
+    def test_get_object_with_invalid_id_returns_null_or_error(self):
+        self.add_permissions(self.view_permission)
+
+        data = self.graphql_request(self.build_detail_query(999999))
+
+        self.assert_missing_object_response(data, self.detail_field)
+
+
+class ImportedCertificateObservationGraphQLTestCase(PluginGraphQLTestMixin, APITestCase):
+    model = rpki_models.ImportedCertificateObservation
+    view_permission = 'netbox_rpki.view_importedcertificateobservation'
+    detail_field = 'netbox_rpki_importedcertificateobservation'
+    list_field = 'netbox_rpki_importedcertificateobservation_list'
+    detail_selection = 'id'
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(
+            org_id='imported-cert-graphql-org',
+            name='Imported Certificate GraphQL Org',
+        )
+        cls.provider_account = create_test_provider_account(
+            name='Imported Certificate GraphQL Account',
+            organization=cls.organization,
+            provider_type='krill',
+            org_handle='ORG-IMPORTED-CERT-GRAPHQL',
+            ca_handle='imported-cert-graphql',
+        )
+        cls.snapshot = create_test_provider_snapshot(
+            name='Imported Certificate GraphQL Snapshot',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+            status='completed',
+        )
+        cls.imported_publication_point = create_test_imported_publication_point(
+            name='Imported Certificate GraphQL Publication Point',
+            organization=cls.organization,
+            provider_snapshot=cls.snapshot,
+            publication_uri='rsync://graphql.invalid/repo/',
+        )
+        cls.imported_signed_object = create_test_imported_signed_object(
+            name='Imported Certificate GraphQL Signed Object',
+            organization=cls.organization,
+            provider_snapshot=cls.snapshot,
+            publication_point=cls.imported_publication_point,
+            signed_object_uri='rsync://graphql.invalid/repo/example.mft',
+        )
+        cls.certificate_observation = create_test_imported_certificate_observation(
+            name='Imported Certificate GraphQL Record',
+            organization=cls.organization,
+            provider_snapshot=cls.snapshot,
+            publication_point=cls.imported_publication_point,
+            signed_object=cls.imported_signed_object,
+            certificate_uri='rsync://graphql.invalid/repo/example.cer',
+            publication_uri=cls.imported_publication_point.publication_uri,
+            signed_object_uri=cls.imported_signed_object.signed_object_uri,
+        )
+        cls.valid_filter_cases = (
+            (f'publication_point_id: "{cls.imported_publication_point.pk}"', (cls.certificate_observation,)),
+            (f'signed_object_id: "{cls.imported_signed_object.pk}"', (cls.certificate_observation,)),
+        )
+        cls.empty_result_filter = 'signed_object_id: "999999"'
+
+    def test_get_object_by_id(self):
+        self.add_permissions(self.view_permission)
+
+        data = self.graphql_request(self.build_detail_query(self.certificate_observation.pk))
+
+        self.assert_graphql_success(data)
+        self.assertEqual(int(data['data'][self.detail_field]['id']), self.certificate_observation.pk)
+
+    def test_get_object_with_invalid_id_returns_null_or_error(self):
+        self.add_permissions(self.view_permission)
+
+        data = self.graphql_request(self.build_detail_query(999999))
+
+        self.assert_missing_object_response(data, self.detail_field)
+
+
+class ImportedPublicationLinkGraphQLTestCase(APITestCase):
+    def graphql_request(self, query):
+        response = self.client.post(reverse('graphql'), data={'query': query}, format='json', **self.header)
+        self.assertHttpStatus(response, 200)
+        return json.loads(response.content)
+
+    def assert_graphql_success(self, data):
+        self.assertNotIn('errors', data)
+        self.assertIn('data', data)
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(
+            org_id='imported-publication-link-graphql-org',
+            name='Imported Publication Link GraphQL Org',
+        )
+        cls.provider_account = create_test_provider_account(
+            name='Imported Publication Link GraphQL Account',
+            organization=cls.organization,
+            provider_type='krill',
+            org_handle='ORG-IMPORTED-LINK-GRAPHQL',
+            ca_handle='imported-link-graphql',
+        )
+        cls.snapshot = create_test_provider_snapshot(
+            name='Imported Publication Link GraphQL Snapshot',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+            status='completed',
+        )
+        cls.authored_publication_point = create_test_publication_point(
+            name='Imported Publication Link GraphQL Authored Publication Point',
+            organization=cls.organization,
+            publication_uri='rsync://graphql.invalid/repo/',
+        )
+        cls.authored_signed_object = create_test_signed_object(
+            name='Imported Publication Link GraphQL Authored Signed Object',
+            organization=cls.organization,
+            publication_point=cls.authored_publication_point,
+            object_type='manifest',
+            object_uri='rsync://graphql.invalid/repo/example.mft',
+        )
+        cls.imported_publication_point = create_test_imported_publication_point(
+            name='Imported Publication Link GraphQL Publication Point',
+            organization=cls.organization,
+            provider_snapshot=cls.snapshot,
+            authored_publication_point=cls.authored_publication_point,
+            publication_uri=cls.authored_publication_point.publication_uri,
+        )
+        cls.imported_signed_object = create_test_imported_signed_object(
+            name='Imported Publication Link GraphQL Signed Object',
+            organization=cls.organization,
+            provider_snapshot=cls.snapshot,
+            publication_point=cls.imported_publication_point,
+            authored_signed_object=cls.authored_signed_object,
+            signed_object_type='manifest',
+            signed_object_uri=cls.authored_signed_object.object_uri,
+            publication_uri=cls.imported_publication_point.publication_uri,
+        )
+
+    def test_imported_publication_point_list_filters_by_authored_publication_point(self):
+        self.add_permissions('netbox_rpki.view_importedpublicationpoint')
+
+        data = self.graphql_request(
+            f'{{netbox_rpki_importedpublicationpoint_list(filters: {{authored_publication_point_id: "{self.authored_publication_point.pk}"}}) {{id}}}}'
+        )
+
+        self.assert_graphql_success(data)
+        self.assertEqual(
+            [int(item['id']) for item in data['data']['netbox_rpki_importedpublicationpoint_list']],
+            [self.imported_publication_point.pk],
+        )
+
+    def test_imported_signed_object_list_filters_by_authored_signed_object(self):
+        self.add_permissions('netbox_rpki.view_importedsignedobject')
+
+        data = self.graphql_request(
+            f'{{netbox_rpki_importedsignedobject_list(filters: {{authored_signed_object_id: "{self.authored_signed_object.pk}"}}) {{id}}}}'
+        )
+
+        self.assert_graphql_success(data)
+        self.assertEqual(
+            [int(item['id']) for item in data['data']['netbox_rpki_importedsignedobject_list']],
+            [self.imported_signed_object.pk],
+        )
+
+
+class ValidatedPayloadValidationLinkGraphQLTestCase(APITestCase):
+    def graphql_request(self, query):
+        response = self.client.post(reverse('graphql'), data={'query': query}, format='json', **self.header)
+        self.assertHttpStatus(response, 200)
+        return json.loads(response.content)
+
+    def assert_graphql_success(self, data):
+        self.assertNotIn('errors', data)
+        self.assertIn('data', data)
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(
+            org_id='validated-payload-graphql-org',
+            name='Validated Payload GraphQL Org',
+        )
+        cls.validation_run = create_test_validation_run(
+            name='Validated Payload GraphQL Validation Run',
+        )
+        cls.roa_signing_certificate = create_test_certificate(
+            name='Validated Payload GraphQL ROA Certificate',
+            rpki_org=cls.organization,
+        )
+        cls.roa_signed_object = create_test_signed_object(
+            name='Validated Payload GraphQL ROA Signed Object',
+            organization=cls.organization,
+            object_type=rpki_models.SignedObjectType.ROA,
+            resource_certificate=cls.roa_signing_certificate,
+        )
+        cls.roa = create_test_roa(
+            name='Validated Payload GraphQL ROA',
+            signed_by=cls.roa_signing_certificate,
+            signed_object=cls.roa_signed_object,
+        )
+        cls.roa_object_validation_result = create_test_object_validation_result(
+            name='Validated Payload GraphQL ROA Validation Result',
+            validation_run=cls.validation_run,
+            signed_object=cls.roa_signed_object,
+        )
+        cls.validated_roa_payload = create_test_validated_roa_payload(
+            name='Validated Payload GraphQL ROA Payload',
+            validation_run=cls.validation_run,
+            roa=cls.roa,
+            object_validation_result=cls.roa_object_validation_result,
+        )
+        cls.aspa = create_test_aspa(
+            name='Validated Payload GraphQL ASPA',
+            organization=cls.organization,
+            customer_as=create_test_asn(65420),
+        )
+        cls.aspa_object_validation_result = create_test_object_validation_result(
+            name='Validated Payload GraphQL ASPA Validation Result',
+            validation_run=cls.validation_run,
+            signed_object=cls.aspa.signed_object,
+        )
+        cls.validated_aspa_payload = create_test_validated_aspa_payload(
+            name='Validated Payload GraphQL ASPA Payload',
+            validation_run=cls.validation_run,
+            aspa=cls.aspa,
+            object_validation_result=cls.aspa_object_validation_result,
+            customer_as=cls.aspa.customer_as,
+            provider_as=create_test_asn(65421),
+        )
+
+    def test_validated_roa_payload_list_filters_by_object_validation_result(self):
+        self.add_permissions('netbox_rpki.view_validatedroapayload')
+
+        data = self.graphql_request(
+            f'{{netbox_rpki_validatedroapayload_list(filters: {{object_validation_result_id: "{self.roa_object_validation_result.pk}"}}) {{id}}}}'
+        )
+
+        self.assert_graphql_success(data)
+        self.assertEqual(
+            [int(item['id']) for item in data['data']['netbox_rpki_validatedroapayload_list']],
+            [self.validated_roa_payload.pk],
+        )
+
+    def test_validated_aspa_payload_list_filters_by_object_validation_result(self):
+        self.add_permissions('netbox_rpki.view_validatedaspapayload')
+
+        data = self.graphql_request(
+            f'{{netbox_rpki_validatedaspapayload_list(filters: {{object_validation_result_id: "{self.aspa_object_validation_result.pk}"}}) {{id}}}}'
+        )
+
+        self.assert_graphql_success(data)
+        self.assertEqual(
+            [int(item['id']) for item in data['data']['netbox_rpki_validatedaspapayload_list']],
+            [self.validated_aspa_payload.pk],
+        )
 
 
 class CertificatePrefixGraphQLTestCase(PluginGraphQLTestMixin, APITestCase):
