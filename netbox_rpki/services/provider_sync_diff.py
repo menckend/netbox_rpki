@@ -7,10 +7,13 @@ from django.utils import timezone
 
 from netbox_rpki import models as rpki_models
 from netbox_rpki.services.provider_sync_contract import (
+    PROVIDER_SYNC_FAMILY_ORDER,
     build_family_summary,
+    build_provider_family_rollups,
     combine_family_counts,
     family_capability_extra,
     empty_sync_counts,
+    supported_sync_families,
 )
 
 
@@ -708,10 +711,22 @@ def build_provider_snapshot_diff(
 
         diff.status = rpki_models.ValidationRunStatus.COMPLETED
         diff.compared_at = timezone.now()
+        family_rollups = build_provider_family_rollups(
+            comparison_snapshot.provider_account,
+            summary={'families': family_summaries},
+        )
         diff.summary_json = {
+            'status': rpki_models.ValidationRunStatus.COMPLETED,
             'base_snapshot_id': base_snapshot.pk,
             'comparison_snapshot_id': comparison_snapshot.pk,
+            'supported_families': list(supported_sync_families(comparison_snapshot.provider_account)),
+            'family_order': list(PROVIDER_SYNC_FAMILY_ORDER),
             'families': family_summaries,
+            'family_rollups': family_rollups,
+            'family_status_counts': {
+                status: sum(1 for rollup in family_rollups if str(rollup['status']) == status)
+                for status in {str(rollup['status']) for rollup in family_rollups}
+            },
             'totals': combine_family_counts(family_summaries),
         }
         diff.save(update_fields=('status', 'compared_at', 'summary_json'))

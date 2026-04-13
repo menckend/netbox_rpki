@@ -5,6 +5,7 @@ from django.urls import reverse
 from django.utils import timezone
 from unittest.mock import patch
 
+from netbox_rpki import models as rpki_models
 from netbox_rpki import filtersets
 from netbox_rpki.api import serializers as api_serializers
 from netbox_rpki.api import views as api_views
@@ -29,6 +30,7 @@ from netbox_rpki.models import (
     RoaPrefix,
 )
 from netbox_rpki.object_registry import API_OBJECT_SPECS, GRAPHQL_OBJECT_SPECS
+from netbox_rpki.services.provider_sync_contract import build_provider_sync_summary
 from netbox_rpki.tests.base import PluginAPITestCase
 from netbox_rpki.tests.utils import (
     create_test_asn,
@@ -141,6 +143,81 @@ class RpkiProviderAccountSerializerTestCase(TestCase):
         self.assertEqual(serializer.data['sync_health'], 'stale')
         self.assertEqual(serializer.data['sync_health_display'], 'Stale')
         self.assertIn('next_sync_due_at', serializer.data)
+
+    def test_provider_account_serializer_exposes_arin_rollup_capabilities_and_transport(self):
+        organization = create_test_organization(org_id='provider-serializer-arin-org', name='Provider Serializer ARIN Org')
+        provider_account = create_test_provider_account(
+            name='Provider Serializer ARIN Account',
+            organization=organization,
+            provider_type=rpki_models.ProviderType.ARIN,
+            transport=rpki_models.ProviderSyncTransport.OTE,
+            org_handle='ORG-PROVIDER-SERIALIZER-ARIN',
+        )
+        provider_account.last_sync_summary_json = build_provider_sync_summary(
+            provider_account,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+            family_summaries={},
+        )
+        provider_account.save(update_fields=['last_sync_summary_json'])
+
+        serializer = api_serializers.RpkiProviderAccountSerializer(provider_account, context={'request': None})
+
+        self.assertEqual(serializer.data['transport'], rpki_models.ProviderSyncTransport.OTE)
+        self.assertFalse(serializer.data['supports_roa_write'])
+        self.assertEqual(serializer.data['roa_write_mode'], rpki_models.ProviderRoaWriteMode.UNSUPPORTED)
+        self.assertEqual(serializer.data['last_sync_rollup']['transport'], rpki_models.ProviderSyncTransport.OTE)
+        self.assertEqual(
+            serializer.data['last_sync_rollup']['supported_families'],
+            [rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS],
+        )
+        aspa_rollup = next(
+            row
+            for row in serializer.data['last_sync_rollup']['family_rollups']
+            if row['family'] == rpki_models.ProviderSyncFamily.ASPAS
+        )
+        self.assertEqual(aspa_rollup['status'], rpki_models.ProviderSyncFamilyStatus.NOT_IMPLEMENTED)
+        self.assertEqual(aspa_rollup['capability_mode'], 'provider_limited')
+        self.assertIn('hosted ROA authorizations only', aspa_rollup['capability_reason'])
+
+
+class RpkiProviderAccountSummaryAPITestCase(PluginAPITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='provider-summary-api-org', name='Provider Summary API Org')
+        cls.arin_account = create_test_provider_account(
+            name='Provider Summary API ARIN',
+            organization=cls.organization,
+            provider_type=rpki_models.ProviderType.ARIN,
+            transport=rpki_models.ProviderSyncTransport.OTE,
+            org_handle='ORG-PROVIDER-SUMMARY-ARIN',
+        )
+        cls.arin_account.last_sync_summary_json = build_provider_sync_summary(
+            cls.arin_account,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+            family_summaries={},
+        )
+        cls.arin_account.save(update_fields=['last_sync_summary_json'])
+
+    def test_provider_account_summary_action_exposes_transport_and_arin_rollup_capabilities(self):
+        self.add_permissions('netbox_rpki.view_rpkiprovideraccount')
+
+        response = self.client.get(
+            reverse('plugins-api:netbox_rpki-api:provideraccount-summary'),
+            **self.header,
+        )
+
+        self.assertHttpStatus(response, 200)
+        self.assertEqual(response.data['total_accounts'], 1)
+        self.assertEqual(response.data['accounts'][0]['transport'], rpki_models.ProviderSyncTransport.OTE)
+        self.assertEqual(response.data['accounts'][0]['supported_families'], [rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS])
+        aspa_rollup = next(
+            row
+            for row in response.data['accounts'][0]['family_rollups']
+            if row['family'] == rpki_models.ProviderSyncFamily.ASPAS
+        )
+        self.assertEqual(aspa_rollup['capability_status'], rpki_models.ProviderSyncFamilyStatus.NOT_IMPLEMENTED)
+        self.assertEqual(aspa_rollup['capability_mode'], 'provider_limited')
+        self.assertIn('hosted ROA authorizations only', aspa_rollup['capability_reason'])
 
 
 class ViewSetSmokeTestCase(SimpleTestCase):
@@ -702,6 +779,34 @@ class ProviderAccountSummaryAPITestCase(PluginAPITestCase):
             last_successful_sync=timezone.now(),
             last_sync_status='completed',
         )
+        cls.healthy_base_snapshot = create_test_provider_snapshot(
+            name='Provider Summary Base Snapshot',
+            organization=cls.organization,
+            provider_account=cls.healthy_account,
+        )
+        cls.healthy_snapshot = create_test_provider_snapshot(
+            name='Provider Summary Latest Snapshot',
+            organization=cls.organization,
+            provider_account=cls.healthy_account,
+        )
+        cls.healthy_diff = create_test_provider_snapshot_diff(
+            name='Provider Summary Latest Diff',
+            organization=cls.organization,
+            provider_account=cls.healthy_account,
+            base_snapshot=cls.healthy_base_snapshot,
+            comparison_snapshot=cls.healthy_snapshot,
+        )
+        cls.healthy_account.last_sync_summary_json = build_provider_sync_summary(
+            cls.healthy_account,
+            status='completed',
+            family_summaries={},
+        )
+        cls.healthy_account.last_sync_summary_json['latest_snapshot_id'] = cls.healthy_snapshot.pk
+        cls.healthy_account.last_sync_summary_json['latest_snapshot_name'] = cls.healthy_snapshot.name
+        cls.healthy_account.last_sync_summary_json['latest_snapshot_completed_at'] = timezone.now().isoformat()
+        cls.healthy_account.last_sync_summary_json['latest_diff_id'] = cls.healthy_diff.pk
+        cls.healthy_account.last_sync_summary_json['latest_diff_name'] = cls.healthy_diff.name
+        cls.healthy_account.save(update_fields=['last_sync_summary_json'])
         cls.stale_account = create_test_provider_account(
             name='Provider Summary Stale',
             organization=cls.organization,
@@ -721,7 +826,11 @@ class ProviderAccountSummaryAPITestCase(PluginAPITestCase):
         )
 
     def test_provider_account_summary_reports_health_and_capabilities(self):
-        self.add_permissions('netbox_rpki.view_rpkiprovideraccount')
+        self.add_permissions(
+            'netbox_rpki.view_rpkiprovideraccount',
+            'netbox_rpki.view_providersnapshot',
+            'netbox_rpki.view_providersnapshotdiff',
+        )
 
         response = self.client.get(
             reverse('plugins-api:netbox_rpki-api:provideraccount-summary'),
@@ -735,6 +844,13 @@ class ProviderAccountSummaryAPITestCase(PluginAPITestCase):
         self.assertEqual(response.data['by_sync_health']['healthy'], 1)
         self.assertEqual(response.data['by_sync_health']['stale'], 1)
         self.assertEqual(response.data['by_sync_health']['failed'], 1)
+        self.assertEqual(response.data['latest_snapshot_count'], 1)
+        self.assertEqual(response.data['latest_diff_count'], 1)
+        self.assertIn('pending', response.data['by_family_status'])
+        self.assertEqual(len(response.data['accounts']), 3)
+        self.assertTrue(any(account['latest_snapshot_id'] == self.healthy_snapshot.pk for account in response.data['accounts']))
+        self.assertTrue(any(account['latest_diff_id'] == self.healthy_diff.pk for account in response.data['accounts']))
+        self.assertTrue(any('family_rollups' in account for account in response.data['accounts']))
         self.assertEqual(response.data['sync_due_count'], 2)
         self.assertEqual(response.data['roa_write_supported_count'], 1)
 
@@ -789,6 +905,18 @@ class ProviderSnapshotActionAPITestCase(PluginAPITestCase):
             publication_uri=cls.imported_publication_point.publication_uri,
             signed_object_uri=cls.imported_signed_object.signed_object_uri,
         )
+        cls.comparison_snapshot.summary_json = build_provider_sync_summary(
+            cls.provider_account,
+            status='completed',
+            family_summaries={
+                'roa_authorizations': {
+                    'records_imported': 2,
+                    'records_stale': 1,
+                    'records_changed': 1,
+                },
+            },
+        )
+        cls.comparison_snapshot.save(update_fields=['summary_json'])
 
     def test_provider_snapshot_compare_action_returns_persisted_diff(self):
         self.add_permissions('netbox_rpki.view_providersnapshot', 'netbox_rpki.view_providersnapshotdiff')
@@ -807,6 +935,12 @@ class ProviderSnapshotActionAPITestCase(PluginAPITestCase):
         self.assertEqual(response.data['base_snapshot'], self.base_snapshot.pk)
         self.assertEqual(response.data['comparison_snapshot'], self.comparison_snapshot.pk)
         self.assertEqual(response.data['item_count'], 3)
+        self.assertIn('family_rollups', response.data)
+        self.assertIn('family_status_counts', response.data)
+        publication_points_rollup = next(
+            row for row in response.data['family_rollups'] if row['family'] == 'publication_points'
+        )
+        self.assertEqual(publication_points_rollup['churn_status'], 'active')
 
     def test_provider_snapshot_summary_reports_status_and_diff_coverage(self):
         self.add_permissions('netbox_rpki.view_providersnapshot', 'netbox_rpki.view_providersnapshotdiff')
@@ -853,6 +987,10 @@ class ProviderSnapshotActionAPITestCase(PluginAPITestCase):
 
         self.assertHttpStatus(response, 200)
         self.assertEqual(response.data['latest_diff']['id'], snapshot_diff.pk)
+        self.assertIn('family_rollups', response.data)
+        self.assertIn('family_status_counts', response.data)
+        self.assertEqual(response.data['latest_diff_summary']['snapshot_diff_id'], snapshot_diff.pk)
+        self.assertTrue(any(row['family'] == 'roa_authorizations' for row in response.data['family_rollups']))
         self.assertEqual(
             [row['id'] for row in response.data['imported_publication_points']],
             [self.imported_publication_point.pk],
@@ -903,6 +1041,10 @@ class ImportedCertificateObservationAPITestCase(PluginAPITestCase):
             organization=cls.organization,
             provider_snapshot=cls.snapshot,
             publication_uri='rsync://api.invalid/repo/',
+            payload_json={
+                'authored_linkage': {'status': 'linked'},
+                'evidence_summary': {'published_object_count': 1, 'authored_linkage_status': 'linked'},
+            },
         )
         cls.imported_signed_object = create_test_imported_signed_object(
             name='Imported Certificate Observation API Signed Object',
@@ -910,6 +1052,15 @@ class ImportedCertificateObservationAPITestCase(PluginAPITestCase):
             provider_snapshot=cls.snapshot,
             publication_point=cls.imported_publication_point,
             signed_object_uri='rsync://api.invalid/repo/example.mft',
+            payload_json={
+                'publication_linkage': {'status': 'linked'},
+                'authored_linkage': {'status': 'unmatched'},
+                'evidence_summary': {
+                    'signed_object_type': 'manifest',
+                    'publication_linkage_status': 'linked',
+                    'authored_linkage_status': 'unmatched',
+                },
+            },
         )
         cls.certificate_observation = create_test_imported_certificate_observation(
             name='Imported Certificate Observation API Record',
@@ -920,6 +1071,24 @@ class ImportedCertificateObservationAPITestCase(PluginAPITestCase):
             signed_object=cls.imported_signed_object,
             publication_uri=cls.imported_publication_point.publication_uri,
             signed_object_uri=cls.imported_signed_object.signed_object_uri,
+            payload_json={
+                'source_summary': {
+                    'source_count': 2,
+                    'source_labels': ['Signed Object EE Certificate', 'Parent Issued Certificate'],
+                    'has_multiple_sources': True,
+                    'is_ambiguous': True,
+                },
+                'publication_linkage': {'status': 'derived_from_signed_object'},
+                'signed_object_linkage': {'status': 'linked'},
+                'evidence_summary': {
+                    'source_count': 2,
+                    'source_labels': ['Signed Object EE Certificate', 'Parent Issued Certificate'],
+                    'has_multiple_sources': True,
+                    'is_ambiguous': True,
+                    'publication_linkage_status': 'derived_from_signed_object',
+                    'signed_object_linkage_status': 'linked',
+                },
+            },
         )
 
     def test_imported_certificate_observation_list_and_detail_are_exposed(self):
@@ -944,6 +1113,11 @@ class ImportedCertificateObservationAPITestCase(PluginAPITestCase):
         self.assertHttpStatus(detail_response, 200)
         self.assertEqual(detail_response.data['id'], self.certificate_observation.pk)
         self.assertEqual(detail_response.data['certificate_uri'], 'rsync://api.invalid/repo/example.cer')
+        self.assertEqual(detail_response.data['source_count'], 2)
+        self.assertEqual(detail_response.data['source_labels'], ['Signed Object EE Certificate', 'Parent Issued Certificate'])
+        self.assertTrue(detail_response.data['is_ambiguous'])
+        self.assertEqual(detail_response.data['publication_linkage_status'], 'derived_from_signed_object')
+        self.assertEqual(detail_response.data['signed_object_linkage_status'], 'linked')
         publication_point = detail_response.data['publication_point']
         signed_object = detail_response.data['signed_object']
         self.assertEqual(
@@ -954,6 +1128,7 @@ class ImportedCertificateObservationAPITestCase(PluginAPITestCase):
             signed_object['id'] if isinstance(signed_object, dict) else signed_object,
             self.imported_signed_object.pk,
         )
+        self.assertEqual(detail_response.data['evidence_summary']['source_count'], 2)
 
     def test_imported_certificate_observation_endpoint_is_read_only(self):
         self.add_permissions('netbox_rpki.add_importedcertificateobservation')
@@ -1013,6 +1188,10 @@ class ImportedPublicationLinkAPITestCase(PluginAPITestCase):
             provider_snapshot=cls.snapshot,
             authored_publication_point=cls.authored_publication_point,
             publication_uri=cls.authored_publication_point.publication_uri,
+            payload_json={
+                'authored_linkage': {'status': 'linked'},
+                'evidence_summary': {'published_object_count': 1, 'authored_linkage_status': 'linked'},
+            },
         )
         cls.imported_signed_object = create_test_imported_signed_object(
             name='Imported Publication Link API Signed Object',
@@ -1023,6 +1202,15 @@ class ImportedPublicationLinkAPITestCase(PluginAPITestCase):
             signed_object_type='manifest',
             signed_object_uri=cls.authored_signed_object.object_uri,
             publication_uri=cls.imported_publication_point.publication_uri,
+            payload_json={
+                'publication_linkage': {'status': 'linked'},
+                'authored_linkage': {'status': 'linked'},
+                'evidence_summary': {
+                    'signed_object_type': 'manifest',
+                    'publication_linkage_status': 'linked',
+                    'authored_linkage_status': 'linked',
+                },
+            },
         )
 
     def test_imported_publication_point_detail_exposes_authored_publication_point(self):
@@ -1036,6 +1224,8 @@ class ImportedPublicationLinkAPITestCase(PluginAPITestCase):
 
         self.assertHttpStatus(response, 200)
         authored_publication_point = response.data['authored_publication_point']
+        self.assertEqual(response.data['authored_linkage_status'], 'linked')
+        self.assertEqual(response.data['evidence_summary']['published_object_count'], 1)
         self.assertEqual(
             authored_publication_point['id'] if isinstance(authored_publication_point, dict) else authored_publication_point,
             self.authored_publication_point.pk,
@@ -1052,6 +1242,9 @@ class ImportedPublicationLinkAPITestCase(PluginAPITestCase):
 
         self.assertHttpStatus(response, 200)
         authored_signed_object = response.data['authored_signed_object']
+        self.assertEqual(response.data['publication_linkage_status'], 'linked')
+        self.assertEqual(response.data['authored_linkage_status'], 'linked')
+        self.assertEqual(response.data['evidence_summary']['signed_object_type'], 'manifest')
         self.assertEqual(
             authored_signed_object['id'] if isinstance(authored_signed_object, dict) else authored_signed_object,
             self.authored_signed_object.pk,

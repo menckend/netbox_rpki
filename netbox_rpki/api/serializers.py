@@ -6,6 +6,24 @@ from rest_framework import serializers
 from netbox_rpki import models
 from netbox_rpki.object_registry import API_OBJECT_SPECS
 from netbox_rpki.object_specs import ObjectSpec
+from netbox_rpki.services.provider_sync_contract import (
+    build_provider_account_rollup,
+    build_provider_snapshot_diff_rollup,
+    build_provider_snapshot_rollup,
+)
+from netbox_rpki.services.provider_sync_evidence import (
+    get_certificate_observation_evidence_summary,
+    get_certificate_observation_is_ambiguous,
+    get_certificate_observation_publication_linkage_status,
+    get_certificate_observation_signed_object_linkage_status,
+    get_certificate_observation_source_count,
+    get_certificate_observation_source_labels,
+    get_publication_point_authored_linkage_status,
+    get_publication_point_evidence_summary,
+    get_signed_object_authored_linkage_status,
+    get_signed_object_evidence_summary,
+    get_signed_object_publication_linkage_status,
+)
 
 
 def build_serializer_class(spec: ObjectSpec) -> type[NetBoxModelSerializer]:
@@ -43,6 +61,7 @@ class RpkiProviderAccountSerializer(SERIALIZER_CLASS_MAP['rpkiprovideraccount'])
     roa_write_capability = serializers.ReadOnlyField()
     sync_health = serializers.ReadOnlyField()
     sync_health_display = serializers.ReadOnlyField()
+    last_sync_rollup = serializers.SerializerMethodField()
     next_sync_due_at = serializers.DateTimeField(read_only=True)
 
     class Meta(SERIALIZER_CLASS_MAP['rpkiprovideraccount'].Meta):
@@ -52,7 +71,36 @@ class RpkiProviderAccountSerializer(SERIALIZER_CLASS_MAP['rpkiprovideraccount'])
             'roa_write_capability',
             'sync_health',
             'sync_health_display',
+            'last_sync_rollup',
             'next_sync_due_at',
+        )
+
+    def get_last_sync_rollup(self, obj):
+        request = self.context.get('request')
+        visible_snapshot_ids = None
+        visible_diff_ids = None
+
+        if request is not None and request.user.is_authenticated:
+            summary = obj.last_sync_summary_json or {}
+            snapshot_id = summary.get('latest_snapshot_id')
+            diff_id = summary.get('latest_diff_id')
+            if snapshot_id is not None:
+                visible_snapshot_ids = set(
+                    models.ProviderSnapshot.objects.restrict(request.user, 'view')
+                    .filter(pk=snapshot_id)
+                    .values_list('pk', flat=True)
+                )
+            if diff_id is not None:
+                visible_diff_ids = set(
+                    models.ProviderSnapshotDiff.objects.restrict(request.user, 'view')
+                    .filter(pk=diff_id)
+                    .values_list('pk', flat=True)
+                )
+
+        return build_provider_account_rollup(
+            obj,
+            visible_snapshot_ids=visible_snapshot_ids,
+            visible_diff_ids=visible_diff_ids,
         )
 
 
@@ -135,6 +183,9 @@ globals()['ROAChangePlanSerializer'] = ROAChangePlanSerializer
 
 class ProviderSnapshotSerializer(SERIALIZER_CLASS_MAP['providersnapshot']):
     latest_diff = serializers.SerializerMethodField()
+    latest_diff_summary = serializers.SerializerMethodField()
+    family_rollups = serializers.SerializerMethodField()
+    family_status_counts = serializers.SerializerMethodField()
     imported_publication_points = serializers.SerializerMethodField()
     imported_signed_objects = serializers.SerializerMethodField()
     imported_certificate_observations = serializers.SerializerMethodField()
@@ -142,21 +193,24 @@ class ProviderSnapshotSerializer(SERIALIZER_CLASS_MAP['providersnapshot']):
     class Meta(SERIALIZER_CLASS_MAP['providersnapshot'].Meta):
         fields = SERIALIZER_CLASS_MAP['providersnapshot'].Meta.fields + (
             'latest_diff',
+            'latest_diff_summary',
+            'family_rollups',
+            'family_status_counts',
             'imported_publication_points',
             'imported_signed_objects',
             'imported_certificate_observations',
         )
 
-    def _is_detail_view(self):
+    def _is_expanded_view(self):
         request = self.context.get('request')
         if request is None:
             return False
         parser_context = getattr(request, 'parser_context', None) or {}
         view = parser_context.get('view')
-        return getattr(view, 'action', '') == 'retrieve'
+        return getattr(view, 'action', '') in {'retrieve', 'compare'}
 
     def _serialize_nested_collection(self, obj, *, related_name, serializer_key, select_related_fields=()):
-        if not self._is_detail_view():
+        if not self._is_expanded_view():
             return []
         serializer_class = SERIALIZER_CLASS_MAP[serializer_key]
         queryset = getattr(obj, related_name).all()
@@ -165,13 +219,32 @@ class ProviderSnapshotSerializer(SERIALIZER_CLASS_MAP['providersnapshot']):
         return serializer_class(queryset, many=True, context=self.context).data
 
     def get_latest_diff(self, obj):
-        if not self._is_detail_view():
+        if not self._is_expanded_view():
             return None
         snapshot_diff = obj.diffs_as_comparison.order_by('-compared_at', '-created').first()
         if snapshot_diff is None:
             return None
         serializer = SERIALIZER_CLASS_MAP['providersnapshotdiff'](snapshot_diff, context=self.context)
         return serializer.data
+
+    def get_latest_diff_summary(self, obj):
+        if not self._is_expanded_view():
+            return None
+        request = self.context.get('request')
+        visible_diff_ids = None
+        if request is not None and request.user.is_authenticated:
+            visible_diff_ids = set(
+                models.ProviderSnapshotDiff.objects.restrict(request.user, 'view')
+                .filter(comparison_snapshot=obj)
+                .values_list('pk', flat=True)
+            )
+        return build_provider_snapshot_rollup(obj, visible_diff_ids=visible_diff_ids)['latest_diff_summary']
+
+    def get_family_rollups(self, obj):
+        return build_provider_snapshot_rollup(obj)['family_rollups']
+
+    def get_family_status_counts(self, obj):
+        return build_provider_snapshot_rollup(obj)['family_status_counts']
 
     def get_imported_publication_points(self, obj):
         return self._serialize_nested_collection(
@@ -199,6 +272,115 @@ class ProviderSnapshotSerializer(SERIALIZER_CLASS_MAP['providersnapshot']):
 
 SERIALIZER_CLASS_MAP['providersnapshot'] = ProviderSnapshotSerializer
 globals()['ProviderSnapshotSerializer'] = ProviderSnapshotSerializer
+
+
+class ProviderSnapshotDiffSerializer(SERIALIZER_CLASS_MAP['providersnapshotdiff']):
+    family_rollups = serializers.SerializerMethodField()
+    family_status_counts = serializers.SerializerMethodField()
+
+    class Meta(SERIALIZER_CLASS_MAP['providersnapshotdiff'].Meta):
+        fields = SERIALIZER_CLASS_MAP['providersnapshotdiff'].Meta.fields + (
+            'family_rollups',
+            'family_status_counts',
+        )
+
+    def get_family_rollups(self, obj):
+        return build_provider_snapshot_diff_rollup(obj)['family_rollups']
+
+    def get_family_status_counts(self, obj):
+        return build_provider_snapshot_diff_rollup(obj)['family_status_counts']
+
+
+SERIALIZER_CLASS_MAP['providersnapshotdiff'] = ProviderSnapshotDiffSerializer
+globals()['ProviderSnapshotDiffSerializer'] = ProviderSnapshotDiffSerializer
+
+
+class ImportedPublicationPointSerializer(SERIALIZER_CLASS_MAP['importedpublicationpoint']):
+    authored_linkage_status = serializers.SerializerMethodField()
+    evidence_summary = serializers.SerializerMethodField()
+
+    class Meta(SERIALIZER_CLASS_MAP['importedpublicationpoint'].Meta):
+        fields = SERIALIZER_CLASS_MAP['importedpublicationpoint'].Meta.fields + (
+            'authored_linkage_status',
+            'evidence_summary',
+        )
+
+    def get_authored_linkage_status(self, obj):
+        return get_publication_point_authored_linkage_status(obj)
+
+    def get_evidence_summary(self, obj):
+        return get_publication_point_evidence_summary(obj)
+
+
+SERIALIZER_CLASS_MAP['importedpublicationpoint'] = ImportedPublicationPointSerializer
+globals()['ImportedPublicationPointSerializer'] = ImportedPublicationPointSerializer
+
+
+class ImportedSignedObjectSerializer(SERIALIZER_CLASS_MAP['importedsignedobject']):
+    publication_linkage_status = serializers.SerializerMethodField()
+    authored_linkage_status = serializers.SerializerMethodField()
+    evidence_summary = serializers.SerializerMethodField()
+
+    class Meta(SERIALIZER_CLASS_MAP['importedsignedobject'].Meta):
+        fields = SERIALIZER_CLASS_MAP['importedsignedobject'].Meta.fields + (
+            'publication_linkage_status',
+            'authored_linkage_status',
+            'evidence_summary',
+        )
+
+    def get_publication_linkage_status(self, obj):
+        return get_signed_object_publication_linkage_status(obj)
+
+    def get_authored_linkage_status(self, obj):
+        return get_signed_object_authored_linkage_status(obj)
+
+    def get_evidence_summary(self, obj):
+        return get_signed_object_evidence_summary(obj)
+
+
+SERIALIZER_CLASS_MAP['importedsignedobject'] = ImportedSignedObjectSerializer
+globals()['ImportedSignedObjectSerializer'] = ImportedSignedObjectSerializer
+
+
+class ImportedCertificateObservationSerializer(SERIALIZER_CLASS_MAP['importedcertificateobservation']):
+    source_count = serializers.SerializerMethodField()
+    source_labels = serializers.SerializerMethodField()
+    is_ambiguous = serializers.SerializerMethodField()
+    publication_linkage_status = serializers.SerializerMethodField()
+    signed_object_linkage_status = serializers.SerializerMethodField()
+    evidence_summary = serializers.SerializerMethodField()
+
+    class Meta(SERIALIZER_CLASS_MAP['importedcertificateobservation'].Meta):
+        fields = SERIALIZER_CLASS_MAP['importedcertificateobservation'].Meta.fields + (
+            'source_count',
+            'source_labels',
+            'is_ambiguous',
+            'publication_linkage_status',
+            'signed_object_linkage_status',
+            'evidence_summary',
+        )
+
+    def get_source_count(self, obj):
+        return get_certificate_observation_source_count(obj)
+
+    def get_source_labels(self, obj):
+        return get_certificate_observation_source_labels(obj)
+
+    def get_is_ambiguous(self, obj):
+        return get_certificate_observation_is_ambiguous(obj)
+
+    def get_publication_linkage_status(self, obj):
+        return get_certificate_observation_publication_linkage_status(obj)
+
+    def get_signed_object_linkage_status(self, obj):
+        return get_certificate_observation_signed_object_linkage_status(obj)
+
+    def get_evidence_summary(self, obj):
+        return get_certificate_observation_evidence_summary(obj)
+
+
+SERIALIZER_CLASS_MAP['importedcertificateobservation'] = ImportedCertificateObservationSerializer
+globals()['ImportedCertificateObservationSerializer'] = ImportedCertificateObservationSerializer
 
 
 class SignedObjectSerializer(SERIALIZER_CLASS_MAP['signedobject']):

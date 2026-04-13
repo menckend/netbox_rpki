@@ -68,7 +68,10 @@
                   <th>Provider Type</th>
                   <th>Sync Health</th>
                   <th>Last Sync Status</th>
-                  <th>Last Successful Sync</th>
+                  <th>Freshness</th>
+                  <th>Family Coverage</th>
+                  <th>Latest Snapshot</th>
+                  <th>Latest Diff</th>
                 </tr>
               </thead>
               <tbody>
@@ -79,7 +82,28 @@
                     <td>{{ provider_account.get_provider_type_display }}</td>
                     <td><span class="badge bg-danger">{{ provider_account.sync_health_display }}</span></td>
                     <td>{{ provider_account.last_sync_status }}</td>
-                    <td>{{ provider_account.last_successful_sync|default:'Never' }}</td>
+                    <td>
+                      <div>{{ provider_account.last_sync_rollup.freshness_text }}</div>
+                      <div class="text-muted small">Last success: {{ provider_account.last_successful_sync|default:'Never' }}</div>
+                    </td>
+                    <td>
+                      <div>{{ provider_account.last_sync_rollup.family_status_text }}</div>
+                    </td>
+                    <td>
+                      {% if provider_account.last_sync_rollup.latest_snapshot_url %}
+                        <a href="{{ provider_account.last_sync_rollup.latest_snapshot_url }}">{{ provider_account.last_sync_rollup.latest_snapshot_label }}</a>
+                        <div class="text-muted small">{{ provider_account.last_sync_rollup.latest_snapshot_completed_at|default:'Not completed yet' }}</div>
+                      {% else %}
+                        <span class="text-muted">No snapshot</span>
+                      {% endif %}
+                    </td>
+                    <td>
+                      {% if provider_account.last_sync_rollup.latest_diff_url %}
+                        <a href="{{ provider_account.last_sync_rollup.latest_diff_url }}">{{ provider_account.last_sync_rollup.latest_diff_label }}</a>
+                      {% else %}
+                        <span class="text-muted">No diff</span>
+                      {% endif %}
+                    </td>
                   </tr>
                 {% endfor %}
               </tbody>

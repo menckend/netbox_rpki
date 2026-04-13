@@ -17,6 +17,7 @@ from netbox_rpki.api.serializers import (
 from netbox_rpki.jobs import RunAspaReconciliationJob, RunRoutingIntentProfileJob, SyncProviderAccountJob
 from netbox_rpki.object_registry import API_OBJECT_SPECS
 from netbox_rpki.object_specs import ObjectSpec
+from netbox_rpki.services.provider_sync_contract import build_provider_account_summary
 from netbox_rpki.services.provider_sync_diff import (
     build_latest_provider_snapshot_diff,
     build_provider_snapshot_diff,
@@ -183,27 +184,22 @@ class RpkiProviderAccountViewSet(VIEWSET_CLASS_MAP['rpkiprovideraccount']):
 
     @action(detail=False, methods=['get'])
     def summary(self, request):
-        queryset = self.filter_queryset(self.get_queryset())
-        by_provider_type: dict[str, int] = {}
-        by_sync_health: dict[str, int] = {}
-        sync_due_count = 0
-        roa_write_supported_count = 0
-
-        for provider_account in queryset:
-            by_provider_type[provider_account.provider_type] = by_provider_type.get(provider_account.provider_type, 0) + 1
-            by_sync_health[provider_account.sync_health] = by_sync_health.get(provider_account.sync_health, 0) + 1
-            if provider_account.is_sync_due():
-                sync_due_count += 1
-            if provider_account.supports_roa_write:
-                roa_write_supported_count += 1
-
-        return Response({
-            'total_accounts': queryset.count(),
-            'by_provider_type': by_provider_type,
-            'by_sync_health': by_sync_health,
-            'sync_due_count': sync_due_count,
-            'roa_write_supported_count': roa_write_supported_count,
-        })
+        provider_accounts = list(self.filter_queryset(self.get_queryset()))
+        visible_snapshot_ids = set(
+            rpki_models.ProviderSnapshot.objects.restrict(request.user, 'view')
+            .filter(provider_account__in=provider_accounts)
+            .values_list('pk', flat=True)
+        )
+        visible_diff_ids = set(
+            rpki_models.ProviderSnapshotDiff.objects.restrict(request.user, 'view')
+            .filter(provider_account__in=provider_accounts)
+            .values_list('pk', flat=True)
+        )
+        return Response(build_provider_account_summary(
+            provider_accounts,
+            visible_snapshot_ids=visible_snapshot_ids,
+            visible_diff_ids=visible_diff_ids,
+        ))
 
 
 class ProviderSnapshotViewSet(VIEWSET_CLASS_MAP['providersnapshot']):

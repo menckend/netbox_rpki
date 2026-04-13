@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+* Provider sync: enrich Krill hosted-publication imports with stable evidence summaries for publication points, signed objects, and certificate observations, and expose those summaries through the standard REST, GraphQL, and detail-view reporting surfaces.
+* Provider sync: preserve family capability metadata in shared rollups, expose provider-account rollups through dashboard and reporting surfaces, and clarify that ARIN currently supports hosted ROA synchronization only, while repeated ARIN syncs now have explicit regression coverage for stable external identity and zero-churn diffs.
+
 ## 0.1.6.2 (2026-04-11)
 
 * Documentation: expand the README feature and model coverage summary to describe the implemented standards-aligned object families and Priority 1 intent/reconciliation model layer.

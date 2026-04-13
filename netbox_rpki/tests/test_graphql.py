@@ -3,6 +3,7 @@ from importlib import import_module
 
 from django.test import SimpleTestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from core.models import ObjectType
 from netbox.graphql.schema import Query
@@ -21,6 +22,7 @@ from netbox_rpki.models import (
     RoaPrefix,
 )
 from netbox_rpki.object_registry import GRAPHQL_OBJECT_SPECS
+from netbox_rpki.services.provider_sync_contract import build_provider_sync_summary
 from netbox_rpki.tests.registry_scenarios import (
     EXPECTED_GRAPHQL_FIELD_NAMES_BY_KEY,
     EXPECTED_GRAPHQL_FIELD_ORDER,
@@ -492,6 +494,24 @@ class ProviderReportingGraphQLTestCase(APITestCase):
             change_type='changed',
             provider_identity='graphql-provider-identity',
         )
+        cls.provider_account.last_sync_summary_json = build_provider_sync_summary(
+            cls.provider_account,
+            status='completed',
+            family_summaries={},
+        )
+        cls.provider_account.last_sync_summary_json['latest_snapshot_id'] = cls.comparison_snapshot.pk
+        cls.provider_account.last_sync_summary_json['latest_snapshot_name'] = cls.comparison_snapshot.name
+        cls.provider_account.last_sync_summary_json['latest_snapshot_completed_at'] = timezone.now().isoformat()
+        cls.provider_account.last_sync_summary_json['latest_diff_id'] = cls.snapshot_diff.pk
+        cls.provider_account.last_sync_summary_json['latest_diff_name'] = cls.snapshot_diff.name
+        cls.provider_account.save(update_fields=['last_sync_summary_json'])
+        cls.other_provider_account.transport = rpki_models.ProviderSyncTransport.OTE
+        cls.other_provider_account.last_sync_summary_json = build_provider_sync_summary(
+            cls.other_provider_account,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+            family_summaries={},
+        )
+        cls.other_provider_account.save(update_fields=['transport', 'last_sync_summary_json'])
         cls.imported_prefix = create_test_prefix('10.199.0.0/24')
         cls.imported_asn = create_test_asn(65550)
         cls.imported_customer_asn = create_test_asn(65551)
@@ -583,6 +603,11 @@ class ProviderReportingGraphQLTestCase(APITestCase):
         {{
             provider_account_summary
             provider_snapshot_summary
+            netbox_rpki_provideraccount(id: {self.other_provider_account.pk}) {{
+                id
+                transport
+                last_sync_rollup
+            }}
             provider_snapshot_latest_diff(snapshot_id: "{self.comparison_snapshot.pk}") {{
                 id
                 name
@@ -592,11 +617,16 @@ class ProviderReportingGraphQLTestCase(APITestCase):
                 id
                 name
                 item_count
+                family_rollups
+                family_status_counts
             }}
             netbox_rpki_providersnapshot(id: {self.comparison_snapshot.pk}) {{
                 id
                 name
                 summary
+                family_rollups
+                family_status_counts
+                latest_diff_summary
                 latest_diff {{
                     id
                     name
@@ -647,11 +677,53 @@ class ProviderReportingGraphQLTestCase(APITestCase):
         self.assertEqual(data['data']['provider_account_summary']['total_accounts'], 2)
         self.assertEqual(data['data']['provider_account_summary']['by_provider_type']['krill'], 1)
         self.assertEqual(data['data']['provider_account_summary']['by_provider_type']['arin'], 1)
+        self.assertEqual(data['data']['provider_account_summary']['latest_snapshot_count'], 1)
+        self.assertEqual(data['data']['provider_account_summary']['latest_diff_count'], 1)
+        self.assertIn('pending', data['data']['provider_account_summary']['by_family_status'])
+        arin_account = next(
+            account
+            for account in data['data']['provider_account_summary']['accounts']
+            if account['provider_account_id'] == self.other_provider_account.pk
+        )
+        self.assertEqual(arin_account['transport'], rpki_models.ProviderSyncTransport.OTE)
+        self.assertEqual(arin_account['supported_families'], [rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS])
+        aspa_rollup = next(
+            row
+            for row in arin_account['family_rollups']
+            if row['family'] == rpki_models.ProviderSyncFamily.ASPAS
+        )
+        self.assertEqual(aspa_rollup['capability_status'], rpki_models.ProviderSyncFamilyStatus.NOT_IMPLEMENTED)
+        self.assertEqual(aspa_rollup['capability_mode'], 'provider_limited')
+        self.assertIn('hosted ROA authorizations only', aspa_rollup['capability_reason'])
+        self.assertTrue(
+            any(account['latest_snapshot_id'] == self.comparison_snapshot.pk for account in data['data']['provider_account_summary']['accounts'])
+        )
+        self.assertTrue(
+            any(account['latest_diff_id'] == self.snapshot_diff.pk for account in data['data']['provider_account_summary']['accounts'])
+        )
+        self.assertEqual(data['data']['netbox_rpki_provideraccount']['transport'], rpki_models.ProviderSyncTransport.OTE)
+        self.assertEqual(
+            data['data']['netbox_rpki_provideraccount']['last_sync_rollup']['transport'],
+            rpki_models.ProviderSyncTransport.OTE,
+        )
+        self.assertEqual(
+            data['data']['netbox_rpki_provideraccount']['last_sync_rollup']['supported_families'],
+            [rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS],
+        )
         self.assertEqual(data['data']['provider_snapshot_summary']['total_snapshots'], 3)
         self.assertEqual(data['data']['provider_snapshot_summary']['with_diff_count'], 1)
         self.assertEqual(data['data']['provider_snapshot_latest_diff']['id'], str(self.snapshot_diff.pk))
         self.assertEqual(data['data']['provider_snapshot_latest_diff']['item_count'], 1)
         self.assertEqual(data['data']['provider_snapshot_diff']['id'], str(self.snapshot_diff.pk))
+        self.assertIn('family_rollups', data['data']['provider_snapshot_diff'])
+        self.assertIn('family_status_counts', data['data']['provider_snapshot_diff'])
+        self.assertEqual(
+            data['data']['netbox_rpki_providersnapshot']['latest_diff_summary']['snapshot_diff_id'],
+            self.snapshot_diff.pk,
+        )
+        self.assertTrue(
+            any(row['family'] == 'roa_authorizations' for row in data['data']['netbox_rpki_providersnapshot']['family_rollups'])
+        )
         self.assertEqual(data['data']['netbox_rpki_providersnapshot']['latest_diff']['id'], str(self.snapshot_diff.pk))
         self.assertEqual(
             [row['id'] for row in data['data']['netbox_rpki_providersnapshot']['imported_roa_authorizations']],
@@ -963,6 +1035,10 @@ class ImportedCertificateObservationGraphQLTestCase(PluginGraphQLTestMixin, APIT
             organization=cls.organization,
             provider_snapshot=cls.snapshot,
             publication_uri='rsync://graphql.invalid/repo/',
+            payload_json={
+                'authored_linkage': {'status': 'unmatched'},
+                'evidence_summary': {'published_object_count': 1, 'authored_linkage_status': 'unmatched'},
+            },
         )
         cls.imported_signed_object = create_test_imported_signed_object(
             name='Imported Certificate GraphQL Signed Object',
@@ -970,6 +1046,15 @@ class ImportedCertificateObservationGraphQLTestCase(PluginGraphQLTestMixin, APIT
             provider_snapshot=cls.snapshot,
             publication_point=cls.imported_publication_point,
             signed_object_uri='rsync://graphql.invalid/repo/example.mft',
+            payload_json={
+                'publication_linkage': {'status': 'linked'},
+                'authored_linkage': {'status': 'unmatched'},
+                'evidence_summary': {
+                    'signed_object_type': 'manifest',
+                    'publication_linkage_status': 'linked',
+                    'authored_linkage_status': 'unmatched',
+                },
+            },
         )
         cls.certificate_observation = create_test_imported_certificate_observation(
             name='Imported Certificate GraphQL Record',
@@ -980,6 +1065,24 @@ class ImportedCertificateObservationGraphQLTestCase(PluginGraphQLTestMixin, APIT
             certificate_uri='rsync://graphql.invalid/repo/example.cer',
             publication_uri=cls.imported_publication_point.publication_uri,
             signed_object_uri=cls.imported_signed_object.signed_object_uri,
+            payload_json={
+                'source_summary': {
+                    'source_count': 2,
+                    'source_labels': ['Signed Object EE Certificate', 'Parent Issued Certificate'],
+                    'has_multiple_sources': True,
+                    'is_ambiguous': True,
+                },
+                'publication_linkage': {'status': 'derived_from_signed_object'},
+                'signed_object_linkage': {'status': 'linked'},
+                'evidence_summary': {
+                    'source_count': 2,
+                    'source_labels': ['Signed Object EE Certificate', 'Parent Issued Certificate'],
+                    'has_multiple_sources': True,
+                    'is_ambiguous': True,
+                    'publication_linkage_status': 'derived_from_signed_object',
+                    'signed_object_linkage_status': 'linked',
+                },
+            },
         )
         cls.valid_filter_cases = (
             (f'publication_point_id: "{cls.imported_publication_point.pk}"', (cls.certificate_observation,)),
@@ -990,10 +1093,30 @@ class ImportedCertificateObservationGraphQLTestCase(PluginGraphQLTestMixin, APIT
     def test_get_object_by_id(self):
         self.add_permissions(self.view_permission)
 
-        data = self.graphql_request(self.build_detail_query(self.certificate_observation.pk))
+        data = self.graphql_request(
+            f'''{{
+                {self.detail_field}(id: {self.certificate_observation.pk}) {{
+                    id
+                    source_count
+                    source_labels
+                    is_ambiguous
+                    publication_linkage_status
+                    signed_object_linkage_status
+                    evidence_summary
+                }}
+            }}'''
+        )
 
         self.assert_graphql_success(data)
         self.assertEqual(int(data['data'][self.detail_field]['id']), self.certificate_observation.pk)
+        self.assertEqual(data['data'][self.detail_field]['source_count'], 2)
+        self.assertEqual(
+            data['data'][self.detail_field]['source_labels'],
+            ['Signed Object EE Certificate', 'Parent Issued Certificate'],
+        )
+        self.assertTrue(data['data'][self.detail_field]['is_ambiguous'])
+        self.assertEqual(data['data'][self.detail_field]['publication_linkage_status'], 'derived_from_signed_object')
+        self.assertEqual(data['data'][self.detail_field]['signed_object_linkage_status'], 'linked')
 
     def test_get_object_with_invalid_id_returns_null_or_error(self):
         self.add_permissions(self.view_permission)
@@ -1050,6 +1173,10 @@ class ImportedPublicationLinkGraphQLTestCase(APITestCase):
             provider_snapshot=cls.snapshot,
             authored_publication_point=cls.authored_publication_point,
             publication_uri=cls.authored_publication_point.publication_uri,
+            payload_json={
+                'authored_linkage': {'status': 'linked'},
+                'evidence_summary': {'published_object_count': 1, 'authored_linkage_status': 'linked'},
+            },
         )
         cls.imported_signed_object = create_test_imported_signed_object(
             name='Imported Publication Link GraphQL Signed Object',
@@ -1060,6 +1187,15 @@ class ImportedPublicationLinkGraphQLTestCase(APITestCase):
             signed_object_type='manifest',
             signed_object_uri=cls.authored_signed_object.object_uri,
             publication_uri=cls.imported_publication_point.publication_uri,
+            payload_json={
+                'publication_linkage': {'status': 'linked'},
+                'authored_linkage': {'status': 'linked'},
+                'evidence_summary': {
+                    'signed_object_type': 'manifest',
+                    'publication_linkage_status': 'linked',
+                    'authored_linkage_status': 'linked',
+                },
+            },
         )
 
     def test_imported_publication_point_list_filters_by_authored_publication_point(self):
@@ -1086,6 +1222,38 @@ class ImportedPublicationLinkGraphQLTestCase(APITestCase):
         self.assertEqual(
             [int(item['id']) for item in data['data']['netbox_rpki_importedsignedobject_list']],
             [self.imported_signed_object.pk],
+        )
+
+    def test_imported_publication_and_signed_object_detail_expose_evidence_fields(self):
+        self.add_permissions('netbox_rpki.view_importedpublicationpoint', 'netbox_rpki.view_importedsignedobject')
+
+        data = self.graphql_request(
+            f'''{{
+                netbox_rpki_importedpublicationpoint(id: {self.imported_publication_point.pk}) {{
+                    id
+                    authored_linkage_status
+                    evidence_summary
+                }}
+                netbox_rpki_importedsignedobject(id: {self.imported_signed_object.pk}) {{
+                    id
+                    publication_linkage_status
+                    authored_linkage_status
+                    evidence_summary
+                }}
+            }}'''
+        )
+
+        self.assert_graphql_success(data)
+        self.assertEqual(data['data']['netbox_rpki_importedpublicationpoint']['authored_linkage_status'], 'linked')
+        self.assertEqual(
+            data['data']['netbox_rpki_importedpublicationpoint']['evidence_summary']['published_object_count'],
+            1,
+        )
+        self.assertEqual(data['data']['netbox_rpki_importedsignedobject']['publication_linkage_status'], 'linked')
+        self.assertEqual(data['data']['netbox_rpki_importedsignedobject']['authored_linkage_status'], 'linked')
+        self.assertEqual(
+            data['data']['netbox_rpki_importedsignedobject']['evidence_summary']['signed_object_type'],
+            'manifest',
         )
 
 

@@ -10,6 +10,7 @@ from netbox_rpki import models
 from netbox_rpki.detail_specs import get_latest_provider_snapshot_diff
 from netbox_rpki.object_registry import GRAPHQL_OBJECT_SPECS
 from netbox_rpki.object_specs import ObjectSpec
+from netbox_rpki.services.provider_sync_contract import build_provider_account_summary
 
 from . import types as graphql_types
 
@@ -19,27 +20,22 @@ class ProviderReportingQueryMixin:
 
     @strawberry.field
     def provider_account_summary(self, info: Info) -> JSON:
-        queryset = get_restricted_queryset(models.RpkiProviderAccount, info)
-        by_provider_type: dict[str, int] = {}
-        by_sync_health: dict[str, int] = {}
-        sync_due_count = 0
-        roa_write_supported_count = 0
-
-        for provider_account in queryset:
-            by_provider_type[provider_account.provider_type] = by_provider_type.get(provider_account.provider_type, 0) + 1
-            by_sync_health[provider_account.sync_health] = by_sync_health.get(provider_account.sync_health, 0) + 1
-            if provider_account.is_sync_due():
-                sync_due_count += 1
-            if provider_account.supports_roa_write:
-                roa_write_supported_count += 1
-
-        return {
-            'total_accounts': queryset.count(),
-            'by_provider_type': by_provider_type,
-            'by_sync_health': by_sync_health,
-            'sync_due_count': sync_due_count,
-            'roa_write_supported_count': roa_write_supported_count,
-        }
+        provider_accounts = list(get_restricted_queryset(models.RpkiProviderAccount, info))
+        visible_snapshot_ids = set(
+            get_restricted_queryset(models.ProviderSnapshot, info)
+            .filter(provider_account__in=provider_accounts)
+            .values_list('pk', flat=True)
+        )
+        visible_diff_ids = set(
+            get_restricted_queryset(models.ProviderSnapshotDiff, info)
+            .filter(provider_account__in=provider_accounts)
+            .values_list('pk', flat=True)
+        )
+        return build_provider_account_summary(
+            provider_accounts,
+            visible_snapshot_ids=visible_snapshot_ids,
+            visible_diff_ids=visible_diff_ids,
+        )
 
     @strawberry.field
     def provider_snapshot_summary(self, info: Info) -> JSON:

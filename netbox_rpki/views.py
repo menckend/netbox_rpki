@@ -30,6 +30,7 @@ from netbox_rpki.services import (
     build_roa_change_plan_delta,
     preview_roa_change_plan_provider_write,
 )
+from netbox_rpki.services.provider_sync_contract import build_provider_account_rollup
 
 
 class MetadataDrivenDetailView(generic.ObjectView):
@@ -418,13 +419,74 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
             models.ProviderSyncHealth.FAILED,
             models.ProviderSyncHealth.STALE,
         }
+        provider_queryset = models.RpkiProviderAccount.objects.restrict(request.user, 'view').select_related('organization')
+        visible_snapshot_ids = set(
+            models.ProviderSnapshot.objects.restrict(request.user, 'view')
+            .filter(provider_account__in=provider_queryset)
+            .values_list('pk', flat=True)
+        )
+        visible_diff_ids = set(
+            models.ProviderSnapshotDiff.objects.restrict(request.user, 'view')
+            .filter(provider_account__in=provider_queryset)
+            .values_list('pk', flat=True)
+        )
         provider_accounts = [
-            provider_account
-            for provider_account in models.RpkiProviderAccount.objects.restrict(request.user, 'view').select_related('organization')
+            self.build_provider_account_dashboard_row(
+                provider_account,
+                visible_snapshot_ids=visible_snapshot_ids,
+                visible_diff_ids=visible_diff_ids,
+            )
+            for provider_account in provider_queryset
             if provider_account.sync_enabled and provider_account.sync_health in attention_healths
         ]
         provider_accounts.sort(key=self.get_provider_account_sort_key)
         return provider_accounts
+
+    def build_provider_account_dashboard_row(self, provider_account, *, visible_snapshot_ids=None, visible_diff_ids=None):
+        rollup = build_provider_account_rollup(
+            provider_account,
+            visible_snapshot_ids=visible_snapshot_ids,
+            visible_diff_ids=visible_diff_ids,
+        )
+        rollup['family_status_text'] = self.get_family_status_text(rollup)
+        rollup['freshness_text'] = self.get_freshness_text(provider_account, rollup)
+        rollup['latest_snapshot_url'] = self.get_summary_url('plugins:netbox_rpki:providersnapshot', rollup['latest_snapshot_id'])
+        rollup['latest_diff_url'] = self.get_summary_url('plugins:netbox_rpki:providersnapshotdiff', rollup['latest_diff_id'])
+        rollup['latest_snapshot_label'] = rollup['latest_snapshot_name'] or 'Latest snapshot'
+        rollup['latest_diff_label'] = rollup['latest_diff_name'] or 'Latest diff'
+        provider_account.last_sync_rollup = rollup
+        return provider_account
+
+    def get_summary_url(self, view_name, object_id):
+        if object_id in (None, ''):
+            return ''
+        return reverse(view_name, kwargs={'pk': object_id})
+
+    def get_family_status_text(self, rollup):
+        status_counts = rollup.get('family_status_counts', {})
+        if not status_counts:
+            return 'No family summary available'
+        ordered_statuses = [
+            models.ProviderSyncFamilyStatus.COMPLETED,
+            models.ProviderSyncFamilyStatus.LIMITED,
+            models.ProviderSyncFamilyStatus.PENDING,
+            models.ProviderSyncFamilyStatus.RUNNING,
+            models.ProviderSyncFamilyStatus.FAILED,
+            models.ProviderSyncFamilyStatus.SKIPPED,
+            models.ProviderSyncFamilyStatus.NOT_IMPLEMENTED,
+        ]
+        parts = [f"{status_counts[status]} {status.replace('_', ' ')}" for status in ordered_statuses if status_counts.get(status)]
+        return f"{rollup.get('family_count', 0)} families: {', '.join(parts)}"
+
+    def get_freshness_text(self, provider_account, rollup):
+        if not provider_account.sync_enabled:
+            return 'Sync disabled'
+        if provider_account.last_successful_sync is None:
+            return 'Never synced'
+        next_sync_due_at = rollup.get('next_sync_due_at')
+        if next_sync_due_at:
+            return f'Next due {next_sync_due_at}'
+        return f'Last synced {provider_account.last_successful_sync}'
 
     def get_provider_account_sort_key(self, provider_account):
         last_successful_sync_timestamp = (

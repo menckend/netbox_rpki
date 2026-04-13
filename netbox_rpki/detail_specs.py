@@ -9,6 +9,19 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.urls import reverse
 
 from netbox_rpki import models
+from netbox_rpki.services.provider_sync_evidence import (
+    get_certificate_observation_evidence_summary,
+    get_certificate_observation_is_ambiguous,
+    get_certificate_observation_publication_linkage_status,
+    get_certificate_observation_signed_object_linkage_status,
+    get_certificate_observation_source_count,
+    get_certificate_observation_source_labels,
+    get_publication_point_authored_linkage_status,
+    get_publication_point_evidence_summary,
+    get_signed_object_authored_linkage_status,
+    get_signed_object_evidence_summary,
+    get_signed_object_publication_linkage_status,
+)
 
 
 ValueGetter = Callable[[Any], Any]
@@ -16,6 +29,18 @@ ValueGetter = Callable[[Any], Any]
 
 def get_pk(instance: Any) -> Any:
     return instance.pk
+
+
+def get_imported_publication_point_evidence_summary(obj: models.ImportedPublicationPoint) -> str | None:
+    return get_pretty_json(get_publication_point_evidence_summary(obj))
+
+
+def get_imported_signed_object_evidence_summary(obj: models.ImportedSignedObject) -> str | None:
+    return get_pretty_json(get_signed_object_evidence_summary(obj))
+
+
+def get_imported_certificate_observation_evidence_summary(obj: models.ImportedCertificateObservation) -> str | None:
+    return get_pretty_json(get_certificate_observation_evidence_summary(obj))
 
 
 @dataclass(frozen=True)
@@ -246,8 +271,26 @@ def get_provider_snapshot_summary(snapshot: models.ProviderSnapshot) -> str | No
     return get_pretty_json(snapshot.summary_json)
 
 
+def get_provider_snapshot_family_rollups(snapshot: models.ProviderSnapshot) -> str | None:
+    from netbox_rpki.services.provider_sync_contract import build_provider_snapshot_rollup
+
+    return get_pretty_json(build_provider_snapshot_rollup(snapshot)['family_rollups'])
+
+
+def get_provider_snapshot_latest_diff_summary(snapshot: models.ProviderSnapshot) -> str | None:
+    from netbox_rpki.services.provider_sync_contract import build_provider_snapshot_rollup
+
+    return get_pretty_json(build_provider_snapshot_rollup(snapshot)['latest_diff_summary'])
+
+
 def get_provider_snapshot_diff_summary(snapshot_diff: models.ProviderSnapshotDiff) -> str | None:
     return get_pretty_json(snapshot_diff.summary_json)
+
+
+def get_provider_snapshot_diff_family_rollups(snapshot_diff: models.ProviderSnapshotDiff) -> str | None:
+    from netbox_rpki.services.provider_sync_contract import build_provider_snapshot_diff_rollup
+
+    return get_pretty_json(build_provider_snapshot_diff_rollup(snapshot_diff)['family_rollups'])
 
 
 def get_provider_snapshot_diff_before_state(item: models.ProviderSnapshotDiffItem) -> str | None:
@@ -468,7 +511,14 @@ IMPORTED_PUBLICATION_POINT_DETAIL_SPEC = DetailSpec(
             kind='link',
             empty_text='None',
         ),
+        DetailFieldSpec(label='Authored Linkage Status', value=get_publication_point_authored_linkage_status),
         DetailFieldSpec(label='Is Stale', value=lambda obj: obj.is_stale),
+        DetailFieldSpec(
+            label='Evidence Summary',
+            value=get_imported_publication_point_evidence_summary,
+            kind='code',
+            empty_text='None',
+        ),
         DetailFieldSpec(label='Payload', value=lambda obj: get_pretty_json(obj.payload_json), kind='code', empty_text='None'),
     ),
 )
@@ -498,7 +548,15 @@ IMPORTED_SIGNED_OBJECT_DETAIL_SPEC = DetailSpec(
             kind='link',
             empty_text='None',
         ),
+        DetailFieldSpec(label='Publication Linkage Status', value=get_signed_object_publication_linkage_status),
+        DetailFieldSpec(label='Authored Linkage Status', value=get_signed_object_authored_linkage_status),
         DetailFieldSpec(label='Is Stale', value=lambda obj: obj.is_stale),
+        DetailFieldSpec(
+            label='Evidence Summary',
+            value=get_imported_signed_object_evidence_summary,
+            kind='code',
+            empty_text='None',
+        ),
         DetailFieldSpec(label='Payload', value=lambda obj: get_pretty_json(obj.payload_json), kind='code', empty_text='None'),
     ),
 )
@@ -527,9 +585,20 @@ IMPORTED_CERTIFICATE_OBSERVATION_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(label='Serial Number', value=lambda obj: obj.serial_number, empty_text='None'),
         DetailFieldSpec(label='Not Before', value=lambda obj: obj.not_before, empty_text='None'),
         DetailFieldSpec(label='Not After', value=lambda obj: obj.not_after, empty_text='None'),
+        DetailFieldSpec(label='Source Count', value=get_certificate_observation_source_count),
+        DetailFieldSpec(label='Source Labels', value=lambda obj: ', '.join(get_certificate_observation_source_labels(obj)) or 'None'),
+        DetailFieldSpec(label='Is Ambiguous', value=get_certificate_observation_is_ambiguous),
+        DetailFieldSpec(label='Publication Linkage Status', value=get_certificate_observation_publication_linkage_status),
+        DetailFieldSpec(label='Signed Object Linkage Status', value=get_certificate_observation_signed_object_linkage_status),
         DetailFieldSpec(label='External Object ID', value=lambda obj: obj.external_object_id, empty_text='None'),
         DetailFieldSpec(label='External Reference', value=lambda obj: obj.external_reference, kind='link', empty_text='None'),
         DetailFieldSpec(label='Is Stale', value=lambda obj: obj.is_stale),
+        DetailFieldSpec(
+            label='Evidence Summary',
+            value=get_imported_certificate_observation_evidence_summary,
+            kind='code',
+            empty_text='None',
+        ),
         DetailFieldSpec(label='Payload', value=lambda obj: get_pretty_json(obj.payload_json), kind='code', empty_text='None'),
     ),
 )
@@ -1590,6 +1659,8 @@ PROVIDER_SNAPSHOT_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(label='Completed At', value=lambda obj: obj.completed_at, empty_text='None'),
         DetailFieldSpec(label='Sync Run', value=get_provider_snapshot_sync_run, kind='link', empty_text='None'),
         DetailFieldSpec(label='Latest Diff', value=get_latest_provider_snapshot_diff, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Latest Diff Summary', value=get_provider_snapshot_latest_diff_summary, kind='code', empty_text='None'),
+        DetailFieldSpec(label='Family Rollups', value=get_provider_snapshot_family_rollups, kind='code', empty_text='None'),
         DetailFieldSpec(label='Summary', value=get_provider_snapshot_summary, kind='code', empty_text='None'),
     ),
     bottom_tables=(
@@ -1673,6 +1744,7 @@ PROVIDER_SNAPSHOT_DIFF_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(label='Status', value=lambda obj: obj.status),
         DetailFieldSpec(label='Compared At', value=lambda obj: obj.compared_at, empty_text='None'),
         DetailFieldSpec(label='Error', value=lambda obj: obj.error, empty_text='None'),
+        DetailFieldSpec(label='Family Rollups', value=get_provider_snapshot_diff_family_rollups, kind='code', empty_text='None'),
         DetailFieldSpec(label='Summary', value=get_provider_snapshot_diff_summary, kind='code', empty_text='None'),
     ),
     bottom_tables=(

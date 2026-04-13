@@ -6,9 +6,11 @@ from django.utils.formats import date_format
 from django.utils import timezone
 
 from netbox_rpki import filtersets, forms, tables, views
+from netbox_rpki import models as rpki_models
 from netbox_rpki.models import Certificate, CertificateAsn, CertificatePrefix, Organization, Roa, RoaPrefix
 from netbox_rpki.object_registry import SIMPLE_DETAIL_VIEW_OBJECT_SPECS, VIEW_OBJECT_SPECS, get_object_spec
 from netbox_rpki.services import create_roa_change_plan, derive_roa_intents, reconcile_roa_intents
+from netbox_rpki.services.provider_sync_contract import build_provider_sync_summary
 from netbox_rpki.tests.registry_scenarios import _build_instance_for_spec
 from netbox_rpki.tests.base import PluginViewTestCase
 from netbox_rpki.tests.utils import (
@@ -266,6 +268,32 @@ class ProviderAccountSyncViewTestCase(PluginViewTestCase):
         self.assertContains(response, 'Sync Health')
         self.assertContains(response, 'Stale')
 
+    def test_provider_account_detail_shows_arin_transport_and_rollup_capability_reason(self):
+        provider_account = create_test_provider_account(
+            name='Provider Sync ARIN OT&E UI Account',
+            organization=self.organization,
+            provider_type=rpki_models.ProviderType.ARIN,
+            transport=rpki_models.ProviderSyncTransport.OTE,
+            org_handle='ORG-SYNC-UI-ARIN-OTE',
+        )
+        provider_account.last_sync_summary_json = build_provider_sync_summary(
+            provider_account,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+            family_summaries={},
+        )
+        provider_account.save(update_fields=['last_sync_summary_json'])
+
+        self.add_permissions('netbox_rpki.view_rpkiprovideraccount', 'netbox_rpki.change_rpkiprovideraccount')
+
+        response = self.client.get(provider_account.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'Transport')
+        self.assertContains(response, 'ote')
+        self.assertContains(response, 'Last Sync Summary')
+        self.assertContains(response, 'provider_limited')
+        self.assertContains(response, 'hosted ROA authorizations only')
+
 
 class ProviderSnapshotDetailViewTestCase(PluginViewTestCase):
     @classmethod
@@ -465,6 +493,10 @@ class SectionNineSurfaceDetailViewTestCase(PluginViewTestCase):
             provider_snapshot=cls.snapshot,
             authored_publication_point=cls.authored_publication_point,
             publication_uri='rsync://view.invalid/repo/',
+            payload_json={
+                'authored_linkage': {'status': 'linked'},
+                'evidence_summary': {'published_object_count': 1, 'authored_linkage_status': 'linked'},
+            },
         )
         cls.imported_signed_object = create_test_imported_signed_object(
             name='Section Nine View Imported Signed Object',
@@ -473,6 +505,15 @@ class SectionNineSurfaceDetailViewTestCase(PluginViewTestCase):
             publication_point=cls.imported_publication_point,
             authored_signed_object=cls.authored_signed_object,
             signed_object_uri='rsync://view.invalid/repo/example.mft',
+            payload_json={
+                'publication_linkage': {'status': 'linked'},
+                'authored_linkage': {'status': 'linked'},
+                'evidence_summary': {
+                    'signed_object_type': 'manifest',
+                    'publication_linkage_status': 'linked',
+                    'authored_linkage_status': 'linked',
+                },
+            },
         )
         cls.imported_certificate_observation = create_test_imported_certificate_observation(
             name='Section Nine View Imported Certificate Observation',
@@ -483,6 +524,24 @@ class SectionNineSurfaceDetailViewTestCase(PluginViewTestCase):
             certificate_uri='rsync://view.invalid/repo/example.cer',
             publication_uri=cls.imported_publication_point.publication_uri,
             signed_object_uri=cls.imported_signed_object.signed_object_uri,
+            payload_json={
+                'source_summary': {
+                    'source_count': 2,
+                    'source_labels': ['Signed Object EE Certificate', 'Parent Issued Certificate'],
+                    'has_multiple_sources': True,
+                    'is_ambiguous': True,
+                },
+                'publication_linkage': {'status': 'derived_from_signed_object'},
+                'signed_object_linkage': {'status': 'linked'},
+                'evidence_summary': {
+                    'source_count': 2,
+                    'source_labels': ['Signed Object EE Certificate', 'Parent Issued Certificate'],
+                    'has_multiple_sources': True,
+                    'is_ambiguous': True,
+                    'publication_linkage_status': 'derived_from_signed_object',
+                    'signed_object_linkage_status': 'linked',
+                },
+            },
         )
         cls.validation_run = create_test_validation_run(
             name='Section Nine View Validation Run',
@@ -567,6 +626,9 @@ class SectionNineSurfaceDetailViewTestCase(PluginViewTestCase):
         self.assertHttpStatus(response, 200)
         self.assertContains(response, 'Publication Point')
         self.assertContains(response, 'Signed Object')
+        self.assertContains(response, 'Source Count')
+        self.assertContains(response, 'Signed Object EE Certificate')
+        self.assertContains(response, 'derived_from_signed_object')
         self.assertContains(response, self.imported_publication_point.get_absolute_url())
         self.assertContains(response, self.imported_signed_object.get_absolute_url())
         self.assertContains(response, self.imported_publication_point.name)
@@ -579,6 +641,8 @@ class SectionNineSurfaceDetailViewTestCase(PluginViewTestCase):
 
         self.assertHttpStatus(response, 200)
         self.assertContains(response, 'Authored Publication Point')
+        self.assertContains(response, 'Authored Linkage Status')
+        self.assertContains(response, 'published_object_count')
         self.assertContains(response, self.authored_publication_point.get_absolute_url())
         self.assertContains(response, self.authored_publication_point.name)
 
@@ -589,6 +653,8 @@ class SectionNineSurfaceDetailViewTestCase(PluginViewTestCase):
 
         self.assertHttpStatus(response, 200)
         self.assertContains(response, 'Authored Signed Object')
+        self.assertContains(response, 'Publication Linkage Status')
+        self.assertContains(response, 'manifest')
         self.assertContains(response, self.authored_signed_object.get_absolute_url())
         self.assertContains(response, self.authored_signed_object.name)
 
@@ -649,7 +715,16 @@ class ProviderSnapshotDiffDetailViewTestCase(PluginViewTestCase):
             provider_account=cls.provider_account,
             base_snapshot=cls.base_snapshot,
             comparison_snapshot=cls.comparison_snapshot,
-            summary_json={'totals': {'records_changed': 1}},
+            summary_json={
+                'families': {
+                    'roa_authorizations': {
+                        'records_imported': 1,
+                        'records_changed': 1,
+                        'status': 'completed',
+                    },
+                },
+                'totals': {'records_changed': 1, 'records_imported': 1},
+            },
         )
         cls.snapshot_diff_item = create_test_provider_snapshot_diff_item(
             name='Provider Diff View Item',
@@ -665,8 +740,11 @@ class ProviderSnapshotDiffDetailViewTestCase(PluginViewTestCase):
         response = self.client.get(self.snapshot_diff.get_absolute_url())
 
         self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'Family Rollups')
         self.assertContains(response, 'Provider Snapshot Diff Items')
         self.assertContains(response, self.snapshot_diff_item.name)
+        self.assertContains(response, 'ROA Authorizations')
+        self.assertContains(response, '1 changed')
 
     def test_provider_snapshot_diff_item_detail_shows_state_payloads(self):
         self.add_permissions('netbox_rpki.view_providersnapshotdiffitem', 'netbox_rpki.view_providersnapshotdiff')
@@ -938,6 +1016,22 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
     @classmethod
     def setUpTestData(cls):
         cls.organization = create_test_organization(org_id='operations-dashboard-org', name='Operations Dashboard Org')
+        cls.arin_account = create_test_provider_account(
+            name='Operations Dashboard ARIN',
+            organization=cls.organization,
+            provider_type=rpki_models.ProviderType.ARIN,
+            transport=rpki_models.ProviderSyncTransport.OTE,
+            org_handle='ORG-OPS-ARIN',
+            sync_interval=60,
+            last_successful_sync=timezone.now() - timedelta(hours=3),
+            last_sync_status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        cls.arin_account.last_sync_summary_json = build_provider_sync_summary(
+            cls.arin_account,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+            family_summaries={},
+        )
+        cls.arin_account.save(update_fields=['last_sync_summary_json'])
         cls.failed_provider_account = create_test_provider_account(
             name='Failed Operations Account',
             organization=cls.organization,
@@ -946,6 +1040,36 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
             last_successful_sync=timezone.now() - timedelta(days=1),
             last_sync_status='failed',
         )
+        cls.failed_base_snapshot = create_test_provider_snapshot(
+            name='Failed Operations Base Snapshot',
+            organization=cls.organization,
+            provider_account=cls.failed_provider_account,
+        )
+        cls.failed_comparison_snapshot = create_test_provider_snapshot(
+            name='Failed Operations Latest Snapshot',
+            organization=cls.organization,
+            provider_account=cls.failed_provider_account,
+        )
+        cls.failed_snapshot_diff = create_test_provider_snapshot_diff(
+            name='Failed Operations Latest Diff',
+            organization=cls.organization,
+            provider_account=cls.failed_provider_account,
+            base_snapshot=cls.failed_base_snapshot,
+            comparison_snapshot=cls.failed_comparison_snapshot,
+        )
+        cls.failed_provider_account.last_sync_summary_json = build_provider_sync_summary(
+            cls.failed_provider_account,
+            status='failed',
+            family_summaries={},
+            error='Provider sync failed for dashboard test',
+            default_supported_status='failed',
+        )
+        cls.failed_provider_account.last_sync_summary_json['latest_snapshot_id'] = cls.failed_comparison_snapshot.pk
+        cls.failed_provider_account.last_sync_summary_json['latest_snapshot_name'] = cls.failed_comparison_snapshot.name
+        cls.failed_provider_account.last_sync_summary_json['latest_snapshot_completed_at'] = timezone.now().isoformat()
+        cls.failed_provider_account.last_sync_summary_json['latest_diff_id'] = cls.failed_snapshot_diff.pk
+        cls.failed_provider_account.last_sync_summary_json['latest_diff_name'] = cls.failed_snapshot_diff.name
+        cls.failed_provider_account.save(update_fields=['last_sync_summary_json'])
         cls.stale_provider_account = create_test_provider_account(
             name='Stale Operations Account',
             organization=cls.organization,
@@ -989,6 +1113,8 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
     def test_operations_dashboard_surfaces_sync_and_expiry_issues(self):
         self.add_permissions(
             'netbox_rpki.view_rpkiprovideraccount',
+            'netbox_rpki.view_providersnapshot',
+            'netbox_rpki.view_providersnapshotdiff',
             'netbox_rpki.view_roa',
             'netbox_rpki.view_certificate',
             'netbox_rpki.view_roareconciliationrun',
@@ -1003,6 +1129,10 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
         self.assertContains(response, self.failed_provider_account.name)
         self.assertContains(response, self.stale_provider_account.name)
         self.assertNotContains(response, self.healthy_provider_account.name)
+        self.assertContains(response, 'Freshness')
+        self.assertContains(response, 'Family Coverage')
+        self.assertContains(response, self.failed_comparison_snapshot.name)
+        self.assertContains(response, self.failed_snapshot_diff.name)
         self.assertContains(response, self.expiring_roa.name)
         self.assertNotContains(response, self.future_roa.name)
         self.assertContains(response, self.expiring_certificate.name)
@@ -1012,6 +1142,25 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
         self.assertContains(response, 'Reconciliation Runs Requiring Attention')
         self.assertContains(response, 'Open ROA Change Plans Requiring Attention')
         self.assertContains(response, scenario.provider_plan.name)
+
+    def test_operations_dashboard_shows_arin_roa_only_family_coverage(self):
+        self.add_permissions(
+            'netbox_rpki.view_rpkiprovideraccount',
+            'netbox_rpki.view_providersnapshot',
+            'netbox_rpki.view_providersnapshotdiff',
+            'netbox_rpki.view_roa',
+            'netbox_rpki.view_certificate',
+            'netbox_rpki.view_roareconciliationrun',
+            'netbox_rpki.view_roachangeplan',
+        )
+
+        response = self.client.get(reverse('plugins:netbox_rpki:operations_dashboard'))
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'Provider Accounts Requiring Attention')
+        self.assertContains(response, self.arin_account.name)
+        self.assertContains(response, '9 families: 1 pending, 8 not implemented')
+        self.assertContains(response, 'Last success:')
 
 
 class GeneratedSurfaceContractTestCase(PluginViewTestCase):

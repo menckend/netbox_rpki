@@ -3,12 +3,32 @@ from typing import Annotated
 import strawberry
 import strawberry_django
 from strawberry.scalars import JSON
+from strawberry.types import Info
 
 from netbox.graphql.types import NetBoxObjectType
 
+from netbox_rpki import models
 from netbox_rpki.detail_specs import get_latest_provider_snapshot_diff
 from netbox_rpki.object_registry import GRAPHQL_OBJECT_SPECS
 from netbox_rpki.object_specs import ObjectSpec
+from netbox_rpki.services.provider_sync_contract import (
+    build_provider_account_rollup,
+    build_provider_snapshot_diff_rollup,
+    build_provider_snapshot_rollup,
+)
+from netbox_rpki.services.provider_sync_evidence import (
+    get_certificate_observation_evidence_summary,
+    get_certificate_observation_is_ambiguous,
+    get_certificate_observation_publication_linkage_status,
+    get_certificate_observation_signed_object_linkage_status,
+    get_certificate_observation_source_count,
+    get_certificate_observation_source_labels,
+    get_publication_point_authored_linkage_status,
+    get_publication_point_evidence_summary,
+    get_signed_object_authored_linkage_status,
+    get_signed_object_evidence_summary,
+    get_signed_object_publication_linkage_status,
+)
 
 from .filters import GRAPHQL_FILTER_CLASS_MAP
 
@@ -18,6 +38,33 @@ class ProviderAccountReportingMixin:
     @strawberry.field
     def last_sync_summary(self) -> JSON:
         return self.last_sync_summary_json
+
+    @strawberry.field
+    def last_sync_rollup(self, info: Info) -> JSON:
+        summary = self.last_sync_summary_json or {}
+        snapshot_id = summary.get('latest_snapshot_id')
+        diff_id = summary.get('latest_diff_id')
+        visible_snapshot_ids = None
+        visible_diff_ids = None
+
+        if snapshot_id is not None:
+            visible_snapshot_ids = set(
+                models.ProviderSnapshot.objects.restrict(info.context.request.user, 'view')
+                .filter(pk=snapshot_id)
+                .values_list('pk', flat=True)
+            )
+        if diff_id is not None:
+            visible_diff_ids = set(
+                models.ProviderSnapshotDiff.objects.restrict(info.context.request.user, 'view')
+                .filter(pk=diff_id)
+                .values_list('pk', flat=True)
+            )
+
+        return build_provider_account_rollup(
+            self,
+            visible_snapshot_ids=visible_snapshot_ids,
+            visible_diff_ids=visible_diff_ids,
+        )
 
 
 @strawberry.type
@@ -30,6 +77,23 @@ class ProviderSnapshotReportingMixin:
     @strawberry.field
     def latest_diff(self) -> Annotated["ProviderSnapshotDiffType", strawberry.lazy('.types')] | None:
         return get_latest_provider_snapshot_diff(self)
+
+    @strawberry.field
+    def latest_diff_summary(self, info: Info) -> JSON | None:
+        visible_diff_ids = set(
+            models.ProviderSnapshotDiff.objects.restrict(info.context.request.user, 'view')
+            .filter(comparison_snapshot=self)
+            .values_list('pk', flat=True)
+        )
+        return build_provider_snapshot_rollup(self, visible_diff_ids=visible_diff_ids)['latest_diff_summary']
+
+    @strawberry.field
+    def family_rollups(self) -> JSON:
+        return build_provider_snapshot_rollup(self)['family_rollups']
+
+    @strawberry.field
+    def family_status_counts(self) -> JSON:
+        return build_provider_snapshot_rollup(self)['family_status_counts']
 
     @strawberry.field(name='imported_roa_authorizations')
     def imported_roa_authorizations_query(self) -> list[Annotated["ImportedRoaAuthorizationType", strawberry.lazy('.types')]]:
@@ -78,6 +142,14 @@ class ProviderSnapshotDiffReportingMixin:
     @strawberry.field
     def item_count(self) -> int:
         return self.items.count()
+
+    @strawberry.field
+    def family_rollups(self) -> JSON:
+        return build_provider_snapshot_diff_rollup(self)['family_rollups']
+
+    @strawberry.field
+    def family_status_counts(self) -> JSON:
+        return build_provider_snapshot_diff_rollup(self)['family_status_counts']
 
 
 @strawberry.type
@@ -134,11 +206,70 @@ class SignedObjectSurfaceMixin:
         return self.validation_results.all()
 
 
+@strawberry.type
+class ImportedPublicationPointEvidenceMixin:
+
+    @strawberry.field
+    def authored_linkage_status(self) -> str:
+        return get_publication_point_authored_linkage_status(self)
+
+    @strawberry.field
+    def evidence_summary(self) -> JSON:
+        return get_publication_point_evidence_summary(self)
+
+
+@strawberry.type
+class ImportedSignedObjectEvidenceMixin:
+
+    @strawberry.field
+    def publication_linkage_status(self) -> str:
+        return get_signed_object_publication_linkage_status(self)
+
+    @strawberry.field
+    def authored_linkage_status(self) -> str:
+        return get_signed_object_authored_linkage_status(self)
+
+    @strawberry.field
+    def evidence_summary(self) -> JSON:
+        return get_signed_object_evidence_summary(self)
+
+
+@strawberry.type
+class ImportedCertificateObservationEvidenceMixin:
+
+    @strawberry.field
+    def source_count(self) -> int:
+        return get_certificate_observation_source_count(self)
+
+    @strawberry.field
+    def source_labels(self) -> list[str]:
+        return get_certificate_observation_source_labels(self)
+
+    @strawberry.field
+    def is_ambiguous(self) -> bool:
+        return get_certificate_observation_is_ambiguous(self)
+
+    @strawberry.field
+    def publication_linkage_status(self) -> str:
+        return get_certificate_observation_publication_linkage_status(self)
+
+    @strawberry.field
+    def signed_object_linkage_status(self) -> str:
+        return get_certificate_observation_signed_object_linkage_status(self)
+
+    @strawberry.field
+    def evidence_summary(self) -> JSON:
+        return get_certificate_observation_evidence_summary(self)
+
+
 REPORTING_MIXINS = {
     'rpkiprovideraccount': ProviderAccountReportingMixin,
     'providersnapshot': ProviderSnapshotReportingMixin,
     'providersnapshotdiff': ProviderSnapshotDiffReportingMixin,
     'signedobject': SignedObjectSurfaceMixin,
+    'importedpublicationpoint': ImportedPublicationPointEvidenceMixin,
+    'importedsignedobject': ImportedSignedObjectEvidenceMixin,
+    'importedcertificateobservation': ImportedCertificateObservationEvidenceMixin,
 }
 
 

@@ -23,6 +23,10 @@ The plugin still covers the original core inventory objects for organizations, r
 
 This newer model layer is implemented as schema plus registry-driven plugin surfaces. The writable intent-policy objects are available now, while derivation and reconciliation run or result objects are currently read-only reporting surfaces.
 
+The plugin also includes hosted-provider synchronization and reporting surfaces for Krill and ARIN accounts, including imported publication points, signed-object inventory, certificate observations, provider snapshot or diff summaries, and provider-account rollups used by the API, GraphQL, detail views, and operations dashboard. Current hosted-provider coverage is intentionally limited to Krill and ARIN, and ARIN currently supports hosted ROA synchronization only while the shared reporting contract preserves that capability boundary explicitly.
+
+The latest provider-sync reporting work adds stable evidence summaries so imported publication-observation surfaces can explain publication linkage, authored linkage, source ambiguity, freshness, and family-level churn without creating false diffs across unchanged snapshots.
+
 ### Models / DB tables
 
 #### Core inventory models
@@ -198,7 +202,7 @@ Validation completed against real development installs of:
 - NetBox 4.5.0
 - NetBox 4.5.7
 
-Validation evidence for both versions includes successful plugin bootstrap and `manage.py check` with the plugin enabled, plus the full Python test suite passing (`196` tests). Browser smoke coverage was also run successfully against the NetBox 4.5.0 environment (`7` Playwright specs passed).
+Validation evidence for both versions includes successful plugin bootstrap and `manage.py check` with the plugin enabled. Recent verification against NetBox 4.5.7 also covered the provider-sync, models, imported-provider-registry, API, GraphQL, and view suites together, and browser smoke coverage was run successfully against the NetBox 4.5.0 environment.
 
 
 ## Installing
