@@ -35,6 +35,18 @@ from netbox_rpki.tests.utils import (
     create_test_rir,
     create_test_roa,
     create_test_roa_prefix,
+    create_test_imported_aspa,
+    create_test_imported_aspa_provider,
+    create_test_imported_ca_metadata,
+    create_test_imported_child_link,
+    create_test_imported_parent_link,
+    create_test_imported_publication_point,
+    create_test_imported_resource_entitlement,
+    create_test_imported_roa_authorization,
+    create_test_provider_account,
+    create_test_provider_snapshot,
+    create_test_provider_snapshot_diff,
+    create_test_provider_snapshot_diff_item,
 )
 
 
@@ -68,11 +80,17 @@ class GraphQLSchemaRegistrationTestCase(SimpleTestCase):
         )
 
     def test_query_exposes_all_plugin_fields(self):
+        custom_fields = {
+            'provider_account_summary',
+            'provider_snapshot_summary',
+            'provider_snapshot_latest_diff',
+            'provider_snapshot_diff',
+        }
         expected_fields = {
             field_name
             for field_names in EXPECTED_GRAPHQL_FIELD_NAMES_BY_KEY.values()
             for field_name in field_names
-        }
+        } | custom_fields
 
         actual_fields = {field.name for field in NetBoxRpkiQuery.__strawberry_definition__.fields}
 
@@ -81,7 +99,16 @@ class GraphQLSchemaRegistrationTestCase(SimpleTestCase):
     def test_query_field_order_matches_registry_order(self):
         actual_field_order = [field.name for field in NetBoxRpkiQuery.__strawberry_definition__.fields]
 
-        self.assertListEqual(actual_field_order, list(EXPECTED_GRAPHQL_FIELD_ORDER))
+        self.assertListEqual(
+            actual_field_order,
+            [
+                'provider_account_summary',
+                'provider_snapshot_summary',
+                'provider_snapshot_latest_diff',
+                'provider_snapshot_diff',
+                *EXPECTED_GRAPHQL_FIELD_ORDER,
+            ],
+        )
 
     def test_type_map_uses_existing_graphql_types(self):
         graphql_types = import_module('netbox_rpki.graphql.types')
@@ -380,6 +407,218 @@ class RoaPrefixGraphQLTestCase(PluginGraphQLTestMixin, APITestCase):
             (f'roa_name_id: "{cls.roa_b.pk}"', (cls.roa_prefix_b, cls.roa_prefix_c)),
         )
         cls.empty_result_filter = 'roa_name_id: "999999"'
+
+
+class ProviderReportingGraphQLTestCase(APITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='provider-graphql-org', name='Provider GraphQL Org')
+        cls.provider_account = create_test_provider_account(
+            name='GraphQL Provider Account',
+            organization=cls.organization,
+            provider_type='krill',
+            ca_handle='graphql-ca',
+            org_handle='ORG-GRAPHQL',
+        )
+        cls.other_provider_account = create_test_provider_account(
+            name='GraphQL Provider Account 2',
+            organization=cls.organization,
+            provider_type='arin',
+            ca_handle='graphql-ca-2',
+            org_handle='ORG-GRAPHQL-2',
+        )
+        cls.base_snapshot = create_test_provider_snapshot(
+            name='GraphQL Base Snapshot',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+        )
+        cls.comparison_snapshot = create_test_provider_snapshot(
+            name='GraphQL Comparison Snapshot',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+        )
+        cls.extra_snapshot = create_test_provider_snapshot(
+            name='GraphQL Extra Snapshot',
+            organization=cls.organization,
+            provider_account=cls.other_provider_account,
+        )
+        cls.snapshot_diff = create_test_provider_snapshot_diff(
+            name='GraphQL Snapshot Diff',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+            base_snapshot=cls.base_snapshot,
+            comparison_snapshot=cls.comparison_snapshot,
+        )
+        create_test_provider_snapshot_diff_item(
+            name='GraphQL Snapshot Diff Item',
+            snapshot_diff=cls.snapshot_diff,
+            object_family='roa_authorizations',
+            change_type='changed',
+            provider_identity='graphql-provider-identity',
+        )
+        cls.imported_prefix = create_test_prefix('10.199.0.0/24')
+        cls.imported_asn = create_test_asn(65550)
+        cls.imported_customer_asn = create_test_asn(65551)
+        cls.imported_roa = create_test_imported_roa_authorization(
+            name='GraphQL Imported ROA',
+            provider_snapshot=cls.comparison_snapshot,
+            organization=cls.organization,
+            prefix=cls.imported_prefix,
+            origin_asn=cls.imported_asn,
+            max_length=24,
+        )
+        cls.imported_aspa = create_test_imported_aspa(
+            name='GraphQL Imported ASPA',
+            provider_snapshot=cls.comparison_snapshot,
+            organization=cls.organization,
+            customer_as=cls.imported_customer_asn,
+        )
+        create_test_imported_aspa_provider(imported_aspa=cls.imported_aspa, provider_as=cls.imported_asn)
+        cls.imported_ca_metadata = create_test_imported_ca_metadata(
+            name='GraphQL Imported CA Metadata',
+            provider_snapshot=cls.comparison_snapshot,
+            organization=cls.organization,
+            ca_handle='graphql-ca-handle',
+        )
+        cls.imported_parent_link = create_test_imported_parent_link(
+            name='GraphQL Imported Parent Link',
+            provider_snapshot=cls.comparison_snapshot,
+            organization=cls.organization,
+            parent_handle='parent-graphql',
+        )
+        cls.imported_child_link = create_test_imported_child_link(
+            name='GraphQL Imported Child Link',
+            provider_snapshot=cls.comparison_snapshot,
+            organization=cls.organization,
+            child_handle='child-graphql',
+        )
+        cls.imported_resource_entitlement = create_test_imported_resource_entitlement(
+            name='GraphQL Imported Resource Entitlement',
+            provider_snapshot=cls.comparison_snapshot,
+            organization=cls.organization,
+            entitlement_source='graphql-entitlement',
+        )
+        cls.imported_publication_point = create_test_imported_publication_point(
+            name='GraphQL Imported Publication Point',
+            provider_snapshot=cls.comparison_snapshot,
+            organization=cls.organization,
+            publication_uri='rsync://graphql.invalid/repo/',
+        )
+
+    def graphql_request(self, query):
+        response = self.client.post(reverse('graphql'), data={'query': query}, format='json', **self.header)
+        self.assertHttpStatus(response, 200)
+        return json.loads(response.content)
+
+    def test_provider_reporting_queries_expose_summary_and_diff_lookup(self):
+        self.add_permissions(
+            'netbox_rpki.view_rpkiprovideraccount',
+            'netbox_rpki.view_providersnapshot',
+            'netbox_rpki.view_providersnapshotdiff',
+            'netbox_rpki.view_importedroaauthorization',
+            'netbox_rpki.view_importedaspa',
+            'netbox_rpki.view_importedcametadata',
+            'netbox_rpki.view_importedparentlink',
+            'netbox_rpki.view_importedchildlink',
+            'netbox_rpki.view_importedresourceentitlement',
+            'netbox_rpki.view_importedpublicationpoint',
+        )
+
+        query = f'''
+        {{
+            provider_account_summary
+            provider_snapshot_summary
+            provider_snapshot_latest_diff(snapshot_id: "{self.comparison_snapshot.pk}") {{
+                id
+                name
+                item_count
+            }}
+            provider_snapshot_diff(base_snapshot_id: "{self.base_snapshot.pk}", comparison_snapshot_id: "{self.comparison_snapshot.pk}") {{
+                id
+                name
+                item_count
+            }}
+            netbox_rpki_providersnapshot(id: {self.comparison_snapshot.pk}) {{
+                id
+                name
+                summary
+                latest_diff {{
+                    id
+                    name
+                }}
+                imported_roa_authorizations {{
+                    id
+                    name
+                }}
+                imported_aspas {{
+                    id
+                    name
+                }}
+                imported_ca_metadata_records {{
+                    id
+                    name
+                }}
+                imported_parent_links {{
+                    id
+                    name
+                }}
+                imported_child_links {{
+                    id
+                    name
+                }}
+                imported_resource_entitlements {{
+                    id
+                    name
+                }}
+                imported_publication_points {{
+                    id
+                    name
+                }}
+            }}
+        }}
+        '''
+
+        data = self.graphql_request(query)
+
+        self.assertNotIn('errors', data)
+        self.assertEqual(data['data']['provider_account_summary']['total_accounts'], 2)
+        self.assertEqual(data['data']['provider_account_summary']['by_provider_type']['krill'], 1)
+        self.assertEqual(data['data']['provider_account_summary']['by_provider_type']['arin'], 1)
+        self.assertEqual(data['data']['provider_snapshot_summary']['total_snapshots'], 3)
+        self.assertEqual(data['data']['provider_snapshot_summary']['with_diff_count'], 1)
+        self.assertEqual(data['data']['provider_snapshot_latest_diff']['id'], str(self.snapshot_diff.pk))
+        self.assertEqual(data['data']['provider_snapshot_latest_diff']['item_count'], 1)
+        self.assertEqual(data['data']['provider_snapshot_diff']['id'], str(self.snapshot_diff.pk))
+        self.assertEqual(data['data']['netbox_rpki_providersnapshot']['latest_diff']['id'], str(self.snapshot_diff.pk))
+        self.assertEqual(
+            [row['id'] for row in data['data']['netbox_rpki_providersnapshot']['imported_roa_authorizations']],
+            [str(self.imported_roa.pk)],
+        )
+        self.assertEqual(
+            [row['id'] for row in data['data']['netbox_rpki_providersnapshot']['imported_aspas']],
+            [str(self.imported_aspa.pk)],
+        )
+        self.assertEqual(
+            [row['id'] for row in data['data']['netbox_rpki_providersnapshot']['imported_ca_metadata_records']],
+            [str(self.imported_ca_metadata.pk)],
+        )
+        self.assertEqual(
+            [row['id'] for row in data['data']['netbox_rpki_providersnapshot']['imported_parent_links']],
+            [str(self.imported_parent_link.pk)],
+        )
+        self.assertEqual(
+            [row['id'] for row in data['data']['netbox_rpki_providersnapshot']['imported_child_links']],
+            [str(self.imported_child_link.pk)],
+        )
+        self.assertEqual(
+            [row['id'] for row in data['data']['netbox_rpki_providersnapshot']['imported_resource_entitlements']],
+            [str(self.imported_resource_entitlement.pk)],
+        )
+        self.assertEqual(
+            [row['id'] for row in data['data']['netbox_rpki_providersnapshot']['imported_publication_points']],
+            [str(self.imported_publication_point.pk)],
+        )
+        self.assertEqual(data['data']['netbox_rpki_providersnapshot']['summary'], self.comparison_snapshot.summary_json)
 
 
 class CertificatePrefixGraphQLTestCase(PluginGraphQLTestMixin, APITestCase):
