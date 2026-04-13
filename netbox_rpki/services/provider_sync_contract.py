@@ -24,9 +24,49 @@ PROVIDER_SYNC_FAMILY_LABELS = {
     for choice in rpki_models.ProviderSyncFamily
 }
 
+PROVIDER_SYNC_FAMILY_METADATA = {
+    rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS: {
+        'family_kind': 'control_plane',
+        'evidence_source': 'provider_control_plane',
+    },
+    rpki_models.ProviderSyncFamily.ASPAS: {
+        'family_kind': 'control_plane',
+        'evidence_source': 'provider_control_plane',
+    },
+    rpki_models.ProviderSyncFamily.CA_METADATA: {
+        'family_kind': 'control_plane',
+        'evidence_source': 'provider_control_plane',
+    },
+    rpki_models.ProviderSyncFamily.PARENT_LINKS: {
+        'family_kind': 'control_plane',
+        'evidence_source': 'provider_control_plane',
+    },
+    rpki_models.ProviderSyncFamily.CHILD_LINKS: {
+        'family_kind': 'control_plane',
+        'evidence_source': 'provider_control_plane',
+    },
+    rpki_models.ProviderSyncFamily.RESOURCE_ENTITLEMENTS: {
+        'family_kind': 'control_plane',
+        'evidence_source': 'provider_control_plane',
+    },
+    rpki_models.ProviderSyncFamily.PUBLICATION_POINTS: {
+        'family_kind': 'publication_observation',
+        'evidence_source': 'repository_publication',
+    },
+    rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY: {
+        'family_kind': 'publication_observation',
+        'evidence_source': 'repository_publication',
+    },
+    rpki_models.ProviderSyncFamily.SIGNED_OBJECT_INVENTORY: {
+        'family_kind': 'publication_observation',
+        'evidence_source': 'repository_publication',
+    },
+}
+
 KRILL_CERTIFICATE_INVENTORY_LIMITATION_REASON = (
-    'Krill does not expose a documented first-class certificate inventory endpoint; '
-    'only nested certificate-bearing fields are available in CA metadata, parent status, and repo-status payloads.'
+    'Repository-derived published-certificate observation is not yet fully implemented from Krill-backed '
+    'publication evidence; only nested certificate-bearing fields are available in CA metadata, parent status, '
+    'and repo-status payloads.'
 )
 
 
@@ -66,10 +106,15 @@ def family_capability_extra(
                 'ca_metadata',
                 'parent_links',
                 'publication_points',
+                'repo_status',
             ],
             'capability_reason': KRILL_CERTIFICATE_INVENTORY_LIMITATION_REASON,
         }
     return {}
+
+
+def family_metadata(family: str) -> dict[str, object]:
+    return dict(PROVIDER_SYNC_FAMILY_METADATA[family])
 
 
 def build_family_summary(
@@ -84,6 +129,7 @@ def build_family_summary(
         'label': PROVIDER_SYNC_FAMILY_LABELS[family],
         'status': status,
     }
+    summary.update(family_metadata(family))
     summary.update(empty_sync_counts())
     if counts:
         for key in PROVIDER_SYNC_COUNT_KEYS:

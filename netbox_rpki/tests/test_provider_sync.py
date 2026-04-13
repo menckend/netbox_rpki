@@ -198,18 +198,26 @@ class ProviderSyncServiceTestCase(TestCase):
             {row.signed_object_type for row in imported_signed_objects},
             {
                 rpki_models.SignedObjectType.MANIFEST,
-                rpki_models.SignedObjectType.OTHER,
+                rpki_models.SignedObjectType.CRL,
             },
         )
         manifest_signed_object = next(
             row for row in imported_signed_objects if row.signed_object_type == rpki_models.SignedObjectType.MANIFEST
         )
+        crl_signed_object = next(
+            row for row in imported_signed_objects if row.signed_object_type == rpki_models.SignedObjectType.CRL
+        )
         self.assertEqual(manifest_signed_object.publication_point, imported_publication_points[0])
+        self.assertEqual(crl_signed_object.publication_point, imported_publication_points[0])
         provider_account.refresh_from_db()
         self.assertEqual(snapshot.summary_json['summary_schema_version'], PROVIDER_SYNC_SUMMARY_SCHEMA_VERSION)
         self.assertEqual(
             snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS]['label'],
             'ROA Authorizations',
+        )
+        self.assertEqual(
+            snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS]['family_kind'],
+            'control_plane',
         )
         self.assertEqual(
             snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.ASPAS]['records_imported'],
@@ -236,6 +244,10 @@ class ProviderSyncServiceTestCase(TestCase):
             1,
         )
         self.assertEqual(
+            snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.PUBLICATION_POINTS]['family_kind'],
+            'publication_observation',
+        )
+        self.assertEqual(
             snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.SIGNED_OBJECT_INVENTORY]['records_imported'],
             2,
         )
@@ -251,9 +263,21 @@ class ProviderSyncServiceTestCase(TestCase):
             snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY]['capability_mode'],
             'placeholder',
         )
+        self.assertEqual(
+            snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY]['family_kind'],
+            'publication_observation',
+        )
+        self.assertEqual(
+            snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY]['evidence_source'],
+            'repository_publication',
+        )
         self.assertIn(
-            'first-class certificate inventory endpoint',
+            'Repository-derived published-certificate observation',
             snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY]['capability_reason'],
+        )
+        self.assertIn(
+            'repo_status',
+            snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY]['capability_sources'],
         )
         self.assertEqual(snapshot.summary_json['records_imported'], 15)
         self.assertEqual(snapshot.summary_json['route_records_imported'], 2)
@@ -485,6 +509,10 @@ class ProviderSyncServiceTestCase(TestCase):
             1,
         )
         self.assertEqual(
+            snapshot_diff.summary_json['families'][rpki_models.ProviderSyncFamily.PUBLICATION_POINTS]['family_kind'],
+            'publication_observation',
+        )
+        self.assertEqual(
             snapshot_diff.summary_json['families'][rpki_models.ProviderSyncFamily.SIGNED_OBJECT_INVENTORY]['status'],
             rpki_models.ProviderSyncFamilyStatus.COMPLETED,
         )
@@ -499,6 +527,14 @@ class ProviderSyncServiceTestCase(TestCase):
         self.assertEqual(
             snapshot_diff.summary_json['families'][rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY]['capability_status'],
             rpki_models.ProviderSyncFamilyStatus.LIMITED,
+        )
+        self.assertEqual(
+            snapshot_diff.summary_json['families'][rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY]['family_kind'],
+            'publication_observation',
+        )
+        self.assertEqual(
+            snapshot_diff.summary_json['families'][rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY]['evidence_source'],
+            'repository_publication',
         )
         self.assertEqual(
             set(snapshot_diff.items.values_list('change_type', flat=True)),

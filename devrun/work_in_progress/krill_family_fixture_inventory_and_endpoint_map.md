@@ -1,198 +1,173 @@
-# Krill Family Fixture Inventory and Endpoint Map
+# Krill Publication-Point Evidence Fixture Inventory and Repository Artifact Map
 
 Last updated: April 12, 2026
 
-## Scope
+## Purpose
 
-This packet inventories the next Krill sync families after routes and ASPAs, using only:
+This note is the working inventory for Krill evidence sources that can support repository-derived observation, especially publication-point-backed artifacts. It keeps control-plane evidence separate from publication-observation evidence so later importer and test work does not confuse provider management payloads with repository contents.
 
-- repo evidence already present in this workspace
-- public Krill 0.16.0 documentation
-- public Krill testbed documentation where it confirms test-surface availability
+This is documentation only. It does not add importer behavior and it does not invent a provider certificate inventory endpoint.
 
-This packet does not implement importer behavior. It only lands deterministic fixture support and a written endpoint map for follow-on parser and importer work.
+## Evidence model
 
-## Current repo baseline
+### Control-plane evidence
 
-- Current live Krill sync support is limited to routes and ASPAs.
-- Existing adapter endpoints are in `netbox_rpki/services/provider_sync_krill.py`.
-- Existing deterministic Krill route and ASPA payloads were previously inline in `netbox_rpki/tests/test_provider_sync.py` and are now centralized in `netbox_rpki/tests/krill_payloads.py`.
+Control-plane evidence is provider-management state returned by Krill APIs that describe the CA, its parent and child relationships, and its resource entitlements. It is useful for synchronization and linkage, but it is not the authoritative source for published certificate inventory.
 
-## Public evidence used
+Current control-plane families that are suitable Tier 1 inputs now:
 
-- Krill CLI/API manual, stable 0.16.0: `https://krill.docs.nlnetlabs.nl/en/stable/cli.html`
-- Krill child-management guide: `https://krill.docs.nlnetlabs.nl/en/stable/manage-children.html`
-- Krill ASPA guide: `https://krill.docs.nlnetlabs.nl/en/stable/manage-aspas.html`
-- Krill testbed guide: `https://krill.docs.nlnetlabs.nl/en/stable/testbed.html`
-- Public testbed landing page referenced by the official docs: `https://testbed.krill.cloud/index.html#/testbed`
-- Public Krill source references for API type shapes and route dispatch in `NLnetLabs/krill`
+| Family | Current source(s) | Current fixtures | Why Tier 1 now |
+| --- | --- | --- | --- |
+| `ca_metadata` | `GET /api/v1/cas/{ca}` via `krillc show --ca <ca> --api` | `KRILL_CA_METADATA_JSON` | Stable root payload for CA handle, id-cert linkage, repository linkage, resources, parents, and child-handle discovery. |
+| `parent_links` | `GET /api/v1/cas/{ca}/parents` and `GET /api/v1/cas/{ca}/parents/{parent}` via `krillc parents statuses` and `krillc parents contact` | `KRILL_PARENT_STATUSES_JSON`, `KRILL_PARENT_CONTACT_JSON` | Exposes parent handle, exchange status, parent-side resources, and issuance-related certificate-bearing linkage fields. |
+| `child_links` | `GET /api/v1/cas/{ca}` plus `GET /api/v1/cas/{ca}/children/{child}` and `GET /api/v1/cas/{ca}/stats/children/connections` via `krillc children info` and `krillc children connections` | `KRILL_CA_METADATA_JSON`, `KRILL_CHILD_INFO_JSON`, `KRILL_CHILD_CONNECTIONS_JSON` | Provides child handle discovery, child state, child id-cert linkage, entitlement data, and child connection freshness. |
+| `resource_entitlements` | Derived from `GET /api/v1/cas/{ca}`, parent status, and child info | `KRILL_CA_METADATA_JSON`, `KRILL_PARENT_STATUSES_JSON`, `KRILL_CHILD_INFO_JSON` | These are already available as a composed view of provider-held resources and delegated resources. |
 
-## Tier split
+### Publication-observation evidence
 
-### Tier 1: actionable now
+Publication-observation evidence is repository-facing state that describes publication points and the objects published beneath them. This is the evidence source that should anchor repository artifact maps, signed-object inventory, and future certificate observation.
 
-These families are exposed directly enough by the current public Krill surface to justify deterministic parser fixtures now.
+Current publication-observation families that are suitable Tier 1 inputs now:
 
-| Family | Why Tier 1 now |
-| --- | --- |
-| `ca_metadata` | Public docs show `krillc show --api` with a stable CA JSON payload at `GET /api/v1/cas/{ca}`. |
-| `parent_links` | Public docs show both parent status inventory and per-parent contact detail endpoints. |
-| `child_links` | Public docs show child handles in CA detail plus child info and child connection-status endpoints. |
-| `resource_entitlements` | Public docs expose entitlement data directly in parent status responses and child info responses, even though there is no dedicated entitlement-only endpoint. |
-| `publication_points` | Public docs show both configured repository metadata and repository sync status with published-object summaries. |
+| Family | Current source(s) | Current fixtures | Why Tier 1 now |
+| --- | --- | --- | --- |
+| `publication_points` | `GET /api/v1/cas/{ca}/repo` and `GET /api/v1/cas/{ca}/repo/status` via `krillc repo show` and `krillc repo status` | `KRILL_REPO_DETAILS_JSON`, `KRILL_REPO_STATUS_JSON` | This is the cleanest current source for publication topology, freshness, and the published object list. |
+| `signed_object_inventory` | Derived from the publication-point payloads and their published object membership | `KRILL_REPO_STATUS_JSON` | The published list already exposes object URIs and bodies for deterministic classification of published signed objects such as manifests and CRLs. |
 
-### Tier 2: staged / not yet confirmed enough
+## Repository artifact map
 
-| Family | Why not Tier 1 in this packet |
-| --- | --- |
-| `certificate_inventory` | No public dedicated certificate-inventory endpoint is documented. Certificate material exists only as nested data inside CA detail, parent status, and repo-status payloads. That is enough to plan derived inventory work, but not enough to claim a clean first-class inventory surface yet. No standalone fixture is added here. |
+The current Krill dev surface gives us a practical repository artifact map even though it does not yet give us a first-class certificate inventory endpoint.
 
-## Endpoint map
+### Publication-point metadata
 
-### `ca_metadata`
+Use `KRILL_REPO_DETAILS_JSON` and `KRILL_REPO_STATUS_JSON` for publication-point metadata.
 
-- Primary endpoint: `GET /api/v1/cas/{ca}`
-- Public evidence: `krillc show --ca <ca> --api`
-- Fixture: `KRILL_CA_METADATA_JSON`
-- Current actionable fields confirmed in docs/source:
-  - `handle`
-  - `id_cert`
-  - `repo_info`
-  - `parents`
-  - `resources`
-  - `resource_classes`
-  - `children`
-  - `suspended_children`
-- Notes:
-  - This is the best current root payload for the synced CA.
-  - It also supplies child-handle discovery for follow-on child-link fetches.
+Confirmed fields that matter now:
 
-### `parent_links`
+- `service_uri`
+- `repo_info.sia_base`
+- `repo_info.rrdp_notification_uri`
+- `last_exchange`
+- `next_exchange_before`
+- `published`
 
-- Inventory/status endpoint: `GET /api/v1/cas/{ca}/parents`
-- Detail/contact endpoint: `GET /api/v1/cas/{ca}/parents/{parent}`
-- Public evidence:
-  - `krillc parents statuses --ca <ca> --api`
-  - `krillc parents contact --ca <ca> --parent <parent> --api`
-- Fixtures:
-  - `KRILL_PARENT_STATUSES_JSON`
-  - `KRILL_PARENT_CONTACT_JSON`
-- Current actionable fields confirmed in docs/source:
-  - parent handle map key
-  - `last_exchange`
-  - `last_success`
-  - `all_resources`
-  - `classes[*].class_name`
-  - `classes[*].resource_set`
-  - `classes[*].not_after`
-  - `classes[*].signing_cert`
-  - `classes[*].issued_certs`
-  - contact payload `type`, `tag`, `id_cert`, `parent_handle`, `child_handle`, `service_uri`
+These are the right fixtures for publication-point identity, repository endpoint linkage, and freshness reporting.
 
-### `child_links`
+### Published object membership
 
-- Child-handle discovery endpoint: `GET /api/v1/cas/{ca}`
-- Per-child info endpoint: `GET /api/v1/cas/{ca}/children/{child}`
-- Child connection-status endpoint: `GET /api/v1/cas/{ca}/stats/children/connections`
-- Public evidence:
-  - `krillc show --ca <ca> --api`
-  - `krillc children info --ca <ca> --child <child> --api`
-  - `krillc children connections --ca <ca> --api`
-- Fixtures:
-  - `KRILL_CA_METADATA_JSON` for `children` and `suspended_children`
-  - `KRILL_CHILD_INFO_JSON`
-  - `KRILL_CHILD_CONNECTIONS_JSON`
-- Current actionable fields confirmed in docs/source:
-  - child handles as simple arrays on CA detail
-  - child `state`
-  - child `id_cert`
-  - child `entitled_resources`
-  - child connection `last_exchange`, `result`, `user_agent`
-- Notes:
-  - There is no documented `GET /api/v1/cas/{ca}/children` list endpoint for inventory.
-  - Child-link inventory is still Tier 1 because the documented surface is sufficient when composed from the three endpoints above.
+Use the `published` array in `KRILL_REPO_STATUS_JSON` as the current evidence source for membership in the publication set.
 
-### `resource_entitlements`
+Each published object record should preserve at least:
 
-- Aggregate CA resources: `GET /api/v1/cas/{ca}`
-- Parent-issued entitlements: `GET /api/v1/cas/{ca}/parents`
-- Delegated child entitlements: `GET /api/v1/cas/{ca}/children/{child}`
-- Public evidence:
-  - `krillc show --ca <ca> --api`
-  - `krillc parents statuses --ca <ca> --api`
-  - `krillc children info --ca <ca> --child <child> --api`
-- Fixtures reused:
-  - `KRILL_CA_METADATA_JSON`
-  - `KRILL_PARENT_STATUSES_JSON`
-  - `KRILL_CHILD_INFO_JSON`
-- Current actionable fields confirmed in docs/source:
-  - total CA `resources`
-  - parent-side `all_resources`
-  - per-class `resource_set`
-  - child-side `entitled_resources`
-- Notes:
-  - This family is Tier 1 even though it does not have a dedicated entitlement-only endpoint.
-  - Follow-on parser work should treat this as a derived family sourced from documented CA, parent, and child payloads.
+- object URI
+- object body or body hash if available
+- publication-point association
+- signed-object type when it can be derived deterministically
 
-### `publication_points`
+This is the current anchor for future tests that need object membership, object URIs, or a retained snapshot of published content.
 
-- Repository metadata endpoint: `GET /api/v1/cas/{ca}/repo`
-- Repository status endpoint: `GET /api/v1/cas/{ca}/repo/status`
-- Public evidence:
-  - `krillc repo show --ca <ca> --api`
-  - `krillc repo status --ca <ca> --api`
-- Fixtures:
-  - `KRILL_REPO_DETAILS_JSON`
-  - `KRILL_REPO_STATUS_JSON`
-- Current actionable fields confirmed in docs/source:
-  - `service_uri`
-  - `repo_info.sia_base`
-  - `repo_info.rrdp_notification_uri`
-  - `last_exchange`
-  - `next_exchange_before`
-  - `published[*].uri`
-  - `published[*].base64`
-- Notes:
-  - This is the cleanest current source for publication topology and freshness.
-  - The `published` list is also the only currently documented object stream that hints at repository contents beyond ROA and ASPA configuration intent.
+### Manifests
 
-### `certificate_inventory`
+Manifests are not a fake certificate inventory surrogate. They are repository artifacts that enumerate expected published objects and therefore belong in publication-observation tests.
 
-- Candidate derived sources only, not a confirmed first-class endpoint:
-  - nested certificate material inside `GET /api/v1/cas/{ca}` resource-class keys
-  - nested certificate material inside `GET /api/v1/cas/{ca}/parents` class status entries
-  - published repository objects inside `GET /api/v1/cas/{ca}/repo/status`
-- Public evidence:
-  - `krillc show --ca <ca> --api`
-  - `krillc parents statuses --ca <ca> --api`
-  - `krillc repo status --ca <ca> --api`
-- Status in this packet: Tier 2
-- Reason:
-  - The public docs do not present a dedicated certificate inventory endpoint or a documented top-level JSON list for certificates comparable to routes, ASPAs, parents, or repo status.
-  - Public source confirms certificate-bearing structures exist, but the importer contract for a normalized inventory would still be derived and opinionated.
-- Decision:
-  - Do not add standalone certificate inventory fixtures in this packet.
-  - Revisit in the parser wave only after either live captures or a stronger source-backed normalization decision exists.
+For future fixture work, model manifests as:
 
-## Fixture inventory added in this packet
+- manifest metadata
+- manifest object URI
+- manifest entries
+- per-entry object names and hashes
+- the relationship back to the publication point that emitted the manifest
 
-All deterministic payloads landed under `netbox_rpki/tests/krill_payloads.py`.
+The current repo-status payload already gives us the object URI and body for a manifest-like published object; the next fixture step should add explicit manifest parsing and manifest-entry coverage rather than a certificate list endpoint.
 
-- Confirmed Tier 1 fixture payloads:
-  - `KRILL_CA_METADATA_JSON`
-  - `KRILL_PARENT_STATUSES_JSON`
-  - `KRILL_PARENT_CONTACT_JSON`
-  - `KRILL_CHILD_INFO_JSON`
-  - `KRILL_CHILD_CONNECTIONS_JSON`
-  - `KRILL_REPO_DETAILS_JSON`
-  - `KRILL_REPO_STATUS_JSON`
-- Existing baseline payloads retained and centralized for completeness:
-  - `KRILL_ROUTES_JSON`
-  - `KRILL_ASPAS_JSON`
+### CRLs
 
-## Assumptions and blockers
+CRLs belong in the same repository-observation lane as manifests.
 
-- Assumption: synthetic fixture values are acceptable as long as field names and top-level shape are constrained to documented Krill payloads.
-- Assumption: future parser work can treat `resource_entitlements` as a composed family sourced from multiple documented endpoints.
-- Blocker for `certificate_inventory`: public docs and public testbed material do not expose a dedicated inventory endpoint, so claiming a first-class certificate family now would force an opinionated derived model too early.
-- Public testbed docs confirm that a shared Krill testbed exists for experimentation, but they do not add extra anonymous JSON inventory endpoints beyond the normal documented API surface.
+For future fixture work, model CRLs as:
+
+- CRL metadata
+- CRL object URI
+- CRL number and freshness fields when available
+- the relationship back to the publication point that emitted the CRL
+
+The current repo-status payload already gives us the object URI and body for a CRL-like published object. That is enough to anchor a deterministic fixture without fabricating a certificate inventory feed.
+
+### Certificate-bearing auxiliary payloads
+
+Certificate-bearing auxiliary payloads are allowed only as linkage evidence.
+
+Use them to support relationships such as:
+
+- CA metadata to repository linkage
+- parent-issued certificate references
+- child entitlement references
+- publication-point adjacency
+
+Do not treat these fields as the canonical certificate inventory. The canonical inventory should come from repository evidence and published object membership.
+
+## Tier 1, Tier 2, and blocked
+
+### Tier 1: available now
+
+These are already suitable for deterministic tests and repository-observation groundwork.
+
+- `ca_metadata`
+- `parent_links`
+- `child_links`
+- `resource_entitlements`
+- `publication_points`
+- `signed_object_inventory`
+
+### Tier 2: derive next from repository evidence
+
+These are the next standards-aligned follow-ons, but they need real repository parsing or richer fixtures before they should be treated as complete.
+
+- manifest parsing
+- manifest entries
+- CRL parsing
+- repository-derived certificate observation
+- object-classification refinements beyond the current published-object membership list
+
+### Blocked: not a real endpoint
+
+`certificate_inventory` remains a compatibility family in the contract, but it is blocked as a first-class source until repository-derived observation is implemented.
+
+Why it stays blocked:
+
+- Krill does not expose a dedicated certificate inventory API that should be treated as the canonical source.
+- The available evidence is repository-facing and must be derived from publication artifacts.
+- Building a fake certificate-list fixture would hide the standards-aligned source of truth.
+
+## Fixture strategy for future tests
+
+Use the following rules when adding more Krill fixtures:
+
+1. Keep control-plane fixtures and publication-observation fixtures separate.
+2. Model repository evidence from publication points, published object membership, object URIs, and object bodies before inventing any derived certificate view.
+3. Add explicit manifest fixtures and manifest-entry fixtures when parser coverage needs repository completeness checks.
+4. Add explicit CRL fixtures when parser coverage needs revocation and freshness checks.
+5. Keep certificate-bearing auxiliary payloads as linkage hints, not as the canonical inventory source.
+6. Prefer deterministic fixtures built from documented Krill payload shapes over synthetic inventory endpoints.
+
+## Current deterministic payload inventory
+
+All current deterministic Krill payloads are centralized in `netbox_rpki/tests/krill_payloads.py`.
+
+Confirmed current payloads:
+
+- `KRILL_CA_METADATA_JSON`
+- `KRILL_PARENT_STATUSES_JSON`
+- `KRILL_PARENT_CONTACT_JSON`
+- `KRILL_CHILD_INFO_JSON`
+- `KRILL_CHILD_CONNECTIONS_JSON`
+- `KRILL_REPO_DETAILS_JSON`
+- `KRILL_REPO_STATUS_JSON`
+- `KRILL_ROUTES_JSON`
+- `KRILL_ASPAS_JSON`
+
+## Current repo observations worth preserving
+
+- The Krill provider sync implementation already treats publication points as a separate publication-observation family.
+- The provider-sync contract already marks `certificate_inventory` as publication-observation metadata, but the family still needs repository-derived implementation before it can become a real inventory source.
+- The current Krill tests already import publication points and signed objects from repo-status evidence, so the documentation should mirror that split instead of implying a certificate-list endpoint.

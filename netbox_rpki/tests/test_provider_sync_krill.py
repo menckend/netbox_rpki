@@ -227,5 +227,6 @@ class KrillProviderSyncParserTestCase(SimpleTestCase):
         self.assertEqual(records[0].signed_object_uri, 'rsync://testbed.krill.cloud/repo/netbox-rpki-dev/0/netbox-rpki-dev.mft')
         self.assertEqual(records[0].signed_object_type, rpki_models.SignedObjectType.MANIFEST)
         self.assertTrue(records[0].object_hash)
-        self.assertEqual(records[1].signed_object_type, rpki_models.SignedObjectType.OTHER)
+        self.assertEqual(records[1].signed_object_uri, 'rsync://testbed.krill.cloud/repo/netbox-rpki-dev/0/netbox-rpki-dev.crl')
+        self.assertEqual(records[1].signed_object_type, rpki_models.SignedObjectType.CRL)
         self.assertNotEqual(records[0].object_hash, records[1].object_hash)

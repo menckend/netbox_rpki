@@ -73,6 +73,7 @@ class RepositoryType(models.TextChoices):
 class SignedObjectType(models.TextChoices):
     ROA = "roa", "ROA"
     MANIFEST = "manifest", "Manifest"
+    CRL = "crl", "CRL"
     ASPA = "aspa", "ASPA"
     RSC = "rsc", "RSC"
     TAK = "tak", "Trust Anchor Key"

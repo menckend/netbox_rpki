@@ -853,6 +853,8 @@ def _infer_signed_object_type(uri: str) -> str:
         return rpki_models.SignedObjectType.ROA
     if normalized_uri.endswith('.mft'):
         return rpki_models.SignedObjectType.MANIFEST
+    if normalized_uri.endswith('.crl'):
+        return rpki_models.SignedObjectType.CRL
     if normalized_uri.endswith('.asa') or normalized_uri.endswith('.aspa'):
         return rpki_models.SignedObjectType.ASPA
     if normalized_uri.endswith('.rsc'):
