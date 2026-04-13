@@ -59,6 +59,14 @@ class ProviderSnapshotReportingMixin:
     def imported_publication_points_query(self) -> list[Annotated["ImportedPublicationPointType", strawberry.lazy('.types')]]:
         return self.imported_publication_points.all()
 
+    @strawberry.field(name='imported_signed_objects')
+    def imported_signed_objects_query(self) -> list[Annotated["ImportedSignedObjectType", strawberry.lazy('.types')]]:
+        return self.imported_signed_objects.all()
+
+    @strawberry.field(name='imported_certificate_observations')
+    def imported_certificate_observations_query(self) -> list[Annotated["ImportedCertificateObservationType", strawberry.lazy('.types')]]:
+        return self.imported_certificate_observations.all()
+
 
 @strawberry.type
 class ProviderSnapshotDiffReportingMixin:

@@ -234,6 +234,13 @@ class ExternalObjectType(models.TextChoices):
     SIGNED_OBJECT = "signed_object", "Signed Object"
 
 
+class CertificateObservationSource(models.TextChoices):
+    SIGNED_OBJECT_EE = "signed_object_ee", "Signed Object EE Certificate"
+    CA_INCOMING = "ca_incoming", "CA Incoming Certificate"
+    PARENT_SIGNING = "parent_signing", "Parent Signing Certificate"
+    PARENT_ISSUED = "parent_issued", "Parent Issued Certificate"
+
+
 class ImportedResourceEntitlementSource(models.TextChoices):
     CA = "ca", "CA"
     PARENT = "parent", "Parent"
@@ -2086,6 +2093,9 @@ class ExternalObjectReference(NamedRpkiStandardModel):
     def __str__(self):
         return self.name
 
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:externalobjectreference", args=[self.pk])
+
 
 def _build_import_key(*values: object) -> str:
     normalized = "|".join("" if value is None else str(value) for value in values)
@@ -2622,6 +2632,68 @@ class ImportedSignedObject(NamedRpkiStandardModel):
         secondary_identity = publication_uri.strip() if primary_identity != publication_uri.strip() else ''
         tertiary_identity = object_hash.strip() if primary_identity != object_hash.strip() else ''
         return _build_import_key(primary_identity, secondary_identity, tertiary_identity)
+
+
+class ImportedCertificateObservation(NamedRpkiStandardModel):
+    provider_snapshot = models.ForeignKey(
+        to='ProviderSnapshot',
+        on_delete=models.PROTECT,
+        related_name='imported_certificate_observations'
+    )
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='imported_certificate_observations'
+    )
+    certificate_key = models.CharField(max_length=64)
+    observation_source = models.CharField(
+        max_length=32,
+        choices=CertificateObservationSource.choices,
+        default=CertificateObservationSource.SIGNED_OBJECT_EE,
+    )
+    certificate_uri = models.CharField(max_length=500, blank=True)
+    publication_uri = models.CharField(max_length=500, blank=True)
+    signed_object_uri = models.CharField(max_length=500, blank=True)
+    related_handle = models.CharField(max_length=100, blank=True)
+    class_name = models.CharField(max_length=100, blank=True)
+    subject = models.CharField(max_length=500, blank=True)
+    issuer = models.CharField(max_length=500, blank=True)
+    serial_number = models.CharField(max_length=200, blank=True)
+    not_before = models.DateTimeField(blank=True, null=True)
+    not_after = models.DateTimeField(blank=True, null=True)
+    external_object_id = models.CharField(max_length=200, blank=True)
+    external_reference = models.ForeignKey(
+        to='ExternalObjectReference',
+        on_delete=models.PROTECT,
+        related_name='imported_certificate_observations',
+        blank=True,
+        null=True,
+    )
+    is_stale = models.BooleanField(default=False)
+    payload_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("name",)
+        constraints = (
+            models.UniqueConstraint(
+                fields=("provider_snapshot", "certificate_key"),
+                name="nb_rpki_impcertobs_snap_key_uniq",
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:importedcertificateobservation", args=[self.pk])
+
+    @classmethod
+    def build_certificate_key(
+        cls,
+        *,
+        certificate_key: str,
+    ) -> str:
+        return _build_import_key(certificate_key.strip().lower())
 
 
 class ASPAIntent(NamedRpkiStandardModel):

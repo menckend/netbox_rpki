@@ -11,6 +11,11 @@ from datetime import datetime, timezone
 from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
 
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from pyasn1.codec.der import decoder, encoder
+from pyasn1_modules import rfc5652, rfc6486
+
 from netbox_rpki import models as rpki_models
 
 
@@ -203,6 +208,35 @@ class KrillSignedObjectRecord:
 
 
 @dataclass(frozen=True)
+class KrillCertificateObservationSourceRecord:
+    observation_source: str
+    certificate_uri: str = ''
+    publication_uri: str = ''
+    signed_object_uri: str = ''
+    related_handle: str = ''
+    class_name: str = ''
+    freshness_status: str = ''
+
+
+@dataclass(frozen=True)
+class KrillCertificateObservationRecord:
+    certificate_key: str
+    certificate_uri: str = ''
+    publication_uri: str = ''
+    signed_object_uri: str = ''
+    related_handle: str = ''
+    class_name: str = ''
+    subject: str = ''
+    issuer: str = ''
+    serial_number: str = ''
+    not_before: datetime | None = None
+    not_after: datetime | None = None
+    source_records: tuple[KrillCertificateObservationSourceRecord, ...] = ()
+    certificate_pem: str = ''
+    certificate_der_base64: str = ''
+
+
+@dataclass(frozen=True)
 class KrillPublicationPointRecord:
     service_uri: str = ''
     publication_uri: str = ''
@@ -286,6 +320,391 @@ def _parse_unix_timestamp(value) -> datetime | None:
     except (TypeError, ValueError):
         return None
     return datetime.fromtimestamp(timestamp, tz=timezone.utc)
+
+
+def _certificate_fingerprint_hex(certificate: x509.Certificate) -> str:
+    return certificate.fingerprint(hashes.SHA256()).hex()
+
+
+def _load_cms_signed_data(body_base64: str):
+    if not body_base64:
+        return None
+    try:
+        decoded_body = base64.b64decode(body_base64.encode('ascii'), validate=True)
+    except (ValueError, UnicodeEncodeError, binascii.Error):
+        return None
+
+    try:
+        content_info, _ = decoder.decode(decoded_body, asn1Spec=rfc5652.ContentInfo())
+        signed_data = content_info.getComponentByName('content')
+        if not signed_data.isValue:
+            return None
+        decoded_signed_data, _ = decoder.decode(signed_data.asOctets(), asn1Spec=rfc5652.SignedData())
+    except Exception:
+        return None
+    return decoded_signed_data
+
+
+def _load_cms_certificates(body_base64: str) -> list[x509.Certificate]:
+    signed_data = _load_cms_signed_data(body_base64)
+    if signed_data is None:
+        return []
+
+    certificates = []
+    encoded_certs = signed_data.getComponentByName('certificates')
+    if not encoded_certs:
+        return certificates
+
+    for certificate_choice in encoded_certs:
+        if certificate_choice.getName() != 'certificate':
+            continue
+        certificate_der = encoder.encode(certificate_choice['certificate'])
+        try:
+            certificate = x509.load_der_x509_certificate(certificate_der)
+        except ValueError:
+            continue
+        certificates.append(certificate)
+    return certificates
+
+
+def _load_der_certificate(body_base64: str) -> x509.Certificate | None:
+    if not body_base64:
+        return None
+    try:
+        decoded_body = base64.b64decode(body_base64.encode('ascii'), validate=True)
+    except (ValueError, UnicodeEncodeError, binascii.Error):
+        return None
+    try:
+        return x509.load_der_x509_certificate(decoded_body)
+    except ValueError:
+        return None
+
+
+def _manifest_time_text(value) -> str:
+    text = _normalized_text(value)
+    if not text:
+        return ''
+    if len(text) == 15 and text.endswith('Z'):
+        return f'{text[:4]}-{text[4:6]}-{text[6:8]}T{text[8:10]}:{text[10:12]}:{text[12:14]}Z'
+    return text
+
+
+def _publication_uri_from_object_uri(uri: str) -> str:
+    if not uri or '/' not in uri:
+        return ''
+    return uri.rsplit('/', 1)[0] + '/'
+
+
+def _parse_cms_manifest_metadata(body_base64: str) -> dict[str, object]:
+    signed_data = _load_cms_signed_data(body_base64)
+    if signed_data is None:
+        return {}
+
+    econtent = signed_data.getComponentByName('encapContentInfo').getComponentByName('eContent')
+    if not econtent.isValue:
+        return {}
+
+    try:
+        manifest, _ = decoder.decode(bytes(econtent.asOctets()), asn1Spec=rfc6486.Manifest())
+    except Exception:
+        return {}
+
+    file_entries = []
+    for entry in manifest.getComponentByName('fileList'):
+        file_name = _normalized_text(entry.getComponentByName('file'))
+        hash_bits = entry.getComponentByName('hash')
+        file_entries.append(
+            {
+                'file': file_name,
+                'hash_hex': hash_bits.asOctets().hex(),
+            }
+        )
+
+    return {
+        'manifest_number': int(manifest.getComponentByName('manifestNumber')),
+        'this_update': _manifest_time_text(manifest.getComponentByName('thisUpdate')),
+        'next_update': _manifest_time_text(manifest.getComponentByName('nextUpdate')),
+        'file_hash_algorithm': _normalized_text(manifest.getComponentByName('fileHashAlg')),
+        'file_entries': file_entries,
+        'embedded_certificate_count': len(_load_cms_certificates(body_base64)),
+    }
+
+
+def _parse_cms_crl_metadata(body_base64: str) -> dict[str, object]:
+    if not body_base64:
+        return {}
+    try:
+        decoded_body = base64.b64decode(body_base64.encode('ascii'), validate=True)
+    except (ValueError, UnicodeEncodeError, binascii.Error):
+        return {}
+
+    try:
+        crl = x509.load_der_x509_crl(decoded_body)
+    except ValueError:
+        return {}
+
+    freshness_status = 'fresh'
+    next_update = crl.next_update_utc
+    if next_update is not None and next_update < datetime.now(tz=timezone.utc):
+        freshness_status = 'stale'
+
+    crl_number = ''
+    try:
+        extension = crl.extensions.get_extension_for_class(x509.CRLNumber)
+        crl_number = str(extension.value.crl_number)
+    except Exception:
+        crl_number = ''
+
+    return {
+        'issuer': crl.issuer.rfc4514_string(),
+        'this_update': crl.last_update_utc.isoformat() if crl.last_update_utc else '',
+        'next_update': next_update.isoformat() if next_update else '',
+        'revoked_count': len(crl),
+        'crl_number': crl_number,
+        'freshness_status': freshness_status,
+    }
+
+
+def _certificate_source_record(
+    *,
+    observation_source: str,
+    certificate_uri: str = '',
+    publication_uri: str = '',
+    signed_object_uri: str = '',
+    related_handle: str = '',
+    class_name: str = '',
+    freshness_status: str = '',
+) -> KrillCertificateObservationSourceRecord:
+    return KrillCertificateObservationSourceRecord(
+        observation_source=observation_source,
+        certificate_uri=certificate_uri,
+        publication_uri=publication_uri,
+        signed_object_uri=signed_object_uri,
+        related_handle=related_handle,
+        class_name=class_name,
+        freshness_status=freshness_status,
+    )
+
+
+def _certificate_record_from_x509(
+    certificate: x509.Certificate,
+    *,
+    source_record: KrillCertificateObservationSourceRecord,
+) -> KrillCertificateObservationRecord:
+    certificate_der = certificate.public_bytes(encoding=serialization.Encoding.DER)
+    return KrillCertificateObservationRecord(
+        certificate_key=_certificate_fingerprint_hex(certificate),
+        certificate_uri=source_record.certificate_uri,
+        publication_uri=source_record.publication_uri,
+        signed_object_uri=source_record.signed_object_uri,
+        related_handle=source_record.related_handle,
+        class_name=source_record.class_name,
+        subject=certificate.subject.rfc4514_string(),
+        issuer=certificate.issuer.rfc4514_string(),
+        serial_number=str(certificate.serial_number),
+        not_before=certificate.not_valid_before_utc,
+        not_after=certificate.not_valid_after_utc,
+        source_records=(source_record,),
+        certificate_pem=certificate.public_bytes(encoding=serialization.Encoding.PEM).decode('ascii'),
+        certificate_der_base64=base64.b64encode(certificate_der).decode('ascii'),
+    )
+
+
+def _merge_certificate_records(
+    records: Iterable[KrillCertificateObservationRecord],
+) -> list[KrillCertificateObservationRecord]:
+    merged: dict[str, KrillCertificateObservationRecord] = {}
+    for record in records:
+        existing = merged.get(record.certificate_key)
+        if existing is None:
+            merged[record.certificate_key] = record
+            continue
+
+        source_records = existing.source_records + tuple(
+            source_record for source_record in record.source_records if source_record not in existing.source_records
+        )
+        merged[record.certificate_key] = KrillCertificateObservationRecord(
+            certificate_key=existing.certificate_key,
+            certificate_uri=existing.certificate_uri or record.certificate_uri,
+            publication_uri=existing.publication_uri or record.publication_uri,
+            signed_object_uri=existing.signed_object_uri or record.signed_object_uri,
+            related_handle=existing.related_handle or record.related_handle,
+            class_name=existing.class_name or record.class_name,
+            subject=existing.subject or record.subject,
+            issuer=existing.issuer or record.issuer,
+            serial_number=existing.serial_number or record.serial_number,
+            not_before=existing.not_before or record.not_before,
+            not_after=existing.not_after or record.not_after,
+            source_records=source_records,
+            certificate_pem=existing.certificate_pem or record.certificate_pem,
+            certificate_der_base64=existing.certificate_der_base64 or record.certificate_der_base64,
+        )
+    return list(merged.values())
+
+
+def _certificate_observation_records_from_cms_objects(
+    objects: Iterable[tuple[KrillCertificateObservationSourceRecord, str]],
+) -> list[KrillCertificateObservationRecord]:
+    records: list[KrillCertificateObservationRecord] = []
+    for source_record, body_base64 in objects:
+        for certificate in _load_cms_certificates(body_base64):
+            records.append(_certificate_record_from_x509(certificate, source_record=source_record))
+    return records
+
+
+def _certificate_observation_records_from_der_certificates(
+    objects: Iterable[tuple[KrillCertificateObservationSourceRecord, str]],
+) -> list[KrillCertificateObservationRecord]:
+    records: list[KrillCertificateObservationRecord] = []
+    for source_record, body_base64 in objects:
+        certificate = _load_der_certificate(body_base64)
+        if certificate is None:
+            continue
+        records.append(_certificate_record_from_x509(certificate, source_record=source_record))
+    return records
+
+
+def parse_krill_certificate_observation_records(
+    *,
+    route_payload=None,
+    repo_status_payload=None,
+    ca_metadata_payload=None,
+    parent_status_payload=None,
+) -> list[KrillCertificateObservationRecord]:
+    records: list[KrillCertificateObservationRecord] = []
+
+    for route in _sequence(route_payload):
+        route_mapping = _mapping(route)
+        for raw_object in _sequence(route_mapping.get('roa_objects')):
+            roa_object = _mapping(raw_object)
+            signed_object_uri = _normalized_text(roa_object.get('uri'))
+            body_base64 = _normalized_text(roa_object.get('base64'))
+            if not body_base64:
+                continue
+            records.extend(
+                _certificate_observation_records_from_der_certificates(
+                    (
+                        (
+                            _certificate_source_record(
+                                observation_source=rpki_models.CertificateObservationSource.SIGNED_OBJECT_EE,
+                                signed_object_uri=signed_object_uri,
+                                publication_uri=_publication_uri_from_object_uri(signed_object_uri),
+                            ),
+                            body_base64,
+                        ),
+                    )
+                )
+            )
+
+    repo_status = _mapping(repo_status_payload)
+    for raw_object in _sequence(repo_status.get('published')):
+        published_object = _mapping(raw_object)
+        signed_object_uri = _normalized_text(published_object.get('uri'))
+        body_base64 = _normalized_text(published_object.get('base64'))
+        if not body_base64:
+            continue
+        records.extend(
+            _certificate_observation_records_from_cms_objects(
+                (
+                    (
+                        _certificate_source_record(
+                            observation_source=rpki_models.CertificateObservationSource.SIGNED_OBJECT_EE,
+                            signed_object_uri=signed_object_uri,
+                            publication_uri=_publication_uri_from_object_uri(signed_object_uri),
+                        ),
+                        body_base64,
+                    ),
+                )
+            )
+        )
+
+    ca_metadata = parse_krill_ca_metadata_record(ca_metadata_payload)
+    if ca_metadata is not None:
+        ca_payload = _mapping(ca_metadata_payload)
+        repo_info = _mapping(ca_payload.get('repo_info'))
+        resource_classes = _mapping(ca_payload.get('resource_classes'))
+        for fallback_class_name, raw_class_payload in resource_classes.items():
+            class_payload = _mapping(raw_class_payload)
+            active_key = _mapping(_mapping(class_payload.get('keys')).get('active')).get('active_key')
+            active_key_payload = _mapping(active_key)
+            incoming_cert = _mapping(active_key_payload.get('incoming_cert'))
+            certificate_uri = _normalized_text(incoming_cert.get('uri'))
+            certificate = _normalized_text(incoming_cert.get('base64'))
+            if not certificate:
+                continue
+            records.extend(
+                _certificate_observation_records_from_cms_objects(
+                    (
+                        (
+                            _certificate_source_record(
+                                observation_source=rpki_models.CertificateObservationSource.CA_INCOMING,
+                                certificate_uri=certificate_uri,
+                                publication_uri=ca_metadata.publication_uri or _normalized_text(repo_info.get('sia_base')),
+                                related_handle=ca_metadata.ca_handle,
+                                class_name=_normalized_text(class_payload.get('name_space')) or _normalized_text(fallback_class_name),
+                            ),
+                            certificate,
+                        ),
+                    )
+                )
+            )
+
+    for parent_record in parse_krill_parent_link_records(parent_status_payload):
+        parent_payload = _mapping(_mapping(parent_status_payload).get(parent_record.parent_handle))
+        for class_record in parent_record.classes:
+            class_payload = {}
+            for raw_class_payload in _sequence(parent_payload.get('classes')):
+                candidate_class_payload = _mapping(raw_class_payload)
+                if _normalized_text(candidate_class_payload.get('class_name')) == class_record.class_name:
+                    class_payload = candidate_class_payload
+                    break
+
+            signing_cert = _normalized_text(_mapping(class_payload.get('signing_cert')).get('cert'))
+            if signing_cert:
+                records.extend(
+                    _certificate_observation_records_from_der_certificates(
+                        (
+                            (
+                                _certificate_source_record(
+                                    observation_source=rpki_models.CertificateObservationSource.PARENT_SIGNING,
+                                    certificate_uri=class_record.signing_certificate_uri,
+                                    publication_uri=parent_record.service_uri,
+                                    related_handle=parent_record.parent_handle,
+                                    class_name=class_record.class_name,
+                                ),
+                                signing_cert,
+                            ),
+                        )
+                    )
+                )
+            for issued_uri in class_record.issued_certificate_uris:
+                issued_cert = ''
+                for raw_issued in _sequence(class_payload.get('issued_certs')):
+                    issued_payload = _mapping(raw_issued)
+                    if _normalized_text(issued_payload.get('uri')) != issued_uri:
+                        continue
+                    issued_cert = _normalized_text(issued_payload.get('cert'))
+                    break
+                if not issued_cert:
+                    continue
+                records.extend(
+                    _certificate_observation_records_from_der_certificates(
+                        (
+                            (
+                                _certificate_source_record(
+                                    observation_source=rpki_models.CertificateObservationSource.PARENT_ISSUED,
+                                    certificate_uri=issued_uri,
+                                    publication_uri=parent_record.service_uri,
+                                    related_handle=parent_record.parent_handle,
+                                    class_name=class_record.class_name,
+                                ),
+                                issued_cert,
+                            ),
+                        )
+                    )
+                )
+
+    return _merge_certificate_records(records)
 
 
 def _parse_resource_set(value) -> KrillResourceSetRecord:

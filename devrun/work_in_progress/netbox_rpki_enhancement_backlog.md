@@ -122,426 +122,66 @@ Use that distinction to avoid the wrong closure pattern. The goal is not naive o
 ### Priority 2: Hosted-provider synchronization
 
 - End-state objective: provider-agnostic synchronization of ROAs, ASPAs, publication-topology metadata, published certificates, published signed objects, and related provider control-plane metadata with durable identity, retained snapshots, meaningful diffs, and health visibility.
-- Current-state implementation: ARIN and Krill ROA sync exist; Krill ASPA sync and the first broader Krill family/reporting slice now exist; scheduled orchestration, sync-health, external object references, operator-triggered sync surfaces, and retained diff artifacts are in place.
-- Gap to close: broader provider coverage, broader object-family coverage, richer snapshot diff or report views, a cleaner common provider contract beyond the current ROA-focused flows, and an explicit split between provider control-plane synchronization and repository/publication observation.
-- Preferred closure order: second. This is the highest-value gap directly adjacent to what already works.
-
-#### Detailed implementation plan for Priority 2: Krill-only execution slice
-
-This implementation plan deliberately narrows delivery scope to **Krill** because that is the only provider path we can test end to end right now. The shared sync substrate should still be refactored to remain provider-neutral at the contract level, but no new ARIN work should be taken in this slice beyond preserving current behavior.
-
-##### Architectural correction for this slice
-
-The provider account should be treated as the operational anchor for synchronization, not as the authoritative source of every published RPKI artifact. For standards-aligned inventory, the authoritative published-state evidence should come from repository publication points and the objects attested there, especially manifests, CRLs, EE certificates, and published signed objects. Provider-management payloads still matter, but they should be treated as control-plane metadata and auxiliary linkage evidence rather than as the canonical published certificate inventory.
-
-In practical terms, that means this slice should distinguish two kinds of synchronized family:
-
-- control-plane families such as `ca_metadata`, `parent_links`, `child_links`, and `resource_entitlements`
-- publication-observation families such as `publication_points`, `certificate_inventory`, and `signed_object_inventory`
-
-The current contract name `certificate_inventory` can remain for compatibility if needed, but its semantics should be corrected: it should mean repository-derived published certificate observation scoped by the synced provider account, not an imagined first-class Krill management endpoint returning certificate rows.
-
-##### Scope guardrails for this slice
-
-- Keep existing ARIN import code functional, but treat it as compatibility-only during this effort.
-- Require every new provider-sync behavior to be acceptance-tested against a Krill-backed development instance or deterministic Krill fixtures.
-- Treat snapshot retention, diffing, and reporting as first-class deliverables, not as cleanup work after ingestion.
-- Extend the existing provider sync pipeline instead of introducing a second side-channel import system for repository observation, certificates, or ASPA-specific reporting.
-- Preserve the current external identity model and expand it rather than replacing it.
-- Keep provider control-plane sync and publication observation in one coherent workflow, but do not collapse them into the same semantic family.
-- Do not treat certificate-bearing management payload fragments as the canonical certificate inventory when repository-derived evidence is the stronger standards-aligned source.
-
-##### End-state for the Krill slice
-
-By the end of this slice, a Krill provider account should produce a retained, queryable snapshot that covers both provider control-plane metadata and repository/publication observation families, carries per-family summary counts, can be compared against the immediately previous snapshot and an arbitrary prior snapshot, and drives operator-facing report views that explain what changed, what disappeared, what is newly stale, and what requires follow-on reconciliation. The result should feel like a real provider-state control plane backed by repository evidence, not a raw import log.
-
-##### Object-family coverage to implement in this slice
-
-The current sync covers Krill ROA routes and ASPAs only. The next slice should be intentionally broad.
-
-Implement or harden these Krill-backed families:
-
-- ROA authorizations: keep the current import path, but enrich imported rows with stronger per-object metadata, source timestamps when available, and stable snapshot-level family summaries.
-- ASPAs: keep the current import path, but add richer provider-authorization metadata, stronger identity normalization, and first-class diff reporting at both ASPA and provider-member levels.
-- CA account metadata: import Krill CA handle, CA state, publication mode, repository linkage, and operational status so the provider account detail page can explain what control plane is actually being synced.
-- Parent relationships: import parent CA relationships, service URIs, last-known exchange state, and status so parent drift or broken parent linkage can be reported.
-- Child and delegated-customer relationships: import child handles, resource delegation summaries, and status so the plugin can reason about downstream or on-behalf-of inventory later without another sync substrate rewrite.
-- Resource entitlement summaries: import Krill resource-class or entitlement summaries for prefixes and ASNs held by the synced CA so operators can compare provider-held resources against NetBox intent scope.
-- Repository and publication-point metadata: import repository endpoint, RRDP or rsync publication metadata, notify URI, and publication-state summaries so snapshot reporting can expose publication freshness and topology.
-- Published certificate observation: derive certificate inventory from repository/publication evidence available to the synced Krill account, using manifests, CRLs, publication-point membership, published object metadata, and certificate-bearing auxiliary payloads where available. Treat provider-management certificate fields as linkage hints, not as the canonical inventory source.
-- Signed-object inventory: record summary-level visibility into emitted ROA objects, ASPA objects, manifests, CRLs, and additional published object families when the Krill dev instance exposes them cleanly enough to support deterministic parsing.
-
-The plan should assume that some of these families may arrive in two tiers:
-
-- Tier 1: control-plane objects and publication metadata exposed directly by current Krill API endpoints, plus any repository object stream we can parse deterministically from the current Krill development instance.
-- Tier 2: objects that require fuller repository-observation parsing, richer fixture support, or additional Krill/repository evidence before we can claim end-to-end importer support. For Tier 2, land the schema hooks, capability flags, and report placeholders in this slice even if one or two importer implementations remain gated behind fixture availability.
-
-##### Shared architecture changes required before parallel work opens up
-
-The current `provider_sync.py` flow is still a largely monolithic importer with ROA-first assumptions. Before sending many sub-agents into the codebase, land a narrow enabling refactor that creates stable ownership boundaries.
-
-1. Introduce a family-oriented sync contract.
-   Define explicit sync-family identities such as `roa_authorizations`, `aspas`, `ca_metadata`, `parent_links`, `child_links`, `resource_entitlements`, `publication_points`, `certificate_inventory`, and `signed_object_inventory`. Each family should declare whether it is a control-plane or publication-observation family, along with capabilities, fetch order, summary keys, and import responsibility.
-2. Separate provider control-plane synchronization from publication-point observation without creating separate operator workflows.
-   The same provider snapshot should be allowed to carry both kinds of family, but the contract should make their evidence source explicit so reporting and later validator correlation do not confuse management state with published state.
-3. Split transport, parsing, persistence, and diffing into separate modules.
-   Move Krill HTTP fetch logic into a Krill adapter module, keep orchestration in the shared provider sync service, and isolate diff generation into its own service so report work is not blocked on importer internals.
-4. Make snapshot summaries family-aware.
-   `ProviderSnapshot.summary_json` and `ProviderSyncRun.summary_json` should stop being a shallow count blob and become a stable per-family summary contract with fetched, imported, unchanged, added, removed, changed, stale, failed, and warning counts.
-5. Expand external identity handling by object family.
-   `ExternalObjectReference` already gives durable identity. Extend it so each imported family can bind to a stable provider identity and so diffing can reason about persistence, churn, and disappearance across snapshots.
-6. Add first-class diff artifacts.
-   Do not compute diffs only on the fly in views. Persist snapshot comparison objects so the UI, API, GraphQL, and later governance/reporting layers all share one explanation source.
-
-##### Proposed model additions for this slice
-
-Use additive migrations and compatibility shims. A likely model shape for this slice is:
-
-- `ProviderSnapshotDiff`: one row per snapshot comparison, typically latest-versus-previous but also usable for arbitrary compare operations.
-- `ProviderSnapshotDiffItem`: one row per changed, added, removed, reappeared, or stale object identity, with family, change type, before-state JSON, after-state JSON, and summary fields for table filtering.
-- `ImportedProviderCertificate`: repository-derived published-certificate observation row linked to a snapshot and, when possible, to existing certificate, EE-certificate, manifest, CRL, publication-point, or signed-object models. The compatibility-friendly name is acceptable, but the stored semantics should be publication-backed, not management-plane-backed.
-- `ImportedProviderPublicationPoint`: imported repository or publication metadata row linked to a snapshot.
-- `ImportedProviderParentLink`: imported parent-relationship row linked to a snapshot.
-- `ImportedProviderChildLink`: imported child or delegation row linked to a snapshot.
-- `ImportedProviderResourceEntitlement`: imported provider-held resource summary row for prefix and ASN entitlement visibility.
-- `ImportedProviderSignedObject`: imported summary row for provider-visible signed objects beyond the existing ROA and ASPA records, with room for manifest and CRL classification as publication observation matures.
-
-Exact names can still be tuned, but the separation matters:
-
-- raw imported state by family
-- durable cross-snapshot identity
-- persisted diff artifacts
-- roll-up summary views built on top of those artifacts
-
-##### Snapshot diff and reporting enhancements to deliver in this slice
-
-Do not stop at a single “records imported” count. The operator-facing reporting target should be much richer.
-
-Implement these report surfaces:
-
-- Provider account detail roll-up showing latest sync health, next due sync, last successful sync, family-by-family counts, last diff summary, and last error summary.
-- Provider snapshot detail page with per-family summary cards, retained raw summary JSON, and related tables for imported families.
-- Snapshot comparison detail page showing added, removed, changed, unchanged, reappeared, and now-stale counts by family.
-- Diff-item table views filterable by family, change type, object identity, prefix, ASN, child handle, certificate identifier, and publication point.
-- Family-specific delta drill-down views:
-   - ROA diff view with prefix, ASN, maxLength, external identity, and replacement classification.
-   - ASPA diff view with customer ASN plus provider-set additions and removals.
-   - Published-certificate diff view with validity-window changes, issuer or subject changes, publication-point movement, and newly expired or soon-expiring state.
-   - Parent or child relationship diff view with status and endpoint changes.
-   - Publication-point diff view with notify URI, publication URI, and freshness changes.
-- “What disappeared from Krill?” report that surfaces objects missing from the latest snapshot but present in the prior retained snapshot.
-- “What is newly stale?” report that highlights imported rows whose identity persists but whose linked local object resolution now fails or no longer matches provider reality.
-- Snapshot timeline summary for a provider account showing per-run churn volume so operators can distinguish steady state from large provider-side events.
-- Operations dashboard expansion so stale or failed sync is only the first layer; add large-change warnings, repeated family import failures, publication freshness warnings, and certificate-expiry roll-ups.
-
-##### Immediate single-sub-agent implementation slice: publication-backed inventory correction
-
-This is the next architectural correction slice that a single **gpt5.4-mini** sub-agent should be able to handle without fighting the broader provider-sync codebase.
-
-Goal:
-- realign the provider-sync contract and reporting language so `certificate_inventory` explicitly means repository-derived published-certificate observation scoped by a provider account and its publication points
-
-Non-goals:
-- do not implement a full manifest parser
-- do not implement a full CRL parser
-- do not rename database tables or public routes in this slice
-- do not expand ARIN support
-
-Primary files:
-- `netbox_rpki/services/provider_sync_contract.py`
-- `netbox_rpki/services/provider_sync_diff.py`
-- `netbox_rpki/detail_specs.py`
-- `netbox_rpki/tests/test_provider_sync.py`
-- this backlog document and any closely related implementation notes
-
-Implementation steps:
-1. Update the family contract so `certificate_inventory` is explicitly labeled as a publication-observation family rather than a generic provider-management family.
-2. Update capability metadata and placeholder reasons so the limitation is described as “repository-derived certificate observation not yet fully implemented from Krill-backed publication evidence,” rather than as “Krill lacks a certificate endpoint.”
-3. Update provider snapshot and diff reporting language so certificate-family cards, summaries, and placeholder text consistently refer to published-certificate observation and publication evidence.
-4. Preserve the existing family key and summary shape for compatibility, but add enough metadata such as `family_kind` and `evidence_source` for later slices to distinguish control-plane families from publication-observation families.
-5. Update focused tests so the contract explicitly guards this semantic distinction.
-
-Acceptance criteria:
-- the summary contract exposes enough metadata to tell whether a family is control-plane or publication-observation
-- `certificate_inventory` remains present for compatibility but is no longer described as a provider-management certificate API
-- provider snapshot reporting and diff summaries use publication-observation language consistently
-- focused provider-sync tests prove the new family metadata and limitation wording
-
-Suggested sub-agent prompt:
-- "Update the Priority 2 provider-sync contract and reporting language so the existing `certificate_inventory` family is explicitly treated as repository-derived published-certificate observation, not as a Krill management-plane certificate endpoint. Preserve compatibility of the current family key and summary schema, limit changes to contract/reporting/tests/docs, do not implement manifest or CRL parsing in this slice, and keep the full meaning aligned with publication-point-backed observation. Return a concise summary of code changes, test coverage added or updated, and any follow-on blockers."
-
-##### API and query-surface enhancements to deliver in this slice
-
-The richer snapshot and diff layer should be available everywhere the existing registry-based surfaces already operate.
-
-Add or extend these surfaces:
-
-- REST serializers and viewsets for each new imported family model and for snapshot diff models.
-- summary endpoints for provider accounts and provider snapshots, mirroring the existing reconciliation summary pattern.
-- a compare action on `ProviderSnapshot` that either returns an existing persisted diff or creates one on demand and returns its identifier.
-- GraphQL types and list fields for new imported families and diff objects so the reporting layer can be consumed programmatically.
-- filtersets and tables that make family, change type, status, and object identity first-class query inputs.
-
-##### Parallel execution plan for multiple gpt5.4-mini sub-agents
-
-The main risk to parallelization is file conflict density in `models.py`, `object_registry.py`, `detail_specs.py`, and the provider sync service. Avoid that by using a short integration lead phase followed by clearly partitioned tracks.
-
-###### Phase 0: one integration lead agent only
-
-This agent owns the enabling refactor and lands the shared contract first.
-
-- Define the sync-family enumeration and shared summary contract.
-- Carve Krill adapter code out of the monolithic provider sync service.
-- Introduce placeholder diff models and wire them into the registry as read-only objects if the registry path is chosen.
-- Freeze naming for summary keys, diff types, and object-family labels so parallel agents do not invent conflicting contracts.
-
-Once that branch lands, split follow-on work across parallel agents.
-
-###### Track A: Krill control-plane and publication-observation parser agent
-
-Primary responsibility: fetch and parse the additional Krill object families.
-
-- Own the Krill adapter module plus repository-observation parsing helpers and any new publication-evidence fixtures.
-- Add fetchers and parsers for CA metadata, parent links, child links, entitlement summaries, publication metadata, and repository-artifact observation rooted in publication points and their contents.
-- Return normalized record objects without owning model persistence logic.
-
-###### Track B: persistence and identity agent
-
-Primary responsibility: persist imported family rows and bind stable external identities.
-
-- Own model additions for the new imported families.
-- Extend `ExternalObjectReference.object_type` coverage and provider identity builders.
-- Implement idempotent import routines for each new family.
-- Ensure all imported rows link cleanly to `ProviderSnapshot` and, where applicable, existing local models.
-
-###### Track C: diff engine agent
-
-Primary responsibility: build retained snapshot comparison artifacts.
-
-- Own `ProviderSnapshotDiff` and `ProviderSnapshotDiffItem` generation logic.
-- Implement family-specific diff classification rules.
-- Produce family-by-family summary JSON used by UI, API, and dashboard surfaces.
-- Add compare-latest-versus-previous behavior and arbitrary snapshot compare support.
-
-###### Track D: reporting and detail-page agent
-
-Primary responsibility: make the new data understandable to operators.
-
-- Own detail specs, tables, list views, and any new report templates.
-- Upgrade provider account, provider snapshot, and operations dashboard views.
-- Add diff-focused detail pages and family-specific related tables.
-- Keep surfaces read-only unless there is a clear operator action already justified by current workflow.
-
-###### Track E: API and GraphQL agent
-
-Primary responsibility: expose the new imported families and diff artifacts programmatically.
-
-- Own `api/serializers.py`, `api/views.py`, `api/urls.py`, and GraphQL type or filter updates.
-- Add compare and summary actions.
-- Keep method exposure aligned with the read-only reporting contract.
-
-###### Track F: test and publication-evidence fixture agent
-
-Primary responsibility: keep the slice verifiable while other agents move fast.
-
-- Build deterministic publication-point and repository-artifact fixtures for each new family and change scenario.
-- Expand unit tests for publication-observation parsing, import, identity reuse, diff generation, and summary roll-ups.
-- Extend registry-driven view, API, and GraphQL contract tests for each new routed object.
-- Add targeted dashboard and detail-page tests for the new reporting slices.
-
-###### Track G: documentation and operator-workflow agent
-
-Primary responsibility: keep the documentation, test plan, and contributor guidance aligned.
-
-- Update this backlog as milestones land.
-- Update `README.md`, `TEST_SUITE_PLAN.md`, and contributor guidance for the richer Krill sync contract.
-- Document which Krill families are fully synced, partially synced, or schema-only pending fixture support.
-
-##### Merge choreography and conflict management
-
-To keep parallel execution practical, enforce these ownership rules:
-
-- Only the integration lead edits the initial family contract and baseline model additions before the first merge.
-- After that merge, Track A owns Krill fetch and parse modules; Track B owns imported-family persistence; Track C owns diff services; Track D owns tables, detail specs, and dashboard views; Track E owns API and GraphQL files; Track F owns fixtures and tests.
-- Avoid having more than one active branch editing `models.py` or `object_registry.py` at the same time. If more model additions are required, batch them through the persistence agent.
-- Prefer new service modules over repeatedly growing `provider_sync.py` so multiple agents are not forced into the same file.
-
-##### Dependency-ordered issue and PR breakdown for sub-agents
-
-Phase 0 is now complete. The dependency ladder below assumes the following substrate is already merged and stable:
-
-- family-oriented summary contract
-- extracted Krill adapter module
-- persisted `ProviderSnapshotDiff` and `ProviderSnapshotDiffItem`
-- registry exposure for the Phase 0 diff objects
-- a green full plugin suite at the Phase 0 baseline
-
-Use the issue titles as tracking units and the PR titles as merge units. Each sub-agent should own exactly one PR at a time.
-
-###### Wave 1: unblock the next persistence and import slice
-
-Issue 1 / PR 1: Publication-point evidence fixture inventory and repository artifact map
-
-- Owner: Track F with Track A support
-- Depends on: Phase 0 only
-- Goal: capture deterministic publication-point and repository-artifact fixtures plus a written evidence map for the Krill families we can actually support next: `ca_metadata`, `parent_links`, `child_links`, `resource_entitlements`, `publication_points`, repository-backed `certificate_inventory`, and `signed_object_inventory`
-- Primary files: `netbox_rpki/tests/`, `devrun/`, and any new fixture directories or fixture helper modules
-- Deliverables:
-   - deterministic publication-point and repository-artifact fixtures for each Tier 1 family
-   - explicit notes on which evidence sources are Tier 1 versus Tier 2 on the current Krill dev instance
-   - parser-input fixtures rich enough to drive publication-observation import and diff tests later
-- Acceptance criteria:
-   - every claimed Tier 1 family has at least one stable standards-aligned fixture source
-   - fixture naming and layout are documented well enough that later PRs do not need to rediscover publication topology or repository artifact shape
-   - no schema or importer behavior changes land in this PR
-
-Issue 2 / PR 2: Imported-family schema and registry substrate
-
-- Owner: Track B
-- Depends on: Phase 0 only
-- Goal: land the additive model layer for the next imported families so later importer work does not fight over `models.py` and `object_registry.py`
-- Primary files: `netbox_rpki/models.py`, `netbox_rpki/object_registry.py`, `netbox_rpki/migrations/`, `netbox_rpki/tests/utils.py`, `netbox_rpki/tests/registry_scenarios.py`
-- Deliverables:
-   - explicit imported-family models for the Tier 1 Krill families, with publication-observation semantics made explicit for certificate and signed-object families
-   - any needed `ExternalObjectType` extensions or supporting enums not already present
-   - read-only registry wiring, test builders, and shared scenario support for the new models
-- Acceptance criteria:
-   - migration is additive and `makemigrations --check --dry-run` is clean
-   - registry-driven view, API, and GraphQL smoke/contract tests can construct the new read-only families
-   - this PR does not yet fetch or import live Krill data
-
-###### Wave 2: fetch and normalize the new Krill families and publication evidence
-
-Issue 3 / PR 3: Krill adapter and publication-observation parser expansion for Tier 1 families
-
-- Owner: Track A
-- Depends on: PR 1
-- Goal: extend the Krill adapter with fetchers, parsers, and normalized record classes for the Tier 1 families confirmed by the evidence inventory, including deterministic publication-point and repository-artifact evidence available from the Krill development instance
-- Primary files: `netbox_rpki/services/provider_sync_krill.py` and new fixture-backed parser tests
-- Deliverables:
-   - family-specific dataclasses or normalized record shapes
-   - fetch helpers for the supported Krill control-plane endpoints and publication-evidence discovery points
-   - parser helpers that return normalized records from publication points and repository artifacts but do not persist them
-- Acceptance criteria:
-   - parser coverage exists for success, missing-field, and minimal-payload cases
-   - adapter code stays provider-specific and does not take over orchestration or persistence responsibilities
-   - no edits to `models.py` or `object_registry.py`
-
-Issue 4 / PR 4: Persistence and external identity binding for new families
-
-- Owner: Track B
-- Depends on: PR 2 and PR 3
-- Goal: persist the new imported-family rows during sync and bind them to durable external identities
-- Primary files: `netbox_rpki/services/provider_sync.py`, new persistence helper modules if needed, and any targeted model helpers
-- Deliverables:
-   - idempotent import routines for each Tier 1 family
-   - stable provider-identity builders per family
-   - family-aware summary-count population in snapshot and sync-run summaries
-- Acceptance criteria:
-   - repeated syncs do not duplicate imported rows for unchanged provider objects
-   - imported rows link cleanly to `ProviderSnapshot` and to local models where resolution is available
-   - the new families appear in summary JSON with correct counts and statuses
-
-###### Wave 3: extend retained diff behavior beyond ROAs and ASPAs
-
-Issue 5 / PR 5: Diff engine expansion for additional families
-
-- Owner: Track C
-- Depends on: PR 4
-- Goal: extend retained snapshot diff generation to every newly imported Tier 1 family
-- Primary files: `netbox_rpki/services/provider_sync_diff.py` plus focused diff tests
-- Deliverables:
-   - family-specific identity normalization and state serialization
-   - added, removed, changed, unchanged, and stale classification where meaningful
-   - family-level diff summary rollups that feed the existing summary schema
-- Acceptance criteria:
-   - back-to-back identical snapshots produce unchanged counts and no diff items for those families
-   - changed snapshots produce family-appropriate diff items with usable table fields
-   - no UI or API work is bundled into this PR beyond what the tests need for model construction
-
-###### Wave 4: expose and explain the richer data
-
-Issue 6 / PR 6: Reporting and detail-page expansion
-
-- Owner: Track D
-- Depends on: PR 5
-- Goal: make the expanded imported families and diffs understandable in the UI
-- Primary files: `netbox_rpki/detail_specs.py`, `netbox_rpki/tables.py`, `netbox_rpki/views.py`, templates, and any dashboard helpers
-- Deliverables:
-   - richer provider account and provider snapshot detail views
-   - snapshot comparison and diff-item list/detail surfaces
-   - family-specific tables or related-table sections where the generic view is not sufficient
-   - operations dashboard expansion for large-change, repeated-family-failure, and freshness warnings
-- Acceptance criteria:
-   - operators can answer what changed, what disappeared, and what is stale from the UI without reading raw JSON
-   - reporting remains read-only
-   - focused view/table tests cover the new report surfaces
-
-Issue 7 / PR 7: REST and GraphQL exposure for expanded sync families and diffs
-
-- Owner: Track E
-- Depends on: PR 5
-- Goal: expose the richer imported-family and diff artifacts programmatically
-- Primary files: `netbox_rpki/api/serializers.py`, `netbox_rpki/api/views.py`, `netbox_rpki/api/urls.py`, `netbox_rpki/graphql/filters.py`, `netbox_rpki/graphql/types.py`, `netbox_rpki/graphql/schema.py`
-- Deliverables:
-   - serializers and viewsets for the new imported families
-   - compare and summary actions for provider snapshots where justified by the existing API shape
-   - GraphQL types and fields for the new reporting objects
-- Acceptance criteria:
-   - API and GraphQL coverage match the read-only reporting contract
-   - compare surfaces return persisted diff artifacts rather than ad hoc recalculations
-   - this PR can merge in parallel with PR 6 once PR 5 is in
-
-###### Wave 5: stabilization and closure
-
-Issue 8 / PR 8: Full-slice hardening, docs, and release-gate closure
-
-- Owner: Track F and Track G
-- Depends on: PR 6 and PR 7
-- Goal: turn the expanded Krill sync slice into a release-ready, documented, and fully validated increment
-- Primary files: test suites, `README.md`, `TEST_SUITE_PLAN.md`, this backlog, and contributor guidance as needed
-- Deliverables:
-   - focused regression coverage for parsing, import, identity reuse, diff generation, reporting, API, and GraphQL
-   - any missing fixture refinements needed after the implementation PRs settle
-   - updated docs describing which Krill families are fully supported, partially supported, or schema-only
-- Acceptance criteria:
-   - focused provider-sync and report-surface commands are green
-   - the full plugin suite is green
-   - docs and test plan reflect the actual delivered family coverage
-
-###### Recommended sub-agent assignment pattern after Phase 0
-
-Use this merge order unless fixture discovery forces a narrower first slice:
-
-1. Run PR 1 and PR 2 in parallel.
-2. Start PR 3 after PR 1 lands.
-3. Start PR 4 after PR 2 and PR 3 land.
-4. Start PR 5 after PR 4 lands.
-5. Start PR 6 and PR 7 in parallel after PR 5 lands.
-6. Finish with PR 8 as the closure and hardening lane.
-
-If the Krill dev instance only exposes a subset of the planned Tier 1 families cleanly, keep the PR numbering and ownership the same, but narrow PR 2 through PR 7 to the confirmed family subset instead of inventing speculative importer behavior.
-
-##### Recommended delivery milestones
-
-1. Land the family-oriented sync contract and baseline diff models.
-2. Expand Krill ingestion beyond ROAs and ASPAs to at least CA metadata, parent links, child links, publication metadata, and certificate inventory.
-3. Persist durable snapshot diffs and expose family-level summary counts.
-4. Ship provider account, provider snapshot, and snapshot-compare report views with rich tables and filters.
-5. Expose the same capabilities via REST and GraphQL.
-6. Harden the slice with fixture-backed regression coverage and updated docs.
-
-##### Closure criteria for Priority 2 in this Krill-only slice
-
-Consider this priority closed for the current execution window only when all of the following are true:
-
-- Krill sync covers materially more than ROAs and ASPAs and does so through explicit family contracts.
-- Retained snapshots can be compared and the comparison is explainable through persisted diff artifacts rather than ad hoc view code.
-- Provider account and provider snapshot surfaces show meaningful family-aware health and churn reporting.
-- External object identity is durable across snapshots for every imported family implemented in this slice.
-- REST, UI, and GraphQL surfaces exist for the new reporting objects where appropriate.
-- Focused provider-sync and report-surface tests are green, and the full plugin suite remains green.
-- No net-new ARIN work is required to declare the slice complete.
+- Current-state implementation: the foundational Krill-only expansion is now materially implemented. The codebase has a family-oriented sync contract with explicit `family_kind` and `evidence_source` metadata, a provider-specific Krill adapter module, durable external object identity, persisted snapshot diff artifacts, and read-only registry surfaces for the expanded imported families. ARIN ROA import remains functional as a compatibility path. Krill now imports ROA authorizations, ASPAs, CA metadata, parent links, child links, resource entitlements, publication points, signed-object inventory, and repository-derived certificate observations; those records feed `ProviderSnapshot`, `ProviderSnapshotDiff`, and `ProviderSnapshotDiffItem` reporting through UI, REST, and GraphQL surfaces.
+- Gap to close: Priority 2 is no longer a speculative architecture item, but it is not fully closed against the end-state objective. The remaining gap is now concentrated in broader provider coverage, richer family-specific reporting and dashboard roll-ups, deeper publication-observation fidelity for certificate and signed-object inventory, and fuller operator-facing explanation of churn and freshness at the provider-account level.
+- Preferred closure order: keep Priority 2 second, but treat it as a maturity and completion track rather than as a foundational greenfield build. The next work here should deepen reporting and provider breadth before adding more adjacent automation.
+
+#### Status update against section 7 closure criteria
+
+Against the closure standard in section 7, Priority 2 is now substantially farther along than this backlog previously described.
+
+- The schema or registry contract exists and is migration-safe.
+  The provider-sync data model now includes durable provider and snapshot envelopes, external identity rows, retained diff artifacts, and explicit imported-family models for the delivered Krill slice. The registry-driven UI, API, filter, table, navigation, and GraphQL surfaces are wired for the new read-only reporting families, including the supporting `ExternalObjectReference` surface needed by imported-object detail pages.
+- The service layer performs the actual work.
+  This is no longer passive inventory. The service layer fetches and imports live or fixture-backed provider state, normalizes provider identities, binds imported rows to durable external references, builds stable per-family summaries, and persists snapshot comparison artifacts rather than leaving comparison as ad hoc view logic.
+- Operators can reach it through intentional UI, API, command, and job surfaces.
+  Provider-account sync remains available through UI, API, command, and scheduled job paths. Provider snapshots, snapshot diffs, diff items, and imported-family detail pages are routed and queryable. REST and GraphQL reporting surfaces now expose summary JSON, latest diff lookup, retained comparison data, and imported publication-observation children alongside the existing provider objects.
+- The result is explainable in operator terms and fits the existing audit model.
+  Snapshot and diff objects now provide a shared explanation source for what changed between retained provider states, and imported-family detail pages render as intentional reporting surfaces instead of raw storage. This is still thinner than the full end-state reporting vision: provider-account roll-ups, dashboard warning depth, and some family-specific delta views remain incomplete.
+- Focused regression tests exist, and the full plugin suite is green.
+  The provider-sync contract, importer behavior, diff persistence, reporting surfaces, and linked imported-object detail pages now have focused regression coverage. The full plugin suite is currently green at 333 tests.
+
+#### Delivered Krill-only slice
+
+The current delivered slice now includes all of the following:
+
+- explicit family-oriented provider-sync summaries with control-plane versus publication-observation metadata
+- retained `ProviderSnapshotDiff` and `ProviderSnapshotDiffItem` artifacts used by reporting surfaces
+- durable `ExternalObjectReference` binding across imported families
+- Krill-backed imported-family persistence for:
+  - ROA authorizations
+  - ASPAs
+  - CA metadata
+  - parent links
+  - child links
+  - resource entitlements
+  - publication points
+  - signed-object inventory
+  - repository-derived certificate observations
+- repository-observation parsing in the Krill adapter for published signed objects and certificate-bearing evidence
+- provider snapshot reporting through detail pages, REST serializers, compare actions, and GraphQL reporting fields
+- regression coverage that now exercises populated imported-object relation links, preventing false-green UI detail tests
+
+#### Remaining work before Priority 2 can reasonably be called closed
+
+Priority 2 should still be treated as open because the delivered slice does not yet satisfy the full end-state objective for hosted-provider synchronization.
+
+The highest-value remaining items are:
+
+1. Broaden provider support beyond the current ARIN-ROA compatibility path and the Krill-focused implementation.
+2. Deepen provider-account and operations-dashboard reporting so family churn, repeated import failures, publication freshness, and large-change warnings are visible without drilling into raw snapshot detail.
+3. Improve certificate and signed-object observation fidelity so the publication-observation families are less dependent on limited derived evidence and move closer to full repository-backed inventory.
+4. Expand family-specific diff presentation for certificate, publication-point, parent-link, and child-link changes so operators can answer what changed without reading raw JSON payloads.
+5. Keep docs and test guidance aligned with the actual shipped provider-sync contract as the slice matures.
+
+#### Recommended next execution slices
+
+The next practical execution order for Priority 2 is now:
+
+1. provider-account roll-up and operations-dashboard reporting depth
+2. richer family-specific diff and freshness views for the already-imported Krill families
+3. deeper publication-observation parsing and evidence handling for certificate and signed-object inventory
+4. broader provider coverage once the shared reporting and evidence model is stable
 
 ### Priority 3: ASPA operational support
 
@@ -686,71 +326,111 @@ The plugin should stay focused on operator workflow and correctness rather than 
 
 ---
 
-## 9. Missing standards-based RPKI architecture elements to add to the data model
+## 9. Standards-based RPKI architecture elements in the data model: implemented vs. not yet implemented
 
-The strategic backlog above is about closing the operator-workflow gap. The sections below capture a second, related gap: the remaining architectural distance between the current plugin and a fuller standards-aligned RPKI object model. Some additive schema work is already present in the codebase, but these areas are not yet uniformly integrated into the active operator workflow, provider surfaces, or reporting layers.
+The strategic backlog above is about closing the operator-workflow gap. The sections below now reflect the current codebase more precisely. Per `CONTRIBUTING.md`, the explicit Django model layer is the source of truth for whether something is implemented in the data model, while UI/API/GraphQL surfaces and operator workflows are separate concerns. Read the status markers below narrowly: they describe the data model as it exists today, not whether each area is already complete in provider sync, operator workflow, or reporting.
 
 ### 9.1 Certificate Revocation Lists (CRLs)
 **Defining reference:** RFC 6481, Section 2; RFC 6487; RFC 8897, Section 3.
 
-CRLs are not optional wallpaper in the RPKI repository model. A certificate-centric plugin that omits CRLs can say that a certificate exists, but it cannot faithfully represent whether that certificate remains trustworthy or has been revoked. Adding CRL support should shift the model from standalone certificate facts toward revocable repository artifacts with freshness, issuance lineage, CRL number semantics, next-update expectations, and consistency relationships to publication points and manifests.
+**Data-model status:** Implemented already.
+
+The current explicit model layer already includes `CertificateRevocationList` and `RevokedCertificate`. Those models capture issuing-certificate linkage, publication-point linkage, manifest linkage, CRL number, update windows, retrieval and validation state, and per-certificate revocation records for both `Certificate` and `EndEntityCertificate`. This item should therefore no longer be described as missing from the data model, although broader workflow, sync, and reporting use of CRL data is still incomplete.
 
 ### 9.2 Manifests
 **Defining reference:** RFC 6486; RFC 6481, Section 2; RFC 8897, Section 4.
 
-A manifest is the repository’s table of contents with teeth. RFC 6486 defines the manifest signed object used to enumerate the objects expected at a CA publication point, along with hashes, so relying parties can detect missing, stale, substituted, or otherwise inconsistent repository contents. Without a manifest model, the plugin has no way to describe repository completeness or to answer whether the set of published ROAs and certificates is coherent as a published unit. Including manifests should therefore push the schema away from isolated object rows and toward publication-set semantics. In practice, that means adding a `Manifest` signed-object model, a `ManifestEntry` child table for filename and hash members, and explicit relationships from manifests to publication points, EE certificates, CRLs, and signed objects. It also means existing ROA and certificate models should stop assuming publication is implicit and instead carry references to the manifest and publication point that currently attest to their presence.
+**Data-model status:** Implemented already.
+
+The data model already contains `Manifest` and `ManifestEntry`, plus the supporting relationships needed to use them: `Manifest.signed_object`, `Manifest.current_crl`, `SignedObject.current_manifest`, and `ManifestEntry` links to `SignedObject`, `Certificate`, `EndEntityCertificate`, and `CertificateRevocationList`. This means manifest membership and publication-set semantics are already modeled, even if those relationships are not yet fully exploited throughout the active operator workflow.
 
 ### 9.3 End-entity (EE) certificates for signed objects
 **Defining reference:** RFC 6487; RFC 6488; RFC 9582 for ROAs.
 
-ROAs and other RPKI signed objects are not signed directly by the long-lived resource certificate in the casual way a business application might imagine. The standards structure uses end-entity certificates to sign individual CMS-protected signed objects, and those EE certificates have their own profile constraints and validation significance. The plugin description hints at this relationship in prose, but it does not expose EE certificates as first-class data. That omission flattens an important layer of the architecture and makes it hard to express lifecycle, revocation, and signing relationships correctly. Adding EE certificates should spur a deliberate split between resource-holding CA certificates and object-signing EE certificates. The existing `Resource Certificate` model should remain the CA-layer object, while new signed-object records such as ROAs, manifests, ASPAs, RSCs, and Trust Anchor Keys should link to a dedicated `EndEntityCertificate` model carrying SKI/AKI, serial, validity, inherited-vs-enumerated resource constraints where applicable, issuer reference, and revocation linkage. This change would cleanly separate “certificate that delegates authority” from “certificate that signed this object instance.”
+**Data-model status:** Partially implemented.
+
+`EndEntityCertificate` already exists as a first-class model, and `SignedObject.ee_certificate` already gives signed objects an explicit EE-certificate relationship. The model also captures issuer, serial, SKI, AKI, validity dates, publication point, resource-certificate linkage, and revocation linkage via `RevokedCertificate.ee_certificate`. What is still not clearly modeled are fuller EE-profile details such as inherited-vs.-enumerated resource constraints and other deeper certificate-profile semantics. This item is therefore no longer absent, but it is not fully realized.
 
 ### 9.4 Repository publication points and retrieval topology
 **Defining reference:** RFC 6480; RFC 6481; RFC 8182.
 
-The standards architecture is emphatically not just a bag of signed objects. RFC 6480 and RFC 6481 define a distributed repository system with publication points, while RFC 8182 defines RRDP as a scaling-oriented retrieval protocol for repository content. If the plugin does not model publication points, object URIs, repository endpoints, or retrieval metadata, it cannot represent where authoritative objects live, how they are grouped, or how relying parties are expected to fetch them. For hosted-RPKI consumers this still matters, because hosted service does not erase publication mechanics; it merely outsources them. Adding this layer should push the plugin from a pure policy/inventory model toward a repository-aware one. The data model should gain entities such as `Repository`, `PublicationPoint`, `PublishedObjectLocation`, and optionally `RrdpSession`/`RrdpSnapshot` metadata. Existing certificate and ROA objects should then reference publication points and object URIs explicitly, rather than storing publication-related strings as loosely typed attributes on the certificate row.
+**Data-model status:** Partially implemented.
+
+The explicit model layer already includes `Repository` and `PublicationPoint`, and `SignedObject` carries `object_uri`, `repository_uri`, `filename`, publication status, and validation metadata. The provider-sync side also now includes `ImportedPublicationPoint`, `ImportedSignedObject`, and `ImportedCertificateObservation`. That means repository and publication-point semantics are already present in the schema. What remains not yet implemented in the data model are some of the more specialized structures called out here, especially a separate `PublishedObjectLocation` abstraction and distinct `RrdpSession` or `RrdpSnapshot` history models.
 
 ### 9.5 Trust anchors, TALs, and trust-anchor rollover artifacts
 **Defining reference:** RFC 6490; RFC 8630; RFC 9691.
 
-The top of the RPKI tree is not just an abstract “signed by an RIR” notion. Trust anchors are distributed and consumed through specific artifacts and rollover procedures. RFC 6490 defines the Trust Anchor Locator (TAL), RFC 8630 updates the TAL format, and RFC 9691 defines the Trust Anchor Key signed object to support planned trust-anchor rollover without invalidating the tree. A data model that stops at resource certificates misses the root-of-trust mechanics that explain why and how a given certificate chain is grounded. Including this layer should spur two shifts. First, certificates should no longer carry only an `issuer` string but should be able to chain upward to an explicit `TrustAnchor` or parent CA object. Second, rollover should stop being an out-of-band concept and become modeled state. The plugin should add `TrustAnchor`, `TrustAnchorLocator`, and `TrustAnchorKey` entities, plus successor/predecessor relationships and publication metadata. That would let the schema represent not only today’s trust root but also staged rollover state and the repository locations that relying parties need to discover it.
+**Data-model status:** Implemented already.
+
+The current schema already contains `TrustAnchor`, `TrustAnchorLocator`, and `TrustAnchorKey`, along with explicit rollover relationships (`TrustAnchor.superseded_by` and `TrustAnchorKey.supersedes`) and publication metadata such as TAL URIs and trust-anchor-key publication URI. `Certificate` also already has a `trust_anchor` foreign key. This item should therefore be treated as implemented in the data model, even though the surrounding operator workflow is still much thinner than the schema now allows.
 
 ### 9.6 Generic signed-object framework
 **Defining reference:** RFC 6488; IANA RPKI Signed Objects registry.
 
-The plugin today appears to privilege ROAs as a bespoke top-level object type. Standards-wise, that is too narrow. RFC 6488 defines the general signed-object template for the RPKI, and the IANA registry now enumerates multiple signed-object families including ROAs, manifests, RSCs, Trust Anchor Keys, and ASPAs. If the schema continues to model each one as a one-off special case, the plugin will accrue repetitive logic and structural inconsistency every time the standards family grows. Adding a generic signed-object abstraction should therefore cause a refactor of the existing ROA model, not merely the addition of new tables beside it. A parent `SignedObject` entity should capture content type, EE certificate, CMS/signature metadata, publication URI, filename, manifest membership, validation status, and parsed-vs-raw payload references. `ROA` would then become a typed child or extension record rather than the sole architectural pattern. That shift would make it much easier to add ASPA, Manifest, RSC, Ghostbusters, or future object types without re-laying the track each time.
+**Data-model status:** Partially implemented.
+
+The schema already has a generic `SignedObject` model with content type, EE-certificate linkage, publication-point linkage, URI and filename fields, manifest linkage, CMS metadata, validity windows, and validation status. Several object families already attach to it directly: `Manifest`, `ASPA`, `RSC`, and `TrustAnchorKey`, while legacy `Roa` has a compatibility `signed_object` link. However, the abstraction is not yet uniform across every family: CRLs are still modeled separately rather than as typed `SignedObject` extensions, and the legacy ROA model still reflects the earlier architecture. This item is therefore partly done, not missing.
 
 ### 9.7 Autonomous System Provider Authorizations (ASPAs)
 **Defining reference:** IANA RPKI registries; draft-ietf-sidrops-aspa-profile (current SIDROPS working-group definition).
 
-ASPA is the clearest standards-track object family absent from the current plugin and the one with the most immediate architectural relevance after ROAs. The current SIDROPS ASPA profile defines a CMS-protected object through which the holder of an AS authorizes one or more other ASes as transit providers, with the goal of improving route-leak detection and mitigation. For a cloud or other highly interconnected operator, ASPA models the commercial and topological reality of provider relationships in a way ROAs never can. Its inclusion should do more than add an `ASPA` table. It should prompt the plugin to elevate AS-relationship intent into the schema: customer ASN, authorized provider ASN set, validity intervals, publication metadata, and reconciliation against NetBox provider/circuit constructs. Existing ASN-related models should stop assuming ASNs matter only as ROA origins or certificate resources and start supporting provider-role semantics, planned-vs-published authorization state, and many-to-many provider relationship history.
+**Data-model status:** Implemented already.
+
+This item is no longer absent. The data model already includes `ASPA` and `ASPAProvider`, plus the broader ASPA control-plane and observation family: `ImportedAspa`, `ImportedAspaProvider`, `ASPAIntent`, `ASPAIntentMatch`, `ASPAReconciliationRun`, `ASPAIntentResult`, `PublishedASPAResult`, and `ValidatedAspaPayload`. ASPA is now a real modeled object family in both the standards-oriented schema and the operational reconciliation layer.
 
 ### 9.8 RPKI Signed Checklists (RSCs)
 **Defining reference:** RFC 9323.
 
-RSCs extend the RPKI beyond routing origination and into attestation of arbitrary digital artifacts via resource-backed signatures. RFC 9323 defines them as signed checklists of hashes for one or more digital objects. Even if a hosted-RPKI consumer never deploys RSCs in the first implementation wave, they matter architecturally because they prove the plugin’s future should not be “ROAs plus a few odd extras,” but a common signed-object framework that can represent resource-backed attestations beyond route origination. Adding RSC support should therefore reinforce the refactor described above: a generic signed-object layer, a typed payload extension for checklist content, and manifest/publication relationships that parallel the rest of the repository model. It should also encourage the schema to support hash-set child tables and artifact references, which are different from prefix/ASN child rows and therefore useful pressure tests for whether the signed-object abstraction is truly general.
+**Data-model status:** Implemented already.
+
+The current schema already includes `RSC` and `RSCFileHash`, and `RSC` already links into the generic `SignedObject` layer through `RSC.signed_object`. That means the checklist object family and its hash-set child table are already present in the data model. The remaining gap here is workflow and operational use, not core schema presence.
 
 ### 9.9 BGPsec Router Certificates
 **Defining reference:** RFC 8209.
 
-BGPsec router certificates sit at the edge of what many operators actually deploy today, but they are unquestionably part of the standards-based RPKI architecture. RFC 8209 defines the certificate profile used to validate Autonomous System path signatures in BGPsec. Their absence means the plugin currently models RPKI only as a route-origin authorization system and not as a broader routing-security PKI. Including router certificates should prompt a useful broadening of the certificate taxonomy. Instead of treating every certificate as a generic “resource certificate,” the data model should distinguish at least CA resource certificates, EE certificates for signed objects, and router certificates for BGPsec. This suggests introducing a certificate superclass or type discriminator, plus router-key-specific fields, ASN associations at the router-certificate layer, and links to device or logical-router inventory where appropriate. Even if implementation priority remains low, modeling the type cleanly would keep the schema aligned with the standards family rather than hard-coding today’s most common deployment pattern.
+**Data-model status:** Partially implemented.
+
+`RouterCertificate` already exists as a first-class model with resource-certificate linkage, publication-point linkage, ASN association, subject and issuer fields, serial, SKI, router public key, validity dates, and validation status. That means router certificates are already represented in the data model. What remains not yet implemented here are some of the broader taxonomy and integration concerns mentioned in this section, especially a cleaner certificate-type hierarchy and optional links to device or logical-router inventory.
 
 ### 9.10 Relying-party and validated-payload view
 **Defining reference:** RFC 8897; RFC 8210 / 8210bis family for cache-to-router exchange.
 
-A publication-only model is still missing half the architecture that operators actually depend on in production: the relying-party view. RFC 8897 consolidates requirements for relying-party software, and the RPKI-to-router standards describe how validated payloads are exposed downstream to routers. The plugin does not need to become a full validator, but if it aims to represent the architecture rather than just object inventory, it should be able to model what a relying party believes about the published data. Including this element should shift the schema from “object exists” to “object validates, produces payloads, and has observable downstream effect.” That implies entities such as `ValidatorInstance`, `ValidationRun`, `ValidatedRoaPayload`, `ValidatedAspaPayload`, and `ObjectValidationResult`, along with timestamps, reason codes, local-policy outcomes, and optional router/cache export metadata. Existing ROA and certificate tables would then relate not only to authored objects but also to validation outcomes, which is where operational truth actually bites.
+**Data-model status:** Implemented already.
+
+The schema already includes `ValidatorInstance`, `ValidationRun`, `ObjectValidationResult`, `ValidatedRoaPayload`, and `ValidatedAspaPayload`, with timestamps, status, disposition, reason text, and links back to modeled ROA, ASPA, and signed-object records. This means the relying-party and validated-payload view is already present in the data model. What is still incomplete is the broader operator overlay around that data, plus any optional router or cache export metadata that may be worth adding later.
 
 ### 9.11 What this should change in the plugin’s core schema direction
 
-Taken together, these missing elements argue for a broader schema refactor rather than a simple pile-on of new tables. The existing model is centered on three ideas: organization, resource certificate, and ROA. A more standards-aligned architecture would center on five layers instead:
+Taken together, the current section 9 status points to a more specific conclusion than “add more tables.” The codebase already contains most of the major standards-aligned model families. The real remaining task is to normalize the schema so the older legacy objects and the newer standards-oriented objects form one coherent architecture.
 
-1. **Authority layer:** trust anchors, parent/child CAs, resource certificates, router certificates.  
-2. **Publication layer:** repositories, publication points, URIs, RRDP/rsync metadata.  
+The right direction here is therefore **compatibility-preserving normalization**, not a second schema reset.
+
+That means three things.
+
+1. **Unify object semantics around `SignedObject`.**  
+   The plugin already has a generic `SignedObject` layer plus typed extensions such as `Manifest`, `ASPA`, `RSC`, and `TrustAnchorKey`, and the legacy `Roa` model already has a compatibility link to it. The next step is to keep moving shared publication, signature, and lifecycle semantics onto `SignedObject` so new and existing object families stop drifting into separate patterns.
+2. **Clean up certificate-role boundaries.**  
+   The schema already distinguishes legacy resource certificates, `EndEntityCertificate`, and `RouterCertificate`, but those roles are not yet expressed as cleanly or consistently as they should be. The goal is not to invent a brand-new certificate subsystem; it is to make certificate purpose, signing role, and publication or revocation relationships clearer and more uniform.
+3. **Tighten publication and observation linkage.**  
+   The schema already has `Repository`, `PublicationPoint`, provider-imported publication-observation families, and validator-output families. The next step is to align authored state, imported state, and validated state around clearer identity and relationship rules so one object can be followed cleanly across publication, sync, and validation views.
+
+The most useful way to think about the target architecture is still as five layers, but now as a normalization target built on top of what already exists rather than as a hypothetical future redesign:
+
+1. **Authority layer:** trust anchors, parent or child CA relationships, resource certificates, router certificates.  
+2. **Publication layer:** repositories, publication points, URIs, RRDP or rsync metadata, and imported publication observation.  
 3. **Object layer:** generic signed objects plus typed payload extensions such as ROA, Manifest, ASPA, RSC, and Trust Anchor Key.  
-4. **Integrity layer:** EE certificates, CRLs, manifest membership, revocation and freshness state.  
-5. **Validation layer:** relying-party observations, validated payloads, and reconciliation results.
+4. **Integrity layer:** EE certificates, CRLs, manifest membership, revocation state, freshness state, and related certificate observations.  
+5. **Validation layer:** relying-party observations, validated payloads, reconciliation artifacts, and related operator evidence.
 
-That five-layer shape would make the plugin much more faithful to the standards architecture and far more extensible for real operator workflows.
+For implementation planning, this section should explicitly bias toward:
+
+- additive migrations and compatibility shims rather than destructive renames
+- keeping the explicit Django model layer as the source of truth
+- preserving stable UI, API, and GraphQL contracts while the internals are normalized
+- reducing special-case legacy ROA and certificate assumptions over time instead of trying to replace them in one pass
+
+In short, section 9.11 should now be read as a normalization roadmap: make the existing standards-aligned layers coherent, reduce legacy-versus-new-model duplication, and converge future work on the explicit five-layer architecture already emerging in the codebase.
 
 ---
 

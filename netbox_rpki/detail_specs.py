@@ -453,6 +453,35 @@ IMPORTED_SIGNED_OBJECT_DETAIL_SPEC = DetailSpec(
 )
 
 
+IMPORTED_CERTIFICATE_OBSERVATION_DETAIL_SPEC = DetailSpec(
+    model=models.ImportedCertificateObservation,
+    list_url_name='plugins:netbox_rpki:importedcertificateobservation_list',
+    breadcrumb_label='Imported Certificate Observations',
+    card_title='Imported Certificate Observation',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Provider Snapshot', value=lambda obj: obj.provider_snapshot, kind='link'),
+        DetailFieldSpec(label='Organization', value=lambda obj: obj.organization, kind='link'),
+        DetailFieldSpec(label='Certificate Key', value=lambda obj: obj.certificate_key),
+        DetailFieldSpec(label='Observation Source', value=lambda obj: obj.observation_source),
+        DetailFieldSpec(label='Certificate URI', value=lambda obj: obj.certificate_uri, kind='url', empty_text='None'),
+        DetailFieldSpec(label='Publication URI', value=lambda obj: obj.publication_uri, kind='url', empty_text='None'),
+        DetailFieldSpec(label='Signed Object URI', value=lambda obj: obj.signed_object_uri, kind='url', empty_text='None'),
+        DetailFieldSpec(label='Related Handle', value=lambda obj: obj.related_handle, empty_text='None'),
+        DetailFieldSpec(label='Class Name', value=lambda obj: obj.class_name, empty_text='None'),
+        DetailFieldSpec(label='Subject', value=lambda obj: obj.subject, empty_text='None'),
+        DetailFieldSpec(label='Issuer', value=lambda obj: obj.issuer, empty_text='None'),
+        DetailFieldSpec(label='Serial Number', value=lambda obj: obj.serial_number, empty_text='None'),
+        DetailFieldSpec(label='Not Before', value=lambda obj: obj.not_before, empty_text='None'),
+        DetailFieldSpec(label='Not After', value=lambda obj: obj.not_after, empty_text='None'),
+        DetailFieldSpec(label='External Object ID', value=lambda obj: obj.external_object_id, empty_text='None'),
+        DetailFieldSpec(label='External Reference', value=lambda obj: obj.external_reference, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Is Stale', value=lambda obj: obj.is_stale),
+        DetailFieldSpec(label='Payload', value=lambda obj: get_pretty_json(obj.payload_json), kind='code', empty_text='None'),
+    ),
+)
+
+
 ASPA_DETAIL_SPEC = DetailSpec(
     model=models.ASPA,
     list_url_name='plugins:netbox_rpki:aspa_list',
@@ -1362,6 +1391,11 @@ PROVIDER_SNAPSHOT_DETAIL_SPEC = DetailSpec(
             table_class_name='ImportedSignedObjectTable',
             queryset=lambda obj: obj.imported_signed_objects.select_related('external_reference', 'publication_point').all(),
         ),
+        DetailTableSpec(
+            title='Imported Certificate Observations',
+            table_class_name='ImportedCertificateObservationTable',
+            queryset=lambda obj: obj.imported_certificate_observations.select_related('external_reference').all(),
+        ),
     ),
 )
 
@@ -1432,6 +1466,7 @@ DETAIL_SPEC_BY_MODEL = {
     models.ImportedResourceEntitlement: IMPORTED_RESOURCE_ENTITLEMENT_DETAIL_SPEC,
     models.ImportedPublicationPoint: IMPORTED_PUBLICATION_POINT_DETAIL_SPEC,
     models.ImportedSignedObject: IMPORTED_SIGNED_OBJECT_DETAIL_SPEC,
+    models.ImportedCertificateObservation: IMPORTED_CERTIFICATE_OBSERVATION_DETAIL_SPEC,
     models.RpkiProviderAccount: PROVIDER_ACCOUNT_DETAIL_SPEC,
     models.ProviderSyncRun: PROVIDER_SYNC_RUN_DETAIL_SPEC,
     models.ProviderSnapshot: PROVIDER_SNAPSHOT_DETAIL_SPEC,

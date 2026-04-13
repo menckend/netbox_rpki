@@ -132,6 +132,70 @@ SERIALIZER_CLASS_MAP['roachangeplan'] = ROAChangePlanSerializer
 globals()['ROAChangePlanSerializer'] = ROAChangePlanSerializer
 
 
+class ProviderSnapshotSerializer(SERIALIZER_CLASS_MAP['providersnapshot']):
+    latest_diff = serializers.SerializerMethodField()
+    imported_publication_points = serializers.SerializerMethodField()
+    imported_signed_objects = serializers.SerializerMethodField()
+    imported_certificate_observations = serializers.SerializerMethodField()
+
+    class Meta(SERIALIZER_CLASS_MAP['providersnapshot'].Meta):
+        fields = SERIALIZER_CLASS_MAP['providersnapshot'].Meta.fields + (
+            'latest_diff',
+            'imported_publication_points',
+            'imported_signed_objects',
+            'imported_certificate_observations',
+        )
+
+    def _is_detail_view(self):
+        request = self.context.get('request')
+        if request is None:
+            return False
+        parser_context = getattr(request, 'parser_context', None) or {}
+        view = parser_context.get('view')
+        return getattr(view, 'action', '') == 'retrieve'
+
+    def _serialize_nested_collection(self, obj, *, related_name, serializer_key):
+        if not self._is_detail_view():
+            return []
+        serializer_class = SERIALIZER_CLASS_MAP[serializer_key]
+        queryset = getattr(obj, related_name).all()
+        return serializer_class(queryset, many=True, context=self.context).data
+
+    def get_latest_diff(self, obj):
+        if not self._is_detail_view():
+            return None
+        snapshot_diff = obj.diffs_as_comparison.order_by('-compared_at', '-created').first()
+        if snapshot_diff is None:
+            return None
+        serializer = SERIALIZER_CLASS_MAP['providersnapshotdiff'](snapshot_diff, context=self.context)
+        return serializer.data
+
+    def get_imported_publication_points(self, obj):
+        return self._serialize_nested_collection(
+            obj,
+            related_name='imported_publication_points',
+            serializer_key='importedpublicationpoint',
+        )
+
+    def get_imported_signed_objects(self, obj):
+        return self._serialize_nested_collection(
+            obj,
+            related_name='imported_signed_objects',
+            serializer_key='importedsignedobject',
+        )
+
+    def get_imported_certificate_observations(self, obj):
+        return self._serialize_nested_collection(
+            obj,
+            related_name='imported_certificate_observations',
+            serializer_key='importedcertificateobservation',
+        )
+
+
+SERIALIZER_CLASS_MAP['providersnapshot'] = ProviderSnapshotSerializer
+globals()['ProviderSnapshotSerializer'] = ProviderSnapshotSerializer
+
+
 class ROAChangePlanApproveActionSerializer(serializers.Serializer):
     ticket_reference = serializers.CharField(required=False, allow_blank=True, max_length=200)
     change_reference = serializers.CharField(required=False, allow_blank=True, max_length=200)

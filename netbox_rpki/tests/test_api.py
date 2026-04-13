@@ -35,6 +35,9 @@ from netbox_rpki.tests.utils import (
     create_test_certificate,
     create_test_certificate_asn,
     create_test_certificate_prefix,
+    create_test_imported_certificate_observation,
+    create_test_imported_publication_point,
+    create_test_imported_signed_object,
     create_test_organization,
     create_test_prefix,
     create_test_provider_account,
@@ -751,6 +754,25 @@ class ProviderSnapshotActionAPITestCase(PluginAPITestCase):
             completed_at=timezone.now() - timedelta(hours=1),
             status='completed',
         )
+        cls.imported_publication_point = create_test_imported_publication_point(
+            name='Provider Snapshot API Publication Point',
+            organization=cls.organization,
+            provider_snapshot=cls.comparison_snapshot,
+            publication_uri='rsync://api-snapshot.invalid/repo/',
+        )
+        cls.imported_signed_object = create_test_imported_signed_object(
+            name='Provider Snapshot API Signed Object',
+            organization=cls.organization,
+            provider_snapshot=cls.comparison_snapshot,
+            publication_point=cls.imported_publication_point,
+            signed_object_uri='rsync://api-snapshot.invalid/repo/example.mft',
+        )
+        cls.imported_certificate_observation = create_test_imported_certificate_observation(
+            name='Provider Snapshot API Certificate Observation',
+            organization=cls.organization,
+            provider_snapshot=cls.comparison_snapshot,
+            certificate_uri='rsync://api-snapshot.invalid/repo/example.cer',
+        )
 
     def test_provider_snapshot_compare_action_returns_persisted_diff(self):
         self.add_permissions('netbox_rpki.view_providersnapshot', 'netbox_rpki.view_providersnapshotdiff')
@@ -768,7 +790,7 @@ class ProviderSnapshotActionAPITestCase(PluginAPITestCase):
         self.assertHttpStatus(response, 200)
         self.assertEqual(response.data['base_snapshot'], self.base_snapshot.pk)
         self.assertEqual(response.data['comparison_snapshot'], self.comparison_snapshot.pk)
-        self.assertEqual(response.data['item_count'], 0)
+        self.assertEqual(response.data['item_count'], 3)
 
     def test_provider_snapshot_summary_reports_status_and_diff_coverage(self):
         self.add_permissions('netbox_rpki.view_providersnapshot', 'netbox_rpki.view_providersnapshotdiff')
@@ -791,6 +813,108 @@ class ProviderSnapshotActionAPITestCase(PluginAPITestCase):
         self.assertEqual(response.data['by_status']['completed'], 2)
         self.assertEqual(response.data['with_diff_count'], 1)
         self.assertIsNotNone(response.data['latest_completed_at'])
+
+    def test_provider_snapshot_detail_includes_publication_observation_children(self):
+        self.add_permissions(
+            'netbox_rpki.view_providersnapshot',
+            'netbox_rpki.view_providersnapshotdiff',
+            'netbox_rpki.view_importedpublicationpoint',
+            'netbox_rpki.view_importedsignedobject',
+            'netbox_rpki.view_importedcertificateobservation',
+        )
+        snapshot_diff = create_test_provider_snapshot_diff(
+            name='Provider Snapshot Detail Existing Diff',
+            organization=self.organization,
+            provider_account=self.provider_account,
+            base_snapshot=self.base_snapshot,
+            comparison_snapshot=self.comparison_snapshot,
+        )
+
+        response = self.client.get(
+            reverse('plugins-api:netbox_rpki-api:providersnapshot-detail', kwargs={'pk': self.comparison_snapshot.pk}),
+            **self.header,
+        )
+
+        self.assertHttpStatus(response, 200)
+        self.assertEqual(response.data['latest_diff']['id'], snapshot_diff.pk)
+        self.assertEqual(
+            [row['id'] for row in response.data['imported_publication_points']],
+            [self.imported_publication_point.pk],
+        )
+        self.assertEqual(
+            [row['id'] for row in response.data['imported_signed_objects']],
+            [self.imported_signed_object.pk],
+        )
+        self.assertEqual(
+            [row['id'] for row in response.data['imported_certificate_observations']],
+            [self.imported_certificate_observation.pk],
+        )
+
+
+class ImportedCertificateObservationAPITestCase(PluginAPITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(
+            org_id='imported-cert-observation-api-org',
+            name='Imported Certificate Observation API Org',
+        )
+        cls.provider_account = create_test_provider_account(
+            name='Imported Certificate Observation API Account',
+            organization=cls.organization,
+            provider_type='krill',
+            org_handle='ORG-IMPORTED-CERT-API',
+            ca_handle='imported-cert-api',
+        )
+        cls.snapshot = create_test_provider_snapshot(
+            name='Imported Certificate Observation API Snapshot',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+            status='completed',
+        )
+        cls.certificate_observation = create_test_imported_certificate_observation(
+            name='Imported Certificate Observation API Record',
+            organization=cls.organization,
+            provider_snapshot=cls.snapshot,
+            certificate_uri='rsync://api.invalid/repo/example.cer',
+        )
+
+    def test_imported_certificate_observation_list_and_detail_are_exposed(self):
+        self.add_permissions('netbox_rpki.view_importedcertificateobservation')
+        spec = OBJECT_SPEC_BY_REGISTRY_KEY['importedcertificateobservation']
+        list_url = reverse(f'plugins-api:netbox_rpki-api:{spec.api.basename}-list')
+        detail_url = reverse(
+            spec.api.detail_view_name,
+            kwargs={'pk': self.certificate_observation.pk},
+        )
+
+        list_response = self.client.get(list_url, **self.header)
+        detail_response = self.client.get(detail_url, **self.header)
+
+        self.assertHttpStatus(list_response, 200)
+        self.assertEqual(len(list_response.data['results']), 1)
+        self.assertEqual(list_response.data['results'][0]['id'], self.certificate_observation.pk)
+        self.assertHttpStatus(detail_response, 200)
+        self.assertEqual(detail_response.data['id'], self.certificate_observation.pk)
+        self.assertEqual(detail_response.data['certificate_uri'], 'rsync://api.invalid/repo/example.cer')
+
+    def test_imported_certificate_observation_endpoint_is_read_only(self):
+        self.add_permissions('netbox_rpki.add_importedcertificateobservation')
+        spec = OBJECT_SPEC_BY_REGISTRY_KEY['importedcertificateobservation']
+        list_url = reverse(f'plugins-api:netbox_rpki-api:{spec.api.basename}-list')
+
+        response = self.client.post(
+            list_url,
+            {
+                'name': 'Should Not Create',
+                'provider_snapshot': self.snapshot.pk,
+                'organization': self.organization.pk,
+                'certificate_key': 'blocked',
+            },
+            format='json',
+            **self.header,
+        )
+
+        self.assertHttpStatus(response, 405)
 
 
 @_install_registry_api_tests

@@ -64,9 +64,9 @@ PROVIDER_SYNC_FAMILY_METADATA = {
 }
 
 KRILL_CERTIFICATE_INVENTORY_LIMITATION_REASON = (
-    'Repository-derived published-certificate observation is not yet fully implemented from Krill-backed '
-    'publication evidence; only nested certificate-bearing fields are available in CA metadata, parent status, '
-    'and repo-status payloads.'
+    'Repository-derived certificate observation is populated from published signed objects and '
+    'certificate-bearing Krill metadata, but it is still not a full repository validator or canonical '
+    'certificate catalog.'
 )
 
 
@@ -84,6 +84,7 @@ def supported_sync_families(provider_account: rpki_models.RpkiProviderAccount) -
             rpki_models.ProviderSyncFamily.CHILD_LINKS,
             rpki_models.ProviderSyncFamily.RESOURCE_ENTITLEMENTS,
             rpki_models.ProviderSyncFamily.PUBLICATION_POINTS,
+            rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY,
             rpki_models.ProviderSyncFamily.SIGNED_OBJECT_INVENTORY,
         )
     if provider_account.provider_type == rpki_models.ProviderType.ARIN:
@@ -101,11 +102,11 @@ def family_capability_extra(
     ):
         return {
             'capability_status': rpki_models.ProviderSyncFamilyStatus.LIMITED,
-            'capability_mode': 'placeholder',
+            'capability_mode': 'derived',
             'capability_sources': [
+                'published_signed_objects',
                 'ca_metadata',
                 'parent_links',
-                'publication_points',
                 'repo_status',
             ],
             'capability_reason': KRILL_CERTIFICATE_INVENTORY_LIMITATION_REASON,
@@ -221,6 +222,9 @@ def build_provider_sync_summary(
         signed_object_family = resolved_family_summaries[rpki_models.ProviderSyncFamily.SIGNED_OBJECT_INVENTORY]
         summary['signed_object_records_fetched'] = signed_object_family['records_fetched']
         summary['signed_object_records_imported'] = signed_object_family['records_imported']
+        certificate_family = resolved_family_summaries[rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY]
+        summary['certificate_records_fetched'] = certificate_family['records_fetched']
+        summary['certificate_records_imported'] = certificate_family['records_imported']
 
     if extra:
         summary.update(dict(extra))

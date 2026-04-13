@@ -15,7 +15,7 @@ from ipam.models.ip import Prefix
 
 from netbox_rpki import models as rpki_models
 from . import provider_sync_krill
-from .provider_sync_contract import build_family_summary, build_provider_sync_summary
+from .provider_sync_contract import build_family_summary, build_provider_sync_summary, family_capability_extra
 from .provider_sync_diff import build_latest_provider_snapshot_diff
 
 
@@ -521,6 +521,54 @@ def _bind_publication_point_external_reference(
     )
 
 
+def _bind_certificate_observation_external_reference(
+    *,
+    provider_account: rpki_models.RpkiProviderAccount,
+    snapshot: rpki_models.ProviderSnapshot,
+    imported_certificate_observation: rpki_models.ImportedCertificateObservation,
+) -> rpki_models.ExternalObjectReference | None:
+    provider_identity = imported_certificate_observation.certificate_key.strip()
+    return _bind_external_reference(
+        provider_account=provider_account,
+        snapshot=snapshot,
+        object_type=rpki_models.ExternalObjectType.CERTIFICATE,
+        provider_identity=provider_identity,
+        external_object_id=imported_certificate_observation.external_object_id,
+        imported_object=imported_certificate_observation,
+    )
+
+
+def _certificate_observation_payload(
+    observation_record: provider_sync_krill.KrillCertificateObservationRecord,
+) -> dict[str, object]:
+    return {
+        'certificate_uri': observation_record.certificate_uri,
+        'publication_uri': observation_record.publication_uri,
+        'signed_object_uri': observation_record.signed_object_uri,
+        'related_handle': observation_record.related_handle,
+        'class_name': observation_record.class_name,
+        'subject': observation_record.subject,
+        'issuer': observation_record.issuer,
+        'serial_number': observation_record.serial_number,
+        'not_before': observation_record.not_before.isoformat() if observation_record.not_before else '',
+        'not_after': observation_record.not_after.isoformat() if observation_record.not_after else '',
+        'sources': [
+            {
+                'observation_source': source_record.observation_source,
+                'certificate_uri': source_record.certificate_uri,
+                'publication_uri': source_record.publication_uri,
+                'signed_object_uri': source_record.signed_object_uri,
+                'related_handle': source_record.related_handle,
+                'class_name': source_record.class_name,
+                'freshness_status': source_record.freshness_status,
+            }
+            for source_record in observation_record.source_records
+        ],
+        'certificate_pem': observation_record.certificate_pem,
+        'certificate_der_base64': observation_record.certificate_der_base64,
+    }
+
+
 def _import_arin_records(
     provider_account: rpki_models.RpkiProviderAccount,
     snapshot: rpki_models.ProviderSnapshot,
@@ -631,6 +679,12 @@ def _import_krill_records(
         repo_details_payload=repo_details_payload,
         repo_status_payload=repo_status_payload,
     )
+    certificate_observation_records = provider_sync_krill.parse_krill_certificate_observation_records(
+        route_payload=route_payload,
+        repo_status_payload=repo_status_payload,
+        ca_metadata_payload=ca_metadata_payload,
+        parent_status_payload=parent_status_payload,
+    )
 
     imported_count = 0
     imported_aspa_count = 0
@@ -640,6 +694,7 @@ def _import_krill_records(
     imported_resource_entitlement_count = 0
     imported_publication_point_count = 0
     imported_signed_object_count = 0
+    imported_certificate_observation_count = 0
     imported_publication_points: dict[str, rpki_models.ImportedPublicationPoint] = {}
     with transaction.atomic():
         for record in records:
@@ -928,6 +983,12 @@ def _import_krill_records(
                     'signed_object_type': record.signed_object_type,
                     'object_hash': record.object_hash,
                     'body_base64': record.body_base64,
+                    'manifest': provider_sync_krill._parse_cms_manifest_metadata(record.body_base64)
+                    if record.signed_object_type == rpki_models.SignedObjectType.MANIFEST
+                    else {},
+                    'crl': provider_sync_krill._parse_cms_crl_metadata(record.body_base64)
+                    if record.signed_object_type == rpki_models.SignedObjectType.CRL
+                    else {},
                 },
             )
             _bind_signed_object_external_reference(
@@ -936,6 +997,39 @@ def _import_krill_records(
                 imported_signed_object=imported_signed_object,
             )
             imported_signed_object_count += 1
+
+        for record in certificate_observation_records:
+            is_stale = bool(record.not_after and snapshot.fetched_at and record.not_after <= snapshot.fetched_at)
+            imported_certificate_observation = rpki_models.ImportedCertificateObservation.objects.create(
+                name=f'{provider_account.name} Certificate {record.subject or record.certificate_key[:12]}',
+                provider_snapshot=snapshot,
+                organization=provider_account.organization,
+                certificate_key=record.certificate_key,
+                observation_source=(
+                    record.source_records[0].observation_source
+                    if record.source_records
+                    else rpki_models.CertificateObservationSource.SIGNED_OBJECT_EE
+                ),
+                certificate_uri=record.certificate_uri,
+                publication_uri=record.publication_uri,
+                signed_object_uri=record.signed_object_uri,
+                related_handle=record.related_handle,
+                class_name=record.class_name,
+                subject=record.subject,
+                issuer=record.issuer,
+                serial_number=record.serial_number,
+                not_before=record.not_before,
+                not_after=record.not_after,
+                external_object_id=record.certificate_key,
+                payload_json=_certificate_observation_payload(record),
+                is_stale=is_stale,
+            )
+            _bind_certificate_observation_external_reference(
+                provider_account=provider_account,
+                snapshot=snapshot,
+                imported_certificate_observation=imported_certificate_observation,
+            )
+            imported_certificate_observation_count += 1
 
     return {
         rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS: build_family_summary(
@@ -1001,6 +1095,15 @@ def _import_krill_records(
                 'records_fetched': len(signed_object_records),
                 'records_imported': imported_signed_object_count,
             },
+        ),
+        rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY: build_family_summary(
+            rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY,
+            status=rpki_models.ProviderSyncFamilyStatus.LIMITED,
+            counts={
+                'records_fetched': len(certificate_observation_records),
+                'records_imported': imported_certificate_observation_count,
+            },
+            extra=family_capability_extra(provider_account, rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY),
         ),
     }
 

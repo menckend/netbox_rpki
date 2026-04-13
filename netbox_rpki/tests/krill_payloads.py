@@ -1,5 +1,44 @@
 """Deterministic Krill payload fixtures for provider sync planning and tests."""
 
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+
+def _load_live_json(path: str) -> dict[str, object]:
+    sample_path = Path(path)
+    if not sample_path.exists():
+        return {}
+    return json.loads(sample_path.read_text())
+
+
+_LIVE_SAMPLE_BUNDLE = _load_live_json('/tmp/krill_live_samples.json')
+_LIVE_REPO_STATUS = _load_live_json('/tmp/krill_repo_status.json')
+
+
+def _live_sample_value(sample_name: str, key: str) -> str:
+    sample = _LIVE_SAMPLE_BUNDLE.get(sample_name, {})
+    if isinstance(sample, dict):
+        value = sample.get(key)
+        if isinstance(value, str):
+            return value
+    return ''
+
+
+def _live_published_roa_objects() -> list[dict[str, object]]:
+    published = _LIVE_REPO_STATUS.get('published', [])
+    roa_entries = []
+    if isinstance(published, list):
+        for item in published:
+            if not isinstance(item, dict):
+                continue
+            uri = str(item.get('uri') or '')
+            if not uri.endswith('.roa'):
+                continue
+            roa_entries.append(item)
+    return roa_entries
+
 KRILL_ROUTES_JSON = [
     {
         'asn': 65000,
@@ -15,7 +54,7 @@ KRILL_ROUTES_JSON = [
                 },
                 'serial': '111',
                 'uri': 'rsync://testbed.krill.cloud/repo/netbox-rpki-dev/0/v4.roa',
-                'base64': 'AAA',
+                'base64': _live_published_roa_objects()[0]['base64'] if _live_published_roa_objects() else 'AAA',
                 'hash': 'hash-v4',
             }
         ],
@@ -34,7 +73,7 @@ KRILL_ROUTES_JSON = [
                 },
                 'serial': '222',
                 'uri': 'rsync://testbed.krill.cloud/repo/netbox-rpki-dev/0/v6.roa',
-                'base64': 'BBB',
+                'base64': _live_published_roa_objects()[1]['base64'] if len(_live_published_roa_objects()) > 1 else 'BBB',
                 'hash': 'hash-v6',
             }
         ],
@@ -86,6 +125,7 @@ KRILL_CA_METADATA_JSON = {
                         'key_id': 'NETBOXRPKIACTIVEKEY0001',
                         'incoming_cert': {
                             'uri': 'rsync://testbed.krill.cloud/repo/testbed/0/netbox-rpki-dev.cer',
+                            'base64': _live_sample_value('incoming_cert', 'base64') or 'MIIFlDCCBHygAwIBAgIUFmJq/upclIPirQ6V3WEoGGLK1OEwDQYJKoZIhvcNAQELBQAwMzExMC8GA1UEAxMoNzRDRDdFRkM1QUU4MTZCQ0VGMzkwRTVBNkJENjFENjJCRkQzRTBEQTAeFw0yNjA0MTIxMzU3MDVaFw0yNzA0MTExNDAyMDVaMDMxMTAvBgNVBAMTKEUxQzQ0REQ4MzY4MDM2OEFBQTAwNUI0RjI0RDY1NjgxM0E3M0JFRDQwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQCprjxqHqBjId2L7Mx5VjmmGvuhtVWJP1VSgcBGIonAj0RRYwg8eTr06u9TYwdVhz/+Ix2qSxfwVPyTqjBmwgRd787s3ssSpjkoLkOW9hW7Ss5kimqAFsH3Hrmr1Mk58Jxu6dNHI8EkY6Bg3kw04TNBmsqD+8OHjgPYbm7PP2YfEURMShv186ApEyNTnYXFvsAQxasbXTwSAZTw7RwaIAjy+40kpx/SAVqi2CZCNKF2TOTep0cYYrvpuKew17MGm2tDzAVG2h2a/XT9XasT8+UoMs5ujpwYeeINLOQ4N9B88qnqDQKkKN72QAVNtEeYp7NNb4U6S+mVL5D7Q46KXzILAgMBAAGjggKeMIICmjAPBgNVHRMBAf8EBTADAQH/MB0GA1UdDgQWBBThxE3YNoA2iqoAW08k1laBOnO+1DAfBgNVHSMEGDAWgBR0zX78WugWvO85Dlpr1h1iv9Pg2jAOBgNVHQ8BAf8EBAMCAQYwaAYDVR0fBGEwXzBdoFugWYZXcnN5bmM6Ly90ZXN0YmVkLmtyaWxsLmNsb3VkL3JlcG8vdGVzdGJlZC8wLzc0Q0Q3RUZDNUFFODE2QkNFRjM5MEU1QTZCRDYxRDYyQkZEM0UwREEuY3JsMGkGCCsGAQUFBwEBBF0wWzBZBggrBgEFBQcwAoZNcnN5bmM6Ly90ZXN0YmVkLmtyaWxsLmNsb3VkL3JlcG8vNzRDRDdFRkM1QUU4MTZCQ0VGMzkwRTVBNkJENjFENjJCRkQzRTBEQS5jZXIwgf0GCCsGAQUFBwELBIHwMIHtMD8GCCsGAQUFBzAFhjNyc3luYzovL3Rlc3RiZWQua3JpbGwuY2xvdWQvcmVwby9uZXRib3gtcnBraS1kZXYvMC8wawYIKwYBBQUHMAqGX3JzeW5jOi8vdGVzdGJlZC5rcmlsbC5jbG91ZC9yZXBvL25ldGJveC1ycGtpLWRldi8wL0UxQzQ0REQ4MzY4MDM2OEFBQTAwNUI0RjI0RDY1NjgxM0E3M0JFRDQubWZ0MD0GCCsGAQUFBzANhjFodHRwczovL3Rlc3RiZWQua3JpbGwuY2xvdWQvcnJkcC9ub3RpZmljYXRpb24ueG1sMBgGA1UdIAEB/wQOMAwwCgYIKwYBBQUHDgIwLAYIKwYBBQUHAQcBAf8EHTAbMAoEAgABMAQDAgAKMA0EAgACMAcDBQAgAQ24MBoGCCsGAQUFBwEIAQH/BAswCaAHMAUCAwD96DANBgkqhkiG9w0BAQsFAAOCAQEAlwaJXkQQuUCn4j9MaEA5scIXGzVx8mkzzWbG/d0rbqNjz73J8kymS7NcDfjdzkw6CFiz7N18wfNM9Mm8lGzGufSdaubdKH7Oii0WmGGQvGutK48sZ583gDFIIQ4FZwNgbBILbQfbncWLVSs2Lvv01w4vzUCHPl/+ytdbaB6+Wj5srSYyKEjBTQShqB4bYd784K/jswsipqY0kYRI4Ev9Gqkpvkt0Htg8FNdjs5fEqkLQaGmgzp4uZCfm0Gy17ErzK3yRWx2xgIPrv7Ct9FXMR0ux+VjpqjHb8R+yCFGSz1lb517RgsOX2pQjXXBhZdGKHTs9K0A0r9/fO0AMxAzqaQ==',
                             'resources': {
                                 'asn': 'AS65000-AS65010',
                                 'ipv4': '10.10.0.0/24, 10.20.0.0/24',
@@ -128,12 +168,12 @@ KRILL_PARENT_STATUSES_JSON = {
                 'not_after': '2027-04-12T10:00:00Z',
                 'signing_cert': {
                     'url': 'rsync://testbed.krill.cloud/repo/testbed/0/testbed.cer',
-                    'cert': 'MIIKRILLSIGNINGCERT==',
+                    'cert': _live_sample_value('parent_signing_cert', 'cert') or 'MIIKRILLSIGNINGCERT==',
                 },
                 'issued_certs': [
                     {
                         'uri': 'rsync://testbed.krill.cloud/repo/netbox-rpki-dev/0/netbox-rpki-dev.cer',
-                        'cert': 'MIIKRILLISSUEDCERT==',
+                        'cert': _live_sample_value('incoming_cert', 'base64') or 'MIIKRILLISSUEDCERT==',
                     }
                 ],
             }
@@ -209,11 +249,11 @@ KRILL_REPO_STATUS_JSON = {
     'next_exchange_before': 1776024000,
     'published': [
         {
-            'base64': 'MIIKRILLMFT==',
+            'base64': _live_sample_value('manifest', 'base64') or 'MIIKRILLMFT==',
             'uri': 'rsync://testbed.krill.cloud/repo/netbox-rpki-dev/0/netbox-rpki-dev.mft',
         },
         {
-            'base64': 'MIIKRILLCRL==',
+            'base64': _live_sample_value('crl', 'base64') or 'MIIKRILLCRL==',
             'uri': 'rsync://testbed.krill.cloud/repo/netbox-rpki-dev/0/netbox-rpki-dev.crl',
         },
     ],

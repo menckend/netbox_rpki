@@ -28,6 +28,7 @@ from netbox_rpki.tests.utils import (
     create_test_published_roa_result,
     create_test_rir,
     create_test_imported_ca_metadata,
+    create_test_imported_certificate_observation,
     create_test_imported_child_link,
     create_test_imported_parent_link,
     create_test_imported_publication_point,
@@ -309,6 +310,11 @@ class ProviderSnapshotDetailViewTestCase(PluginViewTestCase):
             organization=cls.organization,
             provider_snapshot=cls.snapshot,
         )
+        create_test_imported_certificate_observation(
+            name='Provider Snapshot Imported Certificate Observation',
+            organization=cls.organization,
+            provider_snapshot=cls.snapshot,
+        )
         create_test_provider_snapshot_diff(
             name='Provider Snapshot View Diff',
             organization=cls.organization,
@@ -327,6 +333,7 @@ class ProviderSnapshotDetailViewTestCase(PluginViewTestCase):
             'netbox_rpki.view_importedchildlink',
             'netbox_rpki.view_importedresourceentitlement',
             'netbox_rpki.view_importedpublicationpoint',
+            'netbox_rpki.view_importedcertificateobservation',
         )
 
         response = self.client.get(self.snapshot.get_absolute_url())
@@ -338,6 +345,7 @@ class ProviderSnapshotDetailViewTestCase(PluginViewTestCase):
         self.assertContains(response, 'Imported Child Links')
         self.assertContains(response, 'Imported Resource Entitlements')
         self.assertContains(response, 'Imported Publication Points')
+        self.assertContains(response, 'Imported Certificate Observations')
         self.assertContains(response, 'Provider Snapshot View Diff')
         self.assertContains(response, 'Provider Snapshot Imported CA Metadata')
 

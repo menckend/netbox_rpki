@@ -35,6 +35,7 @@ from netbox_rpki.tests.utils import (
     create_test_certificate_asn,
     create_test_certificate_prefix,
     create_test_end_entity_certificate,
+    create_test_external_object_reference,
     create_test_organization,
     create_test_manifest,
     create_test_manifest_entry,
@@ -54,6 +55,7 @@ from netbox_rpki.tests.utils import (
     create_test_provider_sync_run,
     create_test_provider_snapshot,
     create_test_imported_ca_metadata,
+    create_test_imported_certificate_observation,
     create_test_imported_parent_link,
     create_test_imported_child_link,
     create_test_imported_resource_entitlement,
@@ -590,6 +592,9 @@ def _register_scenario_builders() -> None:
             "approvalrecord": lambda: create_test_approval_record(
                 name=f"Approval Record {unique_token('approval-record')}"
             ),
+            "externalobjectreference": lambda: create_test_external_object_reference(
+                name=f"External Object Reference {unique_token('external-object-reference')}"
+            ),
             "importedroaauthorization": lambda: create_test_imported_roa_authorization(
                 name=f"Imported ROA Authorization {unique_token('imported-roa-authorization')}",
                 origin_asn=create_unique_asn(),
@@ -616,6 +621,9 @@ def _register_scenario_builders() -> None:
             ),
             "importedsignedobject": lambda: create_test_imported_signed_object(
                 name=f"Imported Signed Object {unique_token('imported-signed-object')}"
+            ),
+            "importedcertificateobservation": lambda: create_test_imported_certificate_observation(
+                name=f"Imported Certificate Observation {unique_token('imported-certificate-observation')}"
             ),
             "roachangeplan": lambda: build_roa_change_plan_matrix_instance(),
             "roachangeplanitem": lambda: build_roa_change_plan_matrix_item_instance(),

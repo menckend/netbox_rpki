@@ -24,6 +24,7 @@ from netbox_rpki.tests.krill_payloads import (
 )
 from netbox_rpki.tests.utils import (
     create_test_asn,
+    create_test_external_object_reference,
     create_test_imported_roa_authorization,
     create_test_organization,
     create_test_prefix,
@@ -161,9 +162,12 @@ class ProviderSyncServiceTestCase(TestCase):
         imported_signed_objects = list(
             snapshot.imported_signed_objects.select_related('external_reference', 'publication_point').order_by('signed_object_uri')
         )
+        imported_certificate_observations = list(
+            snapshot.imported_certificate_observations.select_related('external_reference').order_by('certificate_key')
+        )
         self.assertEqual(sync_run.status, rpki_models.ValidationRunStatus.COMPLETED)
-        self.assertEqual(sync_run.records_fetched, 15)
-        self.assertEqual(sync_run.records_imported, 15)
+        self.assertEqual(sync_run.records_fetched, 18)
+        self.assertEqual(sync_run.records_imported, 18)
         self.assertEqual(imported[0].prefix, prefix_v4)
         self.assertEqual(imported[0].origin_asn, origin_asn)
         self.assertEqual(imported[0].external_object_id, '10.10.0.0/24|24|65000')
@@ -194,6 +198,7 @@ class ProviderSyncServiceTestCase(TestCase):
         self.assertEqual(len(imported_publication_points), 1)
         self.assertEqual(imported_publication_points[0].published_object_count, 2)
         self.assertEqual(len(imported_signed_objects), 2)
+        self.assertEqual(len(imported_certificate_observations), 3)
         self.assertEqual(
             {row.signed_object_type for row in imported_signed_objects},
             {
@@ -261,7 +266,7 @@ class ProviderSyncServiceTestCase(TestCase):
         )
         self.assertEqual(
             snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY]['capability_mode'],
-            'placeholder',
+            'derived',
         )
         self.assertEqual(
             snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY]['family_kind'],
@@ -272,16 +277,25 @@ class ProviderSyncServiceTestCase(TestCase):
             'repository_publication',
         )
         self.assertIn(
-            'Repository-derived published-certificate observation',
+            'Repository-derived certificate observation is populated',
             snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY]['capability_reason'],
+        )
+        self.assertIn(
+            'published_signed_objects',
+            snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY]['capability_sources'],
         )
         self.assertIn(
             'repo_status',
             snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY]['capability_sources'],
         )
-        self.assertEqual(snapshot.summary_json['records_imported'], 15)
+        self.assertEqual(
+            snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY]['records_imported'],
+            3,
+        )
+        self.assertEqual(snapshot.summary_json['records_imported'], 18)
         self.assertEqual(snapshot.summary_json['route_records_imported'], 2)
         self.assertEqual(snapshot.summary_json['signed_object_records_imported'], 2)
+        self.assertEqual(snapshot.summary_json['certificate_records_imported'], 3)
         self.assertEqual(provider_account.last_sync_summary_json['ca_handle'], 'netbox-rpki-dev')
         self.assertEqual(provider_account.last_sync_summary_json['aspa_records_imported'], 2)
 
@@ -363,7 +377,7 @@ class ProviderSyncServiceTestCase(TestCase):
         second_import = second_snapshot.imported_roa_authorizations.get(prefix_cidr_text='10.10.0.0/24')
         second_aspa_import = second_snapshot.imported_aspas.get(customer_as_value=65000)
 
-        self.assertEqual(rpki_models.ExternalObjectReference.objects.count(), 15)
+        self.assertEqual(rpki_models.ExternalObjectReference.objects.count(), 18)
         self.assertEqual(second_import.external_reference_id, first_reference.pk)
         first_reference.refresh_from_db()
         self.assertEqual(first_reference.last_seen_provider_snapshot, second_snapshot)
@@ -379,7 +393,7 @@ class ProviderSyncServiceTestCase(TestCase):
         self.assertEqual(snapshot_diff.status, rpki_models.ValidationRunStatus.COMPLETED)
         self.assertEqual(
             snapshot_diff.summary_json['totals']['records_unchanged'],
-            15,
+            18,
         )
         self.assertEqual(snapshot_diff.items.count(), 0)
         self.assertEqual(second_snapshot.summary_json['latest_diff_id'], snapshot_diff.pk)
@@ -529,12 +543,20 @@ class ProviderSyncServiceTestCase(TestCase):
             rpki_models.ProviderSyncFamilyStatus.LIMITED,
         )
         self.assertEqual(
+            snapshot_diff.summary_json['families'][rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY]['capability_mode'],
+            'derived',
+        )
+        self.assertEqual(
             snapshot_diff.summary_json['families'][rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY]['family_kind'],
             'publication_observation',
         )
         self.assertEqual(
             snapshot_diff.summary_json['families'][rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY]['evidence_source'],
             'repository_publication',
+        )
+        self.assertIn(
+            'published_signed_objects',
+            snapshot_diff.summary_json['families'][rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY]['capability_sources'],
         )
         self.assertEqual(
             set(snapshot_diff.items.values_list('change_type', flat=True)),
@@ -655,6 +677,18 @@ class ProviderSyncServiceTestCase(TestCase):
 
 
 class ExternalObjectReferenceModelTestCase(TestCase):
+    def test_external_object_reference_uses_plugin_detail_url(self):
+        external_reference = create_test_external_object_reference(
+            name='External Reference Detail URL',
+            provider_identity='detail-url-provider-identity',
+            external_object_id='detail-url-external-object',
+        )
+
+        self.assertEqual(
+            external_reference.get_absolute_url(),
+            reverse('plugins:netbox_rpki:externalobjectreference', args=[external_reference.pk]),
+        )
+
     def test_external_object_reference_is_unique_per_provider_identity(self):
         organization = create_test_organization(org_id='external-reference-org', name='External Reference Org')
         provider_account = create_test_provider_account(

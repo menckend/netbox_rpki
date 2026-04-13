@@ -1571,6 +1571,60 @@ def create_test_imported_publication_point(
     )
 
 
+def create_test_imported_certificate_observation(
+    name='Imported Certificate Observation 1',
+    provider_snapshot=None,
+    organization=None,
+    certificate_key='deadbeef',
+    observation_source=None,
+    certificate_uri='rsync://example.invalid/repo/example.cer',
+    publication_uri='rsync://example.invalid/repo/',
+    signed_object_uri='',
+    related_handle='',
+    class_name='',
+    subject='CN=Example',
+    issuer='CN=Issuer',
+    serial_number='1',
+    not_before=None,
+    not_after=None,
+    external_object_id='',
+    external_reference=None,
+    is_stale=False,
+    payload_json=None,
+    **kwargs,
+):
+    if organization is None:
+        organization = create_test_organization()
+    if provider_snapshot is None:
+        provider_snapshot = create_test_provider_snapshot(organization=organization)
+    if not external_object_id:
+        external_object_id = certificate_key
+    return rpki_models.ImportedCertificateObservation.objects.create(
+        name=name,
+        provider_snapshot=provider_snapshot,
+        organization=organization,
+        certificate_key=rpki_models.ImportedCertificateObservation.build_certificate_key(
+            certificate_key=certificate_key,
+        ),
+        observation_source=observation_source or rpki_models.CertificateObservationSource.SIGNED_OBJECT_EE,
+        certificate_uri=certificate_uri,
+        publication_uri=publication_uri,
+        signed_object_uri=signed_object_uri,
+        related_handle=related_handle,
+        class_name=class_name,
+        subject=subject,
+        issuer=issuer,
+        serial_number=serial_number,
+        not_before=not_before,
+        not_after=not_after,
+        external_object_id=external_object_id,
+        external_reference=external_reference,
+        is_stale=is_stale,
+        payload_json=payload_json or {},
+        **kwargs,
+    )
+
+
 def create_test_aspa_intent_match(
     name='ASPA Intent Match 1',
     aspa_intent=None,

@@ -38,11 +38,13 @@ from netbox_rpki.tests.utils import (
     create_test_imported_aspa,
     create_test_imported_aspa_provider,
     create_test_imported_ca_metadata,
+    create_test_imported_certificate_observation,
     create_test_imported_child_link,
     create_test_imported_parent_link,
     create_test_imported_publication_point,
     create_test_imported_resource_entitlement,
     create_test_imported_roa_authorization,
+    create_test_imported_signed_object,
     create_test_provider_account,
     create_test_provider_snapshot,
     create_test_provider_snapshot_diff,
@@ -504,6 +506,19 @@ class ProviderReportingGraphQLTestCase(APITestCase):
             organization=cls.organization,
             publication_uri='rsync://graphql.invalid/repo/',
         )
+        cls.imported_signed_object = create_test_imported_signed_object(
+            name='GraphQL Imported Signed Object',
+            provider_snapshot=cls.comparison_snapshot,
+            organization=cls.organization,
+            publication_point=cls.imported_publication_point,
+            signed_object_uri='rsync://graphql.invalid/repo/example.mft',
+        )
+        cls.imported_certificate_observation = create_test_imported_certificate_observation(
+            name='GraphQL Imported Certificate Observation',
+            provider_snapshot=cls.comparison_snapshot,
+            organization=cls.organization,
+            certificate_uri='rsync://graphql.invalid/repo/example.cer',
+        )
 
     def graphql_request(self, query):
         response = self.client.post(reverse('graphql'), data={'query': query}, format='json', **self.header)
@@ -522,6 +537,8 @@ class ProviderReportingGraphQLTestCase(APITestCase):
             'netbox_rpki.view_importedchildlink',
             'netbox_rpki.view_importedresourceentitlement',
             'netbox_rpki.view_importedpublicationpoint',
+            'netbox_rpki.view_importedsignedobject',
+            'netbox_rpki.view_importedcertificateobservation',
         )
 
         query = f'''
@@ -574,6 +591,14 @@ class ProviderReportingGraphQLTestCase(APITestCase):
                     id
                     name
                 }}
+                imported_signed_objects {{
+                    id
+                    name
+                }}
+                imported_certificate_observations {{
+                    id
+                    name
+                }}
             }}
         }}
         '''
@@ -617,6 +642,14 @@ class ProviderReportingGraphQLTestCase(APITestCase):
         self.assertEqual(
             [row['id'] for row in data['data']['netbox_rpki_providersnapshot']['imported_publication_points']],
             [str(self.imported_publication_point.pk)],
+        )
+        self.assertEqual(
+            [row['id'] for row in data['data']['netbox_rpki_providersnapshot']['imported_signed_objects']],
+            [str(self.imported_signed_object.pk)],
+        )
+        self.assertEqual(
+            [row['id'] for row in data['data']['netbox_rpki_providersnapshot']['imported_certificate_observations']],
+            [str(self.imported_certificate_observation.pk)],
         )
         self.assertEqual(data['data']['netbox_rpki_providersnapshot']['summary'], self.comparison_snapshot.summary_json)
 

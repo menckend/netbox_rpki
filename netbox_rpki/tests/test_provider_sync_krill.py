@@ -12,6 +12,7 @@ from netbox_rpki.services.provider_sync_krill import (
     krill_parent_statuses_url,
     krill_repo_details_url,
     krill_repo_status_url,
+    parse_krill_certificate_observation_records,
     parse_krill_ca_metadata_record,
     parse_krill_child_link_records,
     parse_krill_parent_link_records,
@@ -27,6 +28,7 @@ from netbox_rpki.tests.krill_payloads import (
     KRILL_PARENT_STATUSES_JSON,
     KRILL_REPO_DETAILS_JSON,
     KRILL_REPO_STATUS_JSON,
+    KRILL_ROUTES_JSON,
 )
 
 
@@ -230,3 +232,24 @@ class KrillProviderSyncParserTestCase(SimpleTestCase):
         self.assertEqual(records[1].signed_object_uri, 'rsync://testbed.krill.cloud/repo/netbox-rpki-dev/0/netbox-rpki-dev.crl')
         self.assertEqual(records[1].signed_object_type, rpki_models.SignedObjectType.CRL)
         self.assertNotEqual(records[0].object_hash, records[1].object_hash)
+
+    def test_parse_krill_certificate_observation_records_merges_source_material(self):
+        records = parse_krill_certificate_observation_records(
+            route_payload=KRILL_ROUTES_JSON,
+            repo_status_payload=KRILL_REPO_STATUS_JSON,
+            ca_metadata_payload=KRILL_CA_METADATA_JSON,
+            parent_status_payload=KRILL_PARENT_STATUSES_JSON,
+        )
+
+        self.assertEqual(len(records), 3)
+        incoming_uri = KRILL_CA_METADATA_JSON['resource_classes']['0']['keys']['active']['active_key']['incoming_cert']['uri']
+        incoming_record = next(record for record in records if record.certificate_uri.endswith('netbox-rpki-dev.cer'))
+        self.assertEqual(
+            {source.observation_source for source in incoming_record.source_records},
+            {
+                rpki_models.CertificateObservationSource.PARENT_ISSUED,
+            },
+        )
+        self.assertEqual(len(incoming_record.source_records), 1)
+        self.assertTrue(any(record.signed_object_uri.endswith('.mft') for record in records))
+        self.assertTrue(any(record.certificate_uri == incoming_uri for record in records) is False)

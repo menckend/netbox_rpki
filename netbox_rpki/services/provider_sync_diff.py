@@ -455,6 +455,54 @@ def _build_signed_object_item(snapshot_diff, *, family, change_type, before, aft
     )
 
 
+def _certificate_observation_identity(row: rpki_models.ImportedCertificateObservation) -> str:
+    if row.external_reference_id and row.external_reference is not None:
+        return row.external_reference.provider_identity
+    if row.external_object_id:
+        return row.external_object_id
+    return row.certificate_key
+
+
+def _certificate_observation_state(row: rpki_models.ImportedCertificateObservation) -> dict[str, object]:
+    return {
+        'certificate_key': row.certificate_key,
+        'observation_source': row.observation_source,
+        'certificate_uri': row.certificate_uri,
+        'publication_uri': row.publication_uri,
+        'signed_object_uri': row.signed_object_uri,
+        'related_handle': row.related_handle,
+        'class_name': row.class_name,
+        'subject': row.subject,
+        'issuer': row.issuer,
+        'serial_number': row.serial_number,
+        'not_before': _datetime_text(row.not_before),
+        'not_after': _datetime_text(row.not_after),
+        'external_object_id': row.external_object_id,
+        'is_stale': row.is_stale,
+        'payload_json': dict(row.payload_json or {}),
+    }
+
+
+def _build_certificate_observation_item(snapshot_diff, *, family, change_type, before, after):
+    row = after or before
+    _create_diff_item(
+        snapshot_diff,
+        family=family,
+        change_type=change_type,
+        name=f'{row.name} {change_type.title()}',
+        provider_identity=_certificate_observation_identity(row),
+        external_reference=getattr(row, 'external_reference', None),
+        external_object_id=row.external_object_id,
+        before_state=_certificate_observation_state(before) if before is not None else {},
+        after_state=_certificate_observation_state(after) if after is not None else {},
+        related_handle=row.related_handle,
+        certificate_identifier=row.certificate_key,
+        publication_uri=row.publication_uri,
+        signed_object_uri=row.signed_object_uri,
+        is_stale=row.is_stale,
+    )
+
+
 def build_provider_snapshot_diff(
     *,
     base_snapshot: rpki_models.ProviderSnapshot,
@@ -550,6 +598,14 @@ def build_provider_snapshot_diff(
             _signed_object_identity(row): row
             for row in comparison_snapshot.imported_signed_objects.select_related('external_reference', 'publication_point').all()
         }
+        before_certificate_observations = {
+            _certificate_observation_identity(row): row
+            for row in base_snapshot.imported_certificate_observations.select_related('external_reference').all()
+        }
+        after_certificate_observations = {
+            _certificate_observation_identity(row): row
+            for row in comparison_snapshot.imported_certificate_observations.select_related('external_reference').all()
+        }
 
         family_summaries = {
             rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS: _diff_family(
@@ -616,22 +672,19 @@ def build_provider_snapshot_diff(
                 state_builder=_signed_object_state,
                 item_builder=_build_signed_object_item,
             ),
+            rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY: dict(
+                _diff_family(
+                    diff,
+                    family=rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY,
+                    before_rows=before_certificate_observations,
+                    after_rows=after_certificate_observations,
+                    state_builder=_certificate_observation_state,
+                    item_builder=_build_certificate_observation_item,
+                ),
+                **family_capability_extra(comparison_snapshot.provider_account, rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY),
+                status=rpki_models.ProviderSyncFamilyStatus.LIMITED,
+            ),
         }
-
-        for family in (
-            rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY,
-        ):
-            if family == rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY:
-                family_summaries[family] = build_family_summary(
-                    family,
-                    status=rpki_models.ProviderSyncFamilyStatus.LIMITED,
-                    extra=family_capability_extra(comparison_snapshot.provider_account, family),
-                )
-                continue
-            family_summaries[family] = build_family_summary(
-                family,
-                status=rpki_models.ProviderSyncFamilyStatus.NOT_IMPLEMENTED,
-            )
 
         diff.status = rpki_models.ValidationRunStatus.COMPLETED
         diff.compared_at = timezone.now()

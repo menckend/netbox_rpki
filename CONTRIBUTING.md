@@ -518,7 +518,8 @@ Typical places:
 
 - `README.md`
 - `CHANGELOG.md`
-- `TEST_SUITE_PLAN.md` when the new surface changes the intended coverage inventory
+- `LOCAL_DEV_SETUP.md` and `tests/e2e/README.md` when test commands or test-lane workflows change
+- `devrun/work_in_progress/netbox_rpki_surface_contract_checklist.md` when the surface contract or release gate changes
 - the Sphinx docs under `docs/` when user-facing documentation is affected
 
 ### Adding specific categories of objects
@@ -596,6 +597,17 @@ Registry-wide contract coverage already lives in:
 - `netbox_rpki/tests/registry_scenarios.py`
 
 Do not add a new registry object and skip the contract tests. That is how false greens happen.
+
+Also watch for a routine false-green pattern on generated detail pages: a page can pass shared surface tests when the fixture leaves an optional related object unset, but fail in real use once that relation is populated and the template tries to render a link.
+
+Common example in this plugin:
+
+- an imported object detail page renders `external_reference` as a link
+- the shared builder defaults `external_reference=None`
+- the generic detail-view test gets HTTP 200 because it only exercises the empty-state rendering path
+- real synced data populates `external_reference`, and the page fails at render time because the linked object has no valid UI route or `get_absolute_url()` path
+
+Treat populated relation rendering as part of the surface contract. When a detail page renders any optional relation, URL field, or computed link, add at least one test that builds the object in the populated state and renders the real page. Do not rely only on empty-state fixtures or list-page smoke coverage.
 
 #### Required verification habits
 
