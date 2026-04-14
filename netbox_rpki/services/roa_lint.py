@@ -14,6 +14,7 @@ from netbox_rpki import models as rpki_models
 LINT_RULE_FAMILY_INTENT_SAFETY = 'intent_safety'
 LINT_RULE_FAMILY_PUBLISHED_HYGIENE = 'published_hygiene'
 LINT_RULE_FAMILY_PLAN_RISK = 'plan_risk'
+LINT_RULE_FAMILY_OWNERSHIP_CONTEXT = 'ownership_context'
 
 LINT_APPROVAL_IMPACT_INFORMATIONAL = 'informational'
 LINT_APPROVAL_IMPACT_ACKNOWLEDGEMENT_REQUIRED = 'acknowledgement_required'
@@ -36,9 +37,13 @@ LINT_RULE_PLAN_REPLACE = 'plan_replace'
 LINT_RULE_PLAN_RESHAPE = 'plan_reshape'
 LINT_RULE_PLAN_BROADENS_AUTHORIZATION = 'plan_broadens_authorization'
 LINT_RULE_PLAN_WITHDRAW_WITHOUT_REPLACEMENT = 'plan_withdraw_without_replacement'
+LINT_RULE_INTENT_ASN_NOT_IN_ORG = 'intent_origin_asn_not_in_org'
+LINT_RULE_INTENT_PREFIX_NOT_IN_ORG = 'intent_prefix_no_ipam_match'
+LINT_RULE_PUBLISHED_CROSS_ORG_ORIGIN = 'published_cross_org_origin_asn'
+LINT_RULE_PLAN_CROSS_ORG_AUTHORIZATION = 'plan_creates_cross_org_authorization'
 
 LINT_SUMMARY_SCHEMA_VERSION = 3
-LINT_POSTURE_SCHEMA_VERSION = 1
+LINT_POSTURE_SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -152,6 +157,30 @@ LINT_RULE_SPECS = {
         default_severity=rpki_models.ReconciliationSeverity.ERROR,
         approval_impact=LINT_APPROVAL_IMPACT_ACKNOWLEDGEMENT_REQUIRED,
     ),
+    LINT_RULE_INTENT_ASN_NOT_IN_ORG: LintRuleSpec(
+        label='Intent origin ASN not in organization',
+        family=LINT_RULE_FAMILY_OWNERSHIP_CONTEXT,
+        default_severity=rpki_models.ReconciliationSeverity.WARNING,
+        approval_impact=LINT_APPROVAL_IMPACT_INFORMATIONAL,
+    ),
+    LINT_RULE_INTENT_PREFIX_NOT_IN_ORG: LintRuleSpec(
+        label='Intent prefix has no IPAM match in organization',
+        family=LINT_RULE_FAMILY_OWNERSHIP_CONTEXT,
+        default_severity=rpki_models.ReconciliationSeverity.WARNING,
+        approval_impact=LINT_APPROVAL_IMPACT_INFORMATIONAL,
+    ),
+    LINT_RULE_PUBLISHED_CROSS_ORG_ORIGIN: LintRuleSpec(
+        label='Published ROA uses origin ASN from different organization',
+        family=LINT_RULE_FAMILY_OWNERSHIP_CONTEXT,
+        default_severity=rpki_models.ReconciliationSeverity.WARNING,
+        approval_impact=LINT_APPROVAL_IMPACT_INFORMATIONAL,
+    ),
+    LINT_RULE_PLAN_CROSS_ORG_AUTHORIZATION: LintRuleSpec(
+        label='Plan creates cross-organization authorization',
+        family=LINT_RULE_FAMILY_OWNERSHIP_CONTEXT,
+        default_severity=rpki_models.ReconciliationSeverity.WARNING,
+        approval_impact=LINT_APPROVAL_IMPACT_INFORMATIONAL,
+    ),
 }
 
 INTENT_INCONSISTENT_RESULT_TYPES = {
@@ -250,6 +279,28 @@ def _active_suppression_queryset():
     )
 
 
+def _load_org_rule_overrides(organization_id: int) -> dict[str, dict]:
+    result = {}
+    for config in rpki_models.ROALintRuleConfig.objects.filter(organization_id=organization_id):
+        overrides = {}
+        if config.severity_override:
+            overrides['severity'] = config.severity_override
+        if config.approval_impact_override:
+            overrides['approval_impact'] = config.approval_impact_override
+        if overrides:
+            result[config.finding_code] = overrides
+    return result
+
+
+def _finding_prefix_candidates(details_json: dict) -> set[str]:
+    candidates = {
+        details_json.get('intent_prefix'),
+        details_json.get('prefix_cidr_text'),
+        details_json.get('published_prefix'),
+    }
+    return {str(candidate) for candidate in candidates if candidate}
+
+
 def _matching_suppression(
     *,
     lint_run: rpki_models.ROALintRun,
@@ -264,25 +315,45 @@ def _matching_suppression(
     elif change_plan_item is not None and change_plan_item.roa_intent_id is not None:
         suppression_target_intent = change_plan_item.roa_intent
 
-    queryset = _active_suppression_queryset().filter(
+    base_queryset = _active_suppression_queryset().filter(
         organization=lint_run.reconciliation_run.organization,
         finding_code=finding_code,
-        fact_fingerprint=_suppression_fact_fingerprint(
-            finding_code=finding_code,
-            details_json=details_json,
-        ),
     )
+    fingerprint = _suppression_fact_fingerprint(
+        finding_code=finding_code,
+        details_json=details_json,
+    )
+    fingerprint_queryset = base_queryset.filter(fact_fingerprint=fingerprint)
     if suppression_target_intent is not None:
-        suppression = queryset.filter(
+        suppression = fingerprint_queryset.filter(
             scope_type=rpki_models.ROALintSuppressionScope.INTENT,
             roa_intent=suppression_target_intent,
         ).first()
         if suppression is not None:
             return suppression
 
-    return queryset.filter(
+    suppression = fingerprint_queryset.filter(
         scope_type=rpki_models.ROALintSuppressionScope.PROFILE,
         intent_profile=lint_run.reconciliation_run.intent_profile,
+    ).first()
+    if suppression is not None:
+        return suppression
+
+    suppression = base_queryset.filter(
+        scope_type=rpki_models.ROALintSuppressionScope.ORG,
+        fact_fingerprint='',
+    ).first()
+    if suppression is not None:
+        return suppression
+
+    prefix_candidates = _finding_prefix_candidates(details_json)
+    if not prefix_candidates:
+        return None
+
+    return base_queryset.filter(
+        scope_type=rpki_models.ROALintSuppressionScope.PREFIX,
+        fact_fingerprint='',
+        prefix_cidr_text__in=prefix_candidates,
     ).first()
 
 
@@ -388,6 +459,26 @@ def _finding_explanation(
             'Routes that depend on that authorization may lose valid coverage after the change is applied.',
             'Review whether coverage should be preserved with a matching create before approval.',
         ),
+        LINT_RULE_INTENT_ASN_NOT_IN_ORG: (
+            'The intended origin ASN is not associated with this organization tenant.',
+            'Tenant-owned ASN data helps catch cross-organization policy mistakes before publication.',
+            'Confirm the ASN is intentionally external or associate it with this organization tenant.',
+        ),
+        LINT_RULE_INTENT_PREFIX_NOT_IN_ORG: (
+            'No tenant-owned IPAM prefix record matches the intended prefix.',
+            'Without a matching tenant-owned prefix, the organization cannot cross-verify that the intent stays within its modeled address space.',
+            'Add the prefix to tenant-scoped IPAM or suppress this finding if ownership data is intentionally incomplete.',
+        ),
+        LINT_RULE_PUBLISHED_CROSS_ORG_ORIGIN: (
+            'The published ROA uses an origin ASN that is not associated with this organization tenant.',
+            'A published authorization using an external ASN may be intentional, but it deserves review because it can signal cross-organization drift.',
+            'Confirm the published authorization is expected or update tenant-owned ASN data to match reality.',
+        ),
+        LINT_RULE_PLAN_CROSS_ORG_AUTHORIZATION: (
+            'The change plan would create a ROA whose origin ASN is not associated with this organization tenant.',
+            'Reviewing tenant ownership before approval helps prevent cross-organization authorizations from being submitted by mistake.',
+            'Confirm the authorization is intentional before approval or update tenant-owned ASN data first.',
+        ),
     }
     operator_message, why_it_matters, operator_action = explanations[finding_code]
     return {
@@ -460,6 +551,8 @@ def build_roa_change_plan_lint_posture(
             'active_finding_count': 0,
             'suppressed_finding_count': 0,
             'acknowledged_finding_count': 0,
+            'previously_acknowledged_finding_count': 0,
+            'previously_acknowledged_finding_ids': [],
             'approval_impact_counts': dict(zero_counts),
             'active_approval_impact_counts': dict(zero_counts),
             'suppressed_approval_impact_counts': dict(zero_counts),
@@ -477,6 +570,16 @@ def build_roa_change_plan_lint_posture(
         change_plan.lint_acknowledgements.filter(lint_run=lint_run).values_list('finding_id', flat=True)
     )
     acknowledged_ids.update(int(pk) for pk in (acknowledged_finding_ids or []))
+    prior_acked_pairs: set[tuple[str, str]] = set()
+    for finding_code, details_json in (
+        rpki_models.ROALintAcknowledgement.objects
+        .filter(change_plan=change_plan)
+        .exclude(lint_run_id=lint_run.pk)
+        .values_list('finding__finding_code', 'finding__details_json')
+    ):
+        fact_fingerprint = (details_json or {}).get('fact_fingerprint', '')
+        if fact_fingerprint:
+            prior_acked_pairs.add((finding_code, fact_fingerprint))
 
     total_counts = {key: 0 for key in impact_keys}
     active_counts = {key: 0 for key in impact_keys}
@@ -485,6 +588,8 @@ def build_roa_change_plan_lint_posture(
     unresolved_counts = {key: 0 for key in impact_keys}
     suppressed_finding_count = 0
     acknowledged_finding_count = 0
+    previously_acknowledged_finding_count = 0
+    previously_acknowledged_finding_ids: set[int] = set()
     finding_count = 0
 
     for finding in lint_run.findings.all():
@@ -509,6 +614,12 @@ def build_roa_change_plan_lint_posture(
             acknowledged_counts[impact] += 1
             acknowledged_finding_count += 1
             continue
+        if impact == LINT_APPROVAL_IMPACT_ACKNOWLEDGEMENT_REQUIRED:
+            fact_fingerprint = finding.details_json.get('fact_fingerprint', '')
+            if fact_fingerprint and (finding.finding_code, fact_fingerprint) in prior_acked_pairs:
+                previously_acknowledged_finding_count += 1
+                previously_acknowledged_finding_ids.add(finding.pk)
+                continue
         unresolved_counts[impact] += 1
 
     unresolved_blocking = unresolved_counts[LINT_APPROVAL_IMPACT_BLOCKING]
@@ -517,6 +628,8 @@ def build_roa_change_plan_lint_posture(
         status = 'blocked'
     elif unresolved_ack_required > 0:
         status = 'acknowledgement_required'
+    elif previously_acknowledged_finding_count > 0:
+        status = 'previously_acknowledged'
     else:
         status = 'clear'
 
@@ -526,11 +639,17 @@ def build_roa_change_plan_lint_posture(
         'has_lint_run': True,
         'lint_run_id': lint_run.pk,
         'status': status,
-        'can_approve': unresolved_blocking == 0 and unresolved_ack_required == 0,
+        'can_approve': (
+            unresolved_blocking == 0
+            and unresolved_ack_required == 0
+            and previously_acknowledged_finding_count == 0
+        ),
         'finding_count': finding_count,
         'active_finding_count': finding_count - suppressed_finding_count,
         'suppressed_finding_count': suppressed_finding_count,
         'acknowledged_finding_count': acknowledged_finding_count,
+        'previously_acknowledged_finding_count': previously_acknowledged_finding_count,
+        'previously_acknowledged_finding_ids': sorted(previously_acknowledged_finding_ids),
         'approval_impact_counts': total_counts,
         'active_approval_impact_counts': active_counts,
         'suppressed_approval_impact_counts': suppressed_counts,
@@ -564,6 +683,7 @@ def _create_finding(
     lint_run: rpki_models.ROALintRun,
     *,
     finding_code: str,
+    org_overrides: dict[str, dict] | None = None,
     severity: str | None = None,
     details_json: dict,
     roa_intent_result: rpki_models.ROAIntentResult | None = None,
@@ -571,6 +691,9 @@ def _create_finding(
     change_plan_item: rpki_models.ROAChangePlanItem | None = None,
 ) -> rpki_models.ROALintFinding:
     rule_spec = LINT_RULE_SPECS[finding_code]
+    rule_overrides = (org_overrides or {}).get(finding_code, {})
+    effective_severity = rule_overrides.get('severity') or severity or rule_spec.default_severity
+    effective_approval_impact = rule_overrides.get('approval_impact') or rule_spec.approval_impact
     suppression = _matching_suppression(
         lint_run=lint_run,
         finding_code=finding_code,
@@ -608,10 +731,10 @@ def _create_finding(
         published_roa_result=published_roa_result,
         change_plan_item=change_plan_item,
         finding_code=finding_code,
-        severity=severity or rule_spec.default_severity,
+        severity=effective_severity,
         details_json={
             'rule_family': rule_spec.family,
-            'approval_impact': rule_spec.approval_impact,
+            'approval_impact': effective_approval_impact,
             'fact_fingerprint': fact_fingerprint,
             'fact_context': fact_context,
             **(_serialize_suppression(suppression) if suppression is not None else {'suppressed': False}),
@@ -673,9 +796,45 @@ def _plan_item_leaves_no_replacement(
     return _plan_item_prefix_asn_key(item) not in created_keys
 
 
+def _build_org_ownership_context(organization: rpki_models.Organization) -> dict[str, set]:
+    """
+    Load tenant-owned ASN and prefix data for the organization.
+
+    If tenant ownership data is absent, ownership-context rules emit no findings.
+    """
+    asn_values: set[int] = set()
+    prefix_cidrs: set[str] = set()
+    tenant = getattr(organization, 'tenant', None)
+    if tenant is None:
+        return {'asn_values': asn_values, 'prefix_cidrs': prefix_cidrs}
+
+    try:
+        from ipam.models import Prefix as IpamPrefix
+        from ipam.models.asns import ASN as IpamAsn
+    except Exception:
+        return {'asn_values': asn_values, 'prefix_cidrs': prefix_cidrs}
+
+    try:
+        asn_values.update(IpamAsn.objects.filter(tenant=tenant).values_list('asn', flat=True))
+    except Exception:
+        pass
+
+    try:
+        prefix_cidrs.update(
+            str(prefix)
+            for prefix in IpamPrefix.objects.filter(tenant=tenant).values_list('prefix', flat=True)
+        )
+    except Exception:
+        pass
+
+    return {'asn_values': asn_values, 'prefix_cidrs': prefix_cidrs}
+
+
 def _intent_lint_findings(
     lint_run: rpki_models.ROALintRun,
     intent_result: rpki_models.ROAIntentResult,
+    *,
+    org_overrides: dict[str, dict] | None = None,
 ) -> list[rpki_models.ROALintFinding]:
     details = dict(intent_result.details_json or {})
     findings: list[rpki_models.ROALintFinding] = []
@@ -688,6 +847,7 @@ def _intent_lint_findings(
             _create_finding(
                 lint_run,
                 finding_code=LINT_RULE_INTENT_OVERBROAD,
+                org_overrides=org_overrides,
                 severity=intent_result.severity,
                 roa_intent_result=intent_result,
                 details_json={
@@ -704,6 +864,7 @@ def _intent_lint_findings(
             _create_finding(
                 lint_run,
                 finding_code=LINT_RULE_INTENT_INCONSISTENT,
+                org_overrides=org_overrides,
                 severity=intent_result.severity,
                 roa_intent_result=intent_result,
                 details_json={
@@ -724,6 +885,7 @@ def _intent_lint_findings(
             _create_finding(
                 lint_run,
                 finding_code=LINT_RULE_REPLACEMENT_REQUIRED,
+                org_overrides=org_overrides,
                 severity=intent_result.severity,
                 roa_intent_result=intent_result,
                 details_json={
@@ -749,6 +911,7 @@ def _intent_lint_findings(
             _create_finding(
                 lint_run,
                 finding_code=LINT_RULE_INTENT_STATE_CONFLICT,
+                org_overrides=org_overrides,
                 severity=rpki_models.ReconciliationSeverity.WARNING,
                 roa_intent_result=intent_result,
                 details_json={
@@ -772,6 +935,7 @@ def _intent_lint_findings(
             _create_finding(
                 lint_run,
                 finding_code=finding_code,
+                org_overrides=org_overrides,
                 severity=intent_result.severity,
                 roa_intent_result=intent_result,
                 details_json={
@@ -788,6 +952,8 @@ def _intent_lint_findings(
 def _published_lint_findings(
     lint_run: rpki_models.ROALintRun,
     published_result: rpki_models.PublishedROAResult,
+    *,
+    org_overrides: dict[str, dict] | None = None,
 ) -> list[rpki_models.ROALintFinding]:
     details = dict(published_result.details_json or {})
     findings: list[rpki_models.ROALintFinding] = []
@@ -797,6 +963,7 @@ def _published_lint_findings(
             _create_finding(
                 lint_run,
                 finding_code=LINT_RULE_PUBLISHED_ORPHANED,
+                org_overrides=org_overrides,
                 severity=published_result.severity,
                 published_roa_result=published_result,
                 details_json={
@@ -811,6 +978,7 @@ def _published_lint_findings(
             _create_finding(
                 lint_run,
                 finding_code=LINT_RULE_PUBLISHED_STALE,
+                org_overrides=org_overrides,
                 severity=published_result.severity,
                 published_roa_result=published_result,
                 details_json={
@@ -825,6 +993,7 @@ def _published_lint_findings(
             _create_finding(
                 lint_run,
                 finding_code=LINT_RULE_PUBLISHED_DUPLICATE,
+                org_overrides=org_overrides,
                 severity=published_result.severity,
                 published_roa_result=published_result,
                 details_json={
@@ -840,6 +1009,7 @@ def _published_lint_findings(
             _create_finding(
                 lint_run,
                 finding_code=LINT_RULE_PUBLISHED_BROADER_THAN_NEEDED,
+                org_overrides=org_overrides,
                 severity=published_result.severity,
                 published_roa_result=published_result,
                 details_json={
@@ -855,6 +1025,7 @@ def _published_lint_findings(
             _create_finding(
                 lint_run,
                 finding_code=LINT_RULE_PUBLISHED_UNSCOPED,
+                org_overrides=org_overrides,
                 severity=published_result.severity,
                 published_roa_result=published_result,
                 details_json={
@@ -871,6 +1042,7 @@ def _published_lint_findings(
             _create_finding(
                 lint_run,
                 finding_code=LINT_RULE_PUBLISHED_INCONSISTENT,
+                org_overrides=org_overrides,
                 severity=published_result.severity,
                 published_roa_result=published_result,
                 details_json={
@@ -888,6 +1060,7 @@ def _published_lint_findings(
             _create_finding(
                 lint_run,
                 finding_code=LINT_RULE_REPLACEMENT_REQUIRED,
+                org_overrides=org_overrides,
                 severity=published_result.severity,
                 published_roa_result=published_result,
                 details_json={
@@ -903,6 +1076,8 @@ def _published_lint_findings(
 def _plan_lint_findings(
     lint_run: rpki_models.ROALintRun,
     change_plan: rpki_models.ROAChangePlan,
+    *,
+    org_overrides: dict[str, dict] | None = None,
 ) -> list[rpki_models.ROALintFinding]:
     findings: list[rpki_models.ROALintFinding] = []
     plan_items = list(change_plan.items.all())
@@ -917,6 +1092,7 @@ def _plan_lint_findings(
                 _create_finding(
                     lint_run,
                     finding_code=LINT_RULE_PLAN_REPLACE,
+                    org_overrides=org_overrides,
                     change_plan_item=item,
                     details_json={
                         'action_type': item.action_type,
@@ -929,6 +1105,7 @@ def _plan_lint_findings(
                 _create_finding(
                     lint_run,
                     finding_code=LINT_RULE_PLAN_RESHAPE,
+                    org_overrides=org_overrides,
                     change_plan_item=item,
                     details_json={
                         'action_type': item.action_type,
@@ -945,6 +1122,7 @@ def _plan_lint_findings(
                 _create_finding(
                     lint_run,
                     finding_code=LINT_RULE_PLAN_BROADENS_AUTHORIZATION,
+                    org_overrides=org_overrides,
                     change_plan_item=item,
                     details_json={
                         'action_type': item.action_type,
@@ -960,6 +1138,7 @@ def _plan_lint_findings(
                 _create_finding(
                     lint_run,
                     finding_code=LINT_RULE_PLAN_WITHDRAW_WITHOUT_REPLACEMENT,
+                    org_overrides=org_overrides,
                     change_plan_item=item,
                     details_json={
                         'action_type': item.action_type,
@@ -969,6 +1148,99 @@ def _plan_lint_findings(
                     },
                 )
             )
+    return findings
+
+
+def _ownership_lint_findings(
+    lint_run: rpki_models.ROALintRun,
+    *,
+    intent_results: list[rpki_models.ROAIntentResult],
+    published_results: list[rpki_models.PublishedROAResult],
+    plan: rpki_models.ROAChangePlan | None,
+    ownership_context: dict[str, set],
+    org_overrides: dict[str, dict],
+) -> list[rpki_models.ROALintFinding]:
+    findings: list[rpki_models.ROALintFinding] = []
+    asn_values = ownership_context.get('asn_values', set())
+    prefix_cidrs = ownership_context.get('prefix_cidrs', set())
+
+    if asn_values:
+        for intent_result in intent_results:
+            intent = intent_result.roa_intent
+            asn_value = (
+                getattr(getattr(intent, 'origin_asn', None), 'asn', None)
+                or getattr(intent, 'origin_asn_value', None)
+            )
+            if asn_value is not None and asn_value not in asn_values:
+                findings.append(
+                    _create_finding(
+                        lint_run,
+                        finding_code=LINT_RULE_INTENT_ASN_NOT_IN_ORG,
+                        org_overrides=org_overrides,
+                        roa_intent_result=intent_result,
+                        details_json={
+                            'intent_prefix': (intent_result.details_json or {}).get('intent_prefix'),
+                            'intent_origin_asn': asn_value,
+                            'org_asn_count': len(asn_values),
+                        },
+                    )
+                )
+
+    if prefix_cidrs:
+        for intent_result in intent_results:
+            intent_prefix = (intent_result.details_json or {}).get('intent_prefix')
+            if intent_prefix and intent_prefix not in prefix_cidrs:
+                findings.append(
+                    _create_finding(
+                        lint_run,
+                        finding_code=LINT_RULE_INTENT_PREFIX_NOT_IN_ORG,
+                        org_overrides=org_overrides,
+                        roa_intent_result=intent_result,
+                        details_json={
+                            'intent_prefix': intent_prefix,
+                            'ipam_prefix_count': len(prefix_cidrs),
+                        },
+                    )
+                )
+
+    if asn_values:
+        for published_result in published_results:
+            details = published_result.details_json or {}
+            origin_asn = details.get('origin_asn') or details.get('origin_asn_value')
+            if origin_asn is not None and origin_asn not in asn_values:
+                findings.append(
+                    _create_finding(
+                        lint_run,
+                        finding_code=LINT_RULE_PUBLISHED_CROSS_ORG_ORIGIN,
+                        org_overrides=org_overrides,
+                        published_roa_result=published_result,
+                        details_json={
+                            'prefix_cidr_text': details.get('prefix_cidr_text') or details.get('published_prefix'),
+                            'origin_asn': origin_asn,
+                            'org_asn_count': len(asn_values),
+                        },
+                    )
+                )
+
+    if plan is not None and asn_values:
+        for item in plan.items.filter(action_type=rpki_models.ROAChangePlanAction.CREATE):
+            prefix_cidr_text, _ = _plan_item_prefix_and_max_length(item)
+            _, origin_asn_value = _plan_item_prefix_asn_key(item)
+            if origin_asn_value is not None and origin_asn_value not in asn_values:
+                findings.append(
+                    _create_finding(
+                        lint_run,
+                        finding_code=LINT_RULE_PLAN_CROSS_ORG_AUTHORIZATION,
+                        org_overrides=org_overrides,
+                        change_plan_item=item,
+                        details_json={
+                            'prefix_cidr_text': prefix_cidr_text,
+                            'origin_asn_value': origin_asn_value,
+                            'org_asn_count': len(asn_values),
+                        },
+                    )
+                )
+
     return findings
 
 
@@ -1035,22 +1307,63 @@ def suppress_roa_lint_finding(
         suppression.save()
         return suppression
 
-    if scope_type != rpki_models.ROALintSuppressionScope.PROFILE:
-        raise ValueError('Unsupported suppression scope.')
-    payload['intent_profile'] = reconciliation_run.intent_profile
-    payload['name'] = f'{finding.finding_code} suppression for {reconciliation_run.intent_profile.name}'
-    suppression = rpki_models.ROALintSuppression.objects.filter(
-        finding_code=finding.finding_code,
-        scope_type=scope_type,
-        intent_profile=reconciliation_run.intent_profile,
-        lifted_at__isnull=True,
-    ).first()
-    if suppression is not None:
+    if scope_type == rpki_models.ROALintSuppressionScope.PROFILE:
+        payload['intent_profile'] = reconciliation_run.intent_profile
+        payload['name'] = f'{finding.finding_code} suppression for {reconciliation_run.intent_profile.name}'
+        suppression = rpki_models.ROALintSuppression.objects.filter(
+            finding_code=finding.finding_code,
+            scope_type=scope_type,
+            intent_profile=reconciliation_run.intent_profile,
+            lifted_at__isnull=True,
+        ).first()
+        if suppression is not None:
+            return suppression
+        suppression = rpki_models.ROALintSuppression(**payload)
+        suppression.full_clean(validate_unique=False)
+        suppression.save()
         return suppression
-    suppression = rpki_models.ROALintSuppression(**payload)
-    suppression.full_clean(validate_unique=False)
-    suppression.save()
-    return suppression
+
+    if scope_type == rpki_models.ROALintSuppressionScope.ORG:
+        payload['name'] = f'{finding.finding_code} org suppression for {organization.name}'
+        payload['fact_fingerprint'] = ''
+        payload['fact_context_json'] = {}
+        suppression = rpki_models.ROALintSuppression.objects.filter(
+            finding_code=finding.finding_code,
+            scope_type=scope_type,
+            organization=organization,
+            lifted_at__isnull=True,
+        ).first()
+        if suppression is not None:
+            return suppression
+        suppression = rpki_models.ROALintSuppression(**payload)
+        suppression.full_clean(validate_unique=False)
+        suppression.save()
+        return suppression
+
+    if scope_type == rpki_models.ROALintSuppressionScope.PREFIX:
+        prefix_candidates = _finding_prefix_candidates(finding.details_json or {})
+        if not prefix_candidates:
+            raise ValueError('PREFIX-scoped suppressions require a finding with a resolvable prefix field.')
+        prefix_cidr_text = sorted(prefix_candidates)[0]
+        payload['prefix_cidr_text'] = prefix_cidr_text
+        payload['name'] = f'{finding.finding_code} prefix suppression for {prefix_cidr_text}'
+        payload['fact_fingerprint'] = ''
+        payload['fact_context_json'] = {}
+        suppression = rpki_models.ROALintSuppression.objects.filter(
+            finding_code=finding.finding_code,
+            scope_type=scope_type,
+            organization=organization,
+            prefix_cidr_text=prefix_cidr_text,
+            lifted_at__isnull=True,
+        ).first()
+        if suppression is not None:
+            return suppression
+        suppression = rpki_models.ROALintSuppression(**payload)
+        suppression.full_clean(validate_unique=False)
+        suppression.save()
+        return suppression
+
+    raise ValueError('Unsupported suppression scope.')
 
 
 def lift_roa_lint_suppression(
@@ -1079,6 +1392,7 @@ def run_roa_lint(
 ) -> rpki_models.ROALintRun:
     reconciliation_run = _normalize_reconciliation_run(reconciliation_run)
     change_plan = _normalize_change_plan(change_plan)
+    org_overrides = _load_org_rule_overrides(reconciliation_run.organization_id)
     now = timezone.now()
     lint_run = rpki_models.ROALintRun.objects.create(
         name=run_name or f'{reconciliation_run.name} Lint {now:%Y-%m-%d %H:%M:%S}',
@@ -1104,23 +1418,39 @@ def run_roa_lint(
     }
     suppressed_finding_count = 0
 
+    intent_results = list(
+        reconciliation_run.intent_results.select_related('roa_intent__origin_asn').all()
+    )
+    published_results = list(reconciliation_run.published_roa_results.all())
     all_findings: list[rpki_models.ROALintFinding] = []
-    for intent_result in reconciliation_run.intent_results.select_related('roa_intent').all():
-        all_findings.extend(_intent_lint_findings(lint_run, intent_result))
-    for published_result in reconciliation_run.published_roa_results.all():
-        all_findings.extend(_published_lint_findings(lint_run, published_result))
+    for intent_result in intent_results:
+        all_findings.extend(_intent_lint_findings(lint_run, intent_result, org_overrides=org_overrides))
+    for published_result in published_results:
+        all_findings.extend(_published_lint_findings(lint_run, published_result, org_overrides=org_overrides))
     if change_plan is not None:
-        all_findings.extend(_plan_lint_findings(lint_run, change_plan))
+        all_findings.extend(_plan_lint_findings(lint_run, change_plan, org_overrides=org_overrides))
+    ownership_context = _build_org_ownership_context(reconciliation_run.organization)
+    all_findings.extend(
+        _ownership_lint_findings(
+            lint_run,
+            intent_results=intent_results,
+            published_results=published_results,
+            plan=change_plan,
+            ownership_context=ownership_context,
+            org_overrides=org_overrides,
+        )
+    )
 
     for finding in all_findings:
-        rule_spec = LINT_RULE_SPECS[finding.finding_code]
+        rule_family = finding.details_json.get('rule_family') or LINT_RULE_SPECS[finding.finding_code].family
+        approval_impact = finding.details_json.get('approval_impact') or LINT_RULE_SPECS[finding.finding_code].approval_impact
         if finding.details_json.get('suppressed'):
             suppressed_finding_count += 1
         severity_counts[finding.severity] = severity_counts.get(finding.severity, 0) + 1
         finding_code_counts[finding.finding_code] = finding_code_counts.get(finding.finding_code, 0) + 1
-        rule_family_counts[rule_spec.family] = rule_family_counts.get(rule_spec.family, 0) + 1
-        approval_impact_counts[rule_spec.approval_impact] = approval_impact_counts.get(
-            rule_spec.approval_impact, 0
+        rule_family_counts[rule_family] = rule_family_counts.get(rule_family, 0) + 1
+        approval_impact_counts[approval_impact] = approval_impact_counts.get(
+            approval_impact, 0
         ) + 1
 
     lint_run.status = rpki_models.ValidationRunStatus.COMPLETED

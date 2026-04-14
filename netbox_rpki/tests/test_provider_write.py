@@ -6,6 +6,8 @@ from django.urls import reverse
 from django.utils import timezone
 
 from netbox_rpki import models as rpki_models
+from netbox_rpki.api.serializers import ASPAChangePlanApproveActionSerializer
+from netbox_rpki.forms import ASPAChangePlanApprovalForm
 from netbox_rpki.services import (
     ProviderWriteError,
     acknowledge_roa_lint_findings,
@@ -24,6 +26,7 @@ from netbox_rpki.services import (
     reconcile_roa_intents,
     simulate_roa_change_plan,
 )
+from netbox_rpki.services.roa_lint import build_roa_change_plan_lint_posture, run_roa_lint
 from netbox_rpki.tests.base import PluginAPITestCase, PluginViewTestCase
 from netbox_rpki.tests.utils import (
     create_test_asn,
@@ -55,6 +58,10 @@ def current_ack_required_finding_ids(plan):
         if finding.details_json.get('approval_impact') == 'acknowledgement_required'
         and not finding.details_json.get('suppressed')
     ]
+
+
+def current_previously_acknowledged_finding_ids(plan):
+    return build_roa_change_plan_lint_posture(plan).get('previously_acknowledged_finding_ids', [])
 
 
 def current_ack_required_simulation_result_ids(plan):
@@ -471,6 +478,57 @@ class ProviderWriteServiceTestCase(TestCase):
         self.assertEqual(acknowledgement.change_reference, 'ACK-CHANGE')
         self.assertEqual(acknowledgement.notes, 'Reviewed before approval.')
 
+    def test_prior_ack_same_fingerprint_shows_previously_acknowledged(self):
+        plan = create_roa_change_plan(self.reconciliation_run, name='Previously Ack Plan')
+        original_finding = plan.lint_runs.get().findings.get(finding_code='plan_withdraw_without_replacement')
+
+        acknowledge_roa_lint_findings(
+            plan,
+            acknowledged_by='review-user',
+            acknowledged_finding_ids=[original_finding.pk],
+        )
+        run_roa_lint(self.reconciliation_run, change_plan=plan)
+
+        posture = build_roa_change_plan_lint_posture(plan)
+
+        self.assertEqual(posture['previously_acknowledged_finding_count'], 1)
+        self.assertEqual(len(posture['previously_acknowledged_finding_ids']), 1)
+        self.assertEqual(posture['status'], 'previously_acknowledged')
+
+    def test_approve_blocked_on_previously_acknowledged(self):
+        plan = create_roa_change_plan(self.reconciliation_run, name='Previously Ack Blocked Plan')
+        original_finding = plan.lint_runs.get().findings.get(finding_code='plan_withdraw_without_replacement')
+
+        acknowledge_roa_lint_findings(
+            plan,
+            acknowledged_by='review-user',
+            acknowledged_finding_ids=[original_finding.pk],
+        )
+        run_roa_lint(self.reconciliation_run, change_plan=plan)
+
+        with self.assertRaisesMessage(ProviderWriteError, 'previously acknowledged lint findings'):
+            approve_roa_change_plan(plan, approved_by='approval-user')
+
+    def test_approve_passes_after_reconfirmation(self):
+        plan = create_roa_change_plan(self.reconciliation_run, name='Previously Ack Approved Plan')
+        original_finding = plan.lint_runs.get().findings.get(finding_code='plan_withdraw_without_replacement')
+
+        acknowledge_roa_lint_findings(
+            plan,
+            acknowledged_by='review-user',
+            acknowledged_finding_ids=[original_finding.pk],
+        )
+        run_roa_lint(self.reconciliation_run, change_plan=plan)
+
+        approve_roa_change_plan(
+            plan,
+            approved_by='approval-user',
+            previously_acknowledged_finding_ids=current_previously_acknowledged_finding_ids(plan),
+        )
+        plan.refresh_from_db()
+
+        self.assertEqual(plan.status, rpki_models.ROAChangePlanStatus.APPROVED)
+
     def test_apply_submits_delta_records_execution_and_triggers_followup_sync(self):
         plan = create_roa_change_plan(self.reconciliation_run, name='Apply Plan')
         window_start = timezone.now()
@@ -752,6 +810,31 @@ class ROAChangePlanActionAPITestCase(PluginAPITestCase):
         self.assertEqual(plan.lint_acknowledgements.count(), 1)
         self.assertEqual(plan.lint_acknowledgements.get().notes, 'Accepted via API.')
 
+    def test_approve_action_accepts_previously_acknowledged_findings(self):
+        plan = create_roa_change_plan(self.reconciliation_run, name='API Previously Ack Approval Plan')
+        original_finding = plan.lint_runs.get().findings.get(finding_code='plan_withdraw_without_replacement')
+        acknowledge_roa_lint_findings(
+            plan,
+            acknowledged_by='api-review-user',
+            acknowledged_finding_ids=[original_finding.pk],
+        )
+        run_roa_lint(self.reconciliation_run, change_plan=plan)
+        self.add_permissions('netbox_rpki.view_roachangeplan', 'netbox_rpki.change_roachangeplan')
+        url = reverse('plugins-api:netbox_rpki-api:roachangeplan-approve', kwargs={'pk': plan.pk})
+
+        response = self.client.post(
+            url,
+            {
+                'previously_acknowledged_finding_ids': current_previously_acknowledged_finding_ids(plan),
+            },
+            format='json',
+            **self.header,
+        )
+
+        self.assertHttpStatus(response, 200)
+        plan.refresh_from_db()
+        self.assertEqual(plan.status, rpki_models.ROAChangePlanStatus.APPROVED)
+
     def test_approve_action_denies_unresolved_blocking_findings(self):
         mismatch_snapshot = create_test_provider_snapshot(
             name='API Blocking Snapshot',
@@ -948,6 +1031,31 @@ class ROAChangePlanActionAPITestCase(PluginAPITestCase):
         self.assertEqual(response.data['acknowledgements'][0]['ticket_reference'], 'API-ACK-200')
         self.assertEqual(response.data['acknowledgements'][0]['notes'], 'Accepted via review API.')
 
+    def test_acknowledge_findings_action_accepts_previously_acknowledged_findings(self):
+        plan = create_roa_change_plan(self.reconciliation_run, name='API Previously Ack Plan')
+        original_finding = plan.lint_runs.get().findings.get(finding_code='plan_withdraw_without_replacement')
+        acknowledge_roa_lint_findings(
+            plan,
+            acknowledged_by='api-review-user',
+            acknowledged_finding_ids=[original_finding.pk],
+        )
+        run_roa_lint(self.reconciliation_run, change_plan=plan)
+        self.add_permissions('netbox_rpki.view_roachangeplan', 'netbox_rpki.change_roachangeplan')
+        url = reverse('plugins-api:netbox_rpki-api:roachangeplan-acknowledge-findings', kwargs={'pk': plan.pk})
+
+        response = self.client.post(
+            url,
+            {
+                'previously_acknowledged_finding_ids': current_previously_acknowledged_finding_ids(plan),
+            },
+            format='json',
+            **self.header,
+        )
+
+        self.assertHttpStatus(response, 200)
+        latest_lint_run = plan.lint_runs.order_by('-started_at', '-created').first()
+        self.assertEqual(plan.lint_acknowledgements.filter(lint_run=latest_lint_run).count(), 1)
+
     def test_lint_suppress_and_lift_api_actions(self):
         finding = self.plan.lint_runs.get().findings.first()
         self.add_permissions(
@@ -1040,6 +1148,16 @@ class ROAChangePlanActionViewTestCase(PluginViewTestCase):
         self.assertContains(response, reverse('plugins:netbox_rpki:roachangeplan_approve', kwargs={'pk': self.plan.pk}))
         self.assertNotContains(response, reverse('plugins:netbox_rpki:roachangeplan_apply', kwargs={'pk': self.plan.pk}))
 
+    def test_change_plan_detail_shows_acknowledge_button_after_approval(self):
+        self.plan.status = rpki_models.ROAChangePlanStatus.APPROVED
+        self.plan.save(update_fields=('status',))
+        self.add_permissions('netbox_rpki.view_roachangeplan', 'netbox_rpki.change_roachangeplan')
+
+        response = self.client.get(self.plan.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, reverse('plugins:netbox_rpki:roachangeplan_acknowledge_lint', kwargs={'pk': self.plan.pk}))
+
     def test_change_plan_detail_hides_simulate_button_without_change_permission(self):
         self.add_permissions('netbox_rpki.view_roachangeplan')
 
@@ -1076,6 +1194,34 @@ class ROAChangePlanActionViewTestCase(PluginViewTestCase):
         self.assertEqual(self.plan.status, rpki_models.ROAChangePlanStatus.DRAFT)
         self.assertEqual(self.plan.lint_acknowledgements.count(), 1)
         self.assertEqual(self.plan.lint_acknowledgements.get().ticket_reference, 'UI-ACK-12')
+
+    def test_acknowledge_view_shows_and_accepts_previously_acknowledged_findings(self):
+        original_finding = self.plan.lint_runs.get().findings.get(finding_code='plan_withdraw_without_replacement')
+        acknowledge_roa_lint_findings(
+            self.plan,
+            acknowledged_by='view-user',
+            acknowledged_finding_ids=[original_finding.pk],
+        )
+        run_roa_lint(self.reconciliation_run, change_plan=self.plan)
+        self.add_permissions('netbox_rpki.view_roachangeplan', 'netbox_rpki.change_roachangeplan')
+        url = reverse('plugins:netbox_rpki:roachangeplan_acknowledge_lint', kwargs={'pk': self.plan.pk})
+
+        get_response = self.client.get(url)
+
+        self.assertHttpStatus(get_response, 200)
+        self.assertContains(get_response, 'Re-Confirm Previously Acknowledged Lint Findings')
+
+        post_response = self.client.post(
+            url,
+            {
+                'confirm': True,
+                'previously_acknowledged_findings': current_previously_acknowledged_finding_ids(self.plan),
+            },
+        )
+
+        self.assertRedirects(post_response, self.plan.get_absolute_url())
+        latest_lint_run = self.plan.lint_runs.order_by('-started_at', '-created').first()
+        self.assertEqual(self.plan.lint_acknowledgements.filter(lint_run=latest_lint_run).count(), 1)
 
     def test_preview_view_renders_delta(self):
         self.add_permissions('netbox_rpki.view_roachangeplan', 'netbox_rpki.change_roachangeplan')
@@ -1140,6 +1286,34 @@ class ROAChangePlanActionViewTestCase(PluginViewTestCase):
         self.assertEqual(self.plan.ticket_reference, 'UI-CHG-88')
         self.assertEqual(self.plan.change_reference, 'UI-CAB-12')
         self.assertEqual(self.plan.approval_records.count(), 1)
+
+    def test_approve_view_shows_and_accepts_previously_acknowledged_findings(self):
+        original_finding = self.plan.lint_runs.get().findings.get(finding_code='plan_withdraw_without_replacement')
+        acknowledge_roa_lint_findings(
+            self.plan,
+            acknowledged_by='view-user',
+            acknowledged_finding_ids=[original_finding.pk],
+        )
+        run_roa_lint(self.reconciliation_run, change_plan=self.plan)
+        self.add_permissions('netbox_rpki.view_roachangeplan', 'netbox_rpki.change_roachangeplan')
+        url = reverse('plugins:netbox_rpki:roachangeplan_approve', kwargs={'pk': self.plan.pk})
+
+        get_response = self.client.get(url)
+
+        self.assertHttpStatus(get_response, 200)
+        self.assertContains(get_response, 'Re-Confirm Previously Acknowledged Lint Findings')
+
+        post_response = self.client.post(
+            url,
+            {
+                'confirm': True,
+                'previously_acknowledged_findings': current_previously_acknowledged_finding_ids(self.plan),
+            },
+        )
+
+        self.plan.refresh_from_db()
+        self.assertRedirects(post_response, self.plan.get_absolute_url())
+        self.assertEqual(self.plan.status, rpki_models.ROAChangePlanStatus.APPROVED)
 
     def test_approve_view_shows_and_accepts_acknowledgement_required_simulation_results(self):
         plan = build_clean_simulation_plan(
@@ -1326,6 +1500,52 @@ class ASPAChangePlanActionAPITestCase(PluginAPITestCase):
         self.assertEqual(self.plan.approved_by, self.user.username)
         self.assertEqual(response.data['approval_record']['ticket_reference'], 'ASPA-CHG-100')
 
+    def test_approve_action_rejects_invalid_maintenance_window(self):
+        self.add_permissions('netbox_rpki.view_aspachangeplan', 'netbox_rpki.change_aspachangeplan')
+        url = reverse('plugins-api:netbox_rpki-api:aspachangeplan-approve', kwargs={'pk': self.plan.pk})
+
+        response = self.client.post(
+            url,
+            {
+                'ticket_reference': 'ASPA-CHG-101',
+                'maintenance_window_start': '2026-04-13T02:00:00Z',
+                'maintenance_window_end': '2026-04-13T01:00:00Z',
+            },
+            format='json',
+            **self.header,
+        )
+
+        self.assertHttpStatus(response, 400)
+        self.plan.refresh_from_db()
+        self.assertEqual(self.plan.status, rpki_models.ASPAChangePlanStatus.DRAFT)
+
+    def test_approve_serializer_exposes_only_governance_fields(self):
+        serializer = ASPAChangePlanApproveActionSerializer()
+
+        self.assertEqual(
+            list(serializer.fields.keys()),
+            [
+                'ticket_reference',
+                'change_reference',
+                'maintenance_window_start',
+                'maintenance_window_end',
+                'approval_notes',
+            ],
+        )
+
+    def test_approve_serializer_drops_roa_only_acknowledgement_inputs(self):
+        serializer = ASPAChangePlanApproveActionSerializer(
+            data={
+                'ticket_reference': 'ASPA-CHG-102',
+                'acknowledged_finding_ids': [1],
+                'acknowledged_simulation_result_ids': [2],
+                'lint_acknowledgement_notes': 'ignored',
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(serializer.validated_data, {'ticket_reference': 'ASPA-CHG-102'})
+
     def test_apply_action_runs_provider_write_flow(self):
         self.add_permissions('netbox_rpki.view_aspachangeplan', 'netbox_rpki.change_aspachangeplan')
         approve_aspa_change_plan(self.plan, approved_by='api-approver')
@@ -1483,6 +1703,36 @@ class ASPAChangePlanActionViewTestCase(PluginViewTestCase):
         self.assertEqual(self.plan.ticket_reference, 'UI-ASPA-CHG-88')
         self.assertEqual(self.plan.change_reference, 'UI-ASPA-CAB-12')
         self.assertEqual(self.plan.approval_records.count(), 1)
+
+    def test_approve_form_exposes_only_governance_fields(self):
+        form = ASPAChangePlanApprovalForm(plan=self.plan)
+
+        self.assertEqual(
+            list(form.fields.keys()),
+            [
+                'return_url',
+                'confirm',
+                'ticket_reference',
+                'change_reference',
+                'maintenance_window_start',
+                'maintenance_window_end',
+                'approval_notes',
+            ],
+        )
+
+    def test_approve_view_hides_roa_only_acknowledgement_inputs(self):
+        self.add_permissions('netbox_rpki.view_aspachangeplan', 'netbox_rpki.change_aspachangeplan')
+        url = reverse('plugins:netbox_rpki:aspachangeplan_approve', kwargs={'pk': self.plan.pk})
+
+        response = self.client.get(url)
+
+        self.assertHttpStatus(response, 200)
+        self.assertNotContains(response, 'Acknowledge Approval-Required Lint Findings')
+        self.assertNotContains(response, 'Acknowledge Approval-Required Simulation Results')
+        self.assertNotContains(
+            response,
+            'No current unsuppressed acknowledgement-required lint findings remain to acknowledge.',
+        )
 
     def test_apply_view_shows_governance_metadata_after_approval(self):
         approve_aspa_change_plan(

@@ -55,6 +55,7 @@ from netbox_rpki.tests.utils import (
     create_test_roa_lint_acknowledgement,
     create_test_roa_lint_run,
     create_test_roa_lint_finding,
+    create_test_roa_lint_rule_config,
     create_test_roa_lint_suppression,
     create_test_publication_point,
     create_test_published_aspa_result,
@@ -543,6 +544,7 @@ def _register_scenario_builders() -> None:
             "routingintenttemplaterule": build_routing_intent_template_rule_form_data,
             "routingintenttemplatebinding": build_routing_intent_template_binding_form_data,
             "routingintentexception": build_routing_intent_exception_form_data,
+            "roalintruleconfig": build_roa_lint_rule_config_form_data,
         }
     )
     _FILTER_SCENARIO_BUILDERS.update(
@@ -604,6 +606,9 @@ def _register_scenario_builders() -> None:
             "roalintfinding": lambda: create_test_roa_lint_finding(name=f"ROA Lint Finding {unique_token('roa-lint-finding')}"),
             "roalintacknowledgement": lambda: create_test_roa_lint_acknowledgement(
                 name=f"ROA Lint Acknowledgement {unique_token('roa-lint-ack')}"
+            ),
+            "roalintruleconfig": lambda: create_test_roa_lint_rule_config(
+                name=f"ROA Lint Rule Config {unique_token('roa-lint-rule-config')}"
             ),
             "roalintsuppression": lambda: create_test_roa_lint_suppression(
                 name=f"ROA Lint Suppression {unique_token('roa-lint-suppression')}"
@@ -829,6 +834,15 @@ def build_routing_intent_exception_form_data() -> dict[str, object]:
         "exception_type": rpki_models.RoutingIntentExceptionType.TRAFFIC_ENGINEERING,
         "effect_mode": rpki_models.RoutingIntentExceptionEffectMode.SUPPRESS,
         "enabled": True,
+    }
+
+
+def build_roa_lint_rule_config_form_data() -> dict[str, object]:
+    organization = create_unique_organization("roa-lint-rule-config-form-org")
+    return {
+        "name": f"ROA Lint Rule Config {unique_token('roa-lint-rule-config-form')}",
+        "organization": organization.pk,
+        "finding_code": "intent_max_length_overbroad",
     }
 
 

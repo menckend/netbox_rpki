@@ -617,7 +617,10 @@ class ROAChangePlanViewSet(VIEWSET_CLASS_MAP['roachangeplan']):
                 acknowledged_by=getattr(request.user, 'username', ''),
                 ticket_reference=input_serializer.validated_data.get('ticket_reference', ''),
                 change_reference=input_serializer.validated_data.get('change_reference', ''),
-                acknowledged_finding_ids=input_serializer.validated_data['acknowledged_finding_ids'],
+                acknowledged_finding_ids=input_serializer.validated_data.get('acknowledged_finding_ids', []),
+                previously_acknowledged_finding_ids=input_serializer.validated_data.get(
+                    'previously_acknowledged_finding_ids', []
+                ),
                 notes=input_serializer.validated_data.get('lint_acknowledgement_notes', ''),
             )
         except ProviderWriteError as exc:

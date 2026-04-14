@@ -1,4 +1,5 @@
 import hashlib
+from ipaddress import ip_network
 from datetime import timedelta
 
 import ipam
@@ -377,6 +378,8 @@ class ROAChangePlanItemSemantic(models.TextChoices):
 class ROALintSuppressionScope(models.TextChoices):
     INTENT = "intent", "Intent"
     PROFILE = "profile", "Profile"
+    ORG = "org", "Organization"
+    PREFIX = "prefix", "Prefix"
 
 
 class ProviderWriteOperation(models.TextChoices):
@@ -389,6 +392,14 @@ class ProviderWriteOperation(models.TextChoices):
 class ProviderWriteExecutionMode(models.TextChoices):
     PREVIEW = "preview", "Preview"
     APPLY = "apply", "Apply"
+
+
+class RollbackBundleStatus(models.TextChoices):
+    AVAILABLE = "available", "Available"
+    APPROVED = "approved", "Approved"
+    APPLYING = "applying", "Applying"
+    APPLIED = "applied", "Applied"
+    FAILED = "failed", "Failed"
 
 
 class ProviderAspaWriteMode(models.TextChoices):
@@ -4157,6 +4168,11 @@ class ROALintSuppression(NamedRpkiStandardModel):
         blank=True,
         null=True,
     )
+    prefix_cidr_text = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text='Required for prefix-scoped suppressions. CIDR notation, e.g. 192.0.2.0/24.',
+    )
     reason = models.CharField(max_length=255)
     notes = models.TextField(blank=True)
     fact_fingerprint = models.CharField(max_length=64, blank=True, default='')
@@ -4175,8 +4191,30 @@ class ROALintSuppression(NamedRpkiStandardModel):
         constraints = (
             models.CheckConstraint(
                 condition=(
-                    models.Q(scope_type=ROALintSuppressionScope.INTENT, roa_intent__isnull=False, intent_profile__isnull=True)
-                    | models.Q(scope_type=ROALintSuppressionScope.PROFILE, roa_intent__isnull=True, intent_profile__isnull=False)
+                    models.Q(
+                        scope_type=ROALintSuppressionScope.INTENT,
+                        roa_intent__isnull=False,
+                        intent_profile__isnull=True,
+                        prefix_cidr_text='',
+                    )
+                    | models.Q(
+                        scope_type=ROALintSuppressionScope.PROFILE,
+                        roa_intent__isnull=True,
+                        intent_profile__isnull=False,
+                        prefix_cidr_text='',
+                    )
+                    | models.Q(
+                        scope_type=ROALintSuppressionScope.ORG,
+                        roa_intent__isnull=True,
+                        intent_profile__isnull=True,
+                        prefix_cidr_text='',
+                    )
+                    | models.Q(
+                        scope_type=ROALintSuppressionScope.PREFIX,
+                        roa_intent__isnull=True,
+                        intent_profile__isnull=True,
+                        prefix_cidr_text__gt='',
+                    )
                 ),
                 name='netbox_rpki_roalintsuppression_exact_scope_target',
             ),
@@ -4189,6 +4227,16 @@ class ROALintSuppression(NamedRpkiStandardModel):
                 fields=('finding_code', 'intent_profile', 'fact_fingerprint'),
                 condition=models.Q(scope_type=ROALintSuppressionScope.PROFILE, lifted_at__isnull=True),
                 name='netbox_rpki_roalintsuppression_active_profile_unique',
+            ),
+            models.UniqueConstraint(
+                fields=('finding_code', 'organization'),
+                condition=models.Q(scope_type=ROALintSuppressionScope.ORG, lifted_at__isnull=True),
+                name='netbox_rpki_roalintsuppression_active_org_unique',
+            ),
+            models.UniqueConstraint(
+                fields=('finding_code', 'organization', 'prefix_cidr_text'),
+                condition=models.Q(scope_type=ROALintSuppressionScope.PREFIX, lifted_at__isnull=True),
+                name='netbox_rpki_roalintsuppression_active_prefix_unique',
             ),
         )
 
@@ -4211,11 +4259,32 @@ class ROALintSuppression(NamedRpkiStandardModel):
                 errors['intent_profile'] = 'Intent profile is required for profile-scoped suppressions.'
             if self.roa_intent_id is not None:
                 errors['roa_intent'] = 'ROA intent must be empty for profile-scoped suppressions.'
+            if self.prefix_cidr_text:
+                errors['prefix_cidr_text'] = 'Prefix CIDR must be empty for profile-scoped suppressions.'
+        if self.scope_type == ROALintSuppressionScope.ORG:
+            if self.roa_intent_id is not None:
+                errors['roa_intent'] = 'Must be empty for org-scoped suppressions.'
+            if self.intent_profile_id is not None:
+                errors['intent_profile'] = 'Must be empty for org-scoped suppressions.'
+            if self.prefix_cidr_text:
+                errors['prefix_cidr_text'] = 'Must be empty for org-scoped suppressions.'
+        if self.scope_type == ROALintSuppressionScope.PREFIX:
+            if self.roa_intent_id is not None:
+                errors['roa_intent'] = 'Must be empty for prefix-scoped suppressions.'
+            if self.intent_profile_id is not None:
+                errors['intent_profile'] = 'Must be empty for prefix-scoped suppressions.'
+            if not self.prefix_cidr_text:
+                errors['prefix_cidr_text'] = 'Prefix CIDR is required for prefix-scoped suppressions.'
+            else:
+                try:
+                    ip_network(self.prefix_cidr_text, strict=False)
+                except ValueError:
+                    errors['prefix_cidr_text'] = 'Enter a valid CIDR prefix, e.g. 192.0.2.0/24.'
         if self.roa_intent_id and self.organization_id and self.roa_intent.organization_id != self.organization_id:
             errors['organization'] = 'Organization must match the suppressed ROA intent.'
         if self.intent_profile_id and self.organization_id and self.intent_profile.organization_id != self.organization_id:
             errors['organization'] = 'Organization must match the suppressed intent profile.'
-        if not self.fact_fingerprint:
+        if self.scope_type in (ROALintSuppressionScope.INTENT, ROALintSuppressionScope.PROFILE) and not self.fact_fingerprint:
             errors['fact_fingerprint'] = 'A suppression must record the finding facts it applies to.'
         if self.lifted_at is not None and not self.lifted_by:
             errors['lifted_by'] = 'Lifted-by is required when a suppression is lifted.'
@@ -4229,6 +4298,62 @@ class ROALintSuppression(NamedRpkiStandardModel):
         if self.expires_at is not None and self.expires_at <= timezone.now():
             return False
         return True
+
+
+class ROALintRuleConfig(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='roa_lint_rule_configs',
+    )
+    finding_code = models.CharField(
+        max_length=64,
+        help_text='The lint rule code from LINT_RULE_SPECS this override applies to.',
+    )
+    severity_override = models.CharField(
+        max_length=16,
+        choices=ReconciliationSeverity.choices,
+        blank=True,
+        help_text='Leave blank to use the rule default.',
+    )
+    approval_impact_override = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text=(
+            'One of: informational, acknowledgement_required, blocking. '
+            'Leave blank to use the rule default.'
+        ),
+    )
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ('name',)
+        constraints = (
+            models.UniqueConstraint(
+                fields=('organization', 'finding_code'),
+                name='netbox_rpki_roalintruleconfig_org_code_unique',
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:roalintruleconfig", args=[self.pk])
+
+    def clean(self):
+        super().clean()
+        from netbox_rpki.services.roa_lint import LINT_RULE_SPECS
+
+        errors = {}
+        valid_codes = set(LINT_RULE_SPECS.keys())
+        if self.finding_code and self.finding_code not in valid_codes:
+            errors['finding_code'] = f'Unknown finding code. Valid codes: {sorted(valid_codes)}'
+        valid_approval_impacts = {'', 'informational', 'acknowledgement_required', 'blocking'}
+        if self.approval_impact_override not in valid_approval_impacts:
+            errors['approval_impact_override'] = 'Must be one of: informational, acknowledgement_required, blocking.'
+        if errors:
+            raise ValidationError(errors)
 
 
 class ROAChangePlan(NamedRpkiStandardModel):
@@ -4344,7 +4469,7 @@ class ROAChangePlan(NamedRpkiStandardModel):
 
     @property
     def can_acknowledge_lint(self) -> bool:
-        return self.supports_provider_write and self.status == ROAChangePlanStatus.DRAFT
+        return self.supports_provider_write
 
     @property
     def can_apply(self) -> bool:
@@ -4515,6 +4640,79 @@ class ProviderWriteExecution(NamedRpkiStandardModel):
         return 'roa'
 
 
+class ROAChangePlanRollbackBundle(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='roa_rollback_bundles',
+    )
+    source_plan = models.OneToOneField(
+        to='ROAChangePlan',
+        on_delete=models.PROTECT,
+        related_name='rollback_bundle',
+    )
+    rollback_delta_json = models.JSONField(
+        default=dict,
+        help_text=(
+            'The inverse of the applied delta. '
+            'ROA creates become withdraws; withdraws become creates.'
+        ),
+    )
+    item_count = models.PositiveIntegerField(default=0)
+    status = models.CharField(
+        max_length=16,
+        choices=RollbackBundleStatus.choices,
+        default=RollbackBundleStatus.AVAILABLE,
+    )
+    ticket_reference = models.CharField(max_length=200, blank=True)
+    change_reference = models.CharField(max_length=200, blank=True)
+    maintenance_window_start = models.DateTimeField(blank=True, null=True)
+    maintenance_window_end = models.DateTimeField(blank=True, null=True)
+    notes = models.TextField(blank=True)
+    approved_by = models.CharField(max_length=150, blank=True)
+    approved_at = models.DateTimeField(blank=True, null=True)
+    apply_requested_by = models.CharField(max_length=150, blank=True)
+    apply_started_at = models.DateTimeField(blank=True, null=True)
+    applied_at = models.DateTimeField(blank=True, null=True)
+    failed_at = models.DateTimeField(blank=True, null=True)
+    apply_response_json = models.JSONField(default=dict, blank=True)
+    apply_error = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ("-created", "name")
+        constraints = (
+            models.CheckConstraint(
+                condition=(
+                    models.Q(maintenance_window_start__isnull=True)
+                    | models.Q(maintenance_window_end__isnull=True)
+                    | models.Q(maintenance_window_end__gte=models.F('maintenance_window_start'))
+                ),
+                name='netbox_rpki_roa_rollback_valid_mw',
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:roachangeplanrollbackbundle", args=[self.pk])
+
+    def clean(self):
+        super().clean()
+        validate_maintenance_window_bounds(
+            start_at=self.maintenance_window_start,
+            end_at=self.maintenance_window_end,
+        )
+
+    @property
+    def can_approve(self) -> bool:
+        return self.status == RollbackBundleStatus.AVAILABLE
+
+    @property
+    def can_apply(self) -> bool:
+        return self.status == RollbackBundleStatus.APPROVED
+
+
 class ASPAChangePlan(NamedRpkiStandardModel):
     organization = models.ForeignKey(
         to=Organization,
@@ -4641,6 +4839,73 @@ class ASPAChangePlan(NamedRpkiStandardModel):
     @property
     def can_apply(self) -> bool:
         return self.supports_provider_write and self.status == ASPAChangePlanStatus.APPROVED
+
+
+class ASPAChangePlanRollbackBundle(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='aspa_rollback_bundles',
+    )
+    source_plan = models.OneToOneField(
+        to='ASPAChangePlan',
+        on_delete=models.PROTECT,
+        related_name='rollback_bundle',
+    )
+    rollback_delta_json = models.JSONField(default=dict)
+    item_count = models.PositiveIntegerField(default=0)
+    status = models.CharField(
+        max_length=16,
+        choices=RollbackBundleStatus.choices,
+        default=RollbackBundleStatus.AVAILABLE,
+    )
+    ticket_reference = models.CharField(max_length=200, blank=True)
+    change_reference = models.CharField(max_length=200, blank=True)
+    maintenance_window_start = models.DateTimeField(blank=True, null=True)
+    maintenance_window_end = models.DateTimeField(blank=True, null=True)
+    notes = models.TextField(blank=True)
+    approved_by = models.CharField(max_length=150, blank=True)
+    approved_at = models.DateTimeField(blank=True, null=True)
+    apply_requested_by = models.CharField(max_length=150, blank=True)
+    apply_started_at = models.DateTimeField(blank=True, null=True)
+    applied_at = models.DateTimeField(blank=True, null=True)
+    failed_at = models.DateTimeField(blank=True, null=True)
+    apply_response_json = models.JSONField(default=dict, blank=True)
+    apply_error = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ("-created", "name")
+        constraints = (
+            models.CheckConstraint(
+                condition=(
+                    models.Q(maintenance_window_start__isnull=True)
+                    | models.Q(maintenance_window_end__isnull=True)
+                    | models.Q(maintenance_window_end__gte=models.F('maintenance_window_start'))
+                ),
+                name='netbox_rpki_aspa_rollback_valid_mw',
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:aspachangeplanrollbackbundle", args=[self.pk])
+
+    def clean(self):
+        super().clean()
+        validate_maintenance_window_bounds(
+            start_at=self.maintenance_window_start,
+            end_at=self.maintenance_window_end,
+        )
+
+    @property
+    def can_approve(self) -> bool:
+        return self.status == RollbackBundleStatus.AVAILABLE
+
+    @property
+    def can_apply(self) -> bool:
+        return self.status == RollbackBundleStatus.APPROVED
 
 
 class ROAChangePlanItem(NamedRpkiStandardModel):

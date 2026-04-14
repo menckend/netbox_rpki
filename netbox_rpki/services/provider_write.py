@@ -222,6 +222,49 @@ def build_aspa_change_plan_delta(
     }
 
 
+def _invert_delta(delta: dict[str, list[dict]]) -> dict[str, list[dict]]:
+    return {
+        'added': list(delta.get('removed', [])),
+        'removed': list(delta.get('added', [])),
+    }
+
+
+def _create_roa_rollback_bundle(
+    plan: rpki_models.ROAChangePlan,
+    delta: dict[str, list[dict]],
+) -> rpki_models.ROAChangePlanRollbackBundle:
+    rollback_delta = _invert_delta(delta)
+    bundle = rpki_models.ROAChangePlanRollbackBundle(
+        name=f'{plan.name} Rollback',
+        organization=plan.organization,
+        source_plan=plan,
+        tenant=plan.tenant,
+        rollback_delta_json=rollback_delta,
+        item_count=sum(len(values) for values in rollback_delta.values()),
+    )
+    bundle.full_clean(validate_unique=False)
+    bundle.save()
+    return bundle
+
+
+def _create_aspa_rollback_bundle(
+    plan: rpki_models.ASPAChangePlan,
+    delta: dict[str, list[dict]],
+) -> rpki_models.ASPAChangePlanRollbackBundle:
+    rollback_delta = _invert_delta(delta)
+    bundle = rpki_models.ASPAChangePlanRollbackBundle(
+        name=f'{plan.name} Rollback',
+        organization=plan.organization,
+        source_plan=plan,
+        tenant=plan.tenant,
+        rollback_delta_json=rollback_delta,
+        item_count=sum(len(values) for values in rollback_delta.values()),
+    )
+    bundle.full_clean(validate_unique=False)
+    bundle.save()
+    return bundle
+
+
 def _get_plan_governance_metadata(plan) -> dict[str, str]:
     return plan.get_governance_metadata()
 
@@ -360,6 +403,7 @@ def acknowledge_roa_lint_findings(
     plan: rpki_models.ROAChangePlan | int,
     *,
     acknowledged_finding_ids: list[int] | None = None,
+    previously_acknowledged_finding_ids: list[int] | None = None,
     acknowledged_by: str = '',
     ticket_reference: str = '',
     change_reference: str = '',
@@ -367,7 +411,8 @@ def acknowledge_roa_lint_findings(
 ) -> list[rpki_models.ROALintAcknowledgement]:
     plan = _normalize_plan(plan)
     _require_approvable(plan)
-    acknowledged_finding_ids = acknowledged_finding_ids or []
+    acknowledged_finding_ids = list(acknowledged_finding_ids or [])
+    acknowledged_finding_ids.extend(previously_acknowledged_finding_ids or [])
     if not acknowledged_finding_ids:
         raise ProviderWriteError('Select at least one current blocking lint finding to acknowledge.')
 
@@ -396,12 +441,14 @@ def approve_roa_change_plan(
     maintenance_window_end=None,
     approval_notes: str = '',
     acknowledged_finding_ids: list[int] | None = None,
+    previously_acknowledged_finding_ids: list[int] | None = None,
     acknowledged_simulation_result_ids: list[int] | None = None,
     lint_acknowledgement_notes: str = '',
 ) -> rpki_models.ROAChangePlan:
     plan = _normalize_plan(plan)
     _require_approvable(plan)
-    acknowledged_finding_ids = acknowledged_finding_ids or []
+    acknowledged_finding_ids = list(acknowledged_finding_ids or [])
+    acknowledged_finding_ids.extend(previously_acknowledged_finding_ids or [])
     acknowledged_simulation_result_ids = acknowledged_simulation_result_ids or []
     posture = build_roa_change_plan_lint_posture(
         plan,
@@ -416,6 +463,10 @@ def approve_roa_change_plan(
     if posture['unresolved_acknowledgement_required_finding_count'] > 0:
         raise ProviderWriteError(
             'This ROA change plan has acknowledgement-required lint findings that must be acknowledged before approval.'
+        )
+    if posture['previously_acknowledged_finding_count'] > 0:
+        raise ProviderWriteError(
+            'This ROA change plan has previously acknowledged lint findings that must be re-confirmed before approval.'
         )
     try:
         simulation_run = require_roa_change_plan_simulation_approvable(
@@ -734,6 +785,7 @@ def apply_roa_change_plan_provider_write(
         plan.status = rpki_models.ROAChangePlanStatus.APPLIED
         plan.applied_at = applied_at
         plan.save(update_fields=('status', 'applied_at'))
+        _create_roa_rollback_bundle(plan, delta)
 
         response_payload_json = {
             'provider_response': provider_response,
@@ -823,6 +875,7 @@ def apply_aspa_change_plan_provider_write(
         plan.status = rpki_models.ASPAChangePlanStatus.APPLIED
         plan.applied_at = applied_at
         plan.save(update_fields=('status', 'applied_at'))
+        _create_aspa_rollback_bundle(plan, delta)
 
         response_payload_json = {
             'provider_response': provider_response,

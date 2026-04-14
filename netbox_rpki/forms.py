@@ -31,6 +31,7 @@ from netbox.forms import (
 import netbox_rpki
 from netbox_rpki.object_registry import FILTER_FORM_OBJECT_SPECS, FORM_OBJECT_SPECS
 from netbox_rpki.object_specs import ObjectSpec
+from netbox_rpki.services.roa_lint import build_roa_change_plan_lint_posture
 # from .choices import (
 #    SessionStatusChoices,
 #    CommunityStatusChoices,
@@ -92,6 +93,39 @@ for object_spec in FILTER_FORM_OBJECT_SPECS:
     globals()[object_spec.filter_form.class_name] = build_filter_form_class(object_spec)
 
 
+def _lint_finding_label(obj):
+    return (
+        f'[{obj.severity}] {obj.details_json.get("rule_label", obj.finding_code)}: '
+        f'{obj.details_json.get("operator_message", obj.name)}'
+    )
+
+
+def _build_plan_lint_ack_querysets(plan):
+    empty = netbox_rpki.models.ROALintFinding.objects.none()
+    if plan is None:
+        return empty, empty
+    posture = build_roa_change_plan_lint_posture(plan)
+    latest_lint_run = plan.lint_runs.order_by('-started_at', '-created').first()
+    acknowledged_queryset = empty
+    if latest_lint_run is not None:
+        acknowledged_ids = set(plan.lint_acknowledgements.values_list('finding_id', flat=True))
+        current_ids = [
+            finding.pk
+            for finding in latest_lint_run.findings.all()
+            if (
+                finding.details_json.get('approval_impact') == 'acknowledgement_required'
+                and not finding.details_json.get('suppressed')
+                and finding.pk not in acknowledged_ids
+                and finding.pk not in posture.get('previously_acknowledged_finding_ids', [])
+            )
+        ]
+        acknowledged_queryset = netbox_rpki.models.ROALintFinding.objects.filter(pk__in=current_ids)
+    previous_queryset = netbox_rpki.models.ROALintFinding.objects.filter(
+        pk__in=posture.get('previously_acknowledged_finding_ids', [])
+    )
+    return acknowledged_queryset, previous_queryset
+
+
 class ROAChangePlanApprovalForm(ConfirmationForm):
     ticket_reference = forms.CharField(required=False, max_length=200, label='Ticket Reference')
     change_reference = forms.CharField(required=False, max_length=200, label='Change Reference')
@@ -136,6 +170,13 @@ class ROAChangePlanApprovalForm(ConfirmationForm):
         widget=forms.CheckboxSelectMultiple,
         help_text='Select acknowledgement-required lint findings reviewed and accepted for this change plan.',
     )
+    previously_acknowledged_findings = forms.ModelMultipleChoiceField(
+        queryset=netbox_rpki.models.ROALintFinding.objects.none(),
+        required=False,
+        label='Re-Confirm Previously Acknowledged Lint Findings',
+        widget=forms.CheckboxSelectMultiple,
+        help_text='Select findings previously acknowledged on this plan that should be re-confirmed for the current lint run.',
+    )
     acknowledged_simulation_results = forms.ModelMultipleChoiceField(
         queryset=netbox_rpki.models.ROAValidationSimulationResult.objects.none(),
         required=False,
@@ -158,6 +199,7 @@ class ROAChangePlanApprovalForm(ConfirmationForm):
             'maintenance_window_end',
             'approval_notes',
             'acknowledged_findings',
+            'previously_acknowledged_findings',
             'acknowledged_simulation_results',
             'lint_acknowledgement_notes',
             name='Governance',
@@ -167,28 +209,18 @@ class ROAChangePlanApprovalForm(ConfirmationForm):
     def __init__(self, *args, plan=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.plan = plan
-        latest_lint_run = getattr(plan, 'lint_runs', None)
-        latest_lint_run = latest_lint_run.order_by('-started_at', '-created').first() if latest_lint_run is not None else None
-        queryset = netbox_rpki.models.ROALintFinding.objects.none()
-        if latest_lint_run is not None:
-            acknowledged_ids = set(plan.lint_acknowledgements.values_list('finding_id', flat=True)) if plan is not None else set()
-            blocking_ids = []
-            for finding in latest_lint_run.findings.all():
-                if (
-                    finding.details_json.get('approval_impact') == 'acknowledgement_required'
-                    and not finding.details_json.get('suppressed')
-                    and finding.pk not in acknowledged_ids
-                ):
-                    blocking_ids.append(finding.pk)
-            queryset = netbox_rpki.models.ROALintFinding.objects.filter(pk__in=blocking_ids)
-            self.fields['acknowledged_findings'].queryset = queryset
-            self.fields['acknowledged_findings'].label_from_instance = (
-                lambda obj: f'[{obj.severity}] {obj.details_json.get("rule_label", obj.finding_code)}: '
-                f'{obj.details_json.get("operator_message", obj.name)}'
-            )
+        queryset, previous_queryset = _build_plan_lint_ack_querysets(plan)
+        self.fields['acknowledged_findings'].queryset = queryset
+        self.fields['acknowledged_findings'].label_from_instance = _lint_finding_label
+        self.fields['previously_acknowledged_findings'].queryset = previous_queryset
+        self.fields['previously_acknowledged_findings'].label_from_instance = _lint_finding_label
         if not queryset.exists():
             self.fields['acknowledged_findings'].help_text = (
                 'No current unsuppressed acknowledgement-required lint findings remain to acknowledge.'
+            )
+        if not previous_queryset.exists():
+            self.fields['previously_acknowledged_findings'].help_text = (
+                'No previously acknowledged lint findings currently need re-confirmation.'
             )
         simulation_queryset = netbox_rpki.models.ROAValidationSimulationResult.objects.none()
         latest_simulation_run_id = (plan.summary_json or {}).get('simulation_run_id') if plan is not None else None
@@ -219,13 +251,23 @@ class ROAChangePlanApprovalForm(ConfirmationForm):
             start_at=cleaned_data.get('maintenance_window_start'),
             end_at=cleaned_data.get('maintenance_window_end'),
         )
-        acknowledged_findings = cleaned_data.get('acknowledged_findings')
+        acknowledged_findings = cleaned_data.get('acknowledged_findings') or []
         if acknowledged_findings is not None:
             valid_ids = set(self.fields['acknowledged_findings'].queryset.values_list('pk', flat=True))
             selected_ids = {finding.pk for finding in acknowledged_findings}
             if not selected_ids.issubset(valid_ids):
                 raise ValidationError({
                     'acknowledged_findings': 'Only current unsuppressed acknowledgement-required findings may be acknowledged.'
+                })
+        previously_acknowledged_findings = cleaned_data.get('previously_acknowledged_findings') or []
+        if previously_acknowledged_findings is not None:
+            valid_ids = set(self.fields['previously_acknowledged_findings'].queryset.values_list('pk', flat=True))
+            selected_ids = {finding.pk for finding in previously_acknowledged_findings}
+            if not selected_ids.issubset(valid_ids):
+                raise ValidationError({
+                    'previously_acknowledged_findings': (
+                        'Only current previously acknowledged findings may be re-confirmed.'
+                    )
                 })
         acknowledged_simulation_results = cleaned_data.get('acknowledged_simulation_results')
         if acknowledged_simulation_results is not None:
@@ -241,7 +283,34 @@ class ROAChangePlanApprovalForm(ConfirmationForm):
 
 
 class ASPAChangePlanApprovalForm(ROAChangePlanApprovalForm):
-    pass
+    fieldsets = (
+        FieldSet(
+            'ticket_reference',
+            'change_reference',
+            'maintenance_window_start',
+            'maintenance_window_end',
+            'approval_notes',
+            name='Governance',
+        ),
+    )
+
+    def __init__(self, *args, plan=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field_name in (
+            'acknowledged_findings',
+            'previously_acknowledged_findings',
+            'acknowledged_simulation_results',
+            'lint_acknowledgement_notes',
+        ):
+            self.fields.pop(field_name, None)
+
+    def clean(self):
+        cleaned_data = ConfirmationForm.clean(self)
+        validate_maintenance_window_bounds(
+            start_at=cleaned_data.get('maintenance_window_start'),
+            end_at=cleaned_data.get('maintenance_window_end'),
+        )
+        return cleaned_data
 
 
 class RoutingIntentProfileRunActionForm(ConfirmationForm):
@@ -294,10 +363,17 @@ class ROAChangePlanLintAcknowledgementForm(ConfirmationForm):
     change_reference = forms.CharField(required=False, max_length=200, label='Change Reference')
     acknowledged_findings = forms.ModelMultipleChoiceField(
         queryset=netbox_rpki.models.ROALintFinding.objects.none(),
-        required=True,
+        required=False,
         label='Acknowledge Approval-Required Lint Findings',
         widget=forms.CheckboxSelectMultiple,
         help_text='Select current acknowledgement-required lint findings reviewed and accepted for this draft change plan.',
+    )
+    previously_acknowledged_findings = forms.ModelMultipleChoiceField(
+        queryset=netbox_rpki.models.ROALintFinding.objects.none(),
+        required=False,
+        label='Re-Confirm Previously Acknowledged Lint Findings',
+        widget=forms.CheckboxSelectMultiple,
+        help_text='Select previously acknowledged findings that should be re-confirmed for the current lint run.',
     )
     lint_acknowledgement_notes = forms.CharField(
         required=False,
@@ -311,6 +387,7 @@ class ROAChangePlanLintAcknowledgementForm(ConfirmationForm):
             'ticket_reference',
             'change_reference',
             'acknowledged_findings',
+            'previously_acknowledged_findings',
             'lint_acknowledgement_notes',
             name='Lint Review',
         ),
@@ -319,45 +396,48 @@ class ROAChangePlanLintAcknowledgementForm(ConfirmationForm):
     def __init__(self, *args, plan=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.plan = plan
-        latest_lint_run = getattr(plan, 'lint_runs', None)
-        latest_lint_run = latest_lint_run.order_by('-started_at', '-created').first() if latest_lint_run is not None else None
-        queryset = netbox_rpki.models.ROALintFinding.objects.none()
-        if latest_lint_run is not None:
-            blocking_ids = []
-            acknowledged_ids = set(plan.lint_acknowledgements.values_list('finding_id', flat=True)) if plan is not None else set()
-            for finding in latest_lint_run.findings.all():
-                if (
-                    finding.details_json.get('approval_impact') == 'acknowledgement_required'
-                    and not finding.details_json.get('suppressed')
-                    and finding.pk not in acknowledged_ids
-                ):
-                    blocking_ids.append(finding.pk)
-            queryset = netbox_rpki.models.ROALintFinding.objects.filter(pk__in=blocking_ids)
+        queryset, previous_queryset = _build_plan_lint_ack_querysets(plan)
         self.fields['acknowledged_findings'].queryset = queryset
-        self.fields['acknowledged_findings'].label_from_instance = (
-            lambda obj: f'[{obj.severity}] {obj.details_json.get("rule_label", obj.finding_code)}: '
-            f'{obj.details_json.get("operator_message", obj.name)}'
-        )
+        self.fields['acknowledged_findings'].label_from_instance = _lint_finding_label
+        self.fields['previously_acknowledged_findings'].queryset = previous_queryset
+        self.fields['previously_acknowledged_findings'].label_from_instance = _lint_finding_label
         if not queryset.exists():
-            self.fields['acknowledged_findings'].required = False
             self.fields['acknowledged_findings'].help_text = (
                 'No current unsuppressed acknowledgement-required lint findings remain to acknowledge.'
+            )
+        if not previous_queryset.exists():
+            self.fields['previously_acknowledged_findings'].help_text = (
+                'No previously acknowledged lint findings currently need re-confirmation.'
             )
 
     def clean(self):
         cleaned_data = super().clean()
-        acknowledged_findings = cleaned_data.get('acknowledged_findings')
-        if not self.fields['acknowledged_findings'].queryset.exists():
-            if acknowledged_findings:
-                raise ValidationError({'acknowledged_findings': 'No current acknowledgement-required findings remain to acknowledge.'})
-            return cleaned_data
-        if not acknowledged_findings:
-            raise ValidationError({'acknowledged_findings': 'Select at least one current acknowledgement-required finding to acknowledge.'})
+        acknowledged_findings = cleaned_data.get('acknowledged_findings') or []
+        previously_acknowledged_findings = cleaned_data.get('previously_acknowledged_findings') or []
+        if not self.fields['acknowledged_findings'].queryset.exists() and acknowledged_findings:
+            raise ValidationError({'acknowledged_findings': 'No current acknowledgement-required findings remain to acknowledge.'})
+        if (
+            not self.fields['previously_acknowledged_findings'].queryset.exists()
+            and previously_acknowledged_findings
+        ):
+            raise ValidationError({
+                'previously_acknowledged_findings': 'No previously acknowledged findings remain to re-confirm.'
+            })
+        if not acknowledged_findings and not previously_acknowledged_findings:
+            raise ValidationError({
+                'acknowledged_findings': 'Select at least one current or previously acknowledged lint finding to confirm.'
+            })
         valid_ids = set(self.fields['acknowledged_findings'].queryset.values_list('pk', flat=True))
         selected_ids = {finding.pk for finding in acknowledged_findings}
         if not selected_ids.issubset(valid_ids):
             raise ValidationError({
                 'acknowledged_findings': 'Only current unacknowledged acknowledgement-required findings may be acknowledged.'
+            })
+        valid_previous_ids = set(self.fields['previously_acknowledged_findings'].queryset.values_list('pk', flat=True))
+        selected_previous_ids = {finding.pk for finding in previously_acknowledged_findings}
+        if not selected_previous_ids.issubset(valid_previous_ids):
+            raise ValidationError({
+                'previously_acknowledged_findings': 'Only current previously acknowledged findings may be re-confirmed.'
             })
         return cleaned_data
 
@@ -402,6 +482,8 @@ class ROALintFindingSuppressForm(ConfirmationForm):
         if not has_intent:
             self.fields['scope_type'].choices = [
                 (netbox_rpki.models.ROALintSuppressionScope.PROFILE, 'Profile'),
+                (netbox_rpki.models.ROALintSuppressionScope.ORG, 'Organization'),
+                (netbox_rpki.models.ROALintSuppressionScope.PREFIX, 'Prefix'),
             ]
 
 

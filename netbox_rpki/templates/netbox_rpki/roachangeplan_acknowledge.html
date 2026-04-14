@@ -15,6 +15,13 @@
           <div class="card-body">
             <p>Acknowledge current blocking lint findings for <strong>{{ change_plan }}</strong> without approving the change plan.</p>
             {% for field in form.visible_fields %}
+              {% if field.name == 'acknowledged_findings' and field.field.queryset.exists %}
+                <h5 class="mt-4">New Acknowledgements Required</h5>
+              {% elif field.name == 'previously_acknowledged_findings' and field.field.queryset.exists %}
+                <div class="alert alert-secondary mt-4 mb-3">
+                  <strong>Re-Confirm Previously Acknowledged Findings</strong>
+                </div>
+              {% endif %}
               <div class="mb-3">
                 <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
                 {{ field }}

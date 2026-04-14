@@ -151,6 +151,11 @@ ORGANIZATION_DETAIL_SPEC = DetailSpec(
             table_class_name='ASPAChangePlanTable',
             queryset=lambda obj: obj.aspa_change_plans.all(),
         ),
+        DetailTableSpec(
+            title='ROA Lint Rule Configs',
+            table_class_name='ROALintRuleConfigTable',
+            queryset=lambda obj: obj.roa_lint_rule_configs.all(),
+        ),
     ),
 )
 
@@ -1724,6 +1729,7 @@ ROA_LINT_SUPPRESSION_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(label='Scope Type', value=lambda obj: obj.scope_type),
         DetailFieldSpec(label='Intent Profile', value=lambda obj: obj.intent_profile, kind='link', empty_text='None'),
         DetailFieldSpec(label='ROA Intent', value=lambda obj: obj.roa_intent, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Prefix CIDR', value=lambda obj: obj.prefix_cidr_text or None, empty_text='None'),
         DetailFieldSpec(label='Reason', value=lambda obj: obj.reason),
         DetailFieldSpec(label='Fact Fingerprint', value=lambda obj: obj.fact_fingerprint, empty_text='None'),
         DetailFieldSpec(label='Fact Context', value=get_lint_suppression_fact_context, kind='code', empty_text='None'),
@@ -1744,6 +1750,26 @@ ROA_LINT_SUPPRESSION_DETAIL_SPEC = DetailSpec(
             direct_url=lambda obj: reverse('plugins:netbox_rpki:roalintsuppression_lift', kwargs={'pk': obj.pk}),
             visible=lambda obj: obj.lifted_at is None,
         ),
+    ),
+)
+
+
+ROA_LINT_RULE_CONFIG_DETAIL_SPEC = DetailSpec(
+    model=models.ROALintRuleConfig,
+    list_url_name='plugins:netbox_rpki:roalintruleconfig_list',
+    breadcrumb_label='ROA Lint Rule Configs',
+    card_title='ROA Lint Rule Config',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Organization', value=lambda obj: obj.organization, kind='link'),
+        DetailFieldSpec(label='Finding Code', value=lambda obj: obj.finding_code),
+        DetailFieldSpec(label='Severity Override', value=lambda obj: obj.severity_override or None, empty_text='Default'),
+        DetailFieldSpec(
+            label='Approval Impact Override',
+            value=lambda obj: obj.approval_impact_override or None,
+            empty_text='Default',
+        ),
+        DetailFieldSpec(label='Notes', value=lambda obj: obj.notes or None, empty_text='None'),
     ),
 )
 
@@ -2465,6 +2491,7 @@ DETAIL_SPEC_BY_MODEL = {
     models.ROALintFinding: ROA_LINT_FINDING_DETAIL_SPEC,
     models.ROALintAcknowledgement: ROA_LINT_ACKNOWLEDGEMENT_DETAIL_SPEC,
     models.ROALintSuppression: ROA_LINT_SUPPRESSION_DETAIL_SPEC,
+    models.ROALintRuleConfig: ROA_LINT_RULE_CONFIG_DETAIL_SPEC,
     models.ApprovalRecord: APPROVAL_RECORD_DETAIL_SPEC,
     models.ROAIntentResult: ROA_INTENT_RESULT_DETAIL_SPEC,
     models.PublishedROAResult: PUBLISHED_ROA_RESULT_DETAIL_SPEC,

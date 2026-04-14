@@ -724,6 +724,11 @@ class ROAChangePlanApproveActionSerializer(serializers.Serializer):
         required=False,
         allow_empty=True,
     )
+    previously_acknowledged_finding_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        required=False,
+        allow_empty=True,
+    )
     acknowledged_simulation_result_ids = serializers.ListField(
         child=serializers.IntegerField(min_value=1),
         required=False,
@@ -739,8 +744,19 @@ class ROAChangePlanApproveActionSerializer(serializers.Serializer):
         return attrs
 
 
-class ASPAChangePlanApproveActionSerializer(ROAChangePlanApproveActionSerializer):
-    pass
+class ASPAChangePlanApproveActionSerializer(serializers.Serializer):
+    ticket_reference = serializers.CharField(required=False, allow_blank=True, max_length=200)
+    change_reference = serializers.CharField(required=False, allow_blank=True, max_length=200)
+    maintenance_window_start = serializers.DateTimeField(required=False, allow_null=True)
+    maintenance_window_end = serializers.DateTimeField(required=False, allow_null=True)
+    approval_notes = serializers.CharField(required=False, allow_blank=True)
+
+    def validate(self, attrs):
+        models.validate_maintenance_window_bounds(
+            start_at=attrs.get('maintenance_window_start'),
+            end_at=attrs.get('maintenance_window_end'),
+        )
+        return attrs
 
 
 class ROAChangePlanAcknowledgeActionSerializer(serializers.Serializer):
@@ -748,10 +764,22 @@ class ROAChangePlanAcknowledgeActionSerializer(serializers.Serializer):
     change_reference = serializers.CharField(required=False, allow_blank=True, max_length=200)
     acknowledged_finding_ids = serializers.ListField(
         child=serializers.IntegerField(min_value=1),
-        required=True,
-        allow_empty=False,
+        required=False,
+        allow_empty=True,
+    )
+    previously_acknowledged_finding_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        required=False,
+        allow_empty=True,
     )
     lint_acknowledgement_notes = serializers.CharField(required=False, allow_blank=True)
+
+    def validate(self, attrs):
+        if not attrs.get('acknowledged_finding_ids') and not attrs.get('previously_acknowledged_finding_ids'):
+            raise serializers.ValidationError(
+                'Provide at least one current or previously acknowledged finding id.'
+            )
+        return attrs
 
 
 class ROALintFindingSuppressActionSerializer(serializers.Serializer):

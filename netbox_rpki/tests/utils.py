@@ -2332,6 +2332,7 @@ def create_test_roa_lint_suppression(
     scope_type=None,
     intent_profile=None,
     roa_intent=None,
+    prefix_cidr_text='',
     reason='Suppressed for testing.',
     notes='',
     fact_fingerprint='test-fact-fingerprint',
@@ -2359,6 +2360,14 @@ def create_test_roa_lint_suppression(
     if scope_type == rpki_models.ROALintSuppressionScope.PROFILE and intent_profile is None and roa_intent is not None:
         intent_profile = roa_intent.intent_profile
         roa_intent = None
+    if scope_type in (
+        rpki_models.ROALintSuppressionScope.ORG,
+        rpki_models.ROALintSuppressionScope.PREFIX,
+    ):
+        intent_profile = None
+        roa_intent = None
+    if scope_type == rpki_models.ROALintSuppressionScope.PREFIX and not prefix_cidr_text:
+        prefix_cidr_text = '192.0.2.0/24'
     return rpki_models.ROALintSuppression.objects.create(
         name=name,
         organization=organization,
@@ -2367,6 +2376,7 @@ def create_test_roa_lint_suppression(
         scope_type=scope_type,
         intent_profile=intent_profile,
         roa_intent=roa_intent,
+        prefix_cidr_text=prefix_cidr_text,
         reason=reason,
         notes=notes,
         fact_fingerprint=fact_fingerprint,
@@ -2379,6 +2389,29 @@ def create_test_roa_lint_suppression(
         lifted_by=lifted_by,
         lifted_at=lifted_at,
         lift_reason=lift_reason,
+        **kwargs,
+    )
+
+
+def create_test_roa_lint_rule_config(
+    name='ROA Lint Rule Config 1',
+    organization=None,
+    finding_code='intent_max_length_overbroad',
+    severity_override='',
+    approval_impact_override='',
+    notes='',
+    **kwargs,
+):
+    if organization is None:
+        organization = create_test_organization()
+    return rpki_models.ROALintRuleConfig.objects.create(
+        name=name,
+        organization=organization,
+        tenant=organization.tenant,
+        finding_code=finding_code,
+        severity_override=severity_override,
+        approval_impact_override=approval_impact_override,
+        notes=notes,
         **kwargs,
     )
 

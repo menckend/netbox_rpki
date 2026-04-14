@@ -1340,6 +1340,9 @@ class ROAChangePlanApproveView(ROAChangePlanActionView):
                 maintenance_window_end=form.cleaned_data['maintenance_window_end'],
                 approval_notes=form.cleaned_data['approval_notes'],
                 acknowledged_finding_ids=[finding.pk for finding in form.cleaned_data['acknowledged_findings']],
+                previously_acknowledged_finding_ids=[
+                    finding.pk for finding in form.cleaned_data['previously_acknowledged_findings']
+                ],
                 acknowledged_simulation_result_ids=[
                     result.pk for result in form.cleaned_data['acknowledged_simulation_results']
                 ],
@@ -1388,6 +1391,9 @@ class ROAChangePlanAcknowledgeView(ROAChangePlanActionView):
                 ticket_reference=form.cleaned_data['ticket_reference'],
                 change_reference=form.cleaned_data['change_reference'],
                 acknowledged_finding_ids=[finding.pk for finding in form.cleaned_data['acknowledged_findings']],
+                previously_acknowledged_finding_ids=[
+                    finding.pk for finding in form.cleaned_data['previously_acknowledged_findings']
+                ],
                 notes=form.cleaned_data['lint_acknowledgement_notes'],
             )
         except ProviderWriteError as exc:

@@ -47,6 +47,7 @@ from netbox_rpki.tests.utils import (
     create_test_roa_change_plan,
     create_test_roa_change_plan_matrix,
     create_test_roa_change_plan_item,
+    create_test_roa_lint_rule_config,
     create_test_aspa_reconciliation_run,
     create_test_roa_intent,
     create_test_roa_intent_match,
@@ -2299,6 +2300,20 @@ class OrganizationViewTestCase(GeneratedObjectViewTestMixin, PluginViewTestCase)
             response,
             f'{reverse("plugins:netbox_rpki:certificate_add")}?rpki_org={self.organizations[0].pk}',
         )
+
+    def test_organization_detail_renders_roa_lint_rule_configs_table(self):
+        create_test_roa_lint_rule_config(
+            name='Organization Lint Rule Override',
+            organization=self.organizations[0],
+            severity_override=rpki_models.ReconciliationSeverity.CRITICAL,
+        )
+        self.add_permissions('netbox_rpki.view_organization', 'netbox_rpki.view_roalintruleconfig')
+
+        response = self.client.get(self.organizations[0].get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'ROA Lint Rule Configs')
+        self.assertContains(response, 'Organization Lint Rule Override')
 
 
 class CertificateViewTestCase(GeneratedObjectViewTestMixin, PluginViewTestCase):

@@ -1,6 +1,6 @@
 # NetBox RPKI Plugin: High-Priority Enhancement Backlog for Hosted-RPKI Consumers
 
-**Last updated:** April 13, 2026
+**Last updated:** April 14, 2026 (P8 implementation plan linked)
 
 ## 1. Purpose
 
@@ -85,30 +85,9 @@ The closure order should stay dependency-driven rather than milestone-driven.
 
 - **Status:** Functionally complete
 - **End state:** deterministic derivation of intended ROA state from NetBox service context, with clear drift classification, operator drill-down, and actionable remediation planning
-- **Current state:** the core intent and reconciliation stack exists, compares both local ROA state and provider-imported authorization state, classifies replacement-required exact-prefix drift, generates paired replacement create and withdraw actions, persists analysis objects, and exposes operator drill-down through service, job, command, API, and web surfaces
+- **Current state:** the core intent and reconciliation stack exists, compares both local ROA state and provider-imported authorization state, classifies replacement-required exact-prefix drift, generates paired replacement create and withdraw actions, persists analysis objects, and exposes operator drill-down through service, job, command, API, and web surfaces; web-UI actions exist for `routingintentprofile.run`, `roareconciliationrun.create_plan`, and `roachangeplan.simulate`; reconciliation and change-plan aggregate health data are visible in the web UI
 - **Remaining gap:** operator exception and acknowledgement flows for lint findings, richer simulation explanations and scenario coverage, broader roll-up reporting, and finer-grained local-model reshape semantics beyond the current `create` or `replace` or `withdraw` contract
 - **Closure order:** treat Priority 1 as dependency-closed; only take follow-on work here when it unblocks later provider, governance, or bulk-authoring work
-
-#### Active refinement slice: workflow-surface parity
-
-The main remaining Priority 1 work is not new domain modeling. It is parity between operator workflow surfaces.
-
-Action surfaces to add:
-
-- add a web-UI action for `routingintentprofile.run`
-- add a web-UI action for `roareconciliationrun.create_plan`
-- add a web-UI action for `roachangeplan.simulate`
-
-Summary surfaces to expose through existing UI reporting:
-
-- surface `roareconciliationrun.summary` in list-page headers, dashboard cards, or similar roll-up surfaces rather than as a standalone page
-- surface `roachangeplan.summary` the same way
-
-Close this refinement slice when:
-
-- every custom API workflow action representing a human operator step is reachable from the web UI or explicitly documented as API-only by design
-- reconciliation and change-plan aggregate health data are visible somewhere in the web UI
-- tests prove route presence, permission enforcement, and expected UI affordances together
 
 ### Priority 2: Hosted-Provider Synchronization
 
@@ -128,18 +107,20 @@ Close this refinement slice when:
 
 ### Priority 3: ASPA Operational Support
 
+- [Implementation Plan](netbox_rpki_priority3_aspa_writeback_plan.md)
+
 - **Status:** Partially complete
 - **End state:** ASPA intent, provider synchronization, reconciliation, approval, and reporting should be first-class alongside ROAs
-- **Current state:** `ASPA` inventory is hardened with provider-authorization constraints and detail UX, Krill-backed imported ASPA state is normalized through the provider-sync layer, and ASPA intent and reconciliation objects and services exist with job, command, API, and operator drill-down surfaces
-- **Remaining gap:** provider-backed ASPA write-back, broader provider and object-family coverage beyond the current Krill ASPA path, richer reporting and diffing, and eventual lint or simulation workflows analogous to the ROA roadmap
+- **Current state:** `ASPA` inventory is hardened with provider-authorization constraints and detail UX, Krill-backed imported ASPA state is normalized through the provider-sync layer, and ASPA intent and reconciliation objects and services exist with job, command, API, and operator drill-down surfaces. The first provider-backed ASPA write-back slice is now in place for Krill-backed plans, including preview, approval, and apply lifecycle support through service, API, and web actions, provider execution audit rows, Krill ASPA delta serialization and submission, governance metadata capture, and focused provider-write regression coverage for the ASPA path.
+- **Remaining gap:** broader provider and object-family coverage beyond the current Krill ASPA path, richer reporting and diffing, and eventual lint or simulation workflows analogous to the ROA roadmap
 - **Closure order:** extend the shared control-plane surfaces rather than building an ASPA-specific side path
 
 ### Priority 4: ROA Linting and Safety Analysis
 
 - **Status:** Partially complete
 - **End state:** operators can see when intended or published ROAs are too broad, unnecessary, risky, or inconsistent with routing intent
-- **Current state:** reconciliation and change-plan flows can persist `ROALintRun` and `ROALintFinding` records, expose summary counts in API and UI surfaces, and present operator drill-down from reconciliation and plan detail pages
-- **Remaining gap:** deepen the rule set, add clearer operator explanations and exception handling, and decide how acknowledgements or suppressions should feed approval and reporting workflows
+- **Current state:** reconciliation and change-plan flows can persist `ROALintRun` and `ROALintFinding` records, expose summary counts in API and UI surfaces, and present operator drill-down from reconciliation and plan detail pages. Per-organization `ROALintRuleConfig` overrides now allow rule-specific severity or approval-impact tuning without changing global defaults. Lint suppressions now support intent, profile, organization-wide, and prefix-scoped workflows, and the rule set has expanded into tenant-aware ownership-context analysis for intent, published ROA state, and create-plan authorization checks. Findings now carry operator-facing explanation fields, and approval plus standalone acknowledgement workflows now support `previously_acknowledged` carry-forward posture with explicit re-confirmation before approval gates pass. Focused linting, provider-write, view, API, and full plugin-suite verification are green for this implementation wave.
+- **Remaining gap:** deepen the rule set further, broaden roll-up or reporting treatment of suppressions and acknowledgement state, and decide whether additional governance or acknowledgement lifecycle semantics should sit on top of the current lint posture contract
 - **Closure order:** iterate here before adding heavier governance on top of the same plan objects
 
 ### Priority 5: ROV Impact Simulation
@@ -171,6 +152,8 @@ Close this refinement slice when:
 - **Closure order:** in parallel with bulk templating and ASPA expansion where dependencies allow
 
 ### Priority 8: Change Control and Auditability
+
+- [Implementation Plan](netbox_rpki_priority8_change_control_plan.md)
 
 - **Status:** Partially complete
 - **End state:** publication workflows are policy-aware, multi-stage, rollback-capable, and fully auditable across providers

@@ -13,6 +13,7 @@ from netbox_rpki.services import (
     preview_aspa_change_plan_provider_write,
     reconcile_aspa_intents,
 )
+from netbox_rpki.services.provider_write import _serialize_krill_aspa_delta
 from netbox_rpki.tests.utils import (
     create_test_asn,
     create_test_aspa_intent,
@@ -161,6 +162,28 @@ class AspaProviderWriteServiceTestCase(TestCase):
                         'providers': ['AS64722'],
                         'provider_asns': [64722],
                     },
+                ],
+            },
+        )
+
+    def test_serialize_krill_aspa_delta_uses_asn_strings_and_wire_keys(self):
+        self.assertEqual(
+            _serialize_krill_aspa_delta(
+                {
+                    'added': [
+                        {'customer_asn': 64725, 'provider_asns': [64726, 64727]},
+                    ],
+                    'removed': [
+                        {'customer_asn': 64728, 'provider_asns': [64729]},
+                    ],
+                }
+            ),
+            {
+                'add': [
+                    {'customer': 'AS64725', 'providers': ['AS64726', 'AS64727']},
+                ],
+                'remove': [
+                    {'customer': 'AS64728', 'providers': ['AS64729']},
                 ],
             },
         )
@@ -336,6 +359,28 @@ class AspaProviderWriteServiceTestCase(TestCase):
         self.assertEqual(execution.status, rpki_models.ValidationRunStatus.FAILED)
         self.assertEqual(execution.error, 'follow-up sync failed')
         self.assertEqual(execution.response_payload_json['followup_sync']['status'], rpki_models.ValidationRunStatus.FAILED)
+
+    def test_apply_rejects_already_applied_plan(self):
+        customer = create_test_asn(64780)
+        provider = create_test_asn(64781)
+        create_test_aspa_intent(
+            name='ASPA Repeat Apply Intent',
+            organization=self.organization,
+            customer_as=customer,
+            provider_as=provider,
+        )
+        run = reconcile_aspa_intents(
+            self.organization,
+            comparison_scope=rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
+            provider_snapshot=self.provider_snapshot,
+        )
+        plan = create_aspa_change_plan(run, name='ASPA Repeat Apply Plan')
+        plan.status = rpki_models.ASPAChangePlanStatus.APPLIED
+        plan.applied_at = timezone.now()
+        plan.save(update_fields=('status', 'applied_at'))
+
+        with self.assertRaisesMessage(ProviderWriteError, 'already been applied'):
+            apply_aspa_change_plan_provider_write(plan, requested_by='repeat-user')
 
     def test_capability_gating_rejects_unsupported_provider(self):
         unsupported_account = create_test_provider_account(
