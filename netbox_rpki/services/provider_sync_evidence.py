@@ -5,6 +5,9 @@ from collections.abc import Mapping, Sequence
 import base64
 import binascii
 import hashlib
+from datetime import timedelta
+
+from django.utils import timezone
 
 from netbox_rpki import models as rpki_models
 
@@ -35,6 +38,14 @@ def _normalized_text(value) -> str:
     if value is None:
         return ''
     return str(value).strip()
+
+
+def _datetime_text(value) -> str:
+    if value in (None, ''):
+        return ''
+    if hasattr(value, 'isoformat'):
+        return value.isoformat()
+    return str(value)
 
 
 def _dedupe_texts(values: Sequence[object]) -> list[str]:
@@ -416,4 +427,156 @@ def get_certificate_observation_evidence_summary(obj: rpki_models.ImportedCertif
         'is_ambiguous': get_certificate_observation_is_ambiguous(obj),
         'publication_linkage_status': get_certificate_observation_publication_linkage_status(obj),
         'signed_object_linkage_status': get_certificate_observation_signed_object_linkage_status(obj),
+    }
+
+
+def _attention_kinds(*conditions: tuple[str, bool]) -> list[str]:
+    return [kind for kind, condition in conditions if condition]
+
+
+def _is_success_exchange_result(value: str) -> bool:
+    return _normalized_text(value).lower() == 'success'
+
+
+def build_publication_point_attention_summary(
+    obj: rpki_models.ImportedPublicationPoint,
+    *,
+    now=None,
+    thresholds: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    thresholds = dict(thresholds or {})
+    now = now or timezone.now()
+    stale_after_minutes = int(thresholds.get('publication_stale_after_minutes', 0) or 0)
+    last_exchange_result = _normalized_text(obj.last_exchange_result)
+    exchange_status = 'unknown'
+    exchange_failed = False
+    if last_exchange_result:
+        exchange_status = 'success' if _is_success_exchange_result(last_exchange_result) else 'non_success'
+        exchange_failed = exchange_status == 'non_success'
+
+    overdue_threshold = now - timedelta(minutes=stale_after_minutes)
+    if obj.next_exchange_before is not None:
+        exchange_overdue = obj.next_exchange_before <= now
+    elif obj.last_exchange_at is not None and stale_after_minutes > 0:
+        exchange_overdue = obj.last_exchange_at <= overdue_threshold
+    else:
+        exchange_overdue = False
+
+    evidence_summary = get_publication_point_evidence_summary(obj)
+    authored_linkage_status = _normalized_text(evidence_summary.get('authored_linkage_status')) or get_publication_point_authored_linkage_status(obj)
+    authored_linkage_missing = authored_linkage_status != 'linked'
+    attention_kinds = _attention_kinds(
+        ('exchange_failed', exchange_failed),
+        ('exchange_overdue', exchange_overdue),
+        ('stale', bool(obj.is_stale)),
+        ('authored_linkage_missing', authored_linkage_missing),
+    )
+
+    return {
+        'stale': bool(obj.is_stale),
+        'exchange': {
+            'status': exchange_status,
+            'failed': exchange_failed,
+            'overdue': exchange_overdue,
+            'stale_after_minutes': stale_after_minutes,
+            'last_exchange_at': getattr(getattr(obj, 'last_exchange_at', None), 'isoformat', lambda: '')(),
+            'next_exchange_before': getattr(getattr(obj, 'next_exchange_before', None), 'isoformat', lambda: '')(),
+        },
+        'authored_linkage': {
+            'status': authored_linkage_status,
+            'missing': authored_linkage_missing,
+        },
+        'attention_count': len(attention_kinds),
+        'attention_kinds': attention_kinds,
+    }
+
+
+def build_signed_object_attention_summary(
+    obj: rpki_models.ImportedSignedObject,
+) -> dict[str, object]:
+    evidence_summary = get_signed_object_evidence_summary(obj)
+    publication_linkage_status = _normalized_text(evidence_summary.get('publication_linkage_status')) or get_signed_object_publication_linkage_status(obj)
+    authored_linkage_status = _normalized_text(evidence_summary.get('authored_linkage_status')) or get_signed_object_authored_linkage_status(obj)
+    publication_linkage_missing = publication_linkage_status != 'linked'
+    authored_linkage_missing = authored_linkage_status != 'linked'
+    attention_kinds = _attention_kinds(
+        ('publication_linkage_missing', publication_linkage_missing),
+        ('authored_linkage_missing', authored_linkage_missing),
+        ('stale', bool(obj.is_stale)),
+    )
+
+    return {
+        'stale': bool(obj.is_stale),
+        'signed_object_type': obj.signed_object_type,
+        'signed_object_type_label': signed_object_type_label(obj.signed_object_type),
+        'publication_linkage': {
+            'status': publication_linkage_status,
+            'missing': publication_linkage_missing,
+        },
+        'authored_linkage': {
+            'status': authored_linkage_status,
+            'missing': authored_linkage_missing,
+        },
+        'attention_count': len(attention_kinds),
+        'attention_kinds': attention_kinds,
+    }
+
+
+def build_certificate_observation_attention_summary(
+    obj: rpki_models.ImportedCertificateObservation,
+    *,
+    now=None,
+    thresholds: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    thresholds = dict(thresholds or {})
+    now = now or timezone.now()
+    warning_days = int(thresholds.get('certificate_expiry_warning_days', 0) or 0)
+    expired_grace_minutes = int(thresholds.get('certificate_expired_grace_minutes', 0) or 0)
+    publication_linkage_status = get_certificate_observation_publication_linkage_status(obj)
+    signed_object_linkage_status = get_certificate_observation_signed_object_linkage_status(obj)
+    source_count = get_certificate_observation_source_count(obj)
+    is_ambiguous = get_certificate_observation_is_ambiguous(obj)
+
+    not_after = getattr(obj, 'not_after', None)
+    expired_cutoff = now - timedelta(minutes=expired_grace_minutes)
+    expiring_cutoff = now + timedelta(days=warning_days)
+    expired = bool(not_after and not_after <= expired_cutoff)
+    expiring_soon = bool(not_after and not expired and not_after <= expiring_cutoff)
+    publication_linkage_missing = publication_linkage_status != 'linked'
+    signed_object_linkage_missing = signed_object_linkage_status != 'linked'
+    weak_linkage = publication_linkage_missing or signed_object_linkage_missing or is_ambiguous or source_count > 1
+    attention_kinds = _attention_kinds(
+        ('expired', expired),
+        ('expiring_soon', expiring_soon),
+        ('stale', bool(obj.is_stale)),
+        ('ambiguous', is_ambiguous),
+        ('publication_linkage_missing', publication_linkage_missing),
+        ('signed_object_linkage_missing', signed_object_linkage_missing),
+    )
+
+    return {
+        'stale': bool(obj.is_stale),
+        'expiry': {
+            'status': 'expired' if expired else 'expiring_soon' if expiring_soon else 'fresh',
+            'warning_days': warning_days,
+            'expired_grace_minutes': expired_grace_minutes,
+            'expired': expired,
+            'expiring_soon': expiring_soon,
+            'not_after': _datetime_text(not_after),
+        },
+        'evidence': {
+            'source_count': source_count,
+            'is_ambiguous': is_ambiguous,
+            'weak_linkage': weak_linkage,
+        },
+        'publication_linkage': {
+            'status': publication_linkage_status,
+            'missing': publication_linkage_missing,
+        },
+        'signed_object_linkage': {
+            'status': signed_object_linkage_status,
+            'missing': signed_object_linkage_missing,
+        },
+        'attention_count': len(attention_kinds),
+        'attention_kinds': attention_kinds,
     }

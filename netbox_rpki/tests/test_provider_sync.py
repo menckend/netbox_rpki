@@ -25,6 +25,11 @@ from netbox_rpki.services.provider_sync_contract import (
     build_snapshot_signed_object_type_breakdown,
 )
 from netbox_rpki.services.provider_sync_evidence import build_certificate_observation_payload
+from netbox_rpki.services.provider_sync_evidence import (
+    build_certificate_observation_attention_summary,
+    build_publication_point_attention_summary,
+    build_signed_object_attention_summary,
+)
 from netbox_rpki.services.provider_sync_krill import (
     KrillCertificateObservationRecord,
     KrillCertificateObservationSourceRecord,
@@ -1251,6 +1256,146 @@ class ProviderSyncEvidenceContractTestCase(TestCase):
         self.assertIn('multiple_publication_uris', payload['source_summary']['ambiguity_reasons'])
         self.assertEqual(payload['publication_linkage']['status'], 'ambiguous')
         self.assertEqual(payload['signed_object_linkage']['status'], 'unmatched')
+
+    def test_build_publication_point_attention_summary_flags_failed_exchange_and_overdue(self):
+        now = timezone.now()
+        publication_point = create_test_imported_publication_point(
+            last_exchange_at=now - timedelta(minutes=30),
+            last_exchange_result='failed',
+            next_exchange_before=None,
+            is_stale=True,
+        )
+
+        summary = build_publication_point_attention_summary(
+            publication_point,
+            now=now,
+            thresholds={
+                'publication_stale_after_minutes': 15,
+            },
+        )
+
+        self.assertTrue(summary['stale'])
+        self.assertEqual(summary['exchange']['status'], 'non_success')
+        self.assertTrue(summary['exchange']['failed'])
+        self.assertTrue(summary['exchange']['overdue'])
+        self.assertTrue(summary['authored_linkage']['missing'])
+        self.assertIn('exchange_failed', summary['attention_kinds'])
+        self.assertIn('exchange_overdue', summary['attention_kinds'])
+        self.assertIn('stale', summary['attention_kinds'])
+
+    def test_build_signed_object_attention_summary_flags_missing_linkages(self):
+        signed_object = create_test_imported_signed_object(
+            payload_json={
+                'publication_linkage': {
+                    'status': 'unmatched',
+                    'reason': 'No imported publication point matched the source identity.',
+                },
+                'authored_linkage': {
+                    'status': 'unmatched',
+                    'reason': 'No authored signed object matched the source identity.',
+                },
+                'evidence_summary': {
+                    'publication_linkage_status': 'unmatched',
+                    'authored_linkage_status': 'unmatched',
+                },
+            },
+        )
+
+        summary = build_signed_object_attention_summary(signed_object)
+
+        self.assertTrue(summary['publication_linkage']['missing'])
+        self.assertTrue(summary['authored_linkage']['missing'])
+        self.assertEqual(summary['signed_object_type'], rpki_models.SignedObjectType.MANIFEST)
+        self.assertIn('publication_linkage_missing', summary['attention_kinds'])
+        self.assertIn('authored_linkage_missing', summary['attention_kinds'])
+
+    def test_build_certificate_observation_attention_summary_flags_expiry_and_weak_linkage(self):
+        now = timezone.now()
+        observation_record = KrillCertificateObservationRecord(
+            certificate_key='cert-key-2',
+            certificate_uri='rsync://example.invalid/repo/example.cer',
+            publication_uri='rsync://example.invalid/repo/',
+            signed_object_uri='rsync://example.invalid/repo/example.mft',
+            subject='CN=Example',
+            issuer='CN=Issuer',
+            serial_number='99',
+            source_records=(
+                KrillCertificateObservationSourceRecord(
+                    observation_source=rpki_models.CertificateObservationSource.SIGNED_OBJECT_EE,
+                    publication_uri='rsync://example.invalid/repo/',
+                    signed_object_uri='rsync://example.invalid/repo/example.mft',
+                ),
+                KrillCertificateObservationSourceRecord(
+                    observation_source=rpki_models.CertificateObservationSource.PARENT_ISSUED,
+                    publication_uri='rsync://other.invalid/repo/',
+                    related_handle='testbed',
+                    class_name='0',
+                ),
+            ),
+        )
+        payload = build_certificate_observation_payload(
+            observation_record,
+            publication_point=None,
+            publication_linkage_status='unmatched',
+            publication_linkage_reason='No imported publication point matched the source identity.',
+            signed_object=None,
+            signed_object_linkage_status='unmatched',
+            signed_object_linkage_reason='No imported signed object matched the source identity.',
+        )
+        certificate_observation = create_test_imported_certificate_observation(
+            not_after=now + timedelta(days=5),
+            payload_json=payload,
+        )
+
+        summary = build_certificate_observation_attention_summary(
+            certificate_observation,
+            now=now,
+            thresholds={
+                'certificate_expiry_warning_days': 30,
+                'certificate_expired_grace_minutes': 0,
+            },
+        )
+
+        self.assertFalse(summary['expiry']['expired'])
+        self.assertTrue(summary['expiry']['expiring_soon'])
+        self.assertTrue(summary['evidence']['is_ambiguous'])
+        self.assertTrue(summary['evidence']['weak_linkage'])
+        self.assertTrue(summary['publication_linkage']['missing'])
+        self.assertTrue(summary['signed_object_linkage']['missing'])
+        self.assertIn('expiring_soon', summary['attention_kinds'])
+        self.assertIn('ambiguous', summary['attention_kinds'])
+        self.assertIn('publication_linkage_missing', summary['attention_kinds'])
+
+    def test_build_certificate_observation_attention_summary_flags_expired_objects(self):
+        now = timezone.now()
+        certificate_observation = create_test_imported_certificate_observation(
+            not_after=now - timedelta(minutes=1),
+            payload_json={
+                'publication_linkage': {
+                    'status': 'unmatched',
+                    'reason': 'No imported publication point matched the source identity.',
+                },
+                'signed_object_linkage': {
+                    'status': 'unmatched',
+                    'reason': 'No imported signed object matched the source identity.',
+                },
+            },
+        )
+
+        summary = build_certificate_observation_attention_summary(
+            certificate_observation,
+            now=now,
+            thresholds={
+                'certificate_expiry_warning_days': 30,
+                'certificate_expired_grace_minutes': 0,
+            },
+        )
+
+        self.assertTrue(summary['expiry']['expired'])
+        self.assertFalse(summary['expiry']['expiring_soon'])
+        self.assertTrue(summary['evidence']['weak_linkage'])
+        self.assertIn('expired', summary['attention_kinds'])
+        self.assertIn('publication_linkage_missing', summary['attention_kinds'])
 
 
 class ExternalObjectReferenceModelTestCase(TestCase):
