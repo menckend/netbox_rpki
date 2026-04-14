@@ -51,6 +51,11 @@ from netbox_rpki.services import (
     simulate_roa_change_plan,
     suppress_roa_lint_finding,
 )
+from netbox_rpki.services.lifecycle_reporting import (
+    build_provider_lifecycle_health_summary,
+    get_effective_lifecycle_thresholds,
+    is_within_lifecycle_expiry_threshold,
+)
 from netbox_rpki.services.provider_sync_contract import build_provider_account_rollup
 
 
@@ -705,7 +710,6 @@ class ASPAReconciliationRunCreatePlanView(generic.ObjectEditView):
 
 class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
     template_name = 'netbox_rpki/operations_dashboard.html'
-    expiry_window_days = 30
     additional_permissions = [
         'netbox_rpki.view_roa',
         'netbox_rpki.view_certificate',
@@ -726,21 +730,11 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
         return 'netbox_rpki.view_rpkiprovideraccount'
 
     def get(self, request):
-        today = date.today()
-        expiry_threshold = today + timedelta(days=self.expiry_window_days)
         provider_accounts = self.get_provider_accounts(request)
-        expiring_roas = self.get_expiring_roas(request, today=today, expiry_threshold=expiry_threshold)
-        expiring_certificates = self.get_expiring_certificates(
-            request,
-            today=today,
-            expiry_threshold=expiry_threshold,
-        )
+        expiring_roas = self.get_expiring_roas(request)
+        expiring_certificates = self.get_expiring_certificates(request)
         stale_bindings = self.get_stale_bindings(request)
-        expiring_exceptions = self.get_expiring_exceptions(
-            request,
-            today=today,
-            expiry_threshold=expiry_threshold,
-        )
+        expiring_exceptions = self.get_expiring_exceptions(request)
         bulk_run_rollup = self.get_bulk_run_rollup(request)
         roa_reconciliation_summary = self.get_roa_reconciliation_summary(request)
         roa_change_plan_summary = self.get_roa_change_plan_summary(request)
@@ -762,15 +756,9 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
             'change_plans_requiring_attention': change_plans_requiring_attention,
             'aspa_reconciliation_attention_runs': aspa_reconciliation_attention_runs,
             'aspa_change_plans_requiring_attention': aspa_change_plans_requiring_attention,
-            'expiry_window_days': self.expiry_window_days,
-            'expiry_threshold': expiry_threshold,
         })
 
     def get_provider_accounts(self, request):
-        attention_healths = {
-            models.ProviderSyncHealth.FAILED,
-            models.ProviderSyncHealth.STALE,
-        }
         provider_queryset = models.RpkiProviderAccount.objects.restrict(request.user, 'view').select_related('organization')
         visible_snapshot_ids = set(
             models.ProviderSnapshot.objects.restrict(request.user, 'view')
@@ -789,10 +777,18 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
                 visible_diff_ids=visible_diff_ids,
             )
             for provider_account in provider_queryset
-            if provider_account.sync_enabled and provider_account.sync_health in attention_healths
+            if provider_account.sync_enabled and self.provider_account_requires_attention(provider_account)
         ]
         provider_accounts.sort(key=self.get_provider_account_sort_key)
         return provider_accounts
+
+    def provider_account_requires_attention(self, provider_account):
+        lifecycle_summary = build_provider_lifecycle_health_summary(provider_account)
+        return lifecycle_summary['sync']['status'] in {
+            models.ProviderSyncHealth.FAILED,
+            models.ProviderSyncHealth.STALE,
+            models.ProviderSyncHealth.NEVER_SYNCED,
+        }
 
     def build_provider_account_dashboard_row(self, provider_account, *, visible_snapshot_ids=None, visible_diff_ids=None):
         rollup = build_provider_account_rollup(
@@ -800,13 +796,23 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
             visible_snapshot_ids=visible_snapshot_ids,
             visible_diff_ids=visible_diff_ids,
         )
+        lifecycle_summary = build_provider_lifecycle_health_summary(
+            provider_account,
+            visible_snapshot_ids=visible_snapshot_ids,
+            visible_diff_ids=visible_diff_ids,
+        )
         rollup['family_status_text'] = self.get_family_status_text(rollup)
-        rollup['freshness_text'] = self.get_freshness_text(provider_account, rollup)
+        rollup['freshness_text'] = self.get_freshness_text(provider_account, lifecycle_summary)
+        rollup['sync_threshold_text'] = (
+            f"Stale after {lifecycle_summary['policy']['thresholds']['sync_stale_after_minutes']} minute(s)"
+        )
+        rollup['attention_summary'] = lifecycle_summary['attention_summary']
         rollup['latest_snapshot_url'] = self.get_summary_url('plugins:netbox_rpki:providersnapshot', rollup['latest_snapshot_id'])
         rollup['latest_diff_url'] = self.get_summary_url('plugins:netbox_rpki:providersnapshotdiff', rollup['latest_diff_id'])
         rollup['latest_snapshot_label'] = rollup['latest_snapshot_name'] or 'Latest snapshot'
         rollup['latest_diff_label'] = rollup['latest_diff_name'] or 'Latest diff'
         provider_account.last_sync_rollup = rollup
+        provider_account.lifecycle_health_summary = lifecycle_summary
         return provider_account
 
     def get_summary_url(self, view_name, object_id):
@@ -830,14 +836,14 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
         parts = [f"{status_counts[status]} {status.replace('_', ' ')}" for status in ordered_statuses if status_counts.get(status)]
         return f"{rollup.get('family_count', 0)} families: {', '.join(parts)}"
 
-    def get_freshness_text(self, provider_account, rollup):
+    def get_freshness_text(self, provider_account, lifecycle_summary):
         if not provider_account.sync_enabled:
             return 'Sync disabled'
         if provider_account.last_successful_sync is None:
             return 'Never synced'
-        next_sync_due_at = rollup.get('next_sync_due_at')
-        if next_sync_due_at:
-            return f'Next due {next_sync_due_at}'
+        next_stale_at = lifecycle_summary['sync'].get('next_stale_at')
+        if next_stale_at:
+            return f'Stale after {next_stale_at}'
         return f'Last synced {provider_account.last_successful_sync}'
 
     def get_provider_account_sort_key(self, provider_account):
@@ -852,40 +858,56 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
             provider_account.name.lower(),
         )
 
-    def get_expiring_roas(self, request, *, today, expiry_threshold):
+    def get_expiring_roas(self, request):
+        now = timezone.now()
         queryset = models.Roa.objects.restrict(request.user, 'view').select_related(
             'origin_as',
             'signed_by',
             'signed_by__rpki_org',
         ).filter(
             valid_to__isnull=False,
-            valid_to__lte=expiry_threshold,
         ).order_by('valid_to', 'name')
-        return [
-            {
+        items = []
+        for roa in queryset:
+            organization = roa.signed_by.rpki_org
+            _policy, thresholds, _source = get_effective_lifecycle_thresholds(organization=organization)
+            if not is_within_lifecycle_expiry_threshold(
+                expires_at=roa.valid_to,
+                warning_days=thresholds['roa_expiry_warning_days'],
+                reference_time=now,
+            ):
+                continue
+            items.append({
                 'object': roa,
-                'organization': roa.signed_by.rpki_org,
+                'organization': organization,
                 'related_object': roa.signed_by,
-                'expiry_text': self.get_expiry_text(roa.valid_to, today=today),
-                'expiry_badge_class': self.get_expiry_badge_class(roa.valid_to, today=today),
-            }
-            for roa in queryset
-        ]
+                'expiry_text': self.get_expiry_text(roa.valid_to, today=now.date()),
+                'expiry_badge_class': self.get_expiry_badge_class(roa.valid_to, today=now.date()),
+            })
+        return items
 
-    def get_expiring_certificates(self, request, *, today, expiry_threshold):
+    def get_expiring_certificates(self, request):
+        now = timezone.now()
         queryset = models.Certificate.objects.restrict(request.user, 'view').select_related('rpki_org').filter(
             valid_to__isnull=False,
-            valid_to__lte=expiry_threshold,
         ).order_by('valid_to', 'name')
-        return [
-            {
+        items = []
+        for certificate in queryset:
+            organization = certificate.rpki_org
+            _policy, thresholds, _source = get_effective_lifecycle_thresholds(organization=organization)
+            if not is_within_lifecycle_expiry_threshold(
+                expires_at=certificate.valid_to,
+                warning_days=thresholds['certificate_expiry_warning_days'],
+                reference_time=now,
+            ):
+                continue
+            items.append({
                 'object': certificate,
-                'organization': certificate.rpki_org,
-                'expiry_text': self.get_expiry_text(certificate.valid_to, today=today),
-                'expiry_badge_class': self.get_expiry_badge_class(certificate.valid_to, today=today),
-            }
-            for certificate in queryset
-        ]
+                'organization': organization,
+                'expiry_text': self.get_expiry_text(certificate.valid_to, today=now.date()),
+                'expiry_badge_class': self.get_expiry_badge_class(certificate.valid_to, today=now.date()),
+            })
+        return items
 
     def get_stale_bindings(self, request):
         attention_states = {
@@ -916,27 +938,34 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
             })
         return bindings[:10]
 
-    def get_expiring_exceptions(self, request, *, today, expiry_threshold):
+    def get_expiring_exceptions(self, request):
+        now = timezone.now()
         queryset = (
             models.RoutingIntentException.objects.restrict(request.user, 'view')
             .select_related('organization', 'intent_profile', 'template_binding')
             .filter(
                 enabled=True,
                 ends_at__isnull=False,
-                ends_at__date__lte=expiry_threshold,
             )
             .order_by('ends_at', 'name')
         )
-        return [
-            {
+        items = []
+        for exception in queryset:
+            _policy, thresholds, _source = get_effective_lifecycle_thresholds(organization=exception.organization)
+            if not is_within_lifecycle_expiry_threshold(
+                expires_at=exception.ends_at,
+                warning_days=thresholds['exception_expiry_warning_days'],
+                reference_time=now,
+            ):
+                continue
+            items.append({
                 'object': exception,
                 'organization': exception.organization,
-                'expiry_text': self.get_expiry_text(timezone.localtime(exception.ends_at).date(), today=today),
-                'expiry_badge_class': self.get_expiry_badge_class(timezone.localtime(exception.ends_at).date(), today=today),
+                'expiry_text': self.get_expiry_text(timezone.localtime(exception.ends_at).date(), today=now.date()),
+                'expiry_badge_class': self.get_expiry_badge_class(timezone.localtime(exception.ends_at).date(), today=now.date()),
                 'lifecycle_text': self.get_exception_lifecycle_text(exception),
-            }
-            for exception in queryset[:10]
-        ]
+            })
+        return items[:10]
 
     def get_bulk_run_rollup(self, request):
         queryset = (

@@ -7,6 +7,7 @@ from netbox_rpki import models
 from netbox_rpki.services import build_roa_change_plan_lint_posture
 from netbox_rpki.object_registry import API_OBJECT_SPECS
 from netbox_rpki.object_specs import ObjectSpec
+from netbox_rpki.services.lifecycle_reporting import build_provider_lifecycle_health_summary
 from netbox_rpki.services.provider_sync_contract import (
     build_provider_account_rollup,
     build_provider_snapshot_diff_rollup,
@@ -82,6 +83,7 @@ class RpkiProviderAccountSerializer(SERIALIZER_CLASS_MAP['rpkiprovideraccount'])
     sync_health = serializers.ReadOnlyField()
     sync_health_display = serializers.ReadOnlyField()
     last_sync_rollup = serializers.SerializerMethodField()
+    lifecycle_health_summary = serializers.SerializerMethodField()
     next_sync_due_at = serializers.DateTimeField(read_only=True)
 
     class Meta(SERIALIZER_CLASS_MAP['rpkiprovideraccount'].Meta):
@@ -95,6 +97,7 @@ class RpkiProviderAccountSerializer(SERIALIZER_CLASS_MAP['rpkiprovideraccount'])
             'sync_health',
             'sync_health_display',
             'last_sync_rollup',
+            'lifecycle_health_summary',
             'next_sync_due_at',
         )
 
@@ -121,6 +124,34 @@ class RpkiProviderAccountSerializer(SERIALIZER_CLASS_MAP['rpkiprovideraccount'])
                 )
 
         return build_provider_account_rollup(
+            obj,
+            visible_snapshot_ids=visible_snapshot_ids,
+            visible_diff_ids=visible_diff_ids,
+        )
+
+    def get_lifecycle_health_summary(self, obj):
+        request = self.context.get('request')
+        visible_snapshot_ids = None
+        visible_diff_ids = None
+
+        if request is not None and request.user.is_authenticated:
+            summary = obj.last_sync_summary_json or {}
+            snapshot_id = summary.get('latest_snapshot_id')
+            diff_id = summary.get('latest_diff_id')
+            if snapshot_id is not None:
+                visible_snapshot_ids = set(
+                    models.ProviderSnapshot.objects.restrict(request.user, 'view')
+                    .filter(pk=snapshot_id)
+                    .values_list('pk', flat=True)
+                )
+            if diff_id is not None:
+                visible_diff_ids = set(
+                    models.ProviderSnapshotDiff.objects.restrict(request.user, 'view')
+                    .filter(pk=diff_id)
+                    .values_list('pk', flat=True)
+                )
+
+        return build_provider_lifecycle_health_summary(
             obj,
             visible_snapshot_ids=visible_snapshot_ids,
             visible_diff_ids=visible_diff_ids,

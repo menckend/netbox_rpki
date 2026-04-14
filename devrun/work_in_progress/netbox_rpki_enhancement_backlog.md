@@ -98,24 +98,17 @@ The closure order should stay dependency-driven rather than milestone-driven.
 - **Remaining gap:** broader provider coverage, richer family-specific reporting and dashboard roll-ups, deeper publication-observation fidelity for certificate and signed-object inventory, and clearer operator-facing explanation of churn and freshness at the provider-account level
 - **Closure order:** keep Priority 2 second, but treat it as a maturity and completion track rather than a greenfield architecture item
 
-#### Recommended next slices
-
-1. provider-account roll-up and operations-dashboard reporting depth
-2. richer family-specific diff and freshness views for the already imported Krill families
-3. deeper publication-observation parsing and evidence handling for certificate and signed-object inventory
-4. broader provider coverage once the shared reporting and evidence model is stable
-
 ### Priority 3: ASPA Operational Support
 
-- [Implementation Plan](netbox_rpki_priority3_aspa_writeback_plan.md)
-
-- **Status:** Partially complete
+- **Status:** Mostly complete
 - **End state:** ASPA intent, provider synchronization, reconciliation, approval, and reporting should be first-class alongside ROAs
-- **Current state:** `ASPA` inventory is hardened with provider-authorization constraints and detail UX, Krill-backed imported ASPA state is normalized through the provider-sync layer, and ASPA intent and reconciliation objects and services exist with job, command, API, and operator drill-down surfaces. The first provider-backed ASPA write-back slice is now in place for Krill-backed plans, including preview, approval, and apply lifecycle support through service, API, and web actions, provider execution audit rows, Krill ASPA delta serialization and submission, governance metadata capture, and focused provider-write regression coverage for the ASPA path.
+- **Current state:** `ASPA` inventory is hardened with provider-authorization constraints and detail UX, Krill-backed imported ASPA state is normalized through the provider-sync layer, and ASPA intent and reconciliation objects and services exist with job, command, API, and operator drill-down surfaces. The first provider-backed ASPA write-back slice is now complete for Krill-backed plans, including preview, approval, secondary approval, and apply lifecycle support through service, API, and web actions, provider execution audit rows, Krill ASPA delta serialization and submission, governance metadata capture, rollback-bundle support, and focused provider-write regression coverage for the ASPA path across service, API, and view failure and success paths.
 - **Remaining gap:** broader provider and object-family coverage beyond the current Krill ASPA path, richer reporting and diffing, and eventual lint or simulation workflows analogous to the ROA roadmap
 - **Closure order:** extend the shared control-plane surfaces rather than building an ASPA-specific side path
 
 ### Priority 4: ROA Linting and Safety Analysis
+
+- [Maturity Plan](netbox_rpki_priority4_linting_maturity_plan.md)
 
 - **Status:** Partially complete
 - **End state:** operators can see when intended or published ROAs are too broad, unnecessary, risky, or inconsistent with routing intent
@@ -124,8 +117,6 @@ The closure order should stay dependency-driven rather than milestone-driven.
 - **Closure order:** iterate here before adding heavier governance on top of the same plan objects
 
 ### Priority 5: ROV Impact Simulation
-
-- [ROV Impact Simulation Plan](netbox_rpki_rov_impact_simulation_plan.md)
 
 - **Status:** Functionally complete
 - **End state:** before approval or apply, operators can see predicted validation outcomes and blast radius for proposed changes
@@ -143,6 +134,8 @@ The closure order should stay dependency-driven rather than milestone-driven.
 
 ### Priority 7: Deeper NetBox Binding and Service Context
 
+- [Implementation Plan](netbox_rpki_priority7_service_context_plan.md)
+
 - **Status:** Partially complete
 - **End state:** policy can be expressed and explained in terms of tenant, VRF, site, region, service role, provider, circuit, exchange, or other operating context
 - **Current state:** the existing intent layer already binds to prefixes, ASNs, tenant, VRF, site, region, tags, and custom fields
@@ -151,7 +144,7 @@ The closure order should stay dependency-driven rather than milestone-driven.
 
 ### Priority 8: Change Control and Auditability
 
-- [Implementation Plan](netbox_rpki_priority8_change_control_plan.md)
+- [Maturity Plan](netbox_rpki_priority8_change_control_maturity_plan.md)
 
 - **Status:** Partially complete
 - **End state:** publication workflows are policy-aware, multi-stage, rollback-capable, and fully auditable across providers
@@ -236,8 +229,6 @@ Remaining normalization work is second-wave refinement rather than another schem
 
 ## 8. Related Working Documents
 
-- [Schema Normalization Plan](netbox_rpki_schema_normalization_plan.md)
-- [Schema Normalization Decision Log](netbox_rpki_schema_normalization_decision_log.md)
 - [CONTRIBUTING.md](../../CONTRIBUTING.md)
 
 These documents carry the detailed migration, compatibility, and field-level architectural material that used to be duplicated inside this backlog. Keep this file focused on active capability status and priority ordering.

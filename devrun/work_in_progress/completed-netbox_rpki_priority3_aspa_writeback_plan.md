@@ -203,22 +203,26 @@ print('OK:', fields)
 
 ## 5. Slice B — Service-Layer Unit Tests ❌ NOT STARTED
 
-**Goal:** Achieve test parity with `ProviderWriteServiceTestCase` (ROA, 16 tests) via a new `ASPAProviderWriteServiceTestCase`. These are pure Django `TestCase` unit tests that mock only the Krill HTTP layer (`_submit_krill_aspa_delta`) and the followup sync (`sync_provider_account`).
+**Goal:** Achieve test parity with `ProviderWriteServiceTestCase` (ROA) via a new `ASPAProviderWriteServiceTestCase`. These are Django `TestCase` unit tests that exercise the real ASPA change-plan and provider-write services while mocking only the Krill submission seam (`_submit_krill_aspa_delta`) and the follow-up sync (`sync_provider_account`).
 
-**File:** `netbox_rpki/tests/test_provider_write.py` — add after `ProviderWriteServiceTestCase` (currently at L117; no `ASPAProviderWriteServiceTestCase` exists in the file).
+**File:** `netbox_rpki/tests/test_provider_write.py` — add after `ProviderWriteServiceTestCase` (currently at the top of the file; no `ASPAProviderWriteServiceTestCase` exists yet).
 
-> **Prerequisite:** Resolve the `requires_secondary_approval` defect from Slice A before writing these tests — service test setup needs to know whether secondary approval is wired for ASPA (affects `setUpTestData` and the `test_approve_*` tests).
+**Current contract note:** ASPA approval now supports `requires_secondary_approval`; Slice B should treat that as part of the supported governance contract, not as an unresolved prerequisite.
 
 ### 5.1 Test Setup
+
+Use the current helper and model contract, which represents ASPA intent and imported ASPA state as customer/provider rows rather than a single provider-set field on one row.
 
 ```python
 class ASPAProviderWriteServiceTestCase(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.organization = create_test_organization(org_id='aspa-write-org', name='ASPA Write Org')
-        cls.customer_asn = create_test_asn(65200)
-        cls.provider_asn_a = create_test_asn(65201)
-        cls.provider_asn_b = create_test_asn(65202)
+        cls.customer_as = create_test_asn(65200)
+        cls.provider_as_a = create_test_asn(65201)
+        cls.provider_as_b = create_test_asn(65202)
+        cls.orphaned_customer_as = create_test_asn(65299)
+        cls.orphaned_provider_as = create_test_asn(65300)
 
         cls.provider_account = create_test_provider_account(
             name='ASPA Krill Write Account',
@@ -236,27 +240,51 @@ class ASPAProviderWriteServiceTestCase(TestCase):
             provider_name='Krill',
             status=rpki_models.ValidationRunStatus.COMPLETED,
         )
-        # Intent: customer_asn with 2 providers
-        create_test_aspa_intent(
+
+        # Intent: one customer ASN with two intended providers, represented as two ASPAIntent rows.
+        cls.intent_a = create_test_aspa_intent(
+            name='ASPA Write Intent A',
             organization=cls.organization,
-            customer_asn=cls.customer_asn,
-            provider_asns=[cls.provider_asn_a, cls.provider_asn_b],
+            customer_as=cls.customer_as,
+            provider_as=cls.provider_as_a,
         )
-        # Imported ASPA (orphaned — no matching intent)
-        cls.orphaned_customer_asn = create_test_asn(65299)
+        cls.intent_b = create_test_aspa_intent(
+            name='ASPA Write Intent B',
+            organization=cls.organization,
+            customer_as=cls.customer_as,
+            provider_as=cls.provider_as_b,
+        )
+
+        # Imported orphaned ASPA: one customer with one provider and no matching intent.
         cls.orphaned_imported_aspa = create_test_imported_aspa(
+            name='Orphaned Imported ASPA',
             provider_snapshot=cls.provider_snapshot,
             organization=cls.organization,
-            customer_asn=cls.orphaned_customer_asn,
-            provider_asns=[create_test_asn(65300)],
+            customer_as=cls.orphaned_customer_as,
+            customer_as_value=cls.orphaned_customer_as.asn,
         )
-        cls.reconciliation_run = run_aspa_reconciliation(
-            organization=cls.organization,
+        create_test_imported_aspa_provider(
+            imported_aspa=cls.orphaned_imported_aspa,
+            provider_as=cls.orphaned_provider_as,
+            provider_as_value=cls.orphaned_provider_as.asn,
+        )
+
+        cls.reconciliation_run = reconcile_aspa_intents(
+            cls.organization,
             comparison_scope=rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
             provider_snapshot=cls.provider_snapshot,
         )
         cls.plan = create_aspa_change_plan(cls.reconciliation_run)
 ```
+
+Implementation notes for the fixture:
+
+- Import `create_test_imported_aspa_provider`; the imported ASPA helper does not accept a `provider_asns=[...]` list.
+- Use `reconcile_aspa_intents(...)`, which matches the current test file and service export surface. `run_aspa_reconciliation_pipeline(...)` is also valid, but use one consistently.
+- The baseline fixture above naturally produces:
+  - one create or reshape path for customer `AS65200`
+  - one withdraw path for orphaned customer `AS65299`
+- Because ASPA deltas are customer-set based, assertions should focus on the resulting `customer_asn` plus the full `provider_asns` list in each delta entry, not on one-intent-row-per-delta-entry assumptions.
 
 ### 5.2 Tests to Implement
 
@@ -281,18 +309,42 @@ self.assertIn(self.orphaned_customer_asn.asn, removed_customers)
 
 **`test_build_aspa_delta_replace_lands_in_added_only`**
 
-Build a plan where a REPLACE semantic fires (imported ASPA that fully replaces the existing one). Confirm the item's `provider_operation == ADD_PROVIDER_SET` and the entry appears in `added`, not `removed`:
+Build a plan where a REPLACE semantic fires for an existing customer with a materially different provider set. Confirm the REPLACE item uses `ADD_PROVIDER_SET` and contributes only to the `added` bucket.
 
 ```python
-# Use a provider snapshot with an ASPA whose customer matches but providers differ entirely
-replace_snapshot = ...  # create snapshot with different provider set for same customer
-replace_plan = create_aspa_change_plan(reconciliation_from_replace_snapshot)
+replace_snapshot = create_test_provider_snapshot(
+    name='ASPA Replace Snapshot',
+    organization=self.organization,
+    provider_account=self.provider_account,
+    provider_name='Krill',
+    status=rpki_models.ValidationRunStatus.COMPLETED,
+)
+replace_imported_aspa = create_test_imported_aspa(
+    name='ASPA Replace Imported',
+    provider_snapshot=replace_snapshot,
+    organization=self.organization,
+    customer_as=self.customer_as,
+    customer_as_value=self.customer_as.asn,
+)
+create_test_imported_aspa_provider(
+    imported_aspa=replace_imported_aspa,
+    provider_as=create_test_asn(65210),
+    provider_as_value=65210,
+)
+replace_reconciliation = reconcile_aspa_intents(
+    self.organization,
+    comparison_scope=rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
+    provider_snapshot=replace_snapshot,
+)
+replace_plan = create_aspa_change_plan(replace_reconciliation, name='ASPA Replace Plan')
 delta = build_aspa_change_plan_delta(replace_plan)
 
 replace_item = replace_plan.items.get(plan_semantic=rpki_models.ASPAChangePlanItemSemantic.REPLACE)
 self.assertEqual(replace_item.provider_operation, rpki_models.ProviderWriteOperation.ADD_PROVIDER_SET)
-added_customers = {e['customer_asn'] for e in delta.get('added', [])}
-self.assertIn(replace_item.aspa_intent.customer_asn.asn, added_customers)
+added_customers = {entry['customer_asn'] for entry in delta.get('added', [])}
+removed_customers = {entry['customer_asn'] for entry in delta.get('removed', [])}
+self.assertIn(self.customer_as.asn, added_customers)
+self.assertNotIn(self.customer_as.asn, removed_customers)
 ```
 
 **`test_serialize_krill_aspa_delta_converts_asn_integers_to_as_prefixed_strings`**
@@ -385,11 +437,11 @@ with self.assertRaisesMessage(ProviderWriteError, 'Only draft ASPA change plans 
 
 **`test_approve_rejects_non_provider_backed_plan`**
 
-A plan with no `provider_account` (LOCAL scope plan) should fail `_require_aspa_provider_write_capability`:
+A plan with no `provider_account` (LOCAL scope plan) should fail ASPA write-capability gating.
 
 ```python
-local_reconciliation_run = run_aspa_reconciliation(
-    organization=self.organization,
+local_reconciliation_run = reconcile_aspa_intents(
+    self.organization,
     comparison_scope=rpki_models.ReconciliationComparisonScope.LOCAL_ASPA_RECORDS,
 )
 local_plan = create_aspa_change_plan(local_reconciliation_run, name='ASPA Local Plan')
@@ -431,7 +483,8 @@ self.assertEqual(execution.response_payload_json['provider_response'], {'message
 self.assertIn('delta_summary', execution.response_payload_json)
 self.assertIn('governance', execution.response_payload_json)
 
-# Krill was called with the serialized wire-format delta
+# Krill was called with the internal delta; serialization is covered separately by
+# test_serialize_krill_aspa_delta_converts_asn_integers_to_as_prefixed_strings.
 submit_mock.assert_called_once_with(self.provider_account, delta)
 sync_mock.assert_called_once()
 ```
@@ -495,17 +548,56 @@ self.assertEqual(execution.response_payload_json['followup_sync']['status'], rpk
 
 **`test_capability_gating_rejects_unsupported_provider_type`**
 
-A plan bound to an ARIN provider account (which doesn't support ASPA write) should fail appropriately:
+A plan bound to an unsupported provider type such as ARIN should fail at the provider-write capability gate.
 
 ```python
 arin_account = create_test_provider_account(
-    name='ARIN ASPA Unsupported', organization=self.organization,
-    provider_type=rpki_models.ProviderType.ARIN, org_handle='ORG-ARIN-ASPA',
+    name='ARIN ASPA Unsupported',
+    organization=self.organization,
+    provider_type=rpki_models.ProviderType.ARIN,
+    org_handle='ORG-ARIN-ASPA',
 )
-... (build plan targeting arin_account) ...
+unsupported_snapshot = create_test_provider_snapshot(
+    name='ARIN ASPA Unsupported Snapshot',
+    organization=self.organization,
+    provider_account=arin_account,
+    provider_name='ARIN',
+    status=rpki_models.ValidationRunStatus.COMPLETED,
+)
+unsupported_reconciliation = create_test_aspa_reconciliation_run(
+    name='Unsupported ASPA Reconciliation',
+    organization=self.organization,
+    provider_snapshot=unsupported_snapshot,
+    comparison_scope=rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
+)
+unsupported_plan = create_test_aspa_change_plan(
+    name='Unsupported ASPA Plan',
+    organization=self.organization,
+    source_reconciliation_run=unsupported_reconciliation,
+    provider_account=arin_account,
+    provider_snapshot=unsupported_snapshot,
+)
 
 with self.assertRaisesMessage(ProviderWriteError, 'does not support ASPA write operations'):
-    build_aspa_change_plan_delta(unsupported_aspa_plan)
+    build_aspa_change_plan_delta(unsupported_plan)
+```
+
+### 5.2.1 Recommended imports for Slice B
+
+The new service testcase will need these additional imports beyond the current ASPA API/view test block:
+
+```python
+from netbox_rpki.services.provider_write import _serialize_krill_aspa_delta
+from netbox_rpki.tests.utils import (
+    create_test_aspa_change_plan,
+    create_test_aspa_intent,
+    create_test_aspa_reconciliation_run,
+    create_test_imported_aspa,
+    create_test_imported_aspa_provider,
+    create_test_provider_account,
+    create_test_provider_snapshot,
+    create_test_provider_sync_run,
+)
 ```
 
 ### 5.3 Slice B Verification

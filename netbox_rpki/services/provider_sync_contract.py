@@ -8,6 +8,7 @@ from django.db.models import Count, Q
 from django.utils import timezone
 
 from netbox_rpki import models as rpki_models
+from netbox_rpki.services.lifecycle_reporting import build_provider_lifecycle_health_summary
 
 
 PROVIDER_SYNC_SUMMARY_SCHEMA_VERSION = 1
@@ -515,6 +516,11 @@ def build_provider_account_rollup(
         'latest_snapshot_completed_at': latest_snapshot_completed_at,
         'latest_diff_id': latest_diff_id,
         'latest_diff_name': latest_diff_name,
+        'lifecycle_health_summary': build_provider_lifecycle_health_summary(
+            provider_account,
+            visible_snapshot_ids=visible_snapshot_ids,
+            visible_diff_ids=visible_diff_ids,
+        ),
     }
 
 

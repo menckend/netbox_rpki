@@ -10,7 +10,7 @@
         <div class="card-body">
           <p class="mb-3">
             Read-only operational visibility for provider sync drift and upcoming certificate or ROA expiry.
-            Expiry sections include items expiring on or before {{ expiry_threshold }}.
+            Thresholds follow the effective lifecycle policy for each organization or provider account.
           </p>
           <div class="row g-3">
             <div class="col col-md-3">
@@ -29,9 +29,9 @@
             </div>
             <div class="col col-md-3">
               <div class="border rounded p-3 h-100">
-                <div class="text-muted small text-uppercase">Exceptions Expiring Within {{ expiry_window_days }} Days</div>
+                <div class="text-muted small text-uppercase">Exceptions Nearing Expiry</div>
                 <div class="fs-2 fw-semibold">{{ expiring_exceptions|length }}</div>
-                <div class="text-muted">Enabled intent exceptions nearing end time</div>
+                <div class="text-muted">Enabled intent exceptions within their effective lifecycle policy window</div>
               </div>
             </div>
             <div class="col col-md-3">
@@ -71,16 +71,16 @@
             </div>
             <div class="col col-md-3">
               <div class="border rounded p-3 h-100">
-                <div class="text-muted small text-uppercase">ROAs Expiring Within {{ expiry_window_days }} Days</div>
+                <div class="text-muted small text-uppercase">ROAs Nearing Expiry</div>
                 <div class="fs-2 fw-semibold">{{ expiring_roas|length }}</div>
-                <div class="text-muted">Sorted by earliest valid-to date</div>
+                <div class="text-muted">Sorted by earliest valid-to date under the effective lifecycle policy</div>
               </div>
             </div>
             <div class="col col-md-3">
               <div class="border rounded p-3 h-100">
-                <div class="text-muted small text-uppercase">Certificates Expiring Within {{ expiry_window_days }} Days</div>
+                <div class="text-muted small text-uppercase">Certificates Nearing Expiry</div>
                 <div class="fs-2 fw-semibold">{{ expiring_certificates|length }}</div>
-                <div class="text-muted">Includes already expired certificates</div>
+                <div class="text-muted">Includes already expired certificates under the effective lifecycle policy</div>
               </div>
             </div>
           </div>
@@ -175,7 +175,7 @@
             </table>
           </div>
         {% else %}
-          <div class="card-body text-muted">No enabled intent exceptions are currently within the expiry window.</div>
+          <div class="card-body text-muted">No enabled intent exceptions are currently within the effective lifecycle policy threshold.</div>
         {% endif %}
       </div>
     </div>
@@ -254,7 +254,7 @@
                     <td>{{ provider_account.last_sync_status }}</td>
                     <td>
                       <div>{{ provider_account.last_sync_rollup.freshness_text }}</div>
-                      <div class="text-muted small">Last success: {{ provider_account.last_successful_sync|default:'Never' }}</div>
+                      <div class="text-muted small">{{ provider_account.last_sync_rollup.sync_threshold_text }}</div>
                     </td>
                     <td>
                       <div>{{ provider_account.last_sync_rollup.family_status_text }}</div>
@@ -280,7 +280,7 @@
             </table>
           </div>
         {% else %}
-          <div class="card-body text-muted">No provider accounts are currently stale or failed.</div>
+          <div class="card-body text-muted">No provider accounts currently require lifecycle attention.</div>
         {% endif %}
       </div>
     </div>
@@ -318,7 +318,7 @@
             </table>
           </div>
         {% else %}
-          <div class="card-body text-muted">No ROAs are currently within the expiry window.</div>
+          <div class="card-body text-muted">No ROAs are currently within the effective lifecycle policy threshold.</div>
         {% endif %}
       </div>
     </div>
@@ -552,7 +552,7 @@
             </table>
           </div>
         {% else %}
-          <div class="card-body text-muted">No certificates are currently within the expiry window.</div>
+          <div class="card-body text-muted">No certificates are currently within the effective lifecycle policy threshold.</div>
         {% endif %}
       </div>
     </div>

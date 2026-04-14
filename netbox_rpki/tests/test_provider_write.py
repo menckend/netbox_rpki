@@ -26,6 +26,7 @@ from netbox_rpki.services import (
     reconcile_roa_intents,
     simulate_roa_change_plan,
 )
+from netbox_rpki.services.provider_write import _serialize_krill_aspa_delta
 from netbox_rpki.services.roa_lint import build_roa_change_plan_lint_posture, run_roa_lint
 from netbox_rpki.tests.base import PluginAPITestCase, PluginViewTestCase
 from netbox_rpki.tests.utils import (
@@ -33,6 +34,8 @@ from netbox_rpki.tests.utils import (
     create_test_aspa_change_plan,
     create_test_aspa_intent,
     create_test_aspa_reconciliation_run,
+    create_test_imported_aspa,
+    create_test_imported_aspa_provider,
     create_test_imported_roa_authorization,
     create_test_organization,
     create_test_prefix,
@@ -690,6 +693,372 @@ class ProviderWriteServiceTestCase(TestCase):
 
         with self.assertRaisesMessage(ProviderWriteError, 'does not support ROA write operations'):
             build_roa_change_plan_delta(unsupported_plan)
+
+
+class ASPAProviderWriteServiceTestCase(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='aspa-write-org', name='ASPA Write Org')
+        cls.customer_as = create_test_asn(65200)
+        cls.provider_as_a = create_test_asn(65201)
+        cls.provider_as_b = create_test_asn(65202)
+        cls.orphaned_customer_as = create_test_asn(65299)
+        cls.orphaned_provider_as = create_test_asn(65300)
+
+        cls.provider_account = create_test_provider_account(
+            name='ASPA Krill Write Account',
+            organization=cls.organization,
+            provider_type=rpki_models.ProviderType.KRILL,
+            org_handle='ORG-ASPA-WRITE',
+            ca_handle='ca-aspa-write',
+            api_base_url='https://krill.example.invalid',
+            api_key='aspa-krill-token',
+        )
+        cls.provider_snapshot = create_test_provider_snapshot(
+            name='ASPA Krill Write Snapshot',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+            provider_name='Krill',
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+
+        cls.intent_a = create_test_aspa_intent(
+            name='ASPA Write Intent A',
+            organization=cls.organization,
+            customer_as=cls.customer_as,
+            provider_as=cls.provider_as_a,
+        )
+        cls.intent_b = create_test_aspa_intent(
+            name='ASPA Write Intent B',
+            organization=cls.organization,
+            customer_as=cls.customer_as,
+            provider_as=cls.provider_as_b,
+        )
+
+        cls.orphaned_imported_aspa = create_test_imported_aspa(
+            name='Orphaned Imported ASPA',
+            provider_snapshot=cls.provider_snapshot,
+            organization=cls.organization,
+            customer_as=cls.orphaned_customer_as,
+            customer_as_value=cls.orphaned_customer_as.asn,
+        )
+        create_test_imported_aspa_provider(
+            imported_aspa=cls.orphaned_imported_aspa,
+            provider_as=cls.orphaned_provider_as,
+            provider_as_value=cls.orphaned_provider_as.asn,
+        )
+
+        cls.reconciliation_run = reconcile_aspa_intents(
+            cls.organization,
+            comparison_scope=rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
+            provider_snapshot=cls.provider_snapshot,
+        )
+        cls.plan = create_aspa_change_plan(cls.reconciliation_run)
+
+    def test_build_aspa_delta_separates_create_and_withdraw_by_semantic(self):
+        delta = build_aspa_change_plan_delta(self.plan)
+
+        self.assertIn('added', delta)
+        self.assertIn('removed', delta)
+
+        added_customers = {entry['customer_asn'] for entry in delta['added']}
+        removed_customers = {entry['customer_asn'] for entry in delta['removed']}
+
+        self.assertIn(self.customer_as.asn, added_customers)
+        self.assertIn(self.orphaned_customer_as.asn, removed_customers)
+
+    def test_build_aspa_delta_replace_lands_in_added_only(self):
+        replace_customer = create_test_asn(65210)
+        replace_provider = create_test_asn(65211)
+        create_test_aspa_intent(
+            name='Imported Stale Intent',
+            organization=self.organization,
+            customer_as=replace_customer,
+            provider_as=replace_provider,
+        )
+        replace_imported_aspa = create_test_imported_aspa(
+            name='Imported Stale ASPA',
+            provider_snapshot=self.provider_snapshot,
+            organization=self.organization,
+            customer_as=replace_customer,
+            customer_as_value=replace_customer.asn,
+            is_stale=True,
+        )
+        create_test_imported_aspa_provider(
+            imported_aspa=replace_imported_aspa,
+            provider_as=replace_provider,
+            provider_as_value=replace_provider.asn,
+        )
+
+        replace_reconciliation = reconcile_aspa_intents(
+            self.organization,
+            comparison_scope=rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
+            provider_snapshot=self.provider_snapshot,
+        )
+        replace_plan = create_aspa_change_plan(replace_reconciliation, name='ASPA Replace Plan')
+        delta = build_aspa_change_plan_delta(replace_plan)
+
+        replace_item = replace_plan.items.get(plan_semantic=rpki_models.ASPAChangePlanItemSemantic.REPLACE)
+        self.assertEqual(replace_item.provider_operation, rpki_models.ProviderWriteOperation.ADD_PROVIDER_SET)
+        added_customers = {entry['customer_asn'] for entry in delta.get('added', [])}
+        removed_customers = {entry['customer_asn'] for entry in delta.get('removed', [])}
+        self.assertIn(replace_customer.asn, added_customers)
+        self.assertNotIn(replace_customer.asn, removed_customers)
+
+    def test_serialize_krill_aspa_delta_converts_asn_integers_to_as_prefixed_strings(self):
+        internal = {
+            'added': [{'customer_asn': 65001, 'provider_asns': [65002, 65003]}],
+            'removed': [{'customer_asn': 65004, 'provider_asns': [65005]}],
+        }
+
+        wire = _serialize_krill_aspa_delta(internal)
+
+        self.assertEqual(
+            wire,
+            {
+                'add': [{'customer': 'AS65001', 'providers': ['AS65002', 'AS65003']}],
+                'remove': [{'customer': 'AS65004', 'providers': ['AS65005']}],
+            },
+        )
+
+    def test_preview_records_execution_without_applying(self):
+        execution, delta = preview_aspa_change_plan_provider_write(self.plan, requested_by='preview-user')
+
+        self.assertEqual(execution.execution_mode, rpki_models.ProviderWriteExecutionMode.PREVIEW)
+        self.assertEqual(execution.status, rpki_models.ValidationRunStatus.COMPLETED)
+        self.assertEqual(execution.requested_by, 'preview-user')
+        self.assertEqual(execution.request_payload_json, delta)
+        self.plan.refresh_from_db()
+        self.assertEqual(self.plan.status, rpki_models.ASPAChangePlanStatus.DRAFT)
+
+    def test_approve_transitions_plan_to_approved(self):
+        plan = create_aspa_change_plan(self.reconciliation_run, name='ASPA Approval Plan')
+
+        approve_aspa_change_plan(plan, approved_by='aspa-approver')
+        plan.refresh_from_db()
+
+        self.assertEqual(plan.status, rpki_models.ASPAChangePlanStatus.APPROVED)
+        self.assertIsNotNone(plan.approved_at)
+        self.assertEqual(plan.approved_by, 'aspa-approver')
+
+    def test_approve_records_governance_metadata_and_approval_record(self):
+        plan = create_aspa_change_plan(self.reconciliation_run, name='Governed ASPA Approval Plan')
+        window_start = timezone.now()
+        window_end = window_start + timedelta(hours=2)
+
+        approve_aspa_change_plan(
+            plan,
+            approved_by='aspa-approver',
+            ticket_reference='ASPA-CHG-1',
+            change_reference='ASPA-CAB-1',
+            maintenance_window_start=window_start,
+            maintenance_window_end=window_end,
+            approval_notes='ASPA window note.',
+        )
+        plan.refresh_from_db()
+        approval_record = plan.approval_records.get()
+
+        self.assertEqual(plan.ticket_reference, 'ASPA-CHG-1')
+        self.assertEqual(plan.change_reference, 'ASPA-CAB-1')
+        self.assertEqual(plan.maintenance_window_start, window_start)
+        self.assertEqual(plan.maintenance_window_end, window_end)
+        self.assertEqual(approval_record.disposition, rpki_models.ValidationDisposition.ACCEPTED)
+        self.assertEqual(approval_record.recorded_by, 'aspa-approver')
+        self.assertEqual(approval_record.ticket_reference, 'ASPA-CHG-1')
+        self.assertEqual(approval_record.notes, 'ASPA window note.')
+
+    def test_approve_rejects_already_approved_plan(self):
+        plan = create_aspa_change_plan(self.reconciliation_run, name='ASPA Repeat Approval Plan')
+        approve_aspa_change_plan(plan, approved_by='first-approver')
+
+        with self.assertRaisesMessage(ProviderWriteError, 'Only draft ASPA change plans can be approved'):
+            approve_aspa_change_plan(plan, approved_by='second-approver')
+
+    def test_approve_rejects_non_provider_backed_plan(self):
+        local_reconciliation_run = reconcile_aspa_intents(
+            self.organization,
+            comparison_scope=rpki_models.ReconciliationComparisonScope.LOCAL_ASPA_RECORDS,
+        )
+        local_plan = create_aspa_change_plan(local_reconciliation_run, name='ASPA Local Plan')
+
+        with self.assertRaisesMessage(ProviderWriteError, 'not provider-backed'):
+            approve_aspa_change_plan(local_plan, approved_by='approver')
+
+    def test_apply_submits_delta_records_execution_and_triggers_followup_sync(self):
+        plan = create_aspa_change_plan(self.reconciliation_run, name='ASPA Apply Plan')
+        window_start = timezone.now()
+        window_end = window_start + timedelta(hours=1)
+        approve_aspa_change_plan(
+            plan,
+            approved_by='apply-approver',
+            ticket_reference='ASPA-APPLY-CHG',
+            change_reference='ASPA-APPLY-CR',
+            maintenance_window_start=window_start,
+            maintenance_window_end=window_end,
+        )
+        followup_snapshot = create_test_provider_snapshot(
+            name='ASPA Follow-Up Snapshot',
+            organization=self.organization,
+            provider_account=self.provider_account,
+            provider_name='Krill',
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        followup_sync_run = create_test_provider_sync_run(
+            name='ASPA Follow-Up Sync Run',
+            organization=self.organization,
+            provider_account=self.provider_account,
+            provider_snapshot=followup_snapshot,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+
+        with patch(
+            'netbox_rpki.services.provider_write._submit_krill_aspa_delta',
+            return_value={'message': 'accepted'},
+        ) as submit_mock:
+            with patch(
+                'netbox_rpki.services.provider_write.sync_provider_account',
+                return_value=(followup_sync_run, followup_snapshot),
+            ) as sync_mock:
+                execution, delta = apply_aspa_change_plan_provider_write(plan, requested_by='apply-user')
+
+        plan.refresh_from_db()
+        self.assertEqual(plan.status, rpki_models.ASPAChangePlanStatus.APPLIED)
+        self.assertIsNotNone(plan.apply_started_at)
+        self.assertEqual(plan.apply_requested_by, 'apply-user')
+        self.assertIsNotNone(plan.applied_at)
+        self.assertIsNone(plan.failed_at)
+        self.assertEqual(execution.execution_mode, rpki_models.ProviderWriteExecutionMode.APPLY)
+        self.assertEqual(execution.status, rpki_models.ValidationRunStatus.COMPLETED)
+        self.assertEqual(execution.followup_sync_run, followup_sync_run)
+        self.assertEqual(execution.followup_provider_snapshot, followup_snapshot)
+        self.assertEqual(execution.request_payload_json, delta)
+        self.assertEqual(execution.response_payload_json['provider_response'], {'message': 'accepted'})
+        self.assertEqual(
+            execution.response_payload_json['delta_summary'],
+            {
+                'customer_count': len(delta['added']) + len(delta['removed']),
+                'create_count': len(delta['added']),
+                'withdraw_count': len(delta['removed']),
+                'provider_add_count': sum(len(entry.get('provider_asns') or []) for entry in delta['added']),
+                'provider_remove_count': sum(len(entry.get('provider_asns') or []) for entry in delta['removed']),
+            },
+        )
+        submit_mock.assert_called_once_with(self.provider_account, delta)
+        sync_mock.assert_called_once_with(
+            self.provider_account,
+            snapshot_name=sync_mock.call_args.kwargs['snapshot_name'],
+        )
+        rollback_bundle = plan.rollback_bundle
+        self.assertEqual(rollback_bundle.status, rpki_models.RollbackBundleStatus.AVAILABLE)
+
+    def test_apply_rejects_repeat_apply(self):
+        plan = create_aspa_change_plan(self.reconciliation_run, name='ASPA Repeat Apply Plan')
+        approve_aspa_change_plan(plan, approved_by='repeat-approver')
+
+        with patch('netbox_rpki.services.provider_write._submit_krill_aspa_delta', return_value={}):
+            with patch(
+                'netbox_rpki.services.provider_write.sync_provider_account',
+                return_value=(
+                    create_test_provider_sync_run(
+                        name='ASPA Repeat Apply Sync Run',
+                        organization=self.organization,
+                        provider_account=self.provider_account,
+                        provider_snapshot=create_test_provider_snapshot(
+                            name='ASPA Repeat Apply Snapshot',
+                            organization=self.organization,
+                            provider_account=self.provider_account,
+                            provider_name='Krill',
+                            status=rpki_models.ValidationRunStatus.COMPLETED,
+                        ),
+                    ),
+                    create_test_provider_snapshot(
+                        name='ASPA Repeat Apply Snapshot 2',
+                        organization=self.organization,
+                        provider_account=self.provider_account,
+                        provider_name='Krill',
+                        status=rpki_models.ValidationRunStatus.COMPLETED,
+                    ),
+                ),
+            ):
+                apply_aspa_change_plan_provider_write(plan)
+
+        with self.assertRaisesMessage(ProviderWriteError, 'already been applied'):
+            apply_aspa_change_plan_provider_write(plan)
+
+    def test_apply_failure_marks_plan_failed_and_records_error(self):
+        plan = create_aspa_change_plan(self.reconciliation_run, name='Failed ASPA Apply Plan')
+        approve_aspa_change_plan(plan, approved_by='failure-approver')
+
+        with patch(
+            'netbox_rpki.services.provider_write._submit_krill_aspa_delta',
+            side_effect=RuntimeError('krill rejected aspa delta'),
+        ):
+            with self.assertRaisesMessage(ProviderWriteError, 'krill rejected aspa delta'):
+                apply_aspa_change_plan_provider_write(plan, requested_by='failed-apply-user')
+
+        plan.refresh_from_db()
+        self.assertEqual(plan.status, rpki_models.ASPAChangePlanStatus.FAILED)
+        self.assertIsNotNone(plan.apply_started_at)
+        self.assertEqual(plan.apply_requested_by, 'failed-apply-user')
+        self.assertIsNotNone(plan.failed_at)
+        execution = plan.provider_write_executions.get(execution_mode=rpki_models.ProviderWriteExecutionMode.APPLY)
+        self.assertEqual(execution.status, rpki_models.ValidationRunStatus.FAILED)
+        self.assertEqual(execution.error, 'krill rejected aspa delta')
+        self.assertFalse(rpki_models.ASPAChangePlanRollbackBundle.objects.filter(source_plan=plan).exists())
+
+    def test_apply_failure_during_followup_sync_records_partial_success(self):
+        plan = create_aspa_change_plan(self.reconciliation_run, name='ASPA Followup Failure Plan')
+        approve_aspa_change_plan(plan, approved_by='sync-failure-approver')
+
+        with patch(
+            'netbox_rpki.services.provider_write._submit_krill_aspa_delta',
+            return_value={'message': 'accepted'},
+        ):
+            with patch(
+                'netbox_rpki.services.provider_write.sync_provider_account',
+                side_effect=RuntimeError('provider unreachable during followup'),
+            ):
+                execution, _ = apply_aspa_change_plan_provider_write(plan, requested_by='sync-failed-user')
+
+        plan.refresh_from_db()
+        self.assertEqual(plan.status, rpki_models.ASPAChangePlanStatus.APPLIED)
+        self.assertEqual(execution.status, rpki_models.ValidationRunStatus.FAILED)
+        self.assertEqual(execution.error, 'provider unreachable during followup')
+        self.assertEqual(
+            execution.response_payload_json['followup_sync']['status'],
+            rpki_models.ValidationRunStatus.FAILED,
+        )
+
+    def test_capability_gating_rejects_unsupported_provider_type(self):
+        unsupported_account = create_test_provider_account(
+            name='ARIN ASPA Unsupported Account',
+            organization=self.organization,
+            provider_type=rpki_models.ProviderType.ARIN,
+            org_handle='ORG-ARIN-ASPA',
+        )
+        unsupported_snapshot = create_test_provider_snapshot(
+            name='ARIN ASPA Unsupported Snapshot',
+            organization=self.organization,
+            provider_account=unsupported_account,
+            provider_name='ARIN',
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        unsupported_reconciliation = create_test_aspa_reconciliation_run(
+            name='Unsupported ASPA Reconciliation',
+            organization=self.organization,
+            provider_snapshot=unsupported_snapshot,
+            comparison_scope=rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
+        )
+        unsupported_plan = create_test_aspa_change_plan(
+            name='Unsupported ASPA Plan',
+            organization=self.organization,
+            source_reconciliation_run=unsupported_reconciliation,
+            provider_account=unsupported_account,
+            provider_snapshot=unsupported_snapshot,
+        )
+
+        with self.assertRaisesMessage(ProviderWriteError, 'does not support ASPA write operations'):
+            build_aspa_change_plan_delta(unsupported_plan)
 
 
 class ROAChangePlanActionAPITestCase(PluginAPITestCase):
@@ -1602,6 +1971,20 @@ class ASPAChangePlanActionAPITestCase(PluginAPITestCase):
 
         self.assertHttpStatus(response, 200)
         self.assertEqual(response.data['execution']['status'], rpki_models.ValidationRunStatus.COMPLETED)
+
+    def test_apply_action_marks_plan_failed_on_krill_error(self):
+        self.add_permissions('netbox_rpki.view_aspachangeplan', 'netbox_rpki.change_aspachangeplan')
+        approve_aspa_change_plan(self.plan, approved_by='api-approver')
+        url = reverse('plugins-api:netbox_rpki-api:aspachangeplan-apply', kwargs={'pk': self.plan.pk})
+
+        with patch(
+            'netbox_rpki.api.views.apply_aspa_change_plan_provider_write',
+            side_effect=ProviderWriteError('krill rejected aspa delta'),
+        ):
+            response = self.client.post(url, {}, format='json', **self.header)
+
+        self.assertHttpStatus(response, 400)
+        self.assertEqual(str(response.data[0]), 'krill rejected aspa delta')
 
     def test_summary_action_returns_aggregate_counts(self):
         self.add_permissions('netbox_rpki.view_aspachangeplan')

@@ -9,6 +9,12 @@ from django.utils import timezone
 
 from netbox_rpki import models as rpki_models
 from netbox_rpki.services import ProviderSyncError, sync_provider_account
+from netbox_rpki.services.lifecycle_reporting import (
+    LIFECYCLE_HEALTH_DEFAULTS,
+    LIFECYCLE_HEALTH_SUMMARY_SCHEMA_VERSION,
+    build_provider_lifecycle_health_summary,
+    resolve_lifecycle_health_policy,
+)
 from netbox_rpki.services.provider_sync_contract import (
     PROVIDER_SYNC_FAMILY_ORDER,
     PROVIDER_SYNC_SUMMARY_SCHEMA_VERSION,
@@ -44,6 +50,7 @@ from netbox_rpki.tests.utils import (
     create_test_imported_certificate_observation,
     create_test_imported_publication_point,
     create_test_imported_signed_object,
+    create_test_lifecycle_health_policy,
     create_test_organization,
     create_test_prefix,
     create_test_publication_point,
@@ -142,6 +149,59 @@ class ProviderSyncServiceTestCase(TestCase):
         self.assertEqual(aspa_rollup['capability_status'], rpki_models.ProviderSyncFamilyStatus.NOT_IMPLEMENTED)
         self.assertEqual(aspa_rollup['capability_mode'], 'provider_limited')
         self.assertIn('hosted ROA authorizations only', aspa_rollup['capability_reason'])
+
+    def test_resolve_lifecycle_health_policy_falls_back_to_built_in_defaults(self):
+        self.assertIsNone(resolve_lifecycle_health_policy(provider_account=self.provider_account))
+
+        summary = build_provider_lifecycle_health_summary(self.provider_account)
+
+        self.assertEqual(summary['summary_schema_version'], LIFECYCLE_HEALTH_SUMMARY_SCHEMA_VERSION)
+        self.assertEqual(summary['policy']['source'], 'built_in_default')
+        self.assertEqual(summary['policy']['policy_id'], None)
+        self.assertEqual(summary['policy']['thresholds'], LIFECYCLE_HEALTH_DEFAULTS)
+
+    def test_provider_override_policy_beats_organization_default(self):
+        create_test_lifecycle_health_policy(
+            name='Organization Default Lifecycle Policy',
+            organization=self.organization,
+            sync_stale_after_minutes=180,
+        )
+        provider_override = create_test_lifecycle_health_policy(
+            name='Provider Override Lifecycle Policy',
+            organization=self.organization,
+            provider_account=self.provider_account,
+            sync_stale_after_minutes=15,
+        )
+
+        resolved_policy = resolve_lifecycle_health_policy(provider_account=self.provider_account)
+        summary = build_provider_lifecycle_health_summary(self.provider_account)
+
+        self.assertEqual(resolved_policy, provider_override)
+        self.assertEqual(summary['policy']['policy_id'], provider_override.pk)
+        self.assertEqual(summary['policy']['source'], 'provider_account_override')
+        self.assertEqual(summary['policy']['thresholds']['sync_stale_after_minutes'], 15)
+
+    def test_disabled_provider_override_falls_back_to_organization_default(self):
+        organization_default = create_test_lifecycle_health_policy(
+            name='Enabled Organization Default Lifecycle Policy',
+            organization=self.organization,
+            sync_stale_after_minutes=90,
+        )
+        create_test_lifecycle_health_policy(
+            name='Disabled Provider Override Lifecycle Policy',
+            organization=self.organization,
+            provider_account=self.provider_account,
+            enabled=False,
+            sync_stale_after_minutes=5,
+        )
+
+        resolved_policy = resolve_lifecycle_health_policy(provider_account=self.provider_account)
+        summary = build_provider_lifecycle_health_summary(self.provider_account)
+
+        self.assertEqual(resolved_policy, organization_default)
+        self.assertEqual(summary['policy']['policy_id'], organization_default.pk)
+        self.assertEqual(summary['policy']['source'], 'organization_default')
+        self.assertEqual(summary['policy']['thresholds']['sync_stale_after_minutes'], 90)
 
     def test_sync_provider_account_reuses_arin_external_reference_across_snapshots(self):
         with patch('netbox_rpki.services.provider_sync._fetch_arin_roa_xml', return_value=ARIN_ROA_XML):
@@ -733,6 +793,13 @@ class ProviderSyncServiceTestCase(TestCase):
             organization=self.organization,
             provider_type=rpki_models.ProviderType.ARIN,
             sync_enabled=True,
+            last_sync_summary_json={
+                'latest_snapshot_id': 101,
+                'latest_snapshot_name': 'Hidden snapshot',
+                'latest_snapshot_completed_at': '2026-04-13T00:00:00+00:00',
+                'latest_diff_id': 202,
+                'latest_diff_name': 'Visible diff',
+            },
         )
 
         rollup = build_provider_account_rollup(
@@ -759,6 +826,42 @@ class ProviderSyncServiceTestCase(TestCase):
         self.assertEqual(rollup['latest_snapshot_completed_at'], '')
         self.assertEqual(rollup['latest_diff_id'], 202)
         self.assertEqual(rollup['latest_diff_name'], 'Visible diff')
+        self.assertIn('lifecycle_health_summary', rollup)
+        self.assertEqual(rollup['lifecycle_health_summary']['summary_schema_version'], LIFECYCLE_HEALTH_SUMMARY_SCHEMA_VERSION)
+
+    def test_build_provider_lifecycle_health_summary_hides_invisible_related_objects(self):
+        provider_account = create_test_provider_account(
+            name='Lifecycle Visibility Account',
+            organization=self.organization,
+            provider_type=rpki_models.ProviderType.ARIN,
+            sync_enabled=True,
+            last_sync_summary_json={
+                'latest_snapshot_id': 101,
+                'latest_snapshot_name': 'Hidden snapshot',
+                'latest_snapshot_completed_at': '2026-04-13T00:00:00+00:00',
+                'latest_diff_id': 202,
+                'latest_diff_name': 'Visible diff',
+                'records_added': 4,
+                'records_removed': 2,
+                'records_changed': 1,
+            },
+        )
+
+        summary = build_provider_lifecycle_health_summary(
+            provider_account,
+            visible_snapshot_ids=set(),
+            visible_diff_ids={202},
+        )
+
+        self.assertEqual(summary['summary_schema_version'], LIFECYCLE_HEALTH_SUMMARY_SCHEMA_VERSION)
+        self.assertIsNone(summary['diff']['latest_snapshot_id'])
+        self.assertEqual(summary['diff']['latest_snapshot_name'], '')
+        self.assertEqual(summary['diff']['latest_snapshot_completed_at'], '')
+        self.assertEqual(summary['diff']['latest_diff_id'], 202)
+        self.assertEqual(summary['diff']['latest_diff_name'], 'Visible diff')
+        self.assertEqual(summary['diff']['records_added'], 4)
+        self.assertEqual(summary['diff']['records_removed'], 2)
+        self.assertEqual(summary['diff']['records_changed'], 1)
 
     def test_build_provider_snapshot_diff_preserves_certificate_observation_linkage_state(self):
         provider_account = create_test_provider_account(

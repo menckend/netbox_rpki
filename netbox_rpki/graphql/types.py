@@ -11,6 +11,7 @@ from netbox_rpki import models
 from netbox_rpki.detail_specs import get_latest_provider_snapshot_diff
 from netbox_rpki.object_registry import GRAPHQL_OBJECT_SPECS
 from netbox_rpki.object_specs import ObjectSpec
+from netbox_rpki.services.lifecycle_reporting import build_provider_lifecycle_health_summary
 from netbox_rpki.services.provider_sync_contract import (
     build_provider_account_rollup,
     build_provider_snapshot_diff_rollup,
@@ -73,6 +74,33 @@ class ProviderAccountReportingMixin:
             )
 
         return build_provider_account_rollup(
+            self,
+            visible_snapshot_ids=visible_snapshot_ids,
+            visible_diff_ids=visible_diff_ids,
+        )
+
+    @strawberry.field
+    def lifecycle_health_summary(self, info: Info) -> JSON:
+        summary = self.last_sync_summary_json or {}
+        snapshot_id = summary.get('latest_snapshot_id')
+        diff_id = summary.get('latest_diff_id')
+        visible_snapshot_ids = None
+        visible_diff_ids = None
+
+        if snapshot_id is not None:
+            visible_snapshot_ids = set(
+                models.ProviderSnapshot.objects.restrict(info.context.request.user, 'view')
+                .filter(pk=snapshot_id)
+                .values_list('pk', flat=True)
+            )
+        if diff_id is not None:
+            visible_diff_ids = set(
+                models.ProviderSnapshotDiff.objects.restrict(info.context.request.user, 'view')
+                .filter(pk=diff_id)
+                .values_list('pk', flat=True)
+            )
+
+        return build_provider_lifecycle_health_summary(
             self,
             visible_snapshot_ids=visible_snapshot_ids,
             visible_diff_ids=visible_diff_ids,
