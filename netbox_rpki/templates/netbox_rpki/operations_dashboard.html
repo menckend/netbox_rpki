@@ -31,7 +31,21 @@
               <div class="border rounded p-3 h-100">
                 <div class="text-muted small text-uppercase">Open Change Plans Requiring Attention</div>
                 <div class="fs-2 fw-semibold">{{ change_plans_requiring_attention|length }}</div>
-                <div class="text-muted">Draft, approved, or failed plans with open analysis</div>
+                <div class="text-muted">Draft, approved, or failed plans with unresolved or acknowledged lint risk</div>
+              </div>
+            </div>
+            <div class="col col-md-3">
+              <div class="border rounded p-3 h-100">
+                <div class="text-muted small text-uppercase">ASPA Reconciliation Runs Requiring Attention</div>
+                <div class="fs-2 fw-semibold">{{ aspa_reconciliation_attention_runs|length }}</div>
+                <div class="text-muted">Missing, extra, orphaned, or stale ASPA drift</div>
+              </div>
+            </div>
+            <div class="col col-md-3">
+              <div class="border rounded p-3 h-100">
+                <div class="text-muted small text-uppercase">Open ASPA Change Plans Requiring Attention</div>
+                <div class="fs-2 fw-semibold">{{ aspa_change_plans_requiring_attention|length }}</div>
+                <div class="text-muted">Draft, approved, or failed ASPA plans</div>
               </div>
             </div>
             <div class="col col-md-3">
@@ -157,6 +171,48 @@
   <div class="row mb-4">
     <div class="col col-md-12">
       <div class="card">
+        <h5 class="card-header">ASPA Reconciliation Runs Requiring Attention</h5>
+        {% if aspa_reconciliation_attention_runs %}
+          <div class="card-body table-responsive">
+            <table class="table table-hover align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Organization</th>
+                  <th>Comparison Scope</th>
+                  <th>Missing</th>
+                  <th>Missing Provider</th>
+                  <th>Extra Provider</th>
+                  <th>Orphaned</th>
+                  <th>Stale</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in aspa_reconciliation_attention_runs %}
+                  <tr>
+                    <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
+                    <td><a href="{{ item.object.organization.get_absolute_url }}">{{ item.object.organization }}</a></td>
+                    <td>{{ item.object.comparison_scope }}</td>
+                    <td>{{ item.missing_count }}</td>
+                    <td>{{ item.missing_provider_count }}</td>
+                    <td>{{ item.extra_provider_count }}</td>
+                    <td>{{ item.orphaned_count }}</td>
+                    <td>{{ item.stale_count }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="card-body text-muted">No ASPA reconciliation runs currently require operator attention.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="row mb-4">
+    <div class="col col-md-12">
+      <div class="card">
         <h5 class="card-header">ROA Reconciliation Runs Requiring Attention</h5>
         {% if reconciliation_attention_runs %}
           <div class="card-body table-responsive">
@@ -197,6 +253,44 @@
   <div class="row mb-4">
     <div class="col col-md-12">
       <div class="card">
+        <h5 class="card-header">Open ASPA Change Plans Requiring Attention</h5>
+        {% if aspa_change_plans_requiring_attention %}
+          <div class="card-body table-responsive">
+            <table class="table table-hover align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Organization</th>
+                  <th>Status</th>
+                  <th>Replacement Actions</th>
+                  <th>Provider Adds</th>
+                  <th>Provider Removes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in aspa_change_plans_requiring_attention %}
+                  <tr>
+                    <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
+                    <td><a href="{{ item.object.organization.get_absolute_url }}">{{ item.object.organization }}</a></td>
+                    <td>{{ item.object.status }}</td>
+                    <td>{{ item.replacement_count }}</td>
+                    <td>{{ item.provider_add_count }}</td>
+                    <td>{{ item.provider_remove_count }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="card-body text-muted">No open ASPA change plans currently require operator attention.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="row mb-4">
+    <div class="col col-md-12">
+      <div class="card">
         <h5 class="card-header">Open ROA Change Plans Requiring Attention</h5>
         {% if change_plans_requiring_attention %}
           <div class="card-body table-responsive">
@@ -207,8 +301,10 @@
                   <th>Organization</th>
                   <th>Status</th>
                   <th>Replacement Actions</th>
-                  <th>Lint Warnings</th>
-                  <th>Lint Errors</th>
+                  <th>Blocking</th>
+                  <th>Ack Required</th>
+                  <th>Acknowledged</th>
+                  <th>Suppressed</th>
                   <th>Simulation</th>
                 </tr>
               </thead>
@@ -219,8 +315,10 @@
                     <td><a href="{{ item.object.organization.get_absolute_url }}">{{ item.object.organization }}</a></td>
                     <td>{{ item.object.status }}</td>
                     <td>{{ item.replacement_count }}</td>
-                    <td>{{ item.warning_count }}</td>
-                    <td>{{ item.error_count }}</td>
+                    <td>{{ item.blocking_count }}</td>
+                    <td>{{ item.ack_required_count }}</td>
+                    <td>{{ item.acknowledged_count }}</td>
+                    <td>{{ item.suppressed_count }}</td>
                     <td>
                       {% if item.simulation_run %}
                         <a href="{{ item.simulation_run.get_absolute_url }}">{{ item.simulation_run.predicted_valid_count }} valid / {{ item.simulation_run.predicted_invalid_count }} invalid / {{ item.simulation_run.predicted_not_found_count }} not-found</a>

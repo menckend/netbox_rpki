@@ -40,6 +40,18 @@ class ProviderAccountReportingMixin:
         return self.last_sync_summary_json
 
     @strawberry.field
+    def supports_aspa_write(self) -> bool:
+        return models.RpkiProviderAccount.supports_aspa_write.fget(self)
+
+    @strawberry.field
+    def aspa_write_mode(self) -> str:
+        return models.RpkiProviderAccount.aspa_write_mode.fget(self)
+
+    @strawberry.field
+    def aspa_write_capability(self) -> JSON:
+        return models.RpkiProviderAccount.aspa_write_capability.fget(self)
+
+    @strawberry.field
     def last_sync_rollup(self, info: Info) -> JSON:
         summary = self.last_sync_summary_json or {}
         snapshot_id = summary.get('latest_snapshot_id')

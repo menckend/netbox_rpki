@@ -2032,6 +2032,104 @@ def create_test_roa_lint_finding(
     )
 
 
+def create_test_roa_lint_acknowledgement(
+    name='ROA Lint Acknowledgement 1',
+    organization=None,
+    change_plan=None,
+    lint_run=None,
+    finding=None,
+    acknowledged_by='',
+    acknowledged_at=None,
+    ticket_reference='',
+    change_reference='',
+    notes='',
+    **kwargs,
+):
+    if finding is None:
+        finding = create_test_roa_lint_finding()
+    if lint_run is None:
+        lint_run = finding.lint_run
+    if change_plan is None:
+        change_plan = lint_run.change_plan or create_test_roa_change_plan(
+            organization=finding.lint_run.reconciliation_run.organization,
+            source_reconciliation_run=finding.lint_run.reconciliation_run,
+        )
+    if organization is None:
+        organization = change_plan.organization
+    return rpki_models.ROALintAcknowledgement.objects.create(
+        name=name,
+        organization=organization,
+        change_plan=change_plan,
+        lint_run=lint_run,
+        finding=finding,
+        tenant=change_plan.tenant,
+        acknowledged_by=acknowledged_by,
+        acknowledged_at=acknowledged_at,
+        ticket_reference=ticket_reference,
+        change_reference=change_reference,
+        notes=notes,
+        **kwargs,
+    )
+
+
+def create_test_roa_lint_suppression(
+    name='ROA Lint Suppression 1',
+    organization=None,
+    finding_code='replacement_required',
+    scope_type=None,
+    intent_profile=None,
+    roa_intent=None,
+    reason='Suppressed for testing.',
+    notes='',
+    fact_fingerprint='test-fact-fingerprint',
+    fact_context_json=None,
+    created_by='',
+    created_at=None,
+    expires_at=None,
+    last_matched_at=None,
+    match_count=0,
+    lifted_by='',
+    lifted_at=None,
+    lift_reason='',
+    **kwargs,
+):
+    if roa_intent is None and intent_profile is None:
+        roa_intent = create_test_roa_intent(origin_asn=create_test_asn())
+    if organization is None:
+        organization = getattr(roa_intent, 'organization', None) or getattr(intent_profile, 'organization', None) or create_test_organization()
+    if scope_type is None:
+        scope_type = (
+            rpki_models.ROALintSuppressionScope.INTENT
+            if roa_intent is not None
+            else rpki_models.ROALintSuppressionScope.PROFILE
+        )
+    if scope_type == rpki_models.ROALintSuppressionScope.PROFILE and intent_profile is None and roa_intent is not None:
+        intent_profile = roa_intent.intent_profile
+        roa_intent = None
+    return rpki_models.ROALintSuppression.objects.create(
+        name=name,
+        organization=organization,
+        tenant=getattr(roa_intent, 'tenant', None),
+        finding_code=finding_code,
+        scope_type=scope_type,
+        intent_profile=intent_profile,
+        roa_intent=roa_intent,
+        reason=reason,
+        notes=notes,
+        fact_fingerprint=fact_fingerprint,
+        fact_context_json=fact_context_json or {'finding_code': finding_code, 'details': {}},
+        created_by=created_by,
+        created_at=created_at,
+        expires_at=expires_at,
+        last_matched_at=last_matched_at,
+        match_count=match_count,
+        lifted_by=lifted_by,
+        lifted_at=lifted_at,
+        lift_reason=lift_reason,
+        **kwargs,
+    )
+
+
 def create_test_roa_change_plan(
     name='ROA Change Plan 1',
     organization=None,
@@ -2169,6 +2267,89 @@ def create_test_roa_validation_simulation_result(
         outcome_type=outcome_type or rpki_models.ROAValidationSimulationOutcome.NOT_FOUND,
         details_json=details_json or {},
         computed_at=computed_at,
+        **kwargs,
+    )
+
+
+def create_test_aspa_change_plan(
+    name='ASPA Change Plan 1',
+    organization=None,
+    source_reconciliation_run=None,
+    provider_account=None,
+    provider_snapshot=None,
+    status=None,
+    ticket_reference='',
+    change_reference='',
+    maintenance_window_start=None,
+    maintenance_window_end=None,
+    approved_at=None,
+    approved_by='',
+    apply_started_at=None,
+    apply_requested_by='',
+    applied_at=None,
+    failed_at=None,
+    summary_json=None,
+    **kwargs,
+):
+    if organization is None:
+        organization = create_test_organization()
+    if source_reconciliation_run is None:
+        source_reconciliation_run = create_test_aspa_reconciliation_run(
+            organization=organization,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+    return rpki_models.ASPAChangePlan.objects.create(
+        name=name,
+        organization=organization,
+        source_reconciliation_run=source_reconciliation_run,
+        provider_account=provider_account,
+        provider_snapshot=provider_snapshot,
+        status=status or rpki_models.ASPAChangePlanStatus.DRAFT,
+        ticket_reference=ticket_reference,
+        change_reference=change_reference,
+        maintenance_window_start=maintenance_window_start,
+        maintenance_window_end=maintenance_window_end,
+        approved_at=approved_at,
+        approved_by=approved_by,
+        apply_started_at=apply_started_at,
+        apply_requested_by=apply_requested_by,
+        applied_at=applied_at,
+        failed_at=failed_at,
+        summary_json=summary_json or {},
+        **kwargs,
+    )
+
+
+def create_test_aspa_change_plan_item(
+    name='ASPA Change Plan Item 1',
+    change_plan=None,
+    action_type=None,
+    plan_semantic=None,
+    aspa_intent=None,
+    aspa=None,
+    imported_aspa=None,
+    provider_operation='',
+    provider_payload_json=None,
+    before_state_json=None,
+    after_state_json=None,
+    reason='',
+    **kwargs,
+):
+    if change_plan is None:
+        change_plan = create_test_aspa_change_plan()
+    return rpki_models.ASPAChangePlanItem.objects.create(
+        name=name,
+        change_plan=change_plan,
+        action_type=action_type or rpki_models.ASPAChangePlanAction.CREATE,
+        plan_semantic=plan_semantic,
+        aspa_intent=aspa_intent,
+        aspa=aspa,
+        imported_aspa=imported_aspa,
+        provider_operation=provider_operation,
+        provider_payload_json=provider_payload_json or {},
+        before_state_json=before_state_json or {},
+        after_state_json=after_state_json or {},
+        reason=reason,
         **kwargs,
     )
 
@@ -2345,6 +2526,7 @@ def create_test_provider_write_execution(
     provider_account=None,
     provider_snapshot=None,
     change_plan=None,
+    aspa_change_plan=None,
     execution_mode=None,
     status=None,
     requested_by='',
@@ -2360,14 +2542,30 @@ def create_test_provider_write_execution(
 ):
     if organization is None:
         organization = create_test_organization()
-    if provider_account is None:
-        provider_account = create_test_provider_account(organization=organization)
-    if provider_snapshot is None:
-        provider_snapshot = create_test_provider_snapshot(
+    if aspa_change_plan is not None and change_plan is not None:
+        raise ValueError('Pass either change_plan or aspa_change_plan, not both.')
+    if change_plan is not None:
+        provider_account = provider_account or change_plan.provider_account or create_test_provider_account(organization=organization)
+        provider_snapshot = provider_snapshot or change_plan.provider_snapshot or create_test_provider_snapshot(
             organization=organization,
             provider_account=provider_account,
         )
-    if change_plan is None:
+    elif aspa_change_plan is not None:
+        provider_account = (
+            provider_account
+            or aspa_change_plan.provider_account
+            or create_test_provider_account(organization=organization)
+        )
+        provider_snapshot = provider_snapshot or aspa_change_plan.provider_snapshot or create_test_provider_snapshot(
+            organization=organization,
+            provider_account=provider_account,
+        )
+    else:
+        provider_account = provider_account or create_test_provider_account(organization=organization)
+        provider_snapshot = provider_snapshot or create_test_provider_snapshot(
+            organization=organization,
+            provider_account=provider_account,
+        )
         change_plan = create_test_roa_change_plan(
             organization=organization,
             provider_account=provider_account,
@@ -2379,6 +2577,7 @@ def create_test_provider_write_execution(
         provider_account=provider_account,
         provider_snapshot=provider_snapshot,
         change_plan=change_plan,
+        aspa_change_plan=aspa_change_plan,
         execution_mode=execution_mode or rpki_models.ProviderWriteExecutionMode.PREVIEW,
         status=status or rpki_models.ValidationRunStatus.COMPLETED,
         requested_by=requested_by,
@@ -2398,6 +2597,7 @@ def create_test_approval_record(
     name='Approval Record 1',
     organization=None,
     change_plan=None,
+    aspa_change_plan=None,
     disposition=None,
     recorded_by='',
     recorded_at=None,
@@ -2410,13 +2610,17 @@ def create_test_approval_record(
 ):
     if organization is None:
         organization = create_test_organization()
-    if change_plan is None:
+    if aspa_change_plan is not None and change_plan is not None:
+        raise ValueError('Pass either change_plan or aspa_change_plan, not both.')
+    if change_plan is None and aspa_change_plan is None:
         change_plan = create_test_roa_change_plan(organization=organization)
+    target_plan = change_plan or aspa_change_plan
     return rpki_models.ApprovalRecord.objects.create(
         name=name,
         organization=organization,
         change_plan=change_plan,
-        tenant=change_plan.tenant,
+        aspa_change_plan=aspa_change_plan,
+        tenant=target_plan.tenant,
         disposition=disposition or rpki_models.ValidationDisposition.ACCEPTED,
         recorded_by=recorded_by,
         recorded_at=recorded_at,

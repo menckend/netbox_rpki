@@ -606,6 +606,8 @@ class ProviderReportingGraphQLTestCase(APITestCase):
             netbox_rpki_provideraccount(id: {self.other_provider_account.pk}) {{
                 id
                 transport
+                supports_aspa_write
+                aspa_write_mode
                 last_sync_rollup
             }}
             provider_snapshot_latest_diff(snapshot_id: "{self.comparison_snapshot.pk}") {{
@@ -702,6 +704,11 @@ class ProviderReportingGraphQLTestCase(APITestCase):
             any(account['latest_diff_id'] == self.snapshot_diff.pk for account in data['data']['provider_account_summary']['accounts'])
         )
         self.assertEqual(data['data']['netbox_rpki_provideraccount']['transport'], rpki_models.ProviderSyncTransport.OTE)
+        self.assertFalse(data['data']['netbox_rpki_provideraccount']['supports_aspa_write'])
+        self.assertEqual(
+            data['data']['netbox_rpki_provideraccount']['aspa_write_mode'],
+            rpki_models.ProviderAspaWriteMode.UNSUPPORTED,
+        )
         self.assertEqual(
             data['data']['netbox_rpki_provideraccount']['last_sync_rollup']['transport'],
             rpki_models.ProviderSyncTransport.OTE,

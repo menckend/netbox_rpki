@@ -1,0 +1,35 @@
+{% extends 'generic/_base.html' %}
+
+{% block title %}Suppress {{ finding }}{% endblock %}
+
+{% block content %}
+  <div class="row mt-5">
+    <div class="col col-md-8 offset-md-2">
+      <form action="" method="post" class="form">
+        {% csrf_token %}
+        <div class="card border-warning">
+          <h2 class="card-header">Suppress ROA Lint Finding</h2>
+          <div class="card-body">
+            <p>Record a scoped suppression for <strong>{{ finding }}</strong>.</p>
+            {% for field in form.visible_fields %}
+              <div class="mb-3">
+                <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                {{ field }}
+                {% if field.help_text %}
+                  <div class="form-text">{{ field.help_text }}</div>
+                {% endif %}
+                {% for error in field.errors %}
+                  <div class="text-danger">{{ error }}</div>
+                {% endfor %}
+              </div>
+            {% endfor %}
+          </div>
+          <div class="card-footer text-end">
+            <a href="{{ return_url }}" class="btn btn-outline-secondary">Cancel</a>
+            <button type="submit" class="btn btn-warning">Suppress</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endblock %}

@@ -1,19 +1,414 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+import hashlib
+import json
+from ipaddress import ip_network
+
+from django.db.models import Q
 from django.utils import timezone
 
 from netbox_rpki import models as rpki_models
 
 
+LINT_RULE_FAMILY_INTENT_SAFETY = 'intent_safety'
+LINT_RULE_FAMILY_PUBLISHED_HYGIENE = 'published_hygiene'
+LINT_RULE_FAMILY_PLAN_RISK = 'plan_risk'
+
+LINT_APPROVAL_IMPACT_INFORMATIONAL = 'informational'
+LINT_APPROVAL_IMPACT_ACKNOWLEDGEMENT_REQUIRED = 'acknowledgement_required'
+LINT_APPROVAL_IMPACT_BLOCKING = 'blocking'
+
 LINT_RULE_INTENT_OVERBROAD = 'intent_max_length_overbroad'
+LINT_RULE_INTENT_INCONSISTENT = 'intent_inconsistent_with_published'
+LINT_RULE_INTENT_STATE_CONFLICT = 'intent_state_conflict'
 LINT_RULE_PUBLISHED_ORPHANED = 'published_orphaned'
 LINT_RULE_PUBLISHED_STALE = 'published_stale'
+LINT_RULE_PUBLISHED_DUPLICATE = 'published_duplicate'
+LINT_RULE_PUBLISHED_BROADER_THAN_NEEDED = 'published_broader_than_needed'
+LINT_RULE_PUBLISHED_INCONSISTENT = 'published_inconsistent_with_intent'
+LINT_RULE_PUBLISHED_UNSCOPED = 'published_unscoped'
 LINT_RULE_INTENT_STALE = 'intent_stale'
 LINT_RULE_REPLACEMENT_REQUIRED = 'replacement_required'
 LINT_RULE_INTENT_SUPPRESSED = 'intent_suppressed'
 LINT_RULE_INTENT_INACTIVE = 'intent_inactive'
 LINT_RULE_PLAN_REPLACE = 'plan_replace'
 LINT_RULE_PLAN_RESHAPE = 'plan_reshape'
+LINT_RULE_PLAN_BROADENS_AUTHORIZATION = 'plan_broadens_authorization'
+LINT_RULE_PLAN_WITHDRAW_WITHOUT_REPLACEMENT = 'plan_withdraw_without_replacement'
+
+LINT_SUMMARY_SCHEMA_VERSION = 3
+LINT_POSTURE_SCHEMA_VERSION = 1
+
+
+@dataclass(frozen=True)
+class LintRuleSpec:
+    label: str
+    family: str
+    default_severity: str
+    approval_impact: str
+
+
+LINT_RULE_SPECS = {
+    LINT_RULE_INTENT_OVERBROAD: LintRuleSpec(
+        label='Intent maxLength overbroad',
+        family=LINT_RULE_FAMILY_INTENT_SAFETY,
+        default_severity=rpki_models.ReconciliationSeverity.WARNING,
+        approval_impact=LINT_APPROVAL_IMPACT_INFORMATIONAL,
+    ),
+    LINT_RULE_INTENT_INCONSISTENT: LintRuleSpec(
+        label='Intent inconsistent with published state',
+        family=LINT_RULE_FAMILY_INTENT_SAFETY,
+        default_severity=rpki_models.ReconciliationSeverity.ERROR,
+        approval_impact=LINT_APPROVAL_IMPACT_BLOCKING,
+    ),
+    LINT_RULE_INTENT_STATE_CONFLICT: LintRuleSpec(
+        label='Intent state conflicts with published state',
+        family=LINT_RULE_FAMILY_INTENT_SAFETY,
+        default_severity=rpki_models.ReconciliationSeverity.WARNING,
+        approval_impact=LINT_APPROVAL_IMPACT_BLOCKING,
+    ),
+    LINT_RULE_PUBLISHED_ORPHANED: LintRuleSpec(
+        label='Published ROA orphaned',
+        family=LINT_RULE_FAMILY_PUBLISHED_HYGIENE,
+        default_severity=rpki_models.ReconciliationSeverity.WARNING,
+        approval_impact=LINT_APPROVAL_IMPACT_INFORMATIONAL,
+    ),
+    LINT_RULE_PUBLISHED_STALE: LintRuleSpec(
+        label='Published ROA stale',
+        family=LINT_RULE_FAMILY_PUBLISHED_HYGIENE,
+        default_severity=rpki_models.ReconciliationSeverity.INFO,
+        approval_impact=LINT_APPROVAL_IMPACT_INFORMATIONAL,
+    ),
+    LINT_RULE_PUBLISHED_DUPLICATE: LintRuleSpec(
+        label='Published ROA duplicate',
+        family=LINT_RULE_FAMILY_PUBLISHED_HYGIENE,
+        default_severity=rpki_models.ReconciliationSeverity.WARNING,
+        approval_impact=LINT_APPROVAL_IMPACT_INFORMATIONAL,
+    ),
+    LINT_RULE_PUBLISHED_BROADER_THAN_NEEDED: LintRuleSpec(
+        label='Published ROA broader than needed',
+        family=LINT_RULE_FAMILY_PUBLISHED_HYGIENE,
+        default_severity=rpki_models.ReconciliationSeverity.WARNING,
+        approval_impact=LINT_APPROVAL_IMPACT_INFORMATIONAL,
+    ),
+    LINT_RULE_PUBLISHED_INCONSISTENT: LintRuleSpec(
+        label='Published ROA inconsistent with intent',
+        family=LINT_RULE_FAMILY_PUBLISHED_HYGIENE,
+        default_severity=rpki_models.ReconciliationSeverity.ERROR,
+        approval_impact=LINT_APPROVAL_IMPACT_BLOCKING,
+    ),
+    LINT_RULE_PUBLISHED_UNSCOPED: LintRuleSpec(
+        label='Published ROA outside comparison scope',
+        family=LINT_RULE_FAMILY_PUBLISHED_HYGIENE,
+        default_severity=rpki_models.ReconciliationSeverity.WARNING,
+        approval_impact=LINT_APPROVAL_IMPACT_BLOCKING,
+    ),
+    LINT_RULE_INTENT_STALE: LintRuleSpec(
+        label='Intent candidate stale',
+        family=LINT_RULE_FAMILY_INTENT_SAFETY,
+        default_severity=rpki_models.ReconciliationSeverity.INFO,
+        approval_impact=LINT_APPROVAL_IMPACT_INFORMATIONAL,
+    ),
+    LINT_RULE_REPLACEMENT_REQUIRED: LintRuleSpec(
+        label='Replacement workflow required',
+        family=LINT_RULE_FAMILY_PLAN_RISK,
+        default_severity=rpki_models.ReconciliationSeverity.INFO,
+        approval_impact=LINT_APPROVAL_IMPACT_INFORMATIONAL,
+    ),
+    LINT_RULE_INTENT_SUPPRESSED: LintRuleSpec(
+        label='Intent suppressed by policy',
+        family=LINT_RULE_FAMILY_INTENT_SAFETY,
+        default_severity=rpki_models.ReconciliationSeverity.INFO,
+        approval_impact=LINT_APPROVAL_IMPACT_INFORMATIONAL,
+    ),
+    LINT_RULE_INTENT_INACTIVE: LintRuleSpec(
+        label='Intent inactive',
+        family=LINT_RULE_FAMILY_INTENT_SAFETY,
+        default_severity=rpki_models.ReconciliationSeverity.INFO,
+        approval_impact=LINT_APPROVAL_IMPACT_INFORMATIONAL,
+    ),
+    LINT_RULE_PLAN_REPLACE: LintRuleSpec(
+        label='Plan replacement action',
+        family=LINT_RULE_FAMILY_PLAN_RISK,
+        default_severity=rpki_models.ReconciliationSeverity.INFO,
+        approval_impact=LINT_APPROVAL_IMPACT_INFORMATIONAL,
+    ),
+    LINT_RULE_PLAN_RESHAPE: LintRuleSpec(
+        label='Plan reshape action',
+        family=LINT_RULE_FAMILY_PLAN_RISK,
+        default_severity=rpki_models.ReconciliationSeverity.INFO,
+        approval_impact=LINT_APPROVAL_IMPACT_INFORMATIONAL,
+    ),
+    LINT_RULE_PLAN_BROADENS_AUTHORIZATION: LintRuleSpec(
+        label='Plan broadens authorization',
+        family=LINT_RULE_FAMILY_PLAN_RISK,
+        default_severity=rpki_models.ReconciliationSeverity.WARNING,
+        approval_impact=LINT_APPROVAL_IMPACT_ACKNOWLEDGEMENT_REQUIRED,
+    ),
+    LINT_RULE_PLAN_WITHDRAW_WITHOUT_REPLACEMENT: LintRuleSpec(
+        label='Plan withdraws without replacement',
+        family=LINT_RULE_FAMILY_PLAN_RISK,
+        default_severity=rpki_models.ReconciliationSeverity.ERROR,
+        approval_impact=LINT_APPROVAL_IMPACT_ACKNOWLEDGEMENT_REQUIRED,
+    ),
+}
+
+INTENT_INCONSISTENT_RESULT_TYPES = {
+    rpki_models.ROAIntentResultType.ASN_MISMATCH,
+    rpki_models.ROAIntentResultType.ASN_AND_MAX_LENGTH_OVERBROAD,
+    rpki_models.ROAIntentResultType.ASN_AND_MAX_LENGTH_TOO_NARROW,
+    rpki_models.ROAIntentResultType.ASN_AND_MAX_LENGTH_MISMATCH,
+    rpki_models.ROAIntentResultType.PREFIX_MISMATCH,
+    rpki_models.ROAIntentResultType.MAX_LENGTH_TOO_NARROW,
+}
+
+PUBLISHED_INCONSISTENT_RESULT_TYPES = {
+    rpki_models.PublishedROAResultType.MAX_LENGTH_TOO_NARROW,
+    rpki_models.PublishedROAResultType.WRONG_ORIGIN,
+    rpki_models.PublishedROAResultType.WRONG_ORIGIN_AND_MAX_LENGTH_OVERBROAD,
+    rpki_models.PublishedROAResultType.WRONG_ORIGIN_AND_MAX_LENGTH_TOO_NARROW,
+    rpki_models.PublishedROAResultType.WRONG_ORIGIN_AND_MAX_LENGTH_MISMATCH,
+}
+
+SUPPRESSION_DETAIL_EXCLUDED_KEYS = {
+    'approval_impact',
+    'fact_context',
+    'fact_fingerprint',
+    'operator_action',
+    'operator_message',
+    'rule_family',
+    'rule_label',
+    'source_kind',
+    'source_name',
+    'suppressed',
+    'suppression_expires_at',
+    'suppression_id',
+    'suppression_name',
+    'suppression_reason',
+    'suppression_scope_type',
+    'why_it_matters',
+}
+
+
+def _source_summary(
+    *,
+    lint_run: rpki_models.ROALintRun,
+    roa_intent_result: rpki_models.ROAIntentResult | None,
+    published_roa_result: rpki_models.PublishedROAResult | None,
+    change_plan_item: rpki_models.ROAChangePlanItem | None,
+) -> tuple[str, str]:
+    if roa_intent_result is not None:
+        return 'roa_intent_result', roa_intent_result.name
+    if published_roa_result is not None:
+        return 'published_roa_result', published_roa_result.name
+    if change_plan_item is not None:
+        return 'change_plan_item', change_plan_item.name
+    return 'lint_run', lint_run.name
+
+
+def _normalize_fact_value(value):
+    if isinstance(value, dict):
+        return {
+            str(key): _normalize_fact_value(subvalue)
+            for key, subvalue in sorted(value.items(), key=lambda item: str(item[0]))
+        }
+    if isinstance(value, (list, tuple)):
+        return [_normalize_fact_value(item) for item in value]
+    return value
+
+
+def _suppression_fact_context(*, finding_code: str, details_json: dict) -> dict:
+    return {
+        'finding_code': finding_code,
+        'details': _normalize_fact_value({
+            key: value
+            for key, value in (details_json or {}).items()
+            if key not in SUPPRESSION_DETAIL_EXCLUDED_KEYS
+        }),
+    }
+
+
+def _suppression_fact_fingerprint(*, finding_code: str, details_json: dict) -> str:
+    serialized = json.dumps(
+        _suppression_fact_context(finding_code=finding_code, details_json=details_json),
+        sort_keys=True,
+        separators=(',', ':'),
+    )
+    return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
+
+
+def _active_suppression_queryset():
+    now = timezone.now()
+    return rpki_models.ROALintSuppression.objects.select_related(
+        'intent_profile',
+        'roa_intent',
+    ).filter(
+        lifted_at__isnull=True,
+    ).filter(
+        Q(expires_at__isnull=True) | Q(expires_at__gt=now)
+    )
+
+
+def _matching_suppression(
+    *,
+    lint_run: rpki_models.ROALintRun,
+    finding_code: str,
+    details_json: dict,
+    roa_intent_result: rpki_models.ROAIntentResult | None,
+    change_plan_item: rpki_models.ROAChangePlanItem | None,
+) -> rpki_models.ROALintSuppression | None:
+    suppression_target_intent = None
+    if roa_intent_result is not None:
+        suppression_target_intent = roa_intent_result.roa_intent
+    elif change_plan_item is not None and change_plan_item.roa_intent_id is not None:
+        suppression_target_intent = change_plan_item.roa_intent
+
+    queryset = _active_suppression_queryset().filter(
+        organization=lint_run.reconciliation_run.organization,
+        finding_code=finding_code,
+        fact_fingerprint=_suppression_fact_fingerprint(
+            finding_code=finding_code,
+            details_json=details_json,
+        ),
+    )
+    if suppression_target_intent is not None:
+        suppression = queryset.filter(
+            scope_type=rpki_models.ROALintSuppressionScope.INTENT,
+            roa_intent=suppression_target_intent,
+        ).first()
+        if suppression is not None:
+            return suppression
+
+    return queryset.filter(
+        scope_type=rpki_models.ROALintSuppressionScope.PROFILE,
+        intent_profile=lint_run.reconciliation_run.intent_profile,
+    ).first()
+
+
+def _finding_explanation(
+    *,
+    finding_code: str,
+    details_json: dict,
+    lint_run: rpki_models.ROALintRun,
+    roa_intent_result: rpki_models.ROAIntentResult | None,
+    published_roa_result: rpki_models.PublishedROAResult | None,
+    change_plan_item: rpki_models.ROAChangePlanItem | None,
+) -> dict:
+    rule_spec = LINT_RULE_SPECS[finding_code]
+    source_kind, source_name = _source_summary(
+        lint_run=lint_run,
+        roa_intent_result=roa_intent_result,
+        published_roa_result=published_roa_result,
+        change_plan_item=change_plan_item,
+    )
+    explanations = {
+        LINT_RULE_INTENT_OVERBROAD: (
+            'The intended authorization allows more-specific prefixes than the current intent requires.',
+            'Overbroad maxLength increases the blast radius of a mistaken or hijacked origin announcement.',
+            'Review the intended maxLength and narrow it unless broader coverage is explicitly required.',
+        ),
+        LINT_RULE_INTENT_INCONSISTENT: (
+            'Published ROA state does not match the modeled intent for prefix, origin ASN, or maxLength.',
+            'Traffic may validate differently from the policy expressed in NetBox until publication is aligned.',
+            'Review the mismatch axes and generate or apply the replacement needed to align published state.',
+        ),
+        LINT_RULE_INTENT_STATE_CONFLICT: (
+            'An intent marked inactive or suppressed still appears to have matching published coverage.',
+            'Suppressed or inactive policy should not silently remain active in published ROA state.',
+            'Review the published authorization and withdraw or re-enable the intent explicitly.',
+        ),
+        LINT_RULE_PUBLISHED_ORPHANED: (
+            'A published ROA no longer maps to any current modeled intent.',
+            'Orphaned ROAs preserve authorization that operators are no longer explicitly managing.',
+            'Review whether the ROA should be withdrawn or whether matching intent is missing from NetBox.',
+        ),
+        LINT_RULE_PUBLISHED_STALE: (
+            'A published ROA was matched through stale state.',
+            'Stale publication evidence can hide the current authorization posture.',
+            'Refresh provider state or local publication data before treating this result as current.',
+        ),
+        LINT_RULE_PUBLISHED_DUPLICATE: (
+            'Multiple published ROAs appear to cover the same authorization.',
+            'Duplicate coverage complicates review and can hide whether publication is intentionally redundant.',
+            'Review the duplicate authorization set and remove redundant entries where possible.',
+        ),
+        LINT_RULE_PUBLISHED_BROADER_THAN_NEEDED: (
+            'A published ROA is broader than the current modeled intent requires.',
+            'Unnecessary breadth authorizes extra specifics beyond the current routing policy.',
+            'Review whether the ROA should be replaced with a narrower maxLength.',
+        ),
+        LINT_RULE_PUBLISHED_INCONSISTENT: (
+            'A published ROA disagrees with current intent on origin ASN or maxLength.',
+            'Operators are publishing state that does not match the policy they intend to enforce.',
+            'Review the current intent and replace the published authorization with the intended state.',
+        ),
+        LINT_RULE_PUBLISHED_UNSCOPED: (
+            'A published ROA falls outside the comparison scope used for this lint run.',
+            'Unscoped published state may indicate unmanaged authorization or an incomplete review boundary.',
+            'Confirm the comparison scope and decide whether the ROA should be managed, ignored, or withdrawn.',
+        ),
+        LINT_RULE_INTENT_STALE: (
+            'The best matching authorization for this intent was stale.',
+            'Stale comparisons reduce confidence that the modeled match still reflects current publication.',
+            'Refresh the source data before relying on this match for operational decisions.',
+        ),
+        LINT_RULE_REPLACEMENT_REQUIRED: (
+            'This issue requires a replacement workflow rather than a simple keep-or-withdraw decision.',
+            'Changing origin or maxLength safely usually requires coordinated create and withdraw actions.',
+            'Review the replacement reason and confirm the plan carries both sides of the replacement.',
+        ),
+        LINT_RULE_INTENT_SUPPRESSED: (
+            'This intent is currently suppressed by policy.',
+            'Suppressed intent is informational, but it still affects why coverage is absent from the target state.',
+            'Confirm the suppression remains intentional before treating missing coverage as a defect.',
+        ),
+        LINT_RULE_INTENT_INACTIVE: (
+            'This intent is currently inactive.',
+            'Inactive intent should not drive publication unless operators intentionally reactivate it.',
+            'Review whether the inactive state is still correct for the service or prefix.',
+        ),
+        LINT_RULE_PLAN_REPLACE: (
+            'The change plan contains a replacement action pair.',
+            'Replacement work is higher risk than a pure create or pure withdraw because both old and new state matter.',
+            'Review the before and after state to confirm the replacement aligns with intent.',
+        ),
+        LINT_RULE_PLAN_RESHAPE: (
+            'The change plan reshapes coverage rather than only adding or removing it.',
+            'Reshape actions can change validation outcomes for existing routes even when total authorization remains similar.',
+            'Review the before and after state carefully before approval.',
+        ),
+        LINT_RULE_PLAN_BROADENS_AUTHORIZATION: (
+            'The change plan creates authorization broader than the aggregate prefix length.',
+            'Broadening authorization expands what more-specific routes would validate as allowed.',
+            'Review whether the new maxLength is intentionally broad enough to justify approval.',
+        ),
+        LINT_RULE_PLAN_WITHDRAW_WITHOUT_REPLACEMENT: (
+            'The change plan withdraws authorization without a matching replacement for the same prefix and origin.',
+            'Routes that depend on that authorization may lose valid coverage after the change is applied.',
+            'Review whether coverage should be preserved with a matching create before approval.',
+        ),
+    }
+    operator_message, why_it_matters, operator_action = explanations[finding_code]
+    return {
+        'rule_label': rule_spec.label,
+        'operator_message': operator_message,
+        'why_it_matters': why_it_matters,
+        'operator_action': operator_action,
+        'source_kind': source_kind,
+        'source_name': source_name,
+    }
+
+
+def _serialize_suppression(suppression: rpki_models.ROALintSuppression) -> dict:
+    return {
+        'suppressed': True,
+        'suppression_id': suppression.pk,
+        'suppression_name': suppression.name,
+        'suppression_scope_type': suppression.scope_type,
+        'suppression_reason': suppression.reason,
+        'suppression_expires_at': suppression.expires_at.isoformat() if suppression.expires_at else None,
+    }
 
 
 def _normalize_reconciliation_run(
@@ -32,16 +427,165 @@ def _normalize_change_plan(
     return rpki_models.ROAChangePlan.objects.get(pk=change_plan)
 
 
+def _latest_plan_lint_run(
+    change_plan: rpki_models.ROAChangePlan,
+) -> rpki_models.ROALintRun | None:
+    return change_plan.lint_runs.order_by('-started_at', '-created').first()
+
+
+def build_roa_change_plan_lint_posture(
+    change_plan: rpki_models.ROAChangePlan | int,
+    *,
+    acknowledged_finding_ids: list[int] | None = None,
+) -> dict[str, object]:
+    change_plan = _normalize_change_plan(change_plan)
+    if change_plan is None:
+        raise ValueError('ROA lint posture requires a change plan.')
+    lint_run = _latest_plan_lint_run(change_plan)
+    impact_keys = (
+        LINT_APPROVAL_IMPACT_INFORMATIONAL,
+        LINT_APPROVAL_IMPACT_ACKNOWLEDGEMENT_REQUIRED,
+        LINT_APPROVAL_IMPACT_BLOCKING,
+    )
+    zero_counts = {key: 0 for key in impact_keys}
+    if lint_run is None:
+        return {
+            'posture_schema_version': LINT_POSTURE_SCHEMA_VERSION,
+            'change_plan_id': change_plan.pk,
+            'has_lint_run': False,
+            'lint_run_id': None,
+            'status': 'missing_lint',
+            'can_approve': False,
+            'finding_count': 0,
+            'active_finding_count': 0,
+            'suppressed_finding_count': 0,
+            'acknowledged_finding_count': 0,
+            'approval_impact_counts': dict(zero_counts),
+            'active_approval_impact_counts': dict(zero_counts),
+            'suppressed_approval_impact_counts': dict(zero_counts),
+            'acknowledged_approval_impact_counts': dict(zero_counts),
+            'unresolved_approval_impact_counts': dict(zero_counts),
+            'blocking_finding_count': 0,
+            'unresolved_blocking_finding_count': 0,
+            'acknowledgement_required_finding_count': 0,
+            'acknowledged_acknowledgement_required_finding_count': 0,
+            'unresolved_acknowledgement_required_finding_count': 0,
+            'informational_finding_count': 0,
+        }
+
+    acknowledged_ids = set(
+        change_plan.lint_acknowledgements.filter(lint_run=lint_run).values_list('finding_id', flat=True)
+    )
+    acknowledged_ids.update(int(pk) for pk in (acknowledged_finding_ids or []))
+
+    total_counts = {key: 0 for key in impact_keys}
+    active_counts = {key: 0 for key in impact_keys}
+    suppressed_counts = {key: 0 for key in impact_keys}
+    acknowledged_counts = {key: 0 for key in impact_keys}
+    unresolved_counts = {key: 0 for key in impact_keys}
+    suppressed_finding_count = 0
+    acknowledged_finding_count = 0
+    finding_count = 0
+
+    for finding in lint_run.findings.all():
+        finding_count += 1
+        impact = finding.details_json.get('approval_impact') or LINT_APPROVAL_IMPACT_INFORMATIONAL
+        if impact not in total_counts:
+            total_counts[impact] = 0
+            active_counts[impact] = 0
+            suppressed_counts[impact] = 0
+            acknowledged_counts[impact] = 0
+            unresolved_counts[impact] = 0
+        total_counts[impact] += 1
+        if finding.details_json.get('suppressed'):
+            suppressed_counts[impact] += 1
+            suppressed_finding_count += 1
+            continue
+        active_counts[impact] += 1
+        if (
+            impact == LINT_APPROVAL_IMPACT_ACKNOWLEDGEMENT_REQUIRED
+            and finding.pk in acknowledged_ids
+        ):
+            acknowledged_counts[impact] += 1
+            acknowledged_finding_count += 1
+            continue
+        unresolved_counts[impact] += 1
+
+    unresolved_blocking = unresolved_counts[LINT_APPROVAL_IMPACT_BLOCKING]
+    unresolved_ack_required = unresolved_counts[LINT_APPROVAL_IMPACT_ACKNOWLEDGEMENT_REQUIRED]
+    if unresolved_blocking > 0:
+        status = 'blocked'
+    elif unresolved_ack_required > 0:
+        status = 'acknowledgement_required'
+    else:
+        status = 'clear'
+
+    return {
+        'posture_schema_version': LINT_POSTURE_SCHEMA_VERSION,
+        'change_plan_id': change_plan.pk,
+        'has_lint_run': True,
+        'lint_run_id': lint_run.pk,
+        'status': status,
+        'can_approve': unresolved_blocking == 0 and unresolved_ack_required == 0,
+        'finding_count': finding_count,
+        'active_finding_count': finding_count - suppressed_finding_count,
+        'suppressed_finding_count': suppressed_finding_count,
+        'acknowledged_finding_count': acknowledged_finding_count,
+        'approval_impact_counts': total_counts,
+        'active_approval_impact_counts': active_counts,
+        'suppressed_approval_impact_counts': suppressed_counts,
+        'acknowledged_approval_impact_counts': acknowledged_counts,
+        'unresolved_approval_impact_counts': unresolved_counts,
+        'blocking_finding_count': active_counts[LINT_APPROVAL_IMPACT_BLOCKING],
+        'unresolved_blocking_finding_count': unresolved_blocking,
+        'acknowledgement_required_finding_count': active_counts[LINT_APPROVAL_IMPACT_ACKNOWLEDGEMENT_REQUIRED],
+        'acknowledged_acknowledgement_required_finding_count': (
+            acknowledged_counts[LINT_APPROVAL_IMPACT_ACKNOWLEDGEMENT_REQUIRED]
+        ),
+        'unresolved_acknowledgement_required_finding_count': unresolved_ack_required,
+        'informational_finding_count': active_counts[LINT_APPROVAL_IMPACT_INFORMATIONAL],
+    }
+
+
+def refresh_roa_change_plan_lint_posture(
+    change_plan: rpki_models.ROAChangePlan | int,
+) -> dict[str, object]:
+    change_plan = _normalize_change_plan(change_plan)
+    if change_plan is None:
+        raise ValueError('ROA lint posture requires a change plan.')
+    summary_json = dict(change_plan.summary_json or {})
+    summary_json['lint_posture'] = build_roa_change_plan_lint_posture(change_plan)
+    change_plan.summary_json = summary_json
+    change_plan.save(update_fields=('summary_json',))
+    return summary_json['lint_posture']
+
+
 def _create_finding(
     lint_run: rpki_models.ROALintRun,
     *,
     finding_code: str,
-    severity: str,
+    severity: str | None = None,
     details_json: dict,
     roa_intent_result: rpki_models.ROAIntentResult | None = None,
     published_roa_result: rpki_models.PublishedROAResult | None = None,
     change_plan_item: rpki_models.ROAChangePlanItem | None = None,
 ) -> rpki_models.ROALintFinding:
+    rule_spec = LINT_RULE_SPECS[finding_code]
+    suppression = _matching_suppression(
+        lint_run=lint_run,
+        finding_code=finding_code,
+        details_json=details_json,
+        roa_intent_result=roa_intent_result,
+        change_plan_item=change_plan_item,
+    )
+    fact_context = _suppression_fact_context(
+        finding_code=finding_code,
+        details_json=details_json,
+    )
+    fact_fingerprint = _suppression_fact_fingerprint(
+        finding_code=finding_code,
+        details_json=details_json,
+    )
     source_name = (
         roa_intent_result.name
         if roa_intent_result is not None
@@ -51,6 +595,11 @@ def _create_finding(
         if change_plan_item is not None
         else lint_run.name
     )
+    if suppression is not None:
+        suppression.last_matched_at = timezone.now()
+        suppression.match_count = suppression.match_count + 1
+        suppression.save(update_fields=('last_matched_at', 'match_count'))
+
     return rpki_models.ROALintFinding.objects.create(
         name=f'{source_name} {finding_code}',
         lint_run=lint_run,
@@ -59,10 +608,69 @@ def _create_finding(
         published_roa_result=published_roa_result,
         change_plan_item=change_plan_item,
         finding_code=finding_code,
-        severity=severity,
-        details_json=details_json,
+        severity=severity or rule_spec.default_severity,
+        details_json={
+            'rule_family': rule_spec.family,
+            'approval_impact': rule_spec.approval_impact,
+            'fact_fingerprint': fact_fingerprint,
+            'fact_context': fact_context,
+            **(_serialize_suppression(suppression) if suppression is not None else {'suppressed': False}),
+            **_finding_explanation(
+                finding_code=finding_code,
+                details_json=details_json,
+                lint_run=lint_run,
+                roa_intent_result=roa_intent_result,
+                published_roa_result=published_roa_result,
+                change_plan_item=change_plan_item,
+            ),
+            **details_json,
+        },
         computed_at=timezone.now(),
     )
+
+
+def _plan_item_prefix_and_max_length(
+    item: rpki_models.ROAChangePlanItem,
+) -> tuple[str | None, int | None]:
+    for payload in (item.after_state_json, item.before_state_json):
+        prefix_cidr_text = payload.get('prefix_cidr_text')
+        max_length = payload.get('max_length')
+        if prefix_cidr_text:
+            return prefix_cidr_text, max_length
+    prefix_cidr_text = item.provider_payload_json.get('prefix')
+    if prefix_cidr_text:
+        return prefix_cidr_text, item.provider_payload_json.get('max_length')
+    return None, None
+
+
+def _plan_item_prefix_asn_key(item: rpki_models.ROAChangePlanItem) -> tuple[str | None, int | None]:
+    for payload in (item.after_state_json, item.before_state_json):
+        prefix_cidr_text = payload.get('prefix_cidr_text')
+        origin_asn_value = payload.get('origin_asn_value')
+        if prefix_cidr_text:
+            return prefix_cidr_text, origin_asn_value
+    prefix_cidr_text = item.provider_payload_json.get('prefix')
+    if prefix_cidr_text:
+        return prefix_cidr_text, item.provider_payload_json.get('asn')
+    return None, None
+
+
+def _plan_item_broadens_authorization(item: rpki_models.ROAChangePlanItem) -> bool:
+    prefix_cidr_text, max_length = _plan_item_prefix_and_max_length(item)
+    if not prefix_cidr_text or max_length is None:
+        return False
+    return max_length > ip_network(prefix_cidr_text, strict=False).prefixlen
+
+
+def _plan_item_leaves_no_replacement(
+    item: rpki_models.ROAChangePlanItem,
+    created_keys: set[tuple[str | None, int | None]],
+) -> bool:
+    if item.action_type != rpki_models.ROAChangePlanAction.WITHDRAW:
+        return False
+    if item.plan_semantic == rpki_models.ROAChangePlanItemSemantic.REPLACE:
+        return False
+    return _plan_item_prefix_asn_key(item) not in created_keys
 
 
 def _intent_lint_findings(
@@ -91,6 +699,26 @@ def _intent_lint_findings(
             )
         )
 
+    if intent_result.result_type in INTENT_INCONSISTENT_RESULT_TYPES:
+        findings.append(
+            _create_finding(
+                lint_run,
+                finding_code=LINT_RULE_INTENT_INCONSISTENT,
+                severity=intent_result.severity,
+                roa_intent_result=intent_result,
+                details_json={
+                    'result_type': intent_result.result_type,
+                    'intent_prefix': details.get('intent_prefix'),
+                    'intent_origin_asn': details.get('intent_origin_asn'),
+                    'intent_max_length': details.get('intent_max_length'),
+                    'published_prefix': details.get('published_prefix'),
+                    'published_origin_asn': details.get('published_origin_asn'),
+                    'published_max_length': details.get('published_max_length'),
+                    'mismatch_axes': details.get('mismatch_axes', []),
+                },
+            )
+        )
+
     if details.get('replacement_required'):
         findings.append(
             _create_finding(
@@ -102,6 +730,33 @@ def _intent_lint_findings(
                     'result_type': intent_result.result_type,
                     'replacement_reason_code': details.get('replacement_reason_code'),
                     'mismatch_axes': details.get('mismatch_axes', []),
+                },
+            )
+        )
+
+    if (
+        intent_result.result_type in {
+            rpki_models.ROAIntentResultType.SUPPRESSED_BY_POLICY,
+            rpki_models.ROAIntentResultType.INACTIVE_INTENT,
+        }
+        and (
+            intent_result.best_roa_id is not None
+            or intent_result.best_imported_authorization_id is not None
+            or details.get('published_prefix')
+        )
+    ):
+        findings.append(
+            _create_finding(
+                lint_run,
+                finding_code=LINT_RULE_INTENT_STATE_CONFLICT,
+                severity=rpki_models.ReconciliationSeverity.WARNING,
+                roa_intent_result=intent_result,
+                details_json={
+                    'result_type': intent_result.result_type,
+                    'intent_prefix': details.get('intent_prefix'),
+                    'intent_origin_asn': details.get('intent_origin_asn'),
+                    'published_prefix': details.get('published_prefix'),
+                    'published_origin_asn': details.get('published_origin_asn'),
                 },
             )
         )
@@ -165,6 +820,68 @@ def _published_lint_findings(
                 },
             )
         )
+    elif published_result.result_type == rpki_models.PublishedROAResultType.DUPLICATE:
+        findings.append(
+            _create_finding(
+                lint_run,
+                finding_code=LINT_RULE_PUBLISHED_DUPLICATE,
+                severity=published_result.severity,
+                published_roa_result=published_result,
+                details_json={
+                    'result_type': published_result.result_type,
+                    'source': details.get('source'),
+                    'prefix_cidr_text': details.get('prefix_cidr_text'),
+                    'origin_asn': details.get('origin_asn'),
+                },
+            )
+        )
+    elif published_result.result_type == rpki_models.PublishedROAResultType.BROADER_THAN_NEEDED:
+        findings.append(
+            _create_finding(
+                lint_run,
+                finding_code=LINT_RULE_PUBLISHED_BROADER_THAN_NEEDED,
+                severity=published_result.severity,
+                published_roa_result=published_result,
+                details_json={
+                    'result_type': published_result.result_type,
+                    'source': details.get('source'),
+                    'prefix_cidr_text': details.get('prefix_cidr_text'),
+                    'max_length': details.get('max_length'),
+                },
+            )
+        )
+    elif published_result.result_type == rpki_models.PublishedROAResultType.UNSCOPED:
+        findings.append(
+            _create_finding(
+                lint_run,
+                finding_code=LINT_RULE_PUBLISHED_UNSCOPED,
+                severity=published_result.severity,
+                published_roa_result=published_result,
+                details_json={
+                    'result_type': published_result.result_type,
+                    'source': details.get('source'),
+                    'prefix_cidr_text': details.get('prefix_cidr_text'),
+                    'comparison_scope': details.get('comparison_scope'),
+                },
+            )
+        )
+
+    if published_result.result_type in PUBLISHED_INCONSISTENT_RESULT_TYPES:
+        findings.append(
+            _create_finding(
+                lint_run,
+                finding_code=LINT_RULE_PUBLISHED_INCONSISTENT,
+                severity=published_result.severity,
+                published_roa_result=published_result,
+                details_json={
+                    'result_type': published_result.result_type,
+                    'source': details.get('source'),
+                    'prefix_cidr_text': details.get('prefix_cidr_text'),
+                    'origin_asn': details.get('origin_asn'),
+                    'max_length': details.get('max_length'),
+                },
+            )
+        )
 
     if details.get('replacement_required'):
         findings.append(
@@ -188,13 +905,18 @@ def _plan_lint_findings(
     change_plan: rpki_models.ROAChangePlan,
 ) -> list[rpki_models.ROALintFinding]:
     findings: list[rpki_models.ROALintFinding] = []
-    for item in change_plan.items.all():
+    plan_items = list(change_plan.items.all())
+    created_keys = {
+        _plan_item_prefix_asn_key(item)
+        for item in plan_items
+        if item.action_type == rpki_models.ROAChangePlanAction.CREATE
+    }
+    for item in plan_items:
         if item.plan_semantic == rpki_models.ROAChangePlanItemSemantic.REPLACE:
             findings.append(
                 _create_finding(
                     lint_run,
                     finding_code=LINT_RULE_PLAN_REPLACE,
-                    severity=rpki_models.ReconciliationSeverity.INFO,
                     change_plan_item=item,
                     details_json={
                         'action_type': item.action_type,
@@ -207,7 +929,6 @@ def _plan_lint_findings(
                 _create_finding(
                     lint_run,
                     finding_code=LINT_RULE_PLAN_RESHAPE,
-                    severity=rpki_models.ReconciliationSeverity.INFO,
                     change_plan_item=item,
                     details_json={
                         'action_type': item.action_type,
@@ -215,7 +936,139 @@ def _plan_lint_findings(
                     },
                 )
             )
+        if (
+            item.action_type == rpki_models.ROAChangePlanAction.CREATE
+            and _plan_item_broadens_authorization(item)
+        ):
+            prefix_cidr_text, max_length = _plan_item_prefix_and_max_length(item)
+            findings.append(
+                _create_finding(
+                    lint_run,
+                    finding_code=LINT_RULE_PLAN_BROADENS_AUTHORIZATION,
+                    change_plan_item=item,
+                    details_json={
+                        'action_type': item.action_type,
+                        'plan_semantic': item.plan_semantic,
+                        'prefix_cidr_text': prefix_cidr_text,
+                        'max_length': max_length,
+                    },
+                )
+            )
+        if _plan_item_leaves_no_replacement(item, created_keys):
+            prefix_cidr_text, origin_asn_value = _plan_item_prefix_asn_key(item)
+            findings.append(
+                _create_finding(
+                    lint_run,
+                    finding_code=LINT_RULE_PLAN_WITHDRAW_WITHOUT_REPLACEMENT,
+                    change_plan_item=item,
+                    details_json={
+                        'action_type': item.action_type,
+                        'plan_semantic': item.plan_semantic,
+                        'prefix_cidr_text': prefix_cidr_text,
+                        'origin_asn_value': origin_asn_value,
+                    },
+                )
+            )
     return findings
+
+
+def suppress_roa_lint_finding(
+    finding: rpki_models.ROALintFinding | int,
+    *,
+    scope_type: str,
+    reason: str,
+    created_by: str = '',
+    expires_at=None,
+    notes: str = '',
+) -> rpki_models.ROALintSuppression:
+    if not isinstance(finding, rpki_models.ROALintFinding):
+        finding = rpki_models.ROALintFinding.objects.select_related(
+            'lint_run__reconciliation_run__intent_profile',
+            'roa_intent_result__roa_intent',
+            'change_plan_item__roa_intent',
+        ).get(pk=finding)
+
+    reconciliation_run = finding.lint_run.reconciliation_run
+    organization = reconciliation_run.organization
+    roa_intent = None
+    if finding.roa_intent_result_id is not None:
+        roa_intent = finding.roa_intent_result.roa_intent
+    elif finding.change_plan_item_id is not None and finding.change_plan_item.roa_intent_id is not None:
+        roa_intent = finding.change_plan_item.roa_intent
+
+    payload = {
+        'organization': organization,
+        'finding_code': finding.finding_code,
+        'scope_type': scope_type,
+        'reason': reason,
+        'notes': notes,
+        'fact_fingerprint': finding.details_json.get('fact_fingerprint')
+        or _suppression_fact_fingerprint(
+            finding_code=finding.finding_code,
+            details_json=finding.details_json,
+        ),
+        'fact_context_json': finding.details_json.get('fact_context')
+        or _suppression_fact_context(
+            finding_code=finding.finding_code,
+            details_json=finding.details_json,
+        ),
+        'created_by': created_by,
+        'created_at': timezone.now(),
+        'expires_at': expires_at,
+        'tenant': finding.tenant,
+    }
+    if scope_type == rpki_models.ROALintSuppressionScope.INTENT:
+        if roa_intent is None:
+            raise ValueError('Intent-scoped suppressions require a lint finding tied to a ROA intent.')
+        payload['roa_intent'] = roa_intent
+        payload['name'] = f'{finding.finding_code} suppression for {roa_intent.name}'
+        suppression = rpki_models.ROALintSuppression.objects.filter(
+            finding_code=finding.finding_code,
+            scope_type=scope_type,
+            roa_intent=roa_intent,
+            lifted_at__isnull=True,
+        ).first()
+        if suppression is not None:
+            return suppression
+        suppression = rpki_models.ROALintSuppression(**payload)
+        suppression.full_clean(validate_unique=False)
+        suppression.save()
+        return suppression
+
+    if scope_type != rpki_models.ROALintSuppressionScope.PROFILE:
+        raise ValueError('Unsupported suppression scope.')
+    payload['intent_profile'] = reconciliation_run.intent_profile
+    payload['name'] = f'{finding.finding_code} suppression for {reconciliation_run.intent_profile.name}'
+    suppression = rpki_models.ROALintSuppression.objects.filter(
+        finding_code=finding.finding_code,
+        scope_type=scope_type,
+        intent_profile=reconciliation_run.intent_profile,
+        lifted_at__isnull=True,
+    ).first()
+    if suppression is not None:
+        return suppression
+    suppression = rpki_models.ROALintSuppression(**payload)
+    suppression.full_clean(validate_unique=False)
+    suppression.save()
+    return suppression
+
+
+def lift_roa_lint_suppression(
+    suppression: rpki_models.ROALintSuppression | int,
+    *,
+    lifted_by: str = '',
+    lift_reason: str = '',
+) -> rpki_models.ROALintSuppression:
+    if not isinstance(suppression, rpki_models.ROALintSuppression):
+        suppression = rpki_models.ROALintSuppression.objects.get(pk=suppression)
+    if suppression.lifted_at is not None:
+        return suppression
+    suppression.lifted_at = timezone.now()
+    suppression.lifted_by = lifted_by
+    suppression.lift_reason = lift_reason
+    suppression.full_clean(validate_unique=False)
+    suppression.save(update_fields=('lifted_at', 'lifted_by', 'lift_reason'))
+    return suppression
 
 
 def run_roa_lint(
@@ -243,6 +1096,13 @@ def run_roa_lint(
         rpki_models.ReconciliationSeverity.CRITICAL: 0,
     }
     finding_code_counts: dict[str, int] = {}
+    rule_family_counts: dict[str, int] = {}
+    approval_impact_counts = {
+        LINT_APPROVAL_IMPACT_INFORMATIONAL: 0,
+        LINT_APPROVAL_IMPACT_ACKNOWLEDGEMENT_REQUIRED: 0,
+        LINT_APPROVAL_IMPACT_BLOCKING: 0,
+    }
+    suppressed_finding_count = 0
 
     all_findings: list[rpki_models.ROALintFinding] = []
     for intent_result in reconciliation_run.intent_results.select_related('roa_intent').all():
@@ -253,8 +1113,15 @@ def run_roa_lint(
         all_findings.extend(_plan_lint_findings(lint_run, change_plan))
 
     for finding in all_findings:
+        rule_spec = LINT_RULE_SPECS[finding.finding_code]
+        if finding.details_json.get('suppressed'):
+            suppressed_finding_count += 1
         severity_counts[finding.severity] = severity_counts.get(finding.severity, 0) + 1
         finding_code_counts[finding.finding_code] = finding_code_counts.get(finding.finding_code, 0) + 1
+        rule_family_counts[rule_spec.family] = rule_family_counts.get(rule_spec.family, 0) + 1
+        approval_impact_counts[rule_spec.approval_impact] = approval_impact_counts.get(
+            rule_spec.approval_impact, 0
+        ) + 1
 
     lint_run.status = rpki_models.ValidationRunStatus.COMPLETED
     lint_run.completed_at = timezone.now()
@@ -264,8 +1131,15 @@ def run_roa_lint(
     lint_run.error_count = severity_counts[rpki_models.ReconciliationSeverity.ERROR]
     lint_run.critical_count = severity_counts[rpki_models.ReconciliationSeverity.CRITICAL]
     lint_run.summary_json = {
+        'summary_schema_version': LINT_SUMMARY_SCHEMA_VERSION,
         'severity_counts': severity_counts,
         'finding_code_counts': finding_code_counts,
+        'rule_family_counts': rule_family_counts,
+        'approval_impact_counts': approval_impact_counts,
+        'blocking_finding_count': approval_impact_counts[LINT_APPROVAL_IMPACT_BLOCKING],
+        'informational_finding_count': approval_impact_counts[LINT_APPROVAL_IMPACT_INFORMATIONAL],
+        'suppressed_finding_count': suppressed_finding_count,
+        'active_finding_count': len(all_findings) - suppressed_finding_count,
         'reconciliation_run_id': reconciliation_run.pk,
         'change_plan_id': getattr(change_plan, 'pk', None),
         'comparison_scope': reconciliation_run.comparison_scope,

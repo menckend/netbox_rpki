@@ -16,6 +16,7 @@ from netbox_rpki.tests.base import PluginViewTestCase
 from netbox_rpki.tests.utils import (
     create_test_asn,
     create_test_aspa,
+    create_test_aspa_change_plan,
     create_test_aspa_intent,
     create_test_aspa_provider,
     create_test_certificate,
@@ -43,6 +44,7 @@ from netbox_rpki.tests.utils import (
     create_test_manifest,
     create_test_roa,
     create_test_roa_change_plan_matrix,
+    create_test_aspa_reconciliation_run,
     create_test_roa_intent,
     create_test_roa_intent_match,
     create_test_roa_intent_override,
@@ -62,6 +64,18 @@ from netbox_rpki.tests.utils import (
 )
 from utilities.testing.utils import post_data
 from unittest.mock import patch
+
+
+def current_ack_required_finding_ids(plan):
+    lint_run = plan.lint_runs.order_by('-started_at', '-created').first()
+    if lint_run is None:
+        return []
+    return [
+        finding.pk
+        for finding in lint_run.findings.all()
+        if finding.details_json.get('approval_impact') == 'acknowledgement_required'
+        and not finding.details_json.get('suppressed')
+    ]
 
 
 class ViewRegistrySmokeTestCase(TestCase):
@@ -769,12 +783,17 @@ class OrganizationAspaReconciliationViewTestCase(PluginViewTestCase):
             customer_as=cls.customer_as,
             provider_as=cls.provider_as,
         )
+        cls.aspa_change_plan = create_test_aspa_change_plan(
+            name='Organization ASPA Change Plan',
+            organization=cls.organization,
+        )
 
     def test_organization_detail_shows_aspa_sections_and_action(self):
         self.add_permissions(
             'netbox_rpki.view_organization',
             'netbox_rpki.view_aspaintent',
             'netbox_rpki.view_aspareconciliationrun',
+            'netbox_rpki.view_aspachangeplan',
             'netbox_rpki.change_organization',
         )
 
@@ -788,7 +807,9 @@ class OrganizationAspaReconciliationViewTestCase(PluginViewTestCase):
         )
         self.assertContains(response, 'ASPA Intents')
         self.assertContains(response, 'ASPA Reconciliation Runs')
+        self.assertContains(response, 'ASPA Change Plans')
         self.assertContains(response, 'Organization ASPA Intent')
+        self.assertContains(response, 'Organization ASPA Change Plan')
 
     def test_organization_aspa_reconciliation_view_renders_confirmation(self):
         self.add_permissions('netbox_rpki.view_organization', 'netbox_rpki.change_organization')
@@ -1011,6 +1032,85 @@ class RoutingIntentReplacementViewTestCase(PluginViewTestCase):
         self.assertContains(response, 'ROA Lint Runs')
         self.assertContains(response, 'ROA Validation Simulation Runs')
 
+    def test_approve_view_denies_unresolved_blocking_lint(self):
+        url = reverse('plugins:netbox_rpki:roachangeplan_approve', kwargs={'pk': self.plan.pk})
+        self.add_permissions('netbox_rpki.view_roachangeplan', 'netbox_rpki.change_roachangeplan')
+
+        get_response = self.client.get(url)
+
+        self.assertHttpStatus(get_response, 200)
+
+        post_response = self.client.post(
+            url,
+            {
+                'confirm': True,
+            },
+        )
+
+        self.assertRedirects(post_response, self.plan.get_absolute_url())
+        self.plan.refresh_from_db()
+        self.assertEqual(self.plan.status, rpki_models.ROAChangePlanStatus.DRAFT)
+
+    def test_approve_view_supports_lint_acknowledgement(self):
+        derivation_run = derive_roa_intents(self.profile)
+        provider_snapshot = create_test_provider_snapshot(
+            name='Ack Required View Snapshot',
+            organization=self.organization,
+            provider_account=self.provider_account,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        create_test_imported_roa_authorization(
+            name='Ack Required View Imported Authorization',
+            provider_snapshot=provider_snapshot,
+            organization=self.organization,
+            prefix=create_test_prefix('10.155.99.0/24', status='active'),
+            origin_asn=create_test_asn(65592),
+            max_length=24,
+        )
+        reconciliation_run = reconcile_roa_intents(
+            derivation_run,
+            comparison_scope=rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
+            provider_snapshot=provider_snapshot,
+        )
+        plan = create_roa_change_plan(reconciliation_run, name='Ack Required View Plan')
+        ack_required_finding = plan.lint_runs.get().findings.get(finding_code='plan_withdraw_without_replacement')
+        url = reverse('plugins:netbox_rpki:roachangeplan_approve', kwargs={'pk': plan.pk})
+        self.add_permissions('netbox_rpki.view_roachangeplan', 'netbox_rpki.change_roachangeplan')
+
+        get_response = self.client.get(url)
+
+        self.assertHttpStatus(get_response, 200)
+        self.assertContains(get_response, 'Acknowledge Approval-Required Lint Findings')
+        self.assertContains(get_response, 'Plan withdraws without replacement')
+
+        post_response = self.client.post(
+            url,
+            {
+                'confirm': True,
+                'acknowledged_findings': [ack_required_finding.pk],
+                'lint_acknowledgement_notes': 'Accepted in UI test.',
+            },
+        )
+
+        self.assertRedirects(post_response, plan.get_absolute_url())
+        self.assertEqual(plan.lint_acknowledgements.count(), 1)
+
+    def test_lint_finding_detail_view_shows_operator_explanation_fields(self):
+        finding = self.plan.lint_runs.get().findings.get(finding_code='published_inconsistent_with_intent')
+        self.add_permissions('netbox_rpki.view_roalintfinding')
+
+        response = self.client.get(finding.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'Rule Label')
+        self.assertContains(response, 'Approval Impact')
+        self.assertContains(response, 'Operator Message')
+        self.assertContains(response, 'Why It Matters')
+        self.assertContains(response, 'Operator Action')
+        self.assertContains(response, 'Published ROA inconsistent with intent')
+        self.assertContains(response, 'blocking')
+        self.assertContains(response, 'replace the published authorization')
+
 
 class OperationsDashboardViewTestCase(PluginViewTestCase):
     @classmethod
@@ -1109,6 +1209,49 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
             origin_as=create_test_asn(64522),
             valid_to=date.today() + timedelta(days=75),
         )
+        cls.aspa_provider_account = create_test_provider_account(
+            name='ASPA Operations Account',
+            organization=cls.organization,
+            provider_type=rpki_models.ProviderType.KRILL,
+            org_handle='ORG-OPS-ASPA',
+            ca_handle='ops-aspa',
+        )
+        cls.aspa_snapshot = create_test_provider_snapshot(
+            name='ASPA Operations Snapshot',
+            organization=cls.organization,
+            provider_account=cls.aspa_provider_account,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        cls.aspa_reconciliation_run = create_test_aspa_reconciliation_run(
+            name='ASPA Operations Reconciliation',
+            organization=cls.organization,
+            provider_snapshot=cls.aspa_snapshot,
+            comparison_scope=rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+            result_summary_json={
+                'intent_result_types': {
+                    rpki_models.ASPAIntentResultType.MISSING_PROVIDER: 1,
+                    rpki_models.ASPAIntentResultType.STALE: 1,
+                },
+                'published_result_types': {
+                    rpki_models.PublishedASPAResultType.EXTRA_PROVIDER: 1,
+                    rpki_models.PublishedASPAResultType.ORPHANED: 1,
+                },
+            },
+        )
+        cls.aspa_change_plan = create_test_aspa_change_plan(
+            name='ASPA Operations Change Plan',
+            organization=cls.organization,
+            source_reconciliation_run=cls.aspa_reconciliation_run,
+            provider_account=cls.aspa_provider_account,
+            provider_snapshot=cls.aspa_snapshot,
+            status=rpki_models.ASPAChangePlanStatus.FAILED,
+            summary_json={
+                'replacement_count': 1,
+                'provider_add_count': 2,
+                'provider_remove_count': 1,
+            },
+        )
 
     def test_operations_dashboard_surfaces_sync_and_expiry_issues(self):
         self.add_permissions(
@@ -1119,6 +1262,8 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
             'netbox_rpki.view_certificate',
             'netbox_rpki.view_roareconciliationrun',
             'netbox_rpki.view_roachangeplan',
+            'netbox_rpki.view_aspareconciliationrun',
+            'netbox_rpki.view_aspachangeplan',
         )
         scenario = create_test_roa_change_plan_matrix(organization=self.organization)
 
@@ -1133,6 +1278,10 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
         self.assertContains(response, 'Family Coverage')
         self.assertContains(response, self.failed_comparison_snapshot.name)
         self.assertContains(response, self.failed_snapshot_diff.name)
+        self.assertContains(response, 'ASPA Reconciliation Runs Requiring Attention')
+        self.assertContains(response, self.aspa_reconciliation_run.name)
+        self.assertContains(response, 'Open ASPA Change Plans Requiring Attention')
+        self.assertContains(response, self.aspa_change_plan.name)
         self.assertContains(response, self.expiring_roa.name)
         self.assertNotContains(response, self.future_roa.name)
         self.assertContains(response, self.expiring_certificate.name)
@@ -1141,6 +1290,10 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
         self.assertContains(response, 'Expires in 14 day(s)')
         self.assertContains(response, 'Reconciliation Runs Requiring Attention')
         self.assertContains(response, 'Open ROA Change Plans Requiring Attention')
+        self.assertContains(response, 'Blocking')
+        self.assertContains(response, 'Ack Required')
+        self.assertContains(response, 'Acknowledged')
+        self.assertContains(response, 'Suppressed')
         self.assertContains(response, scenario.provider_plan.name)
 
     def test_operations_dashboard_shows_arin_roa_only_family_coverage(self):
@@ -1152,6 +1305,8 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
             'netbox_rpki.view_certificate',
             'netbox_rpki.view_roareconciliationrun',
             'netbox_rpki.view_roachangeplan',
+            'netbox_rpki.view_aspareconciliationrun',
+            'netbox_rpki.view_aspachangeplan',
         )
 
         response = self.client.get(reverse('plugins:netbox_rpki:operations_dashboard'))

@@ -10,8 +10,12 @@ from netbox_rpki import models as rpki_models
 from netbox_rpki import filtersets as filterset_module
 from netbox_rpki.api.serializers import (
     ASPAReconciliationRunActionSerializer,
+    ASPAChangePlanApproveActionSerializer,
     ProviderSnapshotCompareActionSerializer,
+    ROAChangePlanAcknowledgeActionSerializer,
     ROAChangePlanApproveActionSerializer,
+    ROALintFindingSuppressActionSerializer,
+    ROALintSuppressionLiftActionSerializer,
     SERIALIZER_CLASS_MAP,
 )
 from netbox_rpki.jobs import RunAspaReconciliationJob, RunRoutingIntentProfileJob, SyncProviderAccountJob
@@ -24,11 +28,19 @@ from netbox_rpki.services.provider_sync_diff import (
 )
 from netbox_rpki.services import (
     ProviderWriteError,
+    acknowledge_roa_lint_findings,
+    apply_aspa_change_plan_provider_write,
     apply_roa_change_plan_provider_write,
+    approve_aspa_change_plan,
     approve_roa_change_plan,
+    build_roa_change_plan_lint_posture,
+    create_aspa_change_plan,
     create_roa_change_plan,
+    preview_aspa_change_plan_provider_write,
     preview_roa_change_plan_provider_write,
+    lift_roa_lint_suppression,
     simulate_roa_change_plan,
+    suppress_roa_lint_finding,
 )
 
 
@@ -315,13 +327,66 @@ class ROAReconciliationRunViewSet(VIEWSET_CLASS_MAP['roareconciliationrun']):
         return Response(payload)
 
 
+class ASPAReconciliationRunViewSet(VIEWSET_CLASS_MAP['aspareconciliationrun']):
+    http_method_names = ['get', 'head', 'options', 'post']
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+
+        if getattr(self, 'action', None) == 'create_plan' and self.request.user.is_authenticated:
+            return self.queryset.model.objects.restrict(self.request.user, 'change')
+
+        return queryset
+
+    @action(detail=True, methods=['post'], permission_classes=[TokenWritePermission])
+    def create_plan(self, request, pk=None):
+        reconciliation_run = self.get_object()
+
+        if not request.user.has_perm('netbox_rpki.change_aspareconciliationrun', reconciliation_run):
+            raise PermissionDenied('This user does not have permission to create an ASPA change plan from this reconciliation run.')
+
+        plan = create_aspa_change_plan(reconciliation_run)
+        serializer = SERIALIZER_CLASS_MAP['aspachangeplan'](plan, context={'request': request})
+        payload = dict(serializer.data)
+        payload['item_count'] = plan.items.count()
+        return Response(payload)
+
+    @action(detail=False, methods=['get'])
+    def summary(self, request):
+        queryset = self.filter_queryset(self.get_queryset())
+        payload = {
+            'total_runs': queryset.count(),
+            'completed_runs': 0,
+            'missing_count': 0,
+            'missing_provider_count': 0,
+            'extra_provider_count': 0,
+            'orphaned_count': 0,
+            'stale_count': 0,
+        }
+        for run in queryset:
+            if run.status == rpki_models.ValidationRunStatus.COMPLETED:
+                payload['completed_runs'] += 1
+            summary = dict(run.result_summary_json or {})
+            intent_types = dict(summary.get('intent_result_types') or {})
+            published_types = dict(summary.get('published_result_types') or {})
+            payload['missing_count'] += intent_types.get(rpki_models.ASPAIntentResultType.MISSING, 0)
+            payload['missing_provider_count'] += intent_types.get(rpki_models.ASPAIntentResultType.MISSING_PROVIDER, 0)
+            payload['extra_provider_count'] += published_types.get(rpki_models.PublishedASPAResultType.EXTRA_PROVIDER, 0)
+            payload['orphaned_count'] += published_types.get(rpki_models.PublishedASPAResultType.ORPHANED, 0)
+            payload['stale_count'] += (
+                intent_types.get(rpki_models.ASPAIntentResultType.STALE, 0)
+                + published_types.get(rpki_models.PublishedASPAResultType.STALE, 0)
+            )
+        return Response(payload)
+
+
 class ROAChangePlanViewSet(VIEWSET_CLASS_MAP['roachangeplan']):
     http_method_names = ['get', 'head', 'options', 'post']
 
     def get_queryset(self):
         queryset = super().get_queryset()
 
-        if getattr(self, 'action', None) in {'preview', 'approve', 'apply', 'simulate'} and self.request.user.is_authenticated:
+        if getattr(self, 'action', None) in {'preview', 'acknowledge_findings', 'approve', 'apply', 'simulate'} and self.request.user.is_authenticated:
             return self.queryset.model.objects.restrict(self.request.user, 'change')
 
         return queryset
@@ -353,6 +418,34 @@ class ROAChangePlanViewSet(VIEWSET_CLASS_MAP['roachangeplan']):
         payload['delta'] = delta
         payload['execution'] = SERIALIZER_CLASS_MAP['providerwriteexecution'](
             execution,
+            context={'request': request},
+        ).data
+        return Response(payload)
+
+    @action(detail=True, methods=['post'], permission_classes=[TokenWritePermission])
+    def acknowledge_findings(self, request, pk=None):
+        plan = self.get_object()
+        self._require_change_permission(plan)
+        input_serializer = ROAChangePlanAcknowledgeActionSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+
+        try:
+            acknowledgements = acknowledge_roa_lint_findings(
+                plan,
+                acknowledged_by=getattr(request.user, 'username', ''),
+                ticket_reference=input_serializer.validated_data.get('ticket_reference', ''),
+                change_reference=input_serializer.validated_data.get('change_reference', ''),
+                acknowledged_finding_ids=input_serializer.validated_data['acknowledged_finding_ids'],
+                notes=input_serializer.validated_data.get('lint_acknowledgement_notes', ''),
+            )
+        except ProviderWriteError as exc:
+            raise ValidationError(str(exc)) from exc
+
+        plan.refresh_from_db()
+        payload = self._serialize_plan_payload(request, plan)
+        payload['acknowledgements'] = SERIALIZER_CLASS_MAP['roalintacknowledgement'](
+            acknowledgements,
+            many=True,
             context={'request': request},
         ).data
         return Response(payload)
@@ -425,6 +518,11 @@ class ROAChangePlanViewSet(VIEWSET_CLASS_MAP['roachangeplan']):
         simulated_plan_count = 0
         lint_warning_total = 0
         lint_error_total = 0
+        lint_blocking_total = 0
+        lint_ack_required_total = 0
+        lint_acknowledged_total = 0
+        lint_suppressed_total = 0
+        lint_status_counts: dict[str, int] = {}
         for plan in queryset.prefetch_related('simulation_runs', 'lint_runs'):
             by_status[plan.status] = by_status.get(plan.status, 0) + 1
             if plan.is_provider_backed:
@@ -437,6 +535,13 @@ class ROAChangePlanViewSet(VIEWSET_CLASS_MAP['roachangeplan']):
             if lint_run is not None:
                 lint_warning_total += lint_run.warning_count
                 lint_error_total += lint_run.error_count + lint_run.critical_count
+            lint_posture = build_roa_change_plan_lint_posture(plan)
+            lint_blocking_total += lint_posture['unresolved_blocking_finding_count']
+            lint_ack_required_total += lint_posture['unresolved_acknowledgement_required_finding_count']
+            lint_acknowledged_total += lint_posture['acknowledged_finding_count']
+            lint_suppressed_total += lint_posture['suppressed_finding_count']
+            lint_status = lint_posture['status']
+            lint_status_counts[lint_status] = lint_status_counts.get(lint_status, 0) + 1
         return Response({
             'total_plans': queryset.count(),
             'by_status': by_status,
@@ -445,6 +550,195 @@ class ROAChangePlanViewSet(VIEWSET_CLASS_MAP['roachangeplan']):
             'simulated_plan_count': simulated_plan_count,
             'lint_warning_total': lint_warning_total,
             'lint_error_total': lint_error_total,
+            'lint_blocking_total': lint_blocking_total,
+            'lint_acknowledgement_required_total': lint_ack_required_total,
+            'lint_acknowledged_total': lint_acknowledged_total,
+            'lint_suppressed_total': lint_suppressed_total,
+            'lint_status_counts': lint_status_counts,
+        })
+
+
+class ROALintFindingViewSet(VIEWSET_CLASS_MAP['roalintfinding']):
+    http_method_names = ['get', 'head', 'options', 'post']
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        if getattr(self, 'action', None) == 'suppress' and self.request.user.is_authenticated:
+            return self.queryset.model.objects.restrict(self.request.user, 'change')
+        return queryset
+
+    def _require_change_permission(self, finding):
+        if not finding.__class__.objects.restrict(self.request.user, 'change').filter(pk=finding.pk).exists():
+            raise PermissionDenied('This user does not have permission to modify this ROA lint finding.')
+
+    @action(detail=True, methods=['post'], permission_classes=[TokenWritePermission])
+    def suppress(self, request, pk=None):
+        finding = self.get_object()
+        self._require_change_permission(finding)
+        input_serializer = ROALintFindingSuppressActionSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+        suppression = suppress_roa_lint_finding(
+            finding,
+            scope_type=input_serializer.validated_data['scope_type'],
+            reason=input_serializer.validated_data['reason'],
+            created_by=getattr(request.user, 'username', ''),
+            expires_at=input_serializer.validated_data.get('expires_at'),
+            notes=input_serializer.validated_data.get('notes', ''),
+        )
+        return Response(
+            SERIALIZER_CLASS_MAP['roalintsuppression'](suppression, context={'request': request}).data
+        )
+
+
+VIEWSET_CLASS_MAP['roalintfinding'] = ROALintFindingViewSet
+globals()['ROALintFindingViewSet'] = ROALintFindingViewSet
+
+
+class ROALintSuppressionViewSet(VIEWSET_CLASS_MAP['roalintsuppression']):
+    http_method_names = ['get', 'head', 'options', 'post']
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        if getattr(self, 'action', None) == 'lift' and self.request.user.is_authenticated:
+            return self.queryset.model.objects.restrict(self.request.user, 'change')
+        return queryset
+
+    def _require_change_permission(self, suppression):
+        if not suppression.__class__.objects.restrict(self.request.user, 'change').filter(pk=suppression.pk).exists():
+            raise PermissionDenied('This user does not have permission to modify this ROA lint suppression.')
+
+    @action(detail=True, methods=['post'], permission_classes=[TokenWritePermission])
+    def lift(self, request, pk=None):
+        suppression = self.get_object()
+        self._require_change_permission(suppression)
+        input_serializer = ROALintSuppressionLiftActionSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+        suppression = lift_roa_lint_suppression(
+            suppression,
+            lifted_by=getattr(request.user, 'username', ''),
+            lift_reason=input_serializer.validated_data.get('lift_reason', ''),
+        )
+        return Response(
+            SERIALIZER_CLASS_MAP['roalintsuppression'](suppression, context={'request': request}).data
+        )
+
+
+VIEWSET_CLASS_MAP['roalintsuppression'] = ROALintSuppressionViewSet
+globals()['ROALintSuppressionViewSet'] = ROALintSuppressionViewSet
+
+
+class ASPAChangePlanViewSet(VIEWSET_CLASS_MAP['aspachangeplan']):
+    http_method_names = ['get', 'head', 'options', 'post']
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+
+        if getattr(self, 'action', None) in {'preview', 'approve', 'apply'} and self.request.user.is_authenticated:
+            return self.queryset.model.objects.restrict(self.request.user, 'change')
+
+        return queryset
+
+    def _require_change_permission(self, plan):
+        if not self.request.user.has_perm('netbox_rpki.change_aspachangeplan', plan):
+            raise PermissionDenied('This user does not have permission to execute actions on this ASPA change plan.')
+
+    def _serialize_plan_payload(self, request, plan):
+        serializer = SERIALIZER_CLASS_MAP['aspachangeplan'](plan, context={'request': request})
+        payload = dict(serializer.data)
+        payload['item_count'] = plan.items.count()
+        return payload
+
+    @action(detail=True, methods=['post'], permission_classes=[TokenWritePermission])
+    def preview(self, request, pk=None):
+        plan = self.get_object()
+        self._require_change_permission(plan)
+
+        try:
+            execution, delta = preview_aspa_change_plan_provider_write(
+                plan,
+                requested_by=getattr(request.user, 'username', ''),
+            )
+        except ProviderWriteError as exc:
+            raise ValidationError(str(exc)) from exc
+
+        payload = self._serialize_plan_payload(request, plan)
+        payload['delta'] = delta
+        payload['execution'] = SERIALIZER_CLASS_MAP['providerwriteexecution'](
+            execution,
+            context={'request': request},
+        ).data
+        return Response(payload)
+
+    @action(detail=True, methods=['post'], permission_classes=[TokenWritePermission])
+    def approve(self, request, pk=None):
+        plan = self.get_object()
+        self._require_change_permission(plan)
+        input_serializer = ASPAChangePlanApproveActionSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+
+        try:
+            plan = approve_aspa_change_plan(
+                plan,
+                approved_by=getattr(request.user, 'username', ''),
+                **input_serializer.validated_data,
+            )
+        except ProviderWriteError as exc:
+            raise ValidationError(str(exc)) from exc
+
+        payload = self._serialize_plan_payload(request, plan)
+        latest_record = plan.approval_records.order_by('-recorded_at', '-created').first()
+        if latest_record is not None:
+            payload['approval_record'] = SERIALIZER_CLASS_MAP['approvalrecord'](
+                latest_record,
+                context={'request': request},
+            ).data
+        return Response(payload)
+
+    @action(detail=True, methods=['post'], permission_classes=[TokenWritePermission])
+    def apply(self, request, pk=None):
+        plan = self.get_object()
+        self._require_change_permission(plan)
+
+        try:
+            execution, delta = apply_aspa_change_plan_provider_write(
+                plan,
+                requested_by=getattr(request.user, 'username', ''),
+            )
+        except ProviderWriteError as exc:
+            raise ValidationError(str(exc)) from exc
+
+        plan.refresh_from_db()
+        payload = self._serialize_plan_payload(request, plan)
+        payload['delta'] = delta
+        payload['execution'] = SERIALIZER_CLASS_MAP['providerwriteexecution'](
+            execution,
+            context={'request': request},
+        ).data
+        return Response(payload)
+
+    @action(detail=False, methods=['get'])
+    def summary(self, request):
+        queryset = self.filter_queryset(self.get_queryset())
+        by_status: dict[str, int] = {}
+        provider_backed_count = 0
+        replacement_count_total = 0
+        provider_add_count_total = 0
+        provider_remove_count_total = 0
+        for plan in queryset:
+            by_status[plan.status] = by_status.get(plan.status, 0) + 1
+            if plan.is_provider_backed:
+                provider_backed_count += 1
+            summary = dict(plan.summary_json or {})
+            replacement_count_total += summary.get('replacement_count', 0)
+            provider_add_count_total += summary.get('provider_add_count', 0)
+            provider_remove_count_total += summary.get('provider_remove_count', 0)
+        return Response({
+            'total_plans': queryset.count(),
+            'by_status': by_status,
+            'provider_backed_count': provider_backed_count,
+            'replacement_count_total': replacement_count_total,
+            'provider_add_count_total': provider_add_count_total,
+            'provider_remove_count_total': provider_remove_count_total,
         })
 
 
@@ -458,8 +752,12 @@ VIEWSET_CLASS_MAP['providersnapshot'] = ProviderSnapshotViewSet
 globals()['ProviderSnapshotViewSet'] = ProviderSnapshotViewSet
 VIEWSET_CLASS_MAP['roareconciliationrun'] = ROAReconciliationRunViewSet
 globals()['ROAReconciliationRunViewSet'] = ROAReconciliationRunViewSet
+VIEWSET_CLASS_MAP['aspareconciliationrun'] = ASPAReconciliationRunViewSet
+globals()['ASPAReconciliationRunViewSet'] = ASPAReconciliationRunViewSet
 VIEWSET_CLASS_MAP['roachangeplan'] = ROAChangePlanViewSet
 globals()['ROAChangePlanViewSet'] = ROAChangePlanViewSet
+VIEWSET_CLASS_MAP['aspachangeplan'] = ASPAChangePlanViewSet
+globals()['ASPAChangePlanViewSet'] = ASPAChangePlanViewSet
 
 
 __all__ = ("RootView",) + tuple(spec.api.viewset_name for spec in API_OBJECT_SPECS)

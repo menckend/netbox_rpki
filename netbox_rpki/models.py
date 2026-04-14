@@ -341,14 +341,48 @@ class ROAChangePlanItemSemantic(models.TextChoices):
     RESHAPE = "reshape", "Reshape"
 
 
+class ROALintSuppressionScope(models.TextChoices):
+    INTENT = "intent", "Intent"
+    PROFILE = "profile", "Profile"
+
+
 class ProviderWriteOperation(models.TextChoices):
     ADD_ROUTE = "add_route", "Add Route"
     REMOVE_ROUTE = "remove_route", "Remove Route"
+    ADD_PROVIDER_SET = "add_provider_set", "Add Provider Set"
+    REMOVE_PROVIDER_SET = "remove_provider_set", "Remove Provider Set"
 
 
 class ProviderWriteExecutionMode(models.TextChoices):
     PREVIEW = "preview", "Preview"
     APPLY = "apply", "Apply"
+
+
+class ProviderAspaWriteMode(models.TextChoices):
+    UNSUPPORTED = "unsupported", "Unsupported"
+    KRILL_ASPA_DELTA = "krill_aspa_delta", "Krill ASPA Delta"
+
+
+class ASPAChangePlanStatus(models.TextChoices):
+    DRAFT = "draft", "Draft"
+    APPROVED = "approved", "Approved"
+    APPLYING = "applying", "Applying"
+    APPLIED = "applied", "Applied"
+    FAILED = "failed", "Failed"
+
+
+class ASPAChangePlanAction(models.TextChoices):
+    CREATE = "create", "Create"
+    WITHDRAW = "withdraw", "Withdraw"
+
+
+class ASPAChangePlanItemSemantic(models.TextChoices):
+    CREATE = "create", "Create"
+    WITHDRAW = "withdraw", "Withdraw"
+    REPLACE = "replace", "Replace"
+    ADD_PROVIDER = "add_provider", "Add Provider"
+    REMOVE_PROVIDER = "remove_provider", "Remove Provider"
+    RESHAPE = "reshape", "Reshape"
 
 
 def validate_maintenance_window_bounds(*, start_at, end_at):
@@ -2047,6 +2081,27 @@ class RpkiProviderAccount(NamedRpkiStandardModel):
         }
 
     @property
+    def aspa_write_mode(self) -> str:
+        if self.provider_type == ProviderType.KRILL:
+            return ProviderAspaWriteMode.KRILL_ASPA_DELTA
+        return ProviderAspaWriteMode.UNSUPPORTED
+
+    @property
+    def supports_aspa_write(self) -> bool:
+        return self.aspa_write_mode != ProviderAspaWriteMode.UNSUPPORTED
+
+    @property
+    def aspa_write_capability(self) -> dict:
+        supported_actions = []
+        if self.supports_aspa_write:
+            supported_actions = [ASPAChangePlanAction.CREATE, ASPAChangePlanAction.WITHDRAW]
+        return {
+            'supports_aspa_write': self.supports_aspa_write,
+            'aspa_write_mode': self.aspa_write_mode,
+            'supported_aspa_plan_actions': supported_actions,
+        }
+
+    @property
     def sync_health_interval(self) -> timedelta:
         interval_minutes = self.sync_interval or self.DEFAULT_SYNC_HEALTH_INTERVAL_MINUTES
         return timedelta(minutes=interval_minutes)
@@ -3588,6 +3643,161 @@ class ROALintFinding(NamedRpkiStandardModel):
         return reverse("plugins:netbox_rpki:roalintfinding", args=[self.pk])
 
 
+class ROALintAcknowledgement(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='roa_lint_acknowledgements'
+    )
+    change_plan = models.ForeignKey(
+        to='ROAChangePlan',
+        on_delete=models.PROTECT,
+        related_name='lint_acknowledgements'
+    )
+    lint_run = models.ForeignKey(
+        to='ROALintRun',
+        on_delete=models.PROTECT,
+        related_name='acknowledgements'
+    )
+    finding = models.ForeignKey(
+        to='ROALintFinding',
+        on_delete=models.PROTECT,
+        related_name='acknowledgements'
+    )
+    acknowledged_by = models.CharField(max_length=150, blank=True)
+    acknowledged_at = models.DateTimeField(blank=True, null=True)
+    ticket_reference = models.CharField(max_length=200, blank=True)
+    change_reference = models.CharField(max_length=200, blank=True)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ('-acknowledged_at', '-created', 'name')
+        constraints = (
+            models.UniqueConstraint(
+                fields=('change_plan', 'finding'),
+                name='netbox_rpki_roalintack_change_plan_finding_unique',
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:roalintacknowledgement", args=[self.pk])
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self.finding_id and self.lint_run_id and self.finding.lint_run_id != self.lint_run_id:
+            errors['finding'] = 'Finding must belong to the selected lint run.'
+        if self.lint_run_id and self.change_plan_id and self.lint_run.change_plan_id != self.change_plan_id:
+            errors['lint_run'] = 'Lint run must belong to the selected change plan.'
+        if self.change_plan_id and self.organization_id and self.change_plan.organization_id != self.organization_id:
+            errors['organization'] = 'Organization must match the acknowledged change plan.'
+        if errors:
+            raise ValidationError(errors)
+
+
+class ROALintSuppression(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='roa_lint_suppressions'
+    )
+    finding_code = models.CharField(max_length=64)
+    scope_type = models.CharField(
+        max_length=16,
+        choices=ROALintSuppressionScope.choices,
+        default=ROALintSuppressionScope.INTENT,
+    )
+    intent_profile = models.ForeignKey(
+        to='RoutingIntentProfile',
+        on_delete=models.PROTECT,
+        related_name='lint_suppressions',
+        blank=True,
+        null=True,
+    )
+    roa_intent = models.ForeignKey(
+        to='ROAIntent',
+        on_delete=models.PROTECT,
+        related_name='lint_suppressions',
+        blank=True,
+        null=True,
+    )
+    reason = models.CharField(max_length=255)
+    notes = models.TextField(blank=True)
+    fact_fingerprint = models.CharField(max_length=64, blank=True, default='')
+    fact_context_json = models.JSONField(default=dict, blank=True)
+    created_by = models.CharField(max_length=150, blank=True)
+    created_at = models.DateTimeField(blank=True, null=True)
+    expires_at = models.DateTimeField(blank=True, null=True)
+    last_matched_at = models.DateTimeField(blank=True, null=True)
+    match_count = models.PositiveIntegerField(default=0)
+    lifted_by = models.CharField(max_length=150, blank=True)
+    lifted_at = models.DateTimeField(blank=True, null=True)
+    lift_reason = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ('-created_at', '-created', 'name')
+        constraints = (
+            models.CheckConstraint(
+                condition=(
+                    models.Q(scope_type=ROALintSuppressionScope.INTENT, roa_intent__isnull=False, intent_profile__isnull=True)
+                    | models.Q(scope_type=ROALintSuppressionScope.PROFILE, roa_intent__isnull=True, intent_profile__isnull=False)
+                ),
+                name='netbox_rpki_roalintsuppression_exact_scope_target',
+            ),
+            models.UniqueConstraint(
+                fields=('finding_code', 'roa_intent', 'fact_fingerprint'),
+                condition=models.Q(scope_type=ROALintSuppressionScope.INTENT, lifted_at__isnull=True),
+                name='netbox_rpki_roalintsuppression_active_intent_unique',
+            ),
+            models.UniqueConstraint(
+                fields=('finding_code', 'intent_profile', 'fact_fingerprint'),
+                condition=models.Q(scope_type=ROALintSuppressionScope.PROFILE, lifted_at__isnull=True),
+                name='netbox_rpki_roalintsuppression_active_profile_unique',
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:roalintsuppression", args=[self.pk])
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self.scope_type == ROALintSuppressionScope.INTENT:
+            if self.roa_intent_id is None:
+                errors['roa_intent'] = 'ROA intent is required for intent-scoped suppressions.'
+            if self.intent_profile_id is not None:
+                errors['intent_profile'] = 'Intent profile must be empty for intent-scoped suppressions.'
+        if self.scope_type == ROALintSuppressionScope.PROFILE:
+            if self.intent_profile_id is None:
+                errors['intent_profile'] = 'Intent profile is required for profile-scoped suppressions.'
+            if self.roa_intent_id is not None:
+                errors['roa_intent'] = 'ROA intent must be empty for profile-scoped suppressions.'
+        if self.roa_intent_id and self.organization_id and self.roa_intent.organization_id != self.organization_id:
+            errors['organization'] = 'Organization must match the suppressed ROA intent.'
+        if self.intent_profile_id and self.organization_id and self.intent_profile.organization_id != self.organization_id:
+            errors['organization'] = 'Organization must match the suppressed intent profile.'
+        if not self.fact_fingerprint:
+            errors['fact_fingerprint'] = 'A suppression must record the finding facts it applies to.'
+        if self.lifted_at is not None and not self.lifted_by:
+            errors['lifted_by'] = 'Lifted-by is required when a suppression is lifted.'
+        if errors:
+            raise ValidationError(errors)
+
+    @property
+    def is_active(self) -> bool:
+        if self.lifted_at is not None:
+            return False
+        if self.expires_at is not None and self.expires_at <= timezone.now():
+            return False
+        return True
+
+
 class ROAChangePlan(NamedRpkiStandardModel):
     organization = models.ForeignKey(
         to=Organization,
@@ -3700,6 +3910,10 @@ class ROAChangePlan(NamedRpkiStandardModel):
         return self.supports_provider_write and self.status == ROAChangePlanStatus.DRAFT
 
     @property
+    def can_acknowledge_lint(self) -> bool:
+        return self.supports_provider_write and self.status == ROAChangePlanStatus.DRAFT
+
+    @property
     def can_apply(self) -> bool:
         return self.supports_provider_write and self.status == ROAChangePlanStatus.APPROVED
 
@@ -3713,7 +3927,16 @@ class ApprovalRecord(NamedRpkiStandardModel):
     change_plan = models.ForeignKey(
         to='ROAChangePlan',
         on_delete=models.PROTECT,
-        related_name='approval_records'
+        related_name='approval_records',
+        blank=True,
+        null=True,
+    )
+    aspa_change_plan = models.ForeignKey(
+        to='ASPAChangePlan',
+        on_delete=models.PROTECT,
+        related_name='approval_records',
+        blank=True,
+        null=True,
     )
     disposition = models.CharField(
         max_length=16,
@@ -3739,6 +3962,13 @@ class ApprovalRecord(NamedRpkiStandardModel):
                 ),
                 name='netbox_rpki_approvalrecord_valid_maintenance_window',
             ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(change_plan__isnull=False, aspa_change_plan__isnull=True)
+                    | models.Q(change_plan__isnull=True, aspa_change_plan__isnull=False)
+                ),
+                name='netbox_rpki_approvalrecord_exactly_one_plan_target',
+            ),
         )
 
     def __str__(self):
@@ -3753,6 +3983,10 @@ class ApprovalRecord(NamedRpkiStandardModel):
             start_at=self.maintenance_window_start,
             end_at=self.maintenance_window_end,
         )
+
+    @property
+    def target_change_plan(self):
+        return self.change_plan or self.aspa_change_plan
 
 
 class ProviderWriteExecution(NamedRpkiStandardModel):
@@ -3776,7 +4010,16 @@ class ProviderWriteExecution(NamedRpkiStandardModel):
     change_plan = models.ForeignKey(
         to='ROAChangePlan',
         on_delete=models.PROTECT,
-        related_name='provider_write_executions'
+        related_name='provider_write_executions',
+        blank=True,
+        null=True,
+    )
+    aspa_change_plan = models.ForeignKey(
+        to='ASPAChangePlan',
+        on_delete=models.PROTECT,
+        related_name='provider_write_executions',
+        blank=True,
+        null=True,
     )
     execution_mode = models.CharField(
         max_length=16,
@@ -3811,12 +4054,159 @@ class ProviderWriteExecution(NamedRpkiStandardModel):
 
     class Meta:
         ordering = ("-started_at", "name")
+        constraints = (
+            models.CheckConstraint(
+                condition=(
+                    models.Q(change_plan__isnull=False, aspa_change_plan__isnull=True)
+                    | models.Q(change_plan__isnull=True, aspa_change_plan__isnull=False)
+                ),
+                name='netbox_rpki_providerwriteexecution_exactly_one_plan_target',
+            ),
+        )
 
     def __str__(self):
         return self.name
 
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:providerwriteexecution", args=[self.pk])
+
+    @property
+    def target_change_plan(self):
+        return self.change_plan or self.aspa_change_plan
+
+    @property
+    def object_family(self) -> str:
+        if self.aspa_change_plan_id is not None:
+            return 'aspa'
+        return 'roa'
+
+
+class ASPAChangePlan(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='aspa_change_plans'
+    )
+    source_reconciliation_run = models.ForeignKey(
+        to='ASPAReconciliationRun',
+        on_delete=models.PROTECT,
+        related_name='change_plans'
+    )
+    provider_account = models.ForeignKey(
+        to='RpkiProviderAccount',
+        on_delete=models.PROTECT,
+        related_name='aspa_change_plans',
+        blank=True,
+        null=True,
+    )
+    provider_snapshot = models.ForeignKey(
+        to='ProviderSnapshot',
+        on_delete=models.PROTECT,
+        related_name='aspa_change_plans',
+        blank=True,
+        null=True,
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=ASPAChangePlanStatus.choices,
+        default=ASPAChangePlanStatus.DRAFT,
+    )
+    ticket_reference = models.CharField(max_length=200, blank=True)
+    change_reference = models.CharField(max_length=200, blank=True)
+    maintenance_window_start = models.DateTimeField(blank=True, null=True)
+    maintenance_window_end = models.DateTimeField(blank=True, null=True)
+    approved_at = models.DateTimeField(blank=True, null=True)
+    approved_by = models.CharField(max_length=150, blank=True)
+    apply_started_at = models.DateTimeField(blank=True, null=True)
+    apply_requested_by = models.CharField(max_length=150, blank=True)
+    applied_at = models.DateTimeField(blank=True, null=True)
+    failed_at = models.DateTimeField(blank=True, null=True)
+    summary_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("-created", "name")
+        constraints = (
+            models.CheckConstraint(
+                condition=(
+                    models.Q(maintenance_window_start__isnull=True)
+                    | models.Q(maintenance_window_end__isnull=True)
+                    | models.Q(maintenance_window_end__gte=models.F('maintenance_window_start'))
+                ),
+                name='netbox_rpki_aspachangeplan_valid_maintenance_window',
+            ),
+        )
+        indexes = (
+            models.Index(fields=('organization', 'status'), name='nb_rpki_acp_org_status_idx'),
+            models.Index(fields=('provider_account', 'status'), name='nb_rpki_acp_prv_status_idx'),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:aspachangeplan", args=[self.pk])
+
+    def clean(self):
+        super().clean()
+        validate_maintenance_window_bounds(
+            start_at=self.maintenance_window_start,
+            end_at=self.maintenance_window_end,
+        )
+        if self.provider_snapshot_id is not None and self.provider_account_id is None:
+            raise ValidationError({'provider_account': 'Provider account is required when provider snapshot is set.'})
+        if (
+            self.provider_snapshot_id is not None
+            and self.provider_account_id is not None
+            and self.provider_snapshot.provider_account_id != self.provider_account_id
+        ):
+            raise ValidationError({'provider_snapshot': 'Provider snapshot must belong to the selected provider account.'})
+
+    @property
+    def has_governance_metadata(self) -> bool:
+        return any(
+            (
+                self.ticket_reference,
+                self.change_reference,
+                self.maintenance_window_start,
+                self.maintenance_window_end,
+            )
+        )
+
+    def get_governance_metadata(self) -> dict[str, str]:
+        metadata = {}
+        if self.ticket_reference:
+            metadata['ticket_reference'] = self.ticket_reference
+        if self.change_reference:
+            metadata['change_reference'] = self.change_reference
+        if self.maintenance_window_start is not None:
+            metadata['maintenance_window_start'] = self.maintenance_window_start.isoformat()
+        if self.maintenance_window_end is not None:
+            metadata['maintenance_window_end'] = self.maintenance_window_end.isoformat()
+        return metadata
+
+    @property
+    def is_provider_backed(self) -> bool:
+        return self.provider_account_id is not None and self.provider_snapshot_id is not None
+
+    @property
+    def supports_provider_write(self) -> bool:
+        return self.is_provider_backed and self.provider_account.supports_aspa_write
+
+    @property
+    def can_preview(self) -> bool:
+        return self.supports_provider_write and self.status in {
+            ASPAChangePlanStatus.DRAFT,
+            ASPAChangePlanStatus.APPROVED,
+            ASPAChangePlanStatus.FAILED,
+        }
+
+    @property
+    def can_approve(self) -> bool:
+        return self.supports_provider_write and self.status == ASPAChangePlanStatus.DRAFT
+
+    @property
+    def can_apply(self) -> bool:
+        return self.supports_provider_write and self.status == ASPAChangePlanStatus.APPROVED
 
 
 class ROAChangePlanItem(NamedRpkiStandardModel):
@@ -3875,6 +4265,74 @@ class ROAChangePlanItem(NamedRpkiStandardModel):
 
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:roachangeplanitem", args=[self.pk])
+
+
+class ASPAChangePlanItem(NamedRpkiStandardModel):
+    change_plan = models.ForeignKey(
+        to='ASPAChangePlan',
+        on_delete=models.PROTECT,
+        related_name='items'
+    )
+    action_type = models.CharField(
+        max_length=16,
+        choices=ASPAChangePlanAction.choices,
+    )
+    plan_semantic = models.CharField(
+        max_length=24,
+        choices=ASPAChangePlanItemSemantic.choices,
+        blank=True,
+        null=True,
+    )
+    aspa_intent = models.ForeignKey(
+        to='ASPAIntent',
+        on_delete=models.PROTECT,
+        related_name='change_plan_items',
+        blank=True,
+        null=True
+    )
+    aspa = models.ForeignKey(
+        to='ASPA',
+        on_delete=models.PROTECT,
+        related_name='change_plan_items',
+        blank=True,
+        null=True
+    )
+    imported_aspa = models.ForeignKey(
+        to='ImportedAspa',
+        on_delete=models.PROTECT,
+        related_name='change_plan_items',
+        blank=True,
+        null=True
+    )
+    provider_operation = models.CharField(
+        max_length=32,
+        choices=ProviderWriteOperation.choices,
+        blank=True,
+    )
+    provider_payload_json = models.JSONField(default=dict, blank=True)
+    before_state_json = models.JSONField(default=dict, blank=True)
+    after_state_json = models.JSONField(default=dict, blank=True)
+    reason = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ("name",)
+        indexes = (
+            models.Index(fields=('change_plan', 'action_type'), name='nb_rpki_acpi_plan_action_idx'),
+            models.Index(fields=('change_plan', 'plan_semantic'), name='nb_rpki_acpi_plan_sem_idx'),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:aspachangeplanitem", args=[self.pk])
+
+    def clean(self):
+        super().clean()
+        if not any((self.aspa_intent_id, self.aspa_id, self.imported_aspa_id)):
+            raise ValidationError(
+                'ASPA change plan items must reference at least one related intent or published object.'
+            )
 
 
 class ROAValidationSimulationRun(NamedRpkiStandardModel):

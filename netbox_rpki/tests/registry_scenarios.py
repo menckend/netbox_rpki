@@ -25,6 +25,8 @@ from netbox_rpki.object_registry import (
 from netbox_rpki.tests.utils import (
     create_test_asn,
     create_test_aspa,
+    create_test_aspa_change_plan,
+    create_test_aspa_change_plan_item,
     create_test_aspa_provider,
     create_test_aspa_intent,
     create_test_aspa_intent_match,
@@ -48,8 +50,10 @@ from netbox_rpki.tests.utils import (
     create_test_imported_aspa,
     create_test_imported_aspa_provider,
     create_test_provider_write_execution,
+    create_test_roa_lint_acknowledgement,
     create_test_roa_lint_run,
     create_test_roa_lint_finding,
+    create_test_roa_lint_suppression,
     create_test_publication_point,
     create_test_published_aspa_result,
     create_test_provider_sync_run,
@@ -571,6 +575,12 @@ def _register_scenario_builders() -> None:
             "aspareconciliationrun": lambda: create_test_aspa_reconciliation_run(name=f"ASPA Reconciliation Run {unique_token('aspa-reconciliation-run')}"),
             "roaintentresult": lambda: create_test_roa_intent_result(name=f"ROA Intent Result {unique_token('roa-intent-result')}"),
             "roalintfinding": lambda: create_test_roa_lint_finding(name=f"ROA Lint Finding {unique_token('roa-lint-finding')}"),
+            "roalintacknowledgement": lambda: create_test_roa_lint_acknowledgement(
+                name=f"ROA Lint Acknowledgement {unique_token('roa-lint-ack')}"
+            ),
+            "roalintsuppression": lambda: create_test_roa_lint_suppression(
+                name=f"ROA Lint Suppression {unique_token('roa-lint-suppression')}"
+            ),
             "aspaintentresult": lambda: create_test_aspa_intent_result(name=f"ASPA Intent Result {unique_token('aspa-intent-result')}"),
             "publishedroaresult": lambda: create_test_published_roa_result(name=f"Published ROA Result {unique_token('published-roa-result')}"),
             "publishedasparesult": lambda: create_test_published_aspa_result(name=f"Published ASPA Result {unique_token('published-aspa-result')}"),
@@ -627,6 +637,12 @@ def _register_scenario_builders() -> None:
             ),
             "roachangeplan": lambda: build_roa_change_plan_matrix_instance(),
             "roachangeplanitem": lambda: build_roa_change_plan_matrix_item_instance(),
+            "aspachangeplan": lambda: create_test_aspa_change_plan(
+                name=f"ASPA Change Plan {unique_token('aspa-change-plan')}"
+            ),
+            "aspachangeplanitem": lambda: create_test_aspa_change_plan_item(
+                name=f"ASPA Change Plan Item {unique_token('aspa-change-plan-item')}"
+            ),
             "roavalidationsimulationrun": lambda: create_test_roa_validation_simulation_run(
                 name=f"ROA Validation Simulation Run {unique_token('roa-validation-simulation-run')}"
             ),

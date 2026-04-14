@@ -8,7 +8,8 @@ from django.utils import timezone
 
 from netbox_rpki import models as rpki_models
 from netbox_rpki.services.provider_sync import sync_provider_account
-from netbox_rpki.services.provider_sync_krill import krill_routes_url, krill_ssl_context
+from netbox_rpki.services.provider_sync_krill import krill_aspas_url, krill_routes_url, krill_ssl_context
+from netbox_rpki.services.roa_lint import build_roa_change_plan_lint_posture, refresh_roa_change_plan_lint_posture
 
 
 class ProviderWriteError(ValueError):
@@ -35,6 +36,14 @@ def _route_sort_key(payload: dict) -> tuple:
     )
 
 
+def _aspa_delta_sort_key(payload: dict) -> tuple:
+    return (
+        -1 if payload.get('customer_asn') is None else int(payload['customer_asn']),
+        tuple(int(value) for value in (payload.get('provider_asns') or [])),
+        str(payload.get('comment') or ''),
+    )
+
+
 def _normalize_plan(plan: rpki_models.ROAChangePlan | int) -> rpki_models.ROAChangePlan:
     if isinstance(plan, rpki_models.ROAChangePlan):
         return plan
@@ -43,6 +52,22 @@ def _normalize_plan(plan: rpki_models.ROAChangePlan | int) -> rpki_models.ROACha
         'provider_account',
         'provider_snapshot',
     ).get(pk=plan)
+
+
+def _normalize_aspa_plan(plan: rpki_models.ASPAChangePlan | int) -> rpki_models.ASPAChangePlan:
+    if isinstance(plan, rpki_models.ASPAChangePlan):
+        return plan
+    return rpki_models.ASPAChangePlan.objects.select_related(
+        'organization',
+        'provider_account',
+        'provider_snapshot',
+    ).get(pk=plan)
+
+
+def _plan_family(plan) -> str:
+    if isinstance(plan, rpki_models.ASPAChangePlan):
+        return 'ASPA'
+    return 'ROA'
 
 
 def _require_provider_write_capability(plan: rpki_models.ROAChangePlan) -> rpki_models.RpkiProviderAccount:
@@ -66,6 +91,27 @@ def _require_provider_write_capability(plan: rpki_models.ROAChangePlan) -> rpki_
     return provider_account
 
 
+def _require_aspa_provider_write_capability(plan: rpki_models.ASPAChangePlan) -> rpki_models.RpkiProviderAccount:
+    if not plan.is_provider_backed:
+        raise ProviderWriteError('This ASPA change plan is not provider-backed.')
+
+    provider_account = plan.provider_account
+    if provider_account is None:
+        raise ProviderWriteError('This ASPA change plan does not target a provider account.')
+
+    if not provider_account.supports_aspa_write:
+        raise ProviderWriteError(
+            f'Provider account {provider_account.name} does not support ASPA write operations.'
+        )
+
+    if provider_account.provider_type != rpki_models.ProviderType.KRILL:
+        raise ProviderWriteError(
+            f'Provider type {provider_account.provider_type} is not supported for ASPA write operations.'
+        )
+
+    return provider_account
+
+
 def _require_previewable(plan: rpki_models.ROAChangePlan) -> rpki_models.RpkiProviderAccount:
     provider_account = _require_provider_write_capability(plan)
     if plan.status not in {
@@ -77,10 +123,27 @@ def _require_previewable(plan: rpki_models.ROAChangePlan) -> rpki_models.RpkiPro
     return provider_account
 
 
+def _require_aspa_previewable(plan: rpki_models.ASPAChangePlan) -> rpki_models.RpkiProviderAccount:
+    provider_account = _require_aspa_provider_write_capability(plan)
+    if plan.status not in {
+        rpki_models.ASPAChangePlanStatus.DRAFT,
+        rpki_models.ASPAChangePlanStatus.APPROVED,
+        rpki_models.ASPAChangePlanStatus.FAILED,
+    }:
+        raise ProviderWriteError('ASPA change plans can only be previewed while draft, approved, or failed.')
+    return provider_account
+
+
 def _require_approvable(plan: rpki_models.ROAChangePlan) -> None:
     _require_provider_write_capability(plan)
     if plan.status != rpki_models.ROAChangePlanStatus.DRAFT:
         raise ProviderWriteError('Only draft ROA change plans can be approved.')
+
+
+def _require_aspa_approvable(plan: rpki_models.ASPAChangePlan) -> None:
+    _require_aspa_provider_write_capability(plan)
+    if plan.status != rpki_models.ASPAChangePlanStatus.DRAFT:
+        raise ProviderWriteError('Only draft ASPA change plans can be approved.')
 
 
 def _require_applicable(plan: rpki_models.ROAChangePlan) -> rpki_models.RpkiProviderAccount:
@@ -91,6 +154,17 @@ def _require_applicable(plan: rpki_models.ROAChangePlan) -> rpki_models.RpkiProv
         raise ProviderWriteError('This ROA change plan is already being applied.')
     if plan.status != rpki_models.ROAChangePlanStatus.APPROVED:
         raise ProviderWriteError('ROA change plans must be approved before they can be applied.')
+    return provider_account
+
+
+def _require_aspa_applicable(plan: rpki_models.ASPAChangePlan) -> rpki_models.RpkiProviderAccount:
+    provider_account = _require_aspa_provider_write_capability(plan)
+    if plan.status == rpki_models.ASPAChangePlanStatus.APPLIED:
+        raise ProviderWriteError('This ASPA change plan has already been applied.')
+    if plan.status == rpki_models.ASPAChangePlanStatus.APPLYING:
+        raise ProviderWriteError('This ASPA change plan is already being applied.')
+    if plan.status != rpki_models.ASPAChangePlanStatus.APPROVED:
+        raise ProviderWriteError('ASPA change plans must be approved before they can be applied.')
     return provider_account
 
 
@@ -116,12 +190,154 @@ def build_roa_change_plan_delta(
     }
 
 
-def _get_plan_governance_metadata(plan: rpki_models.ROAChangePlan) -> dict[str, str]:
+def build_aspa_change_plan_delta(
+    plan: rpki_models.ASPAChangePlan | int,
+) -> dict[str, list[dict]]:
+    plan = _normalize_aspa_plan(plan)
+    _require_aspa_provider_write_capability(plan)
+
+    added = []
+    removed = []
+    items = plan.items.exclude(provider_operation='').order_by('pk')
+    for item in items:
+        payload = dict(item.provider_payload_json or {})
+        if item.provider_operation == rpki_models.ProviderWriteOperation.ADD_PROVIDER_SET:
+            if item.plan_semantic in {
+                rpki_models.ASPAChangePlanItemSemantic.CREATE,
+                rpki_models.ASPAChangePlanItemSemantic.REPLACE,
+                rpki_models.ASPAChangePlanItemSemantic.RESHAPE,
+            }:
+                added.append(payload)
+        elif item.provider_operation == rpki_models.ProviderWriteOperation.REMOVE_PROVIDER_SET:
+            if item.plan_semantic in {
+                rpki_models.ASPAChangePlanItemSemantic.WITHDRAW,
+                rpki_models.ASPAChangePlanItemSemantic.REMOVE_PROVIDER,
+            }:
+                removed.append(payload)
+
+    return {
+        'added': sorted(added, key=_aspa_delta_sort_key),
+        'removed': sorted(removed, key=_aspa_delta_sort_key),
+    }
+
+
+def _get_plan_governance_metadata(plan) -> dict[str, str]:
     return plan.get_governance_metadata()
 
 
-def _build_approval_record_name(plan: rpki_models.ROAChangePlan, approved_at) -> str:
+def _build_approval_record_name(plan, approved_at) -> str:
     return f'{plan.name} Approval {approved_at:%Y-%m-%d %H:%M:%S}'
+
+
+def _create_approval_record_for_plan(
+    *,
+    plan,
+    approved_by: str,
+    approved_at,
+    ticket_reference: str,
+    change_reference: str,
+    maintenance_window_start,
+    maintenance_window_end,
+    approval_notes: str,
+) -> rpki_models.ApprovalRecord:
+    payload = {
+        'name': _build_approval_record_name(plan, approved_at),
+        'organization': plan.organization,
+        'tenant': plan.tenant,
+        'disposition': rpki_models.ValidationDisposition.ACCEPTED,
+        'recorded_by': approved_by,
+        'recorded_at': approved_at,
+        'ticket_reference': ticket_reference,
+        'change_reference': change_reference,
+        'maintenance_window_start': maintenance_window_start,
+        'maintenance_window_end': maintenance_window_end,
+        'notes': approval_notes,
+    }
+    if isinstance(plan, rpki_models.ASPAChangePlan):
+        payload['aspa_change_plan'] = plan
+    else:
+        payload['change_plan'] = plan
+    approval_record = rpki_models.ApprovalRecord(**payload)
+    approval_record.full_clean(validate_unique=False)
+    approval_record.save()
+    return approval_record
+
+
+def _create_lint_acknowledgements_for_plan(
+    *,
+    plan: rpki_models.ROAChangePlan,
+    acknowledged_finding_ids: list[int],
+    acknowledged_by: str,
+    acknowledged_at,
+    notes: str,
+    ticket_reference: str,
+    change_reference: str,
+) -> list[rpki_models.ROALintAcknowledgement]:
+    if not acknowledged_finding_ids:
+        return []
+    lint_run = plan.lint_runs.order_by('-started_at', '-created').first()
+    if lint_run is None:
+        raise ProviderWriteError('This ROA change plan has no lint run to acknowledge findings against.')
+
+    findings = list(lint_run.findings.filter(pk__in=acknowledged_finding_ids))
+    if len(findings) != len(set(acknowledged_finding_ids)):
+        raise ProviderWriteError('One or more acknowledged lint findings do not belong to the latest lint run for this change plan.')
+
+    acknowledgements = []
+    for finding in findings:
+        if finding.details_json.get('suppressed'):
+            raise ProviderWriteError(f'Lint finding {finding.pk} is suppressed and does not need acknowledgement.')
+        if finding.details_json.get('approval_impact') != 'acknowledgement_required':
+            raise ProviderWriteError(
+                f'Lint finding {finding.pk} is not acknowledgement-required and cannot be acknowledged here.'
+            )
+        acknowledgement, _ = rpki_models.ROALintAcknowledgement.objects.get_or_create(
+            change_plan=plan,
+            finding=finding,
+            defaults={
+                'name': f'Lint Ack {finding.pk} for Plan {plan.pk}',
+                'organization': plan.organization,
+                'tenant': plan.tenant,
+                'lint_run': lint_run,
+                'acknowledged_by': acknowledged_by,
+                'acknowledged_at': acknowledged_at,
+                'ticket_reference': ticket_reference,
+                'change_reference': change_reference,
+                'notes': notes,
+            },
+        )
+        acknowledgements.append(acknowledgement)
+    return acknowledgements
+
+
+def acknowledge_roa_lint_findings(
+    plan: rpki_models.ROAChangePlan | int,
+    *,
+    acknowledged_finding_ids: list[int] | None = None,
+    acknowledged_by: str = '',
+    ticket_reference: str = '',
+    change_reference: str = '',
+    notes: str = '',
+) -> list[rpki_models.ROALintAcknowledgement]:
+    plan = _normalize_plan(plan)
+    _require_approvable(plan)
+    acknowledged_finding_ids = acknowledged_finding_ids or []
+    if not acknowledged_finding_ids:
+        raise ProviderWriteError('Select at least one current blocking lint finding to acknowledge.')
+
+    acknowledged_at = timezone.now()
+    with transaction.atomic():
+        acknowledgements = _create_lint_acknowledgements_for_plan(
+            plan=plan,
+            acknowledged_finding_ids=acknowledged_finding_ids,
+            acknowledged_by=acknowledged_by,
+            acknowledged_at=acknowledged_at,
+            notes=notes,
+            ticket_reference=ticket_reference,
+            change_reference=change_reference,
+        )
+        refresh_roa_change_plan_lint_posture(plan)
+    return acknowledgements
 
 
 def approve_roa_change_plan(
@@ -133,9 +349,26 @@ def approve_roa_change_plan(
     maintenance_window_start=None,
     maintenance_window_end=None,
     approval_notes: str = '',
+    acknowledged_finding_ids: list[int] | None = None,
+    lint_acknowledgement_notes: str = '',
 ) -> rpki_models.ROAChangePlan:
     plan = _normalize_plan(plan)
     _require_approvable(plan)
+    acknowledged_finding_ids = acknowledged_finding_ids or []
+    posture = build_roa_change_plan_lint_posture(
+        plan,
+        acknowledged_finding_ids=acknowledged_finding_ids,
+    )
+    if not posture['has_lint_run']:
+        raise ProviderWriteError('This ROA change plan cannot be approved until a lint run has been recorded.')
+    if posture['unresolved_blocking_finding_count'] > 0:
+        raise ProviderWriteError(
+            f'This ROA change plan has {posture["unresolved_blocking_finding_count"]} unresolved blocking lint finding(s).'
+        )
+    if posture['unresolved_acknowledgement_required_finding_count'] > 0:
+        raise ProviderWriteError(
+            'This ROA change plan has acknowledgement-required lint findings that must be acknowledged before approval.'
+        )
 
     approved_at = timezone.now()
     with transaction.atomic():
@@ -156,28 +389,77 @@ def approve_roa_change_plan(
             'approved_at',
             'approved_by',
         ))
-        approval_record = rpki_models.ApprovalRecord(
-            name=_build_approval_record_name(plan, approved_at),
-            organization=plan.organization,
-            change_plan=plan,
-            tenant=plan.tenant,
-            disposition=rpki_models.ValidationDisposition.ACCEPTED,
-            recorded_by=approved_by,
-            recorded_at=approved_at,
+        _create_approval_record_for_plan(
+            plan=plan,
+            approved_by=approved_by,
+            approved_at=approved_at,
             ticket_reference=ticket_reference,
             change_reference=change_reference,
             maintenance_window_start=maintenance_window_start,
             maintenance_window_end=maintenance_window_end,
-            notes=approval_notes,
+            approval_notes=approval_notes,
         )
-        approval_record.full_clean(validate_unique=False)
-        approval_record.save()
+        _create_lint_acknowledgements_for_plan(
+            plan=plan,
+            acknowledged_finding_ids=acknowledged_finding_ids,
+            acknowledged_by=approved_by,
+            acknowledged_at=approved_at,
+            notes=lint_acknowledgement_notes,
+            ticket_reference=ticket_reference,
+            change_reference=change_reference,
+        )
+        refresh_roa_change_plan_lint_posture(plan)
+    return plan
+
+
+def approve_aspa_change_plan(
+    plan: rpki_models.ASPAChangePlan | int,
+    *,
+    approved_by: str = '',
+    ticket_reference: str = '',
+    change_reference: str = '',
+    maintenance_window_start=None,
+    maintenance_window_end=None,
+    approval_notes: str = '',
+) -> rpki_models.ASPAChangePlan:
+    plan = _normalize_aspa_plan(plan)
+    _require_aspa_approvable(plan)
+
+    approved_at = timezone.now()
+    with transaction.atomic():
+        plan.status = rpki_models.ASPAChangePlanStatus.APPROVED
+        plan.ticket_reference = ticket_reference
+        plan.change_reference = change_reference
+        plan.maintenance_window_start = maintenance_window_start
+        plan.maintenance_window_end = maintenance_window_end
+        plan.approved_at = approved_at
+        plan.approved_by = approved_by
+        plan.full_clean(validate_unique=False)
+        plan.save(update_fields=(
+            'status',
+            'ticket_reference',
+            'change_reference',
+            'maintenance_window_start',
+            'maintenance_window_end',
+            'approved_at',
+            'approved_by',
+        ))
+        _create_approval_record_for_plan(
+            plan=plan,
+            approved_by=approved_by,
+            approved_at=approved_at,
+            ticket_reference=ticket_reference,
+            change_reference=change_reference,
+            maintenance_window_start=maintenance_window_start,
+            maintenance_window_end=maintenance_window_end,
+            approval_notes=approval_notes,
+        )
     return plan
 
 
 def _create_execution(
     *,
-    plan: rpki_models.ROAChangePlan,
+    plan,
     provider_account: rpki_models.RpkiProviderAccount,
     execution_mode: str,
     requested_by: str,
@@ -191,25 +473,29 @@ def _create_execution(
     followup_sync_run: rpki_models.ProviderSyncRun | None = None,
     followup_provider_snapshot: rpki_models.ProviderSnapshot | None = None,
 ) -> rpki_models.ProviderWriteExecution:
-    return rpki_models.ProviderWriteExecution.objects.create(
-        name=f'{plan.name} {execution_mode.title()} {started_at:%Y-%m-%d %H:%M:%S}',
-        organization=plan.organization,
-        provider_account=provider_account,
-        provider_snapshot=plan.provider_snapshot,
-        change_plan=plan,
-        tenant=plan.tenant,
-        execution_mode=execution_mode,
-        status=status,
-        requested_by=requested_by,
-        started_at=started_at,
-        completed_at=completed_at,
-        item_count=item_count,
-        request_payload_json=request_payload_json or {},
-        response_payload_json=response_payload_json or {},
-        error=error,
-        followup_sync_run=followup_sync_run,
-        followup_provider_snapshot=followup_provider_snapshot,
-    )
+    payload = {
+        'name': f'{plan.name} {execution_mode.title()} {started_at:%Y-%m-%d %H:%M:%S}',
+        'organization': plan.organization,
+        'provider_account': provider_account,
+        'provider_snapshot': plan.provider_snapshot,
+        'tenant': plan.tenant,
+        'execution_mode': execution_mode,
+        'status': status,
+        'requested_by': requested_by,
+        'started_at': started_at,
+        'completed_at': completed_at,
+        'item_count': item_count,
+        'request_payload_json': request_payload_json or {},
+        'response_payload_json': response_payload_json or {},
+        'error': error,
+        'followup_sync_run': followup_sync_run,
+        'followup_provider_snapshot': followup_provider_snapshot,
+    }
+    if isinstance(plan, rpki_models.ASPAChangePlan):
+        payload['aspa_change_plan'] = plan
+    else:
+        payload['change_plan'] = plan
+    return rpki_models.ProviderWriteExecution.objects.create(**payload)
 
 
 def preview_roa_change_plan_provider_write(
@@ -240,12 +526,42 @@ def preview_roa_change_plan_provider_write(
     return execution, delta
 
 
-def _submit_krill_route_delta(
+def preview_aspa_change_plan_provider_write(
+    plan: rpki_models.ASPAChangePlan | int,
+    *,
+    requested_by: str = '',
+) -> tuple[rpki_models.ProviderWriteExecution, dict[str, list[dict]]]:
+    plan = _normalize_aspa_plan(plan)
+    provider_account = _require_aspa_previewable(plan)
+    delta = build_aspa_change_plan_delta(plan)
+    started_at = timezone.now()
+    execution = _create_execution(
+        plan=plan,
+        provider_account=provider_account,
+        execution_mode=rpki_models.ProviderWriteExecutionMode.PREVIEW,
+        requested_by=requested_by,
+        status=rpki_models.ValidationRunStatus.COMPLETED,
+        started_at=started_at,
+        completed_at=started_at,
+        item_count=sum(len(values) for values in delta.values()),
+        request_payload_json=delta,
+        response_payload_json={
+            'preview_only': True,
+            'aspa_write_mode': provider_account.aspa_write_mode,
+            'governance': _get_plan_governance_metadata(plan),
+        },
+    )
+    return execution, delta
+
+
+def _submit_krill_json_delta(
+    *,
     provider_account: rpki_models.RpkiProviderAccount,
-    delta: dict[str, list[dict]],
+    url: str,
+    delta: dict,
 ) -> dict:
     request = Request(
-        krill_routes_url(provider_account),
+        url,
         data=json.dumps(delta).encode('utf-8'),
         headers={
             'Accept': 'application/json',
@@ -273,6 +589,48 @@ def _submit_krill_route_delta(
     if isinstance(payload, dict):
         return payload
     return {'raw': payload}
+
+
+def _submit_krill_route_delta(
+    provider_account: rpki_models.RpkiProviderAccount,
+    delta: dict[str, list[dict]],
+) -> dict:
+    return _submit_krill_json_delta(
+        provider_account=provider_account,
+        url=krill_routes_url(provider_account),
+        delta=delta,
+    )
+
+
+def _serialize_krill_aspa_delta(delta: dict[str, list[dict]]) -> dict[str, list[dict]]:
+    def _serialize_entries(entries: list[dict]) -> list[dict]:
+        serialized = []
+        for entry in entries:
+            customer_asn = entry.get('customer_asn')
+            provider_asns = list(entry.get('provider_asns') or [])
+            serialized.append(
+                {
+                    'customer': f'AS{customer_asn}' if customer_asn is not None else '',
+                    'providers': [f'AS{provider_asn}' for provider_asn in provider_asns],
+                }
+            )
+        return serialized
+
+    return {
+        'add': _serialize_entries(delta.get('added', [])),
+        'remove': _serialize_entries(delta.get('removed', [])),
+    }
+
+
+def _submit_krill_aspa_delta(
+    provider_account: rpki_models.RpkiProviderAccount,
+    delta: dict[str, list[dict]],
+) -> dict:
+    return _submit_krill_json_delta(
+        provider_account=provider_account,
+        url=krill_aspas_url(provider_account),
+        delta=_serialize_krill_aspa_delta(delta),
+    )
 
 
 def apply_roa_change_plan_provider_write(
@@ -358,6 +716,102 @@ def apply_roa_change_plan_provider_write(
         execution.error = str(exc)
         execution.response_payload_json = {
             'roa_write_mode': provider_account.roa_write_mode,
+            'governance': _get_plan_governance_metadata(plan),
+        }
+        execution.save(update_fields=('status', 'completed_at', 'error', 'response_payload_json'))
+        raise ProviderWriteError(str(exc)) from exc
+
+
+def apply_aspa_change_plan_provider_write(
+    plan: rpki_models.ASPAChangePlan | int,
+    *,
+    requested_by: str = '',
+) -> tuple[rpki_models.ProviderWriteExecution, dict[str, list[dict]]]:
+    plan = _normalize_aspa_plan(plan)
+    provider_account = _require_aspa_applicable(plan)
+    delta = build_aspa_change_plan_delta(plan)
+    started_at = timezone.now()
+    plan.status = rpki_models.ASPAChangePlanStatus.APPLYING
+    plan.apply_started_at = started_at
+    plan.apply_requested_by = requested_by
+    plan.failed_at = None
+    plan.save(update_fields=('status', 'apply_started_at', 'apply_requested_by', 'failed_at'))
+    execution = _create_execution(
+        plan=plan,
+        provider_account=provider_account,
+        execution_mode=rpki_models.ProviderWriteExecutionMode.APPLY,
+        requested_by=requested_by,
+        status=rpki_models.ValidationRunStatus.RUNNING,
+        started_at=started_at,
+        item_count=sum(len(values) for values in delta.values()),
+        request_payload_json=delta,
+    )
+
+    try:
+        provider_response = _submit_krill_aspa_delta(provider_account, delta)
+        applied_at = timezone.now()
+        plan.status = rpki_models.ASPAChangePlanStatus.APPLIED
+        plan.applied_at = applied_at
+        plan.save(update_fields=('status', 'applied_at'))
+
+        response_payload_json = {
+            'provider_response': provider_response,
+            'aspa_write_mode': provider_account.aspa_write_mode,
+            'governance': _get_plan_governance_metadata(plan),
+            'delta_summary': {
+                'customer_count': len(delta.get('added', [])) + len(delta.get('removed', [])),
+                'create_count': len(delta.get('added', [])),
+                'withdraw_count': len(delta.get('removed', [])),
+                'provider_add_count': sum(len(entry.get('provider_asns') or []) for entry in delta.get('added', [])),
+                'provider_remove_count': sum(len(entry.get('provider_asns') or []) for entry in delta.get('removed', [])),
+            },
+        }
+        followup_sync_run = None
+        followup_snapshot = None
+        try:
+            followup_sync_run, followup_snapshot = sync_provider_account(
+                provider_account,
+                snapshot_name=(
+                    f'{provider_account.name} Post-ASPA-Apply Snapshot {applied_at:%Y-%m-%d %H:%M:%S}'
+                ),
+            )
+            response_payload_json['followup_sync'] = {
+                'provider_sync_run_id': followup_sync_run.pk,
+                'provider_snapshot_id': followup_snapshot.pk,
+                'status': followup_sync_run.status,
+            }
+            execution.status = rpki_models.ValidationRunStatus.COMPLETED
+        except Exception as exc:
+            response_payload_json['followup_sync'] = {
+                'status': rpki_models.ValidationRunStatus.FAILED,
+                'error': str(exc),
+            }
+            execution.status = rpki_models.ValidationRunStatus.FAILED
+            execution.error = str(exc)
+
+        execution.completed_at = timezone.now()
+        execution.response_payload_json = response_payload_json
+        execution.followup_sync_run = followup_sync_run
+        execution.followup_provider_snapshot = followup_snapshot
+        execution.save(update_fields=(
+            'status',
+            'completed_at',
+            'response_payload_json',
+            'error',
+            'followup_sync_run',
+            'followup_provider_snapshot',
+        ))
+        return execution, delta
+    except Exception as exc:
+        completed_at = timezone.now()
+        plan.status = rpki_models.ASPAChangePlanStatus.FAILED
+        plan.failed_at = completed_at
+        plan.save(update_fields=('status', 'failed_at'))
+        execution.status = rpki_models.ValidationRunStatus.FAILED
+        execution.completed_at = completed_at
+        execution.error = str(exc)
+        execution.response_payload_json = {
+            'aspa_write_mode': provider_account.aspa_write_mode,
             'governance': _get_plan_governance_metadata(plan),
         }
         execution.save(update_fields=('status', 'completed_at', 'error', 'response_payload_json'))

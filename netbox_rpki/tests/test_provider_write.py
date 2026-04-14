@@ -8,27 +8,50 @@ from django.utils import timezone
 from netbox_rpki import models as rpki_models
 from netbox_rpki.services import (
     ProviderWriteError,
+    acknowledge_roa_lint_findings,
+    apply_aspa_change_plan_provider_write,
     apply_roa_change_plan_provider_write,
+    approve_aspa_change_plan,
     approve_roa_change_plan,
+    build_aspa_change_plan_delta,
     build_roa_change_plan_delta,
+    create_aspa_change_plan,
     create_roa_change_plan,
     derive_roa_intents,
+    preview_aspa_change_plan_provider_write,
     preview_roa_change_plan_provider_write,
+    reconcile_aspa_intents,
     reconcile_roa_intents,
 )
 from netbox_rpki.tests.base import PluginAPITestCase, PluginViewTestCase
 from netbox_rpki.tests.utils import (
     create_test_asn,
+    create_test_aspa_change_plan,
+    create_test_aspa_intent,
+    create_test_aspa_reconciliation_run,
     create_test_imported_roa_authorization,
     create_test_organization,
     create_test_prefix,
     create_test_provider_account,
     create_test_provider_snapshot,
     create_test_provider_sync_run,
+    create_test_provider_write_execution,
     create_test_roa_change_plan,
     create_test_roa_change_plan_matrix,
     create_test_routing_intent_profile,
 )
+
+
+def current_ack_required_finding_ids(plan):
+    lint_run = plan.lint_runs.order_by('-started_at', '-created').first()
+    if lint_run is None:
+        return []
+    return [
+        finding.pk
+        for finding in lint_run.findings.all()
+        if finding.details_json.get('approval_impact') == 'acknowledgement_required'
+        and not finding.details_json.get('suppressed')
+    ]
 
 
 class ProviderWriteServiceTestCase(TestCase):
@@ -215,7 +238,11 @@ class ProviderWriteServiceTestCase(TestCase):
     def test_approve_transitions_plan_to_approved(self):
         plan = create_roa_change_plan(self.reconciliation_run, name='Approval Plan')
 
-        approve_roa_change_plan(plan, approved_by='approval-user')
+        approve_roa_change_plan(
+            plan,
+            approved_by='approval-user',
+            acknowledged_finding_ids=current_ack_required_finding_ids(plan),
+        )
         plan.refresh_from_db()
 
         self.assertEqual(plan.status, rpki_models.ROAChangePlanStatus.APPROVED)
@@ -235,6 +262,7 @@ class ProviderWriteServiceTestCase(TestCase):
             maintenance_window_start=window_start,
             maintenance_window_end=window_end,
             approval_notes='Scheduled change approval.',
+            acknowledged_finding_ids=current_ack_required_finding_ids(plan),
         )
         plan.refresh_from_db()
         approval_record = plan.approval_records.get()
@@ -249,6 +277,71 @@ class ProviderWriteServiceTestCase(TestCase):
         self.assertEqual(approval_record.change_reference, 'CAB-77')
         self.assertEqual(approval_record.notes, 'Scheduled change approval.')
 
+    def test_approve_records_lint_acknowledgements_for_selected_ack_required_findings(self):
+        plan = create_roa_change_plan(self.reconciliation_run, name='Acknowledged Approval Plan')
+        ack_required_finding = plan.lint_runs.get().findings.get(finding_code='plan_withdraw_without_replacement')
+
+        approve_roa_change_plan(
+            plan,
+            approved_by='approval-user',
+            acknowledged_finding_ids=[ack_required_finding.pk],
+            lint_acknowledgement_notes='Accepted for this change plan.',
+        )
+        acknowledgement = plan.lint_acknowledgements.get()
+
+        self.assertEqual(acknowledgement.finding, ack_required_finding)
+        self.assertEqual(acknowledgement.lint_run, plan.lint_runs.get())
+        self.assertEqual(acknowledgement.acknowledged_by, 'approval-user')
+        self.assertEqual(acknowledgement.notes, 'Accepted for this change plan.')
+
+    def test_approve_denies_unresolved_blocking_findings(self):
+        provider_snapshot = create_test_provider_snapshot(
+            name='Blocking Snapshot',
+            organization=self.organization,
+            provider_account=self.provider_account,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        create_test_imported_roa_authorization(
+            name='Blocking Imported Authorization',
+            provider_snapshot=provider_snapshot,
+            organization=self.organization,
+            prefix=self.primary_prefix,
+            origin_asn=create_test_asn(65078),
+            max_length=26,
+        )
+        reconciliation_run = reconcile_roa_intents(
+            self.derivation_run,
+            comparison_scope=rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
+            provider_snapshot=provider_snapshot,
+        )
+        plan = create_roa_change_plan(reconciliation_run, name='Blocked Approval Plan')
+
+        with self.assertRaisesMessage(ProviderWriteError, 'unresolved blocking lint finding'):
+            approve_roa_change_plan(plan, approved_by='approval-user')
+
+    def test_acknowledge_records_lint_acknowledgements_without_approving_plan(self):
+        plan = create_roa_change_plan(self.reconciliation_run, name='Standalone Ack Plan')
+        ack_required_finding = plan.lint_runs.get().findings.get(finding_code='plan_withdraw_without_replacement')
+
+        acknowledgements = acknowledge_roa_lint_findings(
+            plan,
+            acknowledged_by='review-user',
+            ticket_reference='ACK-123',
+            change_reference='ACK-CHANGE',
+            acknowledged_finding_ids=[ack_required_finding.pk],
+            notes='Reviewed before approval.',
+        )
+        plan.refresh_from_db()
+
+        self.assertEqual(plan.status, rpki_models.ROAChangePlanStatus.DRAFT)
+        self.assertEqual(len(acknowledgements), 1)
+        self.assertEqual(plan.lint_acknowledgements.count(), 1)
+        acknowledgement = plan.lint_acknowledgements.get()
+        self.assertEqual(acknowledgement.finding, ack_required_finding)
+        self.assertEqual(acknowledgement.ticket_reference, 'ACK-123')
+        self.assertEqual(acknowledgement.change_reference, 'ACK-CHANGE')
+        self.assertEqual(acknowledgement.notes, 'Reviewed before approval.')
+
     def test_apply_submits_delta_records_execution_and_triggers_followup_sync(self):
         plan = create_roa_change_plan(self.reconciliation_run, name='Apply Plan')
         window_start = timezone.now()
@@ -260,6 +353,7 @@ class ProviderWriteServiceTestCase(TestCase):
             change_reference='CR-APPLY',
             maintenance_window_start=window_start,
             maintenance_window_end=window_end,
+            acknowledged_finding_ids=current_ack_required_finding_ids(plan),
         )
         followup_snapshot = create_test_provider_snapshot(
             name='Follow-Up Snapshot',
@@ -314,7 +408,11 @@ class ProviderWriteServiceTestCase(TestCase):
 
     def test_apply_rejects_repeat_apply(self):
         plan = create_roa_change_plan(self.reconciliation_run, name='Repeat Apply Plan')
-        approve_roa_change_plan(plan, approved_by='repeat-approver')
+        approve_roa_change_plan(
+            plan,
+            approved_by='repeat-approver',
+            acknowledged_finding_ids=current_ack_required_finding_ids(plan),
+        )
 
         with patch('netbox_rpki.services.provider_write._submit_krill_route_delta', return_value={}):
             with patch(
@@ -348,7 +446,11 @@ class ProviderWriteServiceTestCase(TestCase):
 
     def test_apply_failure_marks_plan_failed_and_records_error(self):
         plan = create_roa_change_plan(self.reconciliation_run, name='Failed Apply Plan')
-        approve_roa_change_plan(plan, approved_by='failure-approver')
+        approve_roa_change_plan(
+            plan,
+            approved_by='failure-approver',
+            acknowledged_finding_ids=current_ack_required_finding_ids(plan),
+        )
 
         with patch(
             'netbox_rpki.services.provider_write._submit_krill_route_delta',
@@ -446,6 +548,7 @@ class ROAChangePlanActionAPITestCase(PluginAPITestCase):
         self.assertHttpStatus(response, 200)
         self.assertIn('delta', response.data)
         self.assertIn('execution', response.data)
+        self.assertIn('latest_lint_posture', response.data)
         self.assertEqual(response.data['status'], rpki_models.ROAChangePlanStatus.DRAFT)
         self.assertIn('latest_simulation_summary', response.data)
 
@@ -453,7 +556,12 @@ class ROAChangePlanActionAPITestCase(PluginAPITestCase):
         self.add_permissions('netbox_rpki.view_roachangeplan', 'netbox_rpki.change_roachangeplan')
         url = reverse('plugins-api:netbox_rpki-api:roachangeplan-approve', kwargs={'pk': self.plan.pk})
 
-        response = self.client.post(url, {}, format='json', **self.header)
+        response = self.client.post(
+            url,
+            {'acknowledged_finding_ids': current_ack_required_finding_ids(self.plan)},
+            format='json',
+            **self.header,
+        )
 
         self.assertHttpStatus(response, 200)
         self.plan.refresh_from_db()
@@ -473,6 +581,7 @@ class ROAChangePlanActionAPITestCase(PluginAPITestCase):
                 'maintenance_window_start': '2026-04-12T22:00:00Z',
                 'maintenance_window_end': '2026-04-12T23:00:00Z',
                 'approval_notes': 'API approval note',
+                'acknowledged_finding_ids': current_ack_required_finding_ids(self.plan),
             },
             format='json',
             **self.header,
@@ -486,9 +595,63 @@ class ROAChangePlanActionAPITestCase(PluginAPITestCase):
         self.assertEqual(response.data['approval_record']['ticket_reference'], 'API-CHG-100')
         self.assertEqual(response.data['approval_record']['notes'], 'API approval note')
 
+    def test_approve_action_records_lint_acknowledgements(self):
+        plan = create_roa_change_plan(self.reconciliation_run, name='API Ack Approval Plan')
+        ack_required_finding = plan.lint_runs.get().findings.get(finding_code='plan_withdraw_without_replacement')
+        self.add_permissions('netbox_rpki.view_roachangeplan', 'netbox_rpki.change_roachangeplan')
+        url = reverse('plugins-api:netbox_rpki-api:roachangeplan-approve', kwargs={'pk': plan.pk})
+
+        response = self.client.post(
+            url,
+            {
+                'acknowledged_finding_ids': [ack_required_finding.pk],
+                'lint_acknowledgement_notes': 'Accepted via API.',
+            },
+            format='json',
+            **self.header,
+        )
+
+        self.assertHttpStatus(response, 200)
+        self.assertEqual(plan.lint_acknowledgements.count(), 1)
+        self.assertEqual(plan.lint_acknowledgements.get().notes, 'Accepted via API.')
+
+    def test_approve_action_denies_unresolved_blocking_findings(self):
+        mismatch_snapshot = create_test_provider_snapshot(
+            name='API Blocking Snapshot',
+            organization=self.organization,
+            provider_account=self.provider_account,
+            provider_name='Krill',
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        create_test_imported_roa_authorization(
+            name='API Blocking Imported Authorization',
+            provider_snapshot=mismatch_snapshot,
+            organization=self.organization,
+            prefix=self.primary_prefix,
+            origin_asn=create_test_asn(65179),
+            max_length=26,
+        )
+        reconciliation_run = reconcile_roa_intents(
+            self.derivation_run,
+            comparison_scope=rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
+            provider_snapshot=mismatch_snapshot,
+        )
+        plan = create_roa_change_plan(reconciliation_run, name='API Blocking Approval Plan')
+        self.add_permissions('netbox_rpki.view_roachangeplan', 'netbox_rpki.change_roachangeplan')
+        url = reverse('plugins-api:netbox_rpki-api:roachangeplan-approve', kwargs={'pk': plan.pk})
+
+        response = self.client.post(url, {}, format='json', **self.header)
+
+        self.assertHttpStatus(response, 400)
+        self.assertEqual(plan.status, rpki_models.ROAChangePlanStatus.DRAFT)
+
     def test_apply_action_runs_provider_write_flow(self):
         self.add_permissions('netbox_rpki.view_roachangeplan', 'netbox_rpki.change_roachangeplan')
-        approve_roa_change_plan(self.plan, approved_by='api-approver')
+        approve_roa_change_plan(
+            self.plan,
+            approved_by='api-approver',
+            acknowledged_finding_ids=current_ack_required_finding_ids(self.plan),
+        )
         followup_snapshot = create_test_provider_snapshot(
             name='Provider Write API Follow-Up Snapshot',
             organization=self.organization,
@@ -539,6 +702,9 @@ class ROAChangePlanActionAPITestCase(PluginAPITestCase):
         self.assertIn('total_plans', response.data)
         self.assertIn('by_status', response.data)
         self.assertIn('simulated_plan_count', response.data)
+        self.assertIn('lint_blocking_total', response.data)
+        self.assertIn('lint_acknowledgement_required_total', response.data)
+        self.assertIn('lint_acknowledged_total', response.data)
 
     def test_provider_account_api_exposes_write_capability_metadata(self):
         self.add_permissions('netbox_rpki.view_rpkiprovideraccount')
@@ -556,11 +722,69 @@ class ROAChangePlanActionAPITestCase(PluginAPITestCase):
 
     def test_custom_actions_require_change_permission(self):
         self.add_permissions('netbox_rpki.view_roachangeplan')
-        for action in ('preview', 'approve', 'apply', 'simulate'):
+        for action in ('preview', 'acknowledge-findings', 'approve', 'apply', 'simulate'):
             url = reverse(f'plugins-api:netbox_rpki-api:roachangeplan-{action}', kwargs={'pk': self.plan.pk})
             response = self.client.post(url, {}, format='json', **self.header)
             with self.subTest(action=action):
                 self.assertHttpStatus(response, 404)
+
+    def test_acknowledge_findings_action_records_lint_acknowledgements(self):
+        plan = create_roa_change_plan(self.reconciliation_run, name='API Standalone Ack Plan')
+        ack_required_finding = plan.lint_runs.get().findings.get(finding_code='plan_withdraw_without_replacement')
+        self.add_permissions('netbox_rpki.view_roachangeplan', 'netbox_rpki.change_roachangeplan')
+        url = reverse('plugins-api:netbox_rpki-api:roachangeplan-acknowledge-findings', kwargs={'pk': plan.pk})
+
+        response = self.client.post(
+            url,
+            {
+                'ticket_reference': 'API-ACK-200',
+                'change_reference': 'API-ACK-CR',
+                'acknowledged_finding_ids': [ack_required_finding.pk],
+                'lint_acknowledgement_notes': 'Accepted via review API.',
+            },
+            format='json',
+            **self.header,
+        )
+
+        self.assertHttpStatus(response, 200)
+        self.assertEqual(plan.lint_acknowledgements.count(), 1)
+        self.assertEqual(plan.status, rpki_models.ROAChangePlanStatus.DRAFT)
+        self.assertEqual(response.data['acknowledgements'][0]['ticket_reference'], 'API-ACK-200')
+        self.assertEqual(response.data['acknowledgements'][0]['notes'], 'Accepted via review API.')
+
+    def test_lint_suppress_and_lift_api_actions(self):
+        finding = self.plan.lint_runs.get().findings.first()
+        self.add_permissions(
+            'netbox_rpki.view_roalintfinding',
+            'netbox_rpki.change_roalintfinding',
+            'netbox_rpki.view_roalintsuppression',
+            'netbox_rpki.change_roalintsuppression',
+        )
+        suppress_url = reverse('plugins-api:netbox_rpki-api:roalintfinding-suppress', kwargs={'pk': finding.pk})
+
+        suppress_response = self.client.post(
+            suppress_url,
+            {
+                'scope_type': rpki_models.ROALintSuppressionScope.PROFILE,
+                'reason': 'Suppress from API test.',
+            },
+            format='json',
+            **self.header,
+        )
+
+        self.assertHttpStatus(suppress_response, 200)
+        suppression_id = suppress_response.data['id']
+        lift_url = reverse('plugins-api:netbox_rpki-api:roalintsuppression-lift', kwargs={'pk': suppression_id})
+
+        lift_response = self.client.post(
+            lift_url,
+            {'lift_reason': 'Lift from API test.'},
+            format='json',
+            **self.header,
+        )
+
+        self.assertHttpStatus(lift_response, 200)
+        self.assertIsNotNone(lift_response.data['lifted_at'])
 
 
 class ROAChangePlanActionViewTestCase(PluginViewTestCase):
@@ -615,8 +839,38 @@ class ROAChangePlanActionViewTestCase(PluginViewTestCase):
 
         self.assertHttpStatus(response, 200)
         self.assertContains(response, reverse('plugins:netbox_rpki:roachangeplan_preview', kwargs={'pk': self.plan.pk}))
+        self.assertContains(response, reverse('plugins:netbox_rpki:roachangeplan_acknowledge_lint', kwargs={'pk': self.plan.pk}))
         self.assertContains(response, reverse('plugins:netbox_rpki:roachangeplan_approve', kwargs={'pk': self.plan.pk}))
         self.assertNotContains(response, reverse('plugins:netbox_rpki:roachangeplan_apply', kwargs={'pk': self.plan.pk}))
+
+    def test_acknowledge_view_records_lint_acknowledgements_without_approval(self):
+        ack_required_finding = self.plan.lint_runs.get().findings.filter(
+            details_json__approval_impact='acknowledgement_required',
+            details_json__suppressed=False,
+        ).first()
+        self.add_permissions('netbox_rpki.view_roachangeplan', 'netbox_rpki.change_roachangeplan')
+        url = reverse('plugins:netbox_rpki:roachangeplan_acknowledge_lint', kwargs={'pk': self.plan.pk})
+
+        get_response = self.client.get(url)
+        self.assertHttpStatus(get_response, 200)
+        self.assertContains(get_response, 'Acknowledge Approval-Required Lint Findings')
+
+        post_response = self.client.post(
+            url,
+            {
+                'confirm': True,
+                'ticket_reference': 'UI-ACK-12',
+                'change_reference': 'UI-ACK-CR',
+                'acknowledged_findings': [ack_required_finding.pk],
+                'lint_acknowledgement_notes': 'Reviewed in UI.',
+            },
+        )
+
+        self.plan.refresh_from_db()
+        self.assertRedirects(post_response, self.plan.get_absolute_url())
+        self.assertEqual(self.plan.status, rpki_models.ROAChangePlanStatus.DRAFT)
+        self.assertEqual(self.plan.lint_acknowledgements.count(), 1)
+        self.assertEqual(self.plan.lint_acknowledgements.get().ticket_reference, 'UI-ACK-12')
 
     def test_preview_view_renders_delta(self):
         self.add_permissions('netbox_rpki.view_roachangeplan', 'netbox_rpki.change_roachangeplan')
@@ -646,6 +900,7 @@ class ROAChangePlanActionViewTestCase(PluginViewTestCase):
                 'maintenance_window_start': '2026-04-13T01:00',
                 'maintenance_window_end': '2026-04-13T02:00',
                 'approval_notes': 'Window approved in UI.',
+                'acknowledged_findings': current_ack_required_finding_ids(self.plan),
             },
         )
 
@@ -655,12 +910,46 @@ class ROAChangePlanActionViewTestCase(PluginViewTestCase):
         self.assertEqual(self.plan.change_reference, 'UI-CAB-12')
         self.assertEqual(self.plan.approval_records.count(), 1)
 
+    def test_lint_finding_suppress_and_lift_views(self):
+        finding = self.plan.lint_runs.get().findings.first()
+        self.add_permissions(
+            'netbox_rpki.view_roalintfinding',
+            'netbox_rpki.change_roalintfinding',
+            'netbox_rpki.view_roalintsuppression',
+            'netbox_rpki.change_roalintsuppression',
+        )
+        suppress_url = reverse('plugins:netbox_rpki:roalintfinding_suppress', kwargs={'pk': finding.pk})
+
+        get_response = self.client.get(suppress_url)
+        self.assertHttpStatus(get_response, 200)
+        self.assertContains(get_response, 'Suppression Scope')
+
+        post_response = self.client.post(
+            suppress_url,
+            {
+                'confirm': True,
+                'scope_type': rpki_models.ROALintSuppressionScope.PROFILE,
+                'reason': 'Suppress from UI test.',
+            },
+        )
+
+        suppression = rpki_models.ROALintSuppression.objects.get(reason='Suppress from UI test.')
+        self.assertRedirects(post_response, suppression.get_absolute_url())
+
+        lift_url = reverse('plugins:netbox_rpki:roalintsuppression_lift', kwargs={'pk': suppression.pk})
+        lift_response = self.client.post(lift_url, {'confirm': True, 'lift_reason': 'Lift from UI test.'})
+        suppression.refresh_from_db()
+
+        self.assertRedirects(lift_response, suppression.get_absolute_url())
+        self.assertIsNotNone(suppression.lifted_at)
+
     def test_apply_view_shows_governance_metadata_after_approval(self):
         approve_roa_change_plan(
             self.plan,
             approved_by='view-approver',
             ticket_reference='UI-APPLY-1',
             change_reference='UI-APPLY-CR',
+            acknowledged_finding_ids=current_ack_required_finding_ids(self.plan),
         )
         self.add_permissions('netbox_rpki.view_roachangeplan', 'netbox_rpki.change_roachangeplan')
 
@@ -700,3 +989,274 @@ class ROAChangePlanActionViewTestCase(PluginViewTestCase):
         self.assertNotContains(response, reverse('plugins:netbox_rpki:roachangeplan_preview', kwargs={'pk': unsupported_plan.pk}))
         self.assertNotContains(response, reverse('plugins:netbox_rpki:roachangeplan_approve', kwargs={'pk': unsupported_plan.pk}))
         self.assertNotContains(response, reverse('plugins:netbox_rpki:roachangeplan_apply', kwargs={'pk': unsupported_plan.pk}))
+
+
+class ASPAChangePlanActionAPITestCase(PluginAPITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='provider-write-aspa-api-org', name='Provider Write ASPA API Org')
+        cls.provider_account = create_test_provider_account(
+            name='Provider Write ASPA API Account',
+            organization=cls.organization,
+            provider_type=rpki_models.ProviderType.KRILL,
+            org_handle='ORG-API-ASPA-WRITE',
+            ca_handle='ca-api-aspa-write',
+            api_base_url='https://krill.example.invalid',
+        )
+        cls.provider_snapshot = create_test_provider_snapshot(
+            name='Provider Write ASPA API Snapshot',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+            provider_name='Krill',
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        cls.customer_as = create_test_asn(65880)
+        cls.provider_as = create_test_asn(65881)
+        create_test_aspa_intent(
+            name='Provider Write ASPA API Intent',
+            organization=cls.organization,
+            customer_as=cls.customer_as,
+            provider_as=cls.provider_as,
+        )
+        cls.reconciliation_run = reconcile_aspa_intents(
+            cls.organization,
+            comparison_scope=rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
+            provider_snapshot=cls.provider_snapshot,
+        )
+        cls.plan = create_aspa_change_plan(cls.reconciliation_run)
+
+    def test_create_plan_action_returns_plan(self):
+        self.add_permissions('netbox_rpki.view_aspareconciliationrun', 'netbox_rpki.change_aspareconciliationrun')
+        url = reverse('plugins-api:netbox_rpki-api:aspareconciliationrun-create-plan', kwargs={'pk': self.reconciliation_run.pk})
+
+        response = self.client.post(url, {}, format='json', **self.header)
+
+        self.assertHttpStatus(response, 200)
+        self.assertIn('item_count', response.data)
+        self.assertEqual(response.data['source_reconciliation_run'], self.reconciliation_run.pk)
+
+    def test_preview_action_returns_delta_and_execution(self):
+        self.add_permissions('netbox_rpki.view_aspachangeplan', 'netbox_rpki.change_aspachangeplan')
+        url = reverse('plugins-api:netbox_rpki-api:aspachangeplan-preview', kwargs={'pk': self.plan.pk})
+
+        response = self.client.post(url, {}, format='json', **self.header)
+
+        self.assertHttpStatus(response, 200)
+        self.assertIn('delta', response.data)
+        self.assertIn('execution', response.data)
+        self.assertEqual(response.data['status'], rpki_models.ASPAChangePlanStatus.DRAFT)
+
+    def test_approve_action_transitions_plan(self):
+        self.add_permissions('netbox_rpki.view_aspachangeplan', 'netbox_rpki.change_aspachangeplan')
+        url = reverse('plugins-api:netbox_rpki-api:aspachangeplan-approve', kwargs={'pk': self.plan.pk})
+
+        response = self.client.post(url, {'ticket_reference': 'ASPA-CHG-100'}, format='json', **self.header)
+
+        self.assertHttpStatus(response, 200)
+        self.plan.refresh_from_db()
+        self.assertEqual(self.plan.status, rpki_models.ASPAChangePlanStatus.APPROVED)
+        self.assertEqual(self.plan.approved_by, self.user.username)
+        self.assertEqual(response.data['approval_record']['ticket_reference'], 'ASPA-CHG-100')
+
+    def test_apply_action_runs_provider_write_flow(self):
+        self.add_permissions('netbox_rpki.view_aspachangeplan', 'netbox_rpki.change_aspachangeplan')
+        approve_aspa_change_plan(self.plan, approved_by='api-approver')
+        followup_snapshot = create_test_provider_snapshot(
+            name='Provider Write ASPA API Follow-Up Snapshot',
+            organization=self.organization,
+            provider_account=self.provider_account,
+            provider_name='Krill',
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        followup_sync_run = create_test_provider_sync_run(
+            name='Provider Write ASPA API Follow-Up Sync',
+            organization=self.organization,
+            provider_account=self.provider_account,
+            provider_snapshot=followup_snapshot,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        url = reverse('plugins-api:netbox_rpki-api:aspachangeplan-apply', kwargs={'pk': self.plan.pk})
+
+        with patch('netbox_rpki.api.views.apply_aspa_change_plan_provider_write', return_value=(
+            create_test_provider_write_execution(
+                name='Provider Write ASPA API Execution',
+                organization=self.organization,
+                provider_account=self.provider_account,
+                provider_snapshot=self.provider_snapshot,
+                change_plan=None,
+                aspa_change_plan=self.plan,
+                execution_mode=rpki_models.ProviderWriteExecutionMode.APPLY,
+                status=rpki_models.ValidationRunStatus.COMPLETED,
+                followup_sync_run=followup_sync_run,
+                followup_provider_snapshot=followup_snapshot,
+            ),
+            {'added': [], 'removed': []},
+        )):
+            response = self.client.post(url, {}, format='json', **self.header)
+
+        self.assertHttpStatus(response, 200)
+        self.assertEqual(response.data['execution']['status'], rpki_models.ValidationRunStatus.COMPLETED)
+
+    def test_summary_action_returns_aggregate_counts(self):
+        self.add_permissions('netbox_rpki.view_aspachangeplan')
+        url = reverse('plugins-api:netbox_rpki-api:aspachangeplan-summary')
+
+        response = self.client.get(url, **self.header)
+
+        self.assertHttpStatus(response, 200)
+        self.assertIn('total_plans', response.data)
+        self.assertIn('by_status', response.data)
+        self.assertIn('provider_add_count_total', response.data)
+
+    def test_custom_actions_require_change_permission(self):
+        self.add_permissions('netbox_rpki.view_aspachangeplan')
+        for action in ('preview', 'approve', 'apply'):
+            url = reverse(f'plugins-api:netbox_rpki-api:aspachangeplan-{action}', kwargs={'pk': self.plan.pk})
+            response = self.client.post(url, {}, format='json', **self.header)
+            with self.subTest(action=action):
+                self.assertHttpStatus(response, 404)
+
+
+class ASPAChangePlanActionViewTestCase(PluginViewTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='provider-write-aspa-view-org', name='Provider Write ASPA View Org')
+        cls.provider_account = create_test_provider_account(
+            name='Provider Write ASPA View Account',
+            organization=cls.organization,
+            provider_type=rpki_models.ProviderType.KRILL,
+            org_handle='ORG-VIEW-ASPA-WRITE',
+            ca_handle='ca-view-aspa-write',
+            api_base_url='https://krill.example.invalid',
+        )
+        cls.provider_snapshot = create_test_provider_snapshot(
+            name='Provider Write ASPA View Snapshot',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+            provider_name='Krill',
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        cls.customer_as = create_test_asn(65890)
+        cls.provider_as = create_test_asn(65891)
+        create_test_aspa_intent(
+            name='Provider Write ASPA View Intent',
+            organization=cls.organization,
+            customer_as=cls.customer_as,
+            provider_as=cls.provider_as,
+        )
+        cls.reconciliation_run = reconcile_aspa_intents(
+            cls.organization,
+            comparison_scope=rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
+            provider_snapshot=cls.provider_snapshot,
+        )
+        cls.plan = create_aspa_change_plan(cls.reconciliation_run)
+
+    def test_reconciliation_run_detail_shows_create_plan_button(self):
+        self.add_permissions('netbox_rpki.view_aspareconciliationrun', 'netbox_rpki.change_aspareconciliationrun')
+
+        response = self.client.get(self.reconciliation_run.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, reverse('plugins:netbox_rpki:aspareconciliationrun_create_plan', kwargs={'pk': self.reconciliation_run.pk}))
+
+    def test_reconciliation_run_create_plan_view_creates_plan(self):
+        self.add_permissions('netbox_rpki.view_aspareconciliationrun', 'netbox_rpki.change_aspareconciliationrun')
+
+        response = self.client.post(
+            reverse('plugins:netbox_rpki:aspareconciliationrun_create_plan', kwargs={'pk': self.reconciliation_run.pk}),
+            {'confirm': True},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertGreaterEqual(rpki_models.ASPAChangePlan.objects.filter(source_reconciliation_run=self.reconciliation_run).count(), 2)
+
+    def test_change_plan_detail_shows_preview_and_approve_buttons(self):
+        self.add_permissions('netbox_rpki.view_aspachangeplan', 'netbox_rpki.change_aspachangeplan')
+
+        response = self.client.get(self.plan.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, reverse('plugins:netbox_rpki:aspachangeplan_preview', kwargs={'pk': self.plan.pk}))
+        self.assertContains(response, reverse('plugins:netbox_rpki:aspachangeplan_approve', kwargs={'pk': self.plan.pk}))
+        self.assertNotContains(response, reverse('plugins:netbox_rpki:aspachangeplan_apply', kwargs={'pk': self.plan.pk}))
+
+    def test_preview_view_renders_delta(self):
+        self.add_permissions('netbox_rpki.view_aspachangeplan', 'netbox_rpki.change_aspachangeplan')
+
+        response = self.client.get(reverse('plugins:netbox_rpki:aspachangeplan_preview', kwargs={'pk': self.plan.pk}))
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'AS65890')
+
+    def test_approve_view_renders_and_persists_governance_fields(self):
+        self.add_permissions('netbox_rpki.view_aspachangeplan', 'netbox_rpki.change_aspachangeplan')
+        url = reverse('plugins:netbox_rpki:aspachangeplan_approve', kwargs={'pk': self.plan.pk})
+
+        get_response = self.client.get(url)
+
+        self.assertHttpStatus(get_response, 200)
+        self.assertContains(get_response, 'Ticket Reference')
+        self.assertContains(get_response, 'Change Reference')
+
+        response = self.client.post(
+            url,
+            {
+                'confirm': True,
+                'ticket_reference': 'UI-ASPA-CHG-88',
+                'change_reference': 'UI-ASPA-CAB-12',
+                'maintenance_window_start': '2026-04-13T01:00',
+                'maintenance_window_end': '2026-04-13T02:00',
+                'approval_notes': 'ASPA window approved in UI.',
+            },
+        )
+
+        self.assertRedirects(response, self.plan.get_absolute_url())
+        self.plan.refresh_from_db()
+        self.assertEqual(self.plan.ticket_reference, 'UI-ASPA-CHG-88')
+        self.assertEqual(self.plan.change_reference, 'UI-ASPA-CAB-12')
+        self.assertEqual(self.plan.approval_records.count(), 1)
+
+    def test_apply_view_shows_governance_metadata_after_approval(self):
+        approve_aspa_change_plan(
+            self.plan,
+            approved_by='view-approver',
+            ticket_reference='UI-ASPA-APPLY-1',
+            change_reference='UI-ASPA-APPLY-CR',
+        )
+        self.add_permissions('netbox_rpki.view_aspachangeplan', 'netbox_rpki.change_aspachangeplan')
+
+        response = self.client.get(reverse('plugins:netbox_rpki:aspachangeplan_apply', kwargs={'pk': self.plan.pk}))
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'UI-ASPA-APPLY-1')
+        self.assertContains(response, 'UI-ASPA-APPLY-CR')
+
+    def test_unsupported_provider_plan_hides_write_buttons(self):
+        unsupported_account = create_test_provider_account(
+            name='Provider Write ASPA View Unsupported Account',
+            organization=self.organization,
+            provider_type=rpki_models.ProviderType.ARIN,
+            org_handle='ORG-VIEW-ASPA-ARIN',
+        )
+        unsupported_snapshot = create_test_provider_snapshot(
+            name='Provider Write ASPA View Unsupported Snapshot',
+            organization=self.organization,
+            provider_account=unsupported_account,
+            provider_name='ARIN',
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        unsupported_plan = create_test_aspa_change_plan(
+            name='Unsupported ASPA View Plan',
+            organization=self.organization,
+            source_reconciliation_run=self.reconciliation_run,
+            provider_account=unsupported_account,
+            provider_snapshot=unsupported_snapshot,
+        )
+        self.add_permissions('netbox_rpki.view_aspachangeplan', 'netbox_rpki.change_aspachangeplan')
+
+        response = self.client.get(unsupported_plan.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertNotContains(response, reverse('plugins:netbox_rpki:aspachangeplan_preview', kwargs={'pk': unsupported_plan.pk}))
+        self.assertNotContains(response, reverse('plugins:netbox_rpki:aspachangeplan_approve', kwargs={'pk': unsupported_plan.pk}))
+        self.assertNotContains(response, reverse('plugins:netbox_rpki:aspachangeplan_apply', kwargs={'pk': unsupported_plan.pk}))

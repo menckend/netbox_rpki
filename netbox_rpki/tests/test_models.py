@@ -17,6 +17,8 @@ from netbox_rpki.tests.utils import (
     create_test_approval_record,
     create_test_asn,
     create_test_aspa,
+    create_test_aspa_change_plan,
+    create_test_aspa_change_plan_item,
     create_test_aspa_intent,
     create_test_aspa_intent_match,
     create_test_aspa_intent_result,
@@ -864,6 +866,25 @@ class PriorityOneModelBehaviorTestCase(TestCase):
             [rpki_models.ROAChangePlanAction.CREATE, rpki_models.ROAChangePlanAction.WITHDRAW],
         )
 
+    def test_provider_account_exposes_explicit_aspa_write_capability(self):
+        krill_account = create_test_provider_account(
+            name='Krill ASPA Capability Account',
+            organization=self.organization,
+            provider_type=rpki_models.ProviderType.KRILL,
+            org_handle='ORG-KRILL-ASPA-CAP',
+            ca_handle='ca-krill-aspa-cap',
+            api_base_url='https://krill.example.invalid',
+        )
+
+        self.assertFalse(self.provider_account.supports_aspa_write)
+        self.assertEqual(self.provider_account.aspa_write_mode, rpki_models.ProviderAspaWriteMode.UNSUPPORTED)
+        self.assertTrue(krill_account.supports_aspa_write)
+        self.assertEqual(krill_account.aspa_write_mode, rpki_models.ProviderAspaWriteMode.KRILL_ASPA_DELTA)
+        self.assertEqual(
+            krill_account.aspa_write_capability['supported_aspa_plan_actions'],
+            [rpki_models.ASPAChangePlanAction.CREATE, rpki_models.ASPAChangePlanAction.WITHDRAW],
+        )
+
     def test_roa_change_plan_state_helpers_reflect_execution_lifecycle(self):
         provider_account = create_test_provider_account(
             name='Failed Plan Krill Account',
@@ -890,6 +911,134 @@ class PriorityOneModelBehaviorTestCase(TestCase):
         self.assertFalse(self.change_plan.can_apply)
         self.assertTrue(failed_plan.can_preview)
         self.assertFalse(failed_plan.can_apply)
+
+    def test_aspa_change_plan_validates_provider_snapshot_belongs_to_provider_account(self):
+        provider_account = create_test_provider_account(
+            name='ASPA Capability Plan Account',
+            organization=self.organization,
+            provider_type=rpki_models.ProviderType.KRILL,
+            org_handle='ORG-ASPA-PLAN',
+            ca_handle='ca-aspa-plan',
+            api_base_url='https://krill.example.invalid',
+        )
+        other_provider_account = create_test_provider_account(
+            name='Other ASPA Capability Plan Account',
+            organization=self.organization,
+            provider_type=rpki_models.ProviderType.KRILL,
+            org_handle='ORG-ASPA-PLAN-OTHER',
+            ca_handle='ca-aspa-plan-other',
+            api_base_url='https://krill.example.invalid',
+        )
+        other_snapshot = create_test_provider_snapshot(
+            name='Other ASPA Plan Snapshot',
+            organization=self.organization,
+            provider_account=other_provider_account,
+        )
+        plan = create_test_aspa_change_plan(
+            name='Mismatched ASPA Plan',
+            organization=self.organization,
+            provider_account=provider_account,
+            provider_snapshot=other_snapshot,
+        )
+
+        with self.assertRaises(ValidationError):
+            plan.full_clean()
+
+    def test_aspa_change_plan_state_helpers_follow_capability_and_status(self):
+        provider_account = create_test_provider_account(
+            name='ASPA Failed Plan Krill Account',
+            organization=self.organization,
+            provider_type=rpki_models.ProviderType.KRILL,
+            org_handle='ORG-ASPA-FAILED-PLAN',
+            ca_handle='ca-aspa-failed-plan',
+            api_base_url='https://krill.example.invalid',
+        )
+        snapshot = create_test_provider_snapshot(
+            name='ASPA Failed Plan Snapshot',
+            organization=self.organization,
+            provider_account=provider_account,
+        )
+        failed_plan = create_test_aspa_change_plan(
+            name='Failed ASPA Change Plan',
+            organization=self.organization,
+            provider_account=provider_account,
+            provider_snapshot=snapshot,
+            status=rpki_models.ASPAChangePlanStatus.FAILED,
+        )
+        approved_plan = create_test_aspa_change_plan(
+            name='Approved ASPA Change Plan',
+            organization=self.organization,
+            provider_account=provider_account,
+            provider_snapshot=snapshot,
+            status=rpki_models.ASPAChangePlanStatus.APPROVED,
+        )
+
+        self.assertTrue(failed_plan.can_preview)
+        self.assertFalse(failed_plan.can_apply)
+        self.assertFalse(failed_plan.can_approve)
+        self.assertFalse(self.change_plan.can_preview)
+        self.assertTrue(approved_plan.can_apply)
+
+    def test_aspa_change_plan_item_requires_related_subject_reference(self):
+        item = create_test_aspa_change_plan_item(
+            name='Invalid ASPA Change Plan Item',
+            aspa_intent=None,
+            aspa=None,
+            imported_aspa=None,
+        )
+
+        with self.assertRaises(ValidationError):
+            item.full_clean()
+
+    def test_approval_record_accepts_aspa_change_plan_target(self):
+        aspa_plan = create_test_aspa_change_plan(
+            name='ASPA Approval Target Plan',
+            organization=self.organization,
+        )
+        approval_record = create_test_approval_record(
+            name='ASPA Approval Record',
+            organization=self.organization,
+            change_plan=None,
+            aspa_change_plan=aspa_plan,
+        )
+
+        self.assertEqual(approval_record.target_change_plan, aspa_plan)
+        self.assertIsNone(approval_record.change_plan)
+        self.assertEqual(approval_record.aspa_change_plan, aspa_plan)
+
+    def test_provider_write_execution_accepts_aspa_change_plan_target(self):
+        provider_account = create_test_provider_account(
+            name='ASPA Execution Account',
+            organization=self.organization,
+            provider_type=rpki_models.ProviderType.KRILL,
+            org_handle='ORG-ASPA-EXEC',
+            ca_handle='ca-aspa-exec',
+            api_base_url='https://krill.example.invalid',
+        )
+        snapshot = create_test_provider_snapshot(
+            name='ASPA Execution Snapshot',
+            organization=self.organization,
+            provider_account=provider_account,
+        )
+        aspa_plan = create_test_aspa_change_plan(
+            name='ASPA Execution Plan',
+            organization=self.organization,
+            provider_account=provider_account,
+            provider_snapshot=snapshot,
+        )
+        execution = create_test_provider_write_execution(
+            name='ASPA Provider Write Execution',
+            organization=self.organization,
+            provider_account=provider_account,
+            provider_snapshot=snapshot,
+            change_plan=None,
+            aspa_change_plan=aspa_plan,
+        )
+
+        self.assertEqual(execution.target_change_plan, aspa_plan)
+        self.assertEqual(execution.object_family, 'aspa')
+        self.assertIsNone(execution.change_plan)
+        self.assertEqual(execution.aspa_change_plan, aspa_plan)
 
     def test_roa_intent_enforces_unique_intent_key_per_derivation_run(self):
         with transaction.atomic():

@@ -35,6 +35,9 @@ from netbox_rpki.tests.base import PluginAPITestCase
 from netbox_rpki.tests.utils import (
     create_test_asn,
     create_test_aspa,
+    create_test_aspa_change_plan,
+    create_test_aspa_intent,
+    create_test_aspa_reconciliation_run,
     create_test_certificate,
     create_test_certificate_asn,
     create_test_certificate_prefix,
@@ -49,8 +52,10 @@ from netbox_rpki.tests.utils import (
     create_test_prefix,
     create_test_publication_point,
     create_test_provider_account,
+    create_test_provider_sync_run,
     create_test_provider_snapshot,
     create_test_provider_snapshot_diff,
+    create_test_provider_write_execution,
     create_test_rir,
     create_test_roa,
     create_test_roa_change_plan,
@@ -165,6 +170,8 @@ class RpkiProviderAccountSerializerTestCase(TestCase):
         self.assertEqual(serializer.data['transport'], rpki_models.ProviderSyncTransport.OTE)
         self.assertFalse(serializer.data['supports_roa_write'])
         self.assertEqual(serializer.data['roa_write_mode'], rpki_models.ProviderRoaWriteMode.UNSUPPORTED)
+        self.assertFalse(serializer.data['supports_aspa_write'])
+        self.assertEqual(serializer.data['aspa_write_mode'], rpki_models.ProviderAspaWriteMode.UNSUPPORTED)
         self.assertEqual(serializer.data['last_sync_rollup']['transport'], rpki_models.ProviderSyncTransport.OTE)
         self.assertEqual(
             serializer.data['last_sync_rollup']['supported_families'],
@@ -232,7 +239,15 @@ class ViewSetSmokeTestCase(SimpleTestCase):
                 self.assertIs(viewset_class.filterset_class, filterset_class)
 
     def test_viewsets_expose_expected_http_method_contract(self):
-        read_only_post_exceptions = {'providersnapshot', 'roareconciliationrun', 'roachangeplan'}
+        read_only_post_exceptions = {
+            'providersnapshot',
+            'roareconciliationrun',
+            'aspareconciliationrun',
+            'roachangeplan',
+            'aspachangeplan',
+            'roalintfinding',
+            'roalintsuppression',
+        }
 
         for spec in API_OBJECT_SPECS:
             viewset_class = getattr(api_views, spec.api.viewset_name)
@@ -285,11 +300,15 @@ def _get_custom_action_route_names(contract):
 
 EXTRA_ACTION_NAME_CONTRACTS = {
     'organization': ('run_aspa_reconciliation',),
+    'aspareconciliationrun': ('create_plan', 'summary'),
+    'aspachangeplan': ('apply', 'approve', 'preview', 'summary'),
     'providersnapshot': ('compare', 'summary'),
     'routingintentprofile': ('run',),
     'rpkiprovideraccount': ('summary', 'sync'),
     'roareconciliationrun': ('create_plan', 'summary'),
-    'roachangeplan': ('apply', 'approve', 'preview', 'simulate', 'summary'),
+    'roalintfinding': ('suppress',),
+    'roalintsuppression': ('lift',),
+    'roachangeplan': ('acknowledge_findings', 'apply', 'approve', 'preview', 'simulate', 'summary'),
 }
 
 CUSTOM_ACTION_CONTRACTS = {
@@ -300,6 +319,26 @@ CUSTOM_ACTION_CONTRACTS = {
         'view_permissions': ('netbox_rpki.view_organization',),
         'allowed_permissions': ('netbox_rpki.view_organization', 'netbox_rpki.change_organization'),
         'instance_attr': 'organization',
+    },
+    'aspareconciliationrun': {
+        'actions': ('create_plan',),
+        'route_names': ('plugins-api:netbox_rpki-api:aspareconciliationrun-create-plan',),
+        'denied_status': 404,
+        'view_permissions': ('netbox_rpki.view_aspareconciliationrun',),
+        'allowed_permissions': ('netbox_rpki.view_aspareconciliationrun', 'netbox_rpki.change_aspareconciliationrun'),
+        'instance_attr': 'aspa_reconciliation_run',
+    },
+    'aspachangeplan': {
+        'actions': ('apply', 'approve', 'preview'),
+        'route_names': (
+            'plugins-api:netbox_rpki-api:aspachangeplan-preview',
+            'plugins-api:netbox_rpki-api:aspachangeplan-approve',
+            'plugins-api:netbox_rpki-api:aspachangeplan-apply',
+        ),
+        'denied_status': 404,
+        'view_permissions': ('netbox_rpki.view_aspachangeplan',),
+        'allowed_permissions': ('netbox_rpki.view_aspachangeplan', 'netbox_rpki.change_aspachangeplan'),
+        'instance_attr': 'aspa_change_plan',
     },
     'routingintentprofile': {
         'actions': ('run',),
@@ -326,8 +365,9 @@ CUSTOM_ACTION_CONTRACTS = {
         'instance_attr': 'reconciliation_run',
     },
     'roachangeplan': {
-        'actions': ('apply', 'approve', 'preview', 'simulate'),
+        'actions': ('acknowledge_findings', 'apply', 'approve', 'preview', 'simulate'),
         'route_names': (
+            'plugins-api:netbox_rpki-api:roachangeplan-acknowledge-findings',
             'plugins-api:netbox_rpki-api:roachangeplan-preview',
             'plugins-api:netbox_rpki-api:roachangeplan-approve',
             'plugins-api:netbox_rpki-api:roachangeplan-apply',
@@ -640,10 +680,20 @@ class CustomActionSurfaceContractTestCase(PluginAPITestCase):
             organization=cls.organization,
             intent_profile=cls.routing_intent_profile,
         )
+        cls.aspa_reconciliation_run = create_test_aspa_reconciliation_run(
+            name='Custom ASPA Action Reconciliation',
+            organization=cls.organization,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
         cls.change_plan = create_test_roa_change_plan(
             name='Custom Action Change Plan',
             organization=cls.organization,
             source_reconciliation_run=cls.reconciliation_run,
+        )
+        cls.aspa_change_plan = create_test_aspa_change_plan(
+            name='Custom ASPA Action Change Plan',
+            organization=cls.organization,
+            source_reconciliation_run=cls.aspa_reconciliation_run,
         )
 
     def test_custom_action_routes_reverse(self):
@@ -765,6 +815,134 @@ class OrganizationAspaReconciliationActionAPITestCase(PluginAPITestCase):
         )
 
 
+class AspaChangePlanActionAPITestCase(PluginAPITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='org-aspa-plan-action', name='Organization ASPA Plan Action')
+        cls.provider_account = create_test_provider_account(
+            name='Organization ASPA Plan Provider',
+            organization=cls.organization,
+            provider_type='krill',
+            org_handle='ORG-ASPA-PLAN-ACTION',
+            ca_handle='org-aspa-plan-action',
+            api_base_url='https://krill.example.invalid',
+        )
+        cls.provider_snapshot = create_test_provider_snapshot(
+            name='Organization ASPA Plan Snapshot',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+            status='completed',
+        )
+        cls.customer_as = create_test_asn(65500)
+        cls.provider_as = create_test_asn(65501)
+        create_test_aspa_intent(
+            name='Organization ASPA Plan Intent',
+            organization=cls.organization,
+            customer_as=cls.customer_as,
+            provider_as=cls.provider_as,
+        )
+        cls.aspa_reconciliation_run = create_test_aspa_reconciliation_run(
+            name='Organization ASPA Plan Reconciliation',
+            organization=cls.organization,
+            provider_snapshot=cls.provider_snapshot,
+            comparison_scope=rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        cls.aspa_change_plan = create_test_aspa_change_plan(
+            name='Organization ASPA Change Plan',
+            organization=cls.organization,
+            source_reconciliation_run=cls.aspa_reconciliation_run,
+            provider_account=cls.provider_account,
+            provider_snapshot=cls.provider_snapshot,
+        )
+
+    def test_aspa_reconciliation_create_plan_action_returns_plan(self):
+        self.add_permissions('netbox_rpki.view_aspareconciliationrun', 'netbox_rpki.change_aspareconciliationrun')
+        url = reverse('plugins-api:netbox_rpki-api:aspareconciliationrun-create-plan', kwargs={'pk': self.aspa_reconciliation_run.pk})
+
+        response = self.client.post(url, {}, format='json', **self.header)
+
+        self.assertHttpStatus(response, 200)
+        self.assertEqual(response.data['source_reconciliation_run'], self.aspa_reconciliation_run.pk)
+        self.assertIn('item_count', response.data)
+
+    def test_aspa_change_plan_preview_action_returns_delta_and_execution(self):
+        self.add_permissions('netbox_rpki.view_aspachangeplan', 'netbox_rpki.change_aspachangeplan')
+        url = reverse('plugins-api:netbox_rpki-api:aspachangeplan-preview', kwargs={'pk': self.aspa_change_plan.pk})
+
+        response = self.client.post(url, {}, format='json', **self.header)
+
+        self.assertHttpStatus(response, 200)
+        self.assertIn('delta', response.data)
+        self.assertIn('execution', response.data)
+        self.assertEqual(response.data['status'], rpki_models.ASPAChangePlanStatus.DRAFT)
+
+    def test_aspa_change_plan_approve_action_transitions_plan(self):
+        self.add_permissions('netbox_rpki.view_aspachangeplan', 'netbox_rpki.change_aspachangeplan')
+        url = reverse('plugins-api:netbox_rpki-api:aspachangeplan-approve', kwargs={'pk': self.aspa_change_plan.pk})
+
+        response = self.client.post(url, {'ticket_reference': 'ASPA-API-CHG'}, format='json', **self.header)
+
+        self.assertHttpStatus(response, 200)
+        self.aspa_change_plan.refresh_from_db()
+        self.assertEqual(self.aspa_change_plan.status, rpki_models.ASPAChangePlanStatus.APPROVED)
+        self.assertEqual(self.aspa_change_plan.approved_by, self.user.username)
+        self.assertEqual(response.data['approval_record']['ticket_reference'], 'ASPA-API-CHG')
+
+    def test_aspa_change_plan_apply_action_runs_provider_write_flow(self):
+        self.add_permissions('netbox_rpki.view_aspachangeplan', 'netbox_rpki.change_aspachangeplan')
+        self.aspa_change_plan.status = rpki_models.ASPAChangePlanStatus.APPROVED
+        self.aspa_change_plan.approved_at = timezone.now()
+        self.aspa_change_plan.approved_by = 'api-approver'
+        self.aspa_change_plan.save(update_fields=('status', 'approved_at', 'approved_by'))
+        followup_snapshot = create_test_provider_snapshot(
+            name='Organization ASPA API Follow-Up Snapshot',
+            organization=self.organization,
+            provider_account=self.provider_account,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        followup_sync_run = create_test_provider_sync_run(
+            name='Organization ASPA API Follow-Up Sync',
+            organization=self.organization,
+            provider_account=self.provider_account,
+            provider_snapshot=followup_snapshot,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        url = reverse('plugins-api:netbox_rpki-api:aspachangeplan-apply', kwargs={'pk': self.aspa_change_plan.pk})
+
+        with patch('netbox_rpki.api.views.apply_aspa_change_plan_provider_write', return_value=(
+            create_test_provider_write_execution(
+                name='Organization ASPA API Execution',
+                organization=self.organization,
+                provider_account=self.provider_account,
+                provider_snapshot=self.provider_snapshot,
+                change_plan=None,
+                aspa_change_plan=self.aspa_change_plan,
+                execution_mode=rpki_models.ProviderWriteExecutionMode.APPLY,
+                status=rpki_models.ValidationRunStatus.COMPLETED,
+                followup_sync_run=followup_sync_run,
+                followup_provider_snapshot=followup_snapshot,
+            ),
+            {'added': [], 'removed': []},
+        )):
+            response = self.client.post(url, {}, format='json', **self.header)
+
+        self.assertHttpStatus(response, 200)
+        self.assertIn('execution', response.data)
+        self.assertEqual(response.data['execution']['status'], rpki_models.ValidationRunStatus.COMPLETED)
+
+    def test_aspa_change_plan_summary_action_returns_aggregate_counts(self):
+        self.add_permissions('netbox_rpki.view_aspachangeplan')
+        url = reverse('plugins-api:netbox_rpki-api:aspachangeplan-summary')
+
+        response = self.client.get(url, **self.header)
+
+        self.assertHttpStatus(response, 200)
+        self.assertIn('total_plans', response.data)
+        self.assertIn('by_status', response.data)
+        self.assertIn('provider_add_count_total', response.data)
+
+
 class ProviderAccountSummaryAPITestCase(PluginAPITestCase):
     @classmethod
     def setUpTestData(cls):
@@ -853,6 +1031,7 @@ class ProviderAccountSummaryAPITestCase(PluginAPITestCase):
         self.assertTrue(any('family_rollups' in account for account in response.data['accounts']))
         self.assertEqual(response.data['sync_due_count'], 2)
         self.assertEqual(response.data['roa_write_supported_count'], 1)
+        self.assertEqual(response.data['aspa_write_supported_count'], 1)
 
 
 class ProviderSnapshotActionAPITestCase(PluginAPITestCase):

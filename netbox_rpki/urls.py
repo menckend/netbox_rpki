@@ -41,6 +41,11 @@ def build_object_urlpatterns(spec):
                     name='roachangeplan_preview',
                 ),
                 path(
+                    f'{path_prefix}/<int:pk>/acknowledge-lint/',
+                    views.ROAChangePlanAcknowledgeView.as_view(),
+                    name='roachangeplan_acknowledge_lint',
+                ),
+                path(
                     f'{path_prefix}/<int:pk>/approve/',
                     views.ROAChangePlanApproveView.as_view(),
                     name='roachangeplan_approve',
@@ -49,6 +54,50 @@ def build_object_urlpatterns(spec):
                     f'{path_prefix}/<int:pk>/apply/',
                     views.ROAChangePlanApplyView.as_view(),
                     name='roachangeplan_apply',
+                ),
+            )
+        )
+    if spec.registry_key == 'roalintfinding':
+        urlpatterns.append(
+            path(
+                f'{path_prefix}/<int:pk>/suppress/',
+                views.ROALintFindingSuppressView.as_view(),
+                name='roalintfinding_suppress',
+            )
+        )
+    if spec.registry_key == 'roalintsuppression':
+        urlpatterns.append(
+            path(
+                f'{path_prefix}/<int:pk>/lift/',
+                views.ROALintSuppressionLiftView.as_view(),
+                name='roalintsuppression_lift',
+            )
+        )
+    if spec.registry_key == 'aspareconciliationrun':
+        urlpatterns.append(
+            path(
+                f'{path_prefix}/<int:pk>/create-plan/',
+                views.ASPAReconciliationRunCreatePlanView.as_view(),
+                name='aspareconciliationrun_create_plan',
+            )
+        )
+    if spec.registry_key == 'aspachangeplan':
+        urlpatterns.extend(
+            (
+                path(
+                    f'{path_prefix}/<int:pk>/preview/',
+                    views.ASPAChangePlanPreviewView.as_view(),
+                    name='aspachangeplan_preview',
+                ),
+                path(
+                    f'{path_prefix}/<int:pk>/approve/',
+                    views.ASPAChangePlanApproveView.as_view(),
+                    name='aspachangeplan_approve',
+                ),
+                path(
+                    f'{path_prefix}/<int:pk>/apply/',
+                    views.ASPAChangePlanApplyView.as_view(),
+                    name='aspachangeplan_apply',
                 ),
             )
         )

@@ -4,6 +4,7 @@ from rest_framework.serializers import HyperlinkedIdentityField
 from rest_framework import serializers
 
 from netbox_rpki import models
+from netbox_rpki.services import build_roa_change_plan_lint_posture
 from netbox_rpki.object_registry import API_OBJECT_SPECS
 from netbox_rpki.object_specs import ObjectSpec
 from netbox_rpki.services.provider_sync_contract import (
@@ -59,6 +60,9 @@ class RpkiProviderAccountSerializer(SERIALIZER_CLASS_MAP['rpkiprovideraccount'])
     supports_roa_write = serializers.ReadOnlyField()
     roa_write_mode = serializers.ReadOnlyField()
     roa_write_capability = serializers.ReadOnlyField()
+    supports_aspa_write = serializers.ReadOnlyField()
+    aspa_write_mode = serializers.ReadOnlyField()
+    aspa_write_capability = serializers.ReadOnlyField()
     sync_health = serializers.ReadOnlyField()
     sync_health_display = serializers.ReadOnlyField()
     last_sync_rollup = serializers.SerializerMethodField()
@@ -69,6 +73,9 @@ class RpkiProviderAccountSerializer(SERIALIZER_CLASS_MAP['rpkiprovideraccount'])
             'supports_roa_write',
             'roa_write_mode',
             'roa_write_capability',
+            'supports_aspa_write',
+            'aspa_write_mode',
+            'aspa_write_capability',
             'sync_health',
             'sync_health_display',
             'last_sync_rollup',
@@ -139,6 +146,7 @@ globals()['ROAReconciliationRunSerializer'] = ROAReconciliationRunSerializer
 class ROAChangePlanSerializer(SERIALIZER_CLASS_MAP['roachangeplan']):
     latest_lint_run = serializers.SerializerMethodField()
     latest_lint_summary = serializers.SerializerMethodField()
+    latest_lint_posture = serializers.SerializerMethodField()
     latest_simulation_run = serializers.SerializerMethodField()
     latest_simulation_summary = serializers.SerializerMethodField()
 
@@ -146,6 +154,7 @@ class ROAChangePlanSerializer(SERIALIZER_CLASS_MAP['roachangeplan']):
         fields = SERIALIZER_CLASS_MAP['roachangeplan'].Meta.fields + (
             'latest_lint_run',
             'latest_lint_summary',
+            'latest_lint_posture',
             'latest_simulation_run',
             'latest_simulation_summary',
         )
@@ -162,6 +171,9 @@ class ROAChangePlanSerializer(SERIALIZER_CLASS_MAP['roachangeplan']):
         if lint_run is None:
             return None
         return lint_run.summary_json
+
+    def get_latest_lint_posture(self, obj):
+        return build_roa_change_plan_lint_posture(obj)
 
     def get_latest_simulation_run(self, obj):
         simulation_run = obj.simulation_runs.order_by('-started_at', '-created').first()
@@ -479,6 +491,12 @@ class ROAChangePlanApproveActionSerializer(serializers.Serializer):
     maintenance_window_start = serializers.DateTimeField(required=False, allow_null=True)
     maintenance_window_end = serializers.DateTimeField(required=False, allow_null=True)
     approval_notes = serializers.CharField(required=False, allow_blank=True)
+    acknowledged_finding_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        required=False,
+        allow_empty=True,
+    )
+    lint_acknowledgement_notes = serializers.CharField(required=False, allow_blank=True)
 
     def validate(self, attrs):
         models.validate_maintenance_window_bounds(
@@ -486,6 +504,32 @@ class ROAChangePlanApproveActionSerializer(serializers.Serializer):
             end_at=attrs.get('maintenance_window_end'),
         )
         return attrs
+
+
+class ASPAChangePlanApproveActionSerializer(ROAChangePlanApproveActionSerializer):
+    pass
+
+
+class ROAChangePlanAcknowledgeActionSerializer(serializers.Serializer):
+    ticket_reference = serializers.CharField(required=False, allow_blank=True, max_length=200)
+    change_reference = serializers.CharField(required=False, allow_blank=True, max_length=200)
+    acknowledged_finding_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        required=True,
+        allow_empty=False,
+    )
+    lint_acknowledgement_notes = serializers.CharField(required=False, allow_blank=True)
+
+
+class ROALintFindingSuppressActionSerializer(serializers.Serializer):
+    scope_type = serializers.ChoiceField(choices=models.ROALintSuppressionScope.choices)
+    reason = serializers.CharField(max_length=255)
+    expires_at = serializers.DateTimeField(required=False, allow_null=True)
+    notes = serializers.CharField(required=False, allow_blank=True)
+
+
+class ROALintSuppressionLiftActionSerializer(serializers.Serializer):
+    lift_reason = serializers.CharField(required=False, allow_blank=True)
 
 
 class ASPAReconciliationRunActionSerializer(serializers.Serializer):

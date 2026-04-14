@@ -525,6 +525,7 @@ def build_provider_account_summary(
     by_family_status: dict[str, int] = {}
     sync_due_count = 0
     roa_write_supported_count = 0
+    aspa_write_supported_count = 0
     latest_snapshot_count = 0
     latest_diff_count = 0
     accounts = []
@@ -536,6 +537,8 @@ def build_provider_account_summary(
             sync_due_count += 1
         if provider_account.supports_roa_write:
             roa_write_supported_count += 1
+        if provider_account.supports_aspa_write:
+            aspa_write_supported_count += 1
         rollup = build_provider_account_rollup(
             provider_account,
             visible_snapshot_ids=visible_snapshot_ids,
@@ -556,6 +559,7 @@ def build_provider_account_summary(
         'by_family_status': by_family_status,
         'sync_due_count': sync_due_count,
         'roa_write_supported_count': roa_write_supported_count,
+        'aspa_write_supported_count': aspa_write_supported_count,
         'latest_snapshot_count': latest_snapshot_count,
         'latest_diff_count': latest_diff_count,
         'accounts': accounts,

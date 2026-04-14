@@ -983,7 +983,7 @@ def reconcile_roa_intents(
         'intent_count',
         'result_summary_json',
     ))
-    from netbox_rpki.services.roa_lint import run_roa_lint
+    from netbox_rpki.services.roa_lint import refresh_roa_change_plan_lint_posture, run_roa_lint
 
     try:
         lint_run = run_roa_lint(reconciliation_run)
@@ -1309,6 +1309,7 @@ def create_roa_change_plan(
     try:
         lint_run = run_roa_lint(reconciliation_run, change_plan=plan)
         plan.summary_json['lint_run_id'] = lint_run.pk
+        plan.summary_json['lint_posture'] = refresh_roa_change_plan_lint_posture(plan)
     except Exception as exc:
         plan.summary_json['lint_error'] = str(exc)
     try:

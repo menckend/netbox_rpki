@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from urllib.parse import urlencode
 
 from django.contrib import messages
+from django.core.exceptions import PermissionDenied
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -25,10 +26,19 @@ from netbox_rpki.object_registry import SIMPLE_DETAIL_VIEW_OBJECT_SPECS, VIEW_OB
 from netbox_rpki.object_specs import ObjectSpec
 from netbox_rpki.services import (
     ProviderWriteError,
+    acknowledge_roa_lint_findings,
+    apply_aspa_change_plan_provider_write,
     apply_roa_change_plan_provider_write,
+    approve_aspa_change_plan,
+    build_aspa_change_plan_delta,
+    build_roa_change_plan_lint_posture,
     approve_roa_change_plan,
     build_roa_change_plan_delta,
+    create_aspa_change_plan,
+    lift_roa_lint_suppression,
+    preview_aspa_change_plan_provider_write,
     preview_roa_change_plan_provider_write,
+    suppress_roa_lint_finding,
 )
 from netbox_rpki.services.provider_sync_contract import build_provider_account_rollup
 
@@ -270,6 +280,19 @@ class ROAChangePlanActionView(generic.ObjectEditView):
         return getattr(request.user, 'username', '') if getattr(request.user, 'is_authenticated', False) else ''
 
 
+class ASPAChangePlanActionView(generic.ObjectEditView):
+    queryset = models.ASPAChangePlan.objects.all()
+
+    def get_required_permission(self):
+        return 'netbox_rpki.change_aspachangeplan'
+
+    def get_plan(self, pk):
+        return get_object_or_404(self.queryset, pk=pk)
+
+    def get_requested_by(self, request) -> str:
+        return getattr(request.user, 'username', '') if getattr(request.user, 'is_authenticated', False) else ''
+
+
 class ProviderAccountSyncView(generic.ObjectEditView):
     queryset = models.RpkiProviderAccount.objects.all()
     template_name = 'netbox_rpki/provideraccount_sync.html'
@@ -374,6 +397,49 @@ class OrganizationRunAspaReconciliationView(generic.ObjectEditView):
         return redirect(organization.get_absolute_url())
 
 
+class ASPAReconciliationRunCreatePlanView(generic.ObjectEditView):
+    queryset = models.ASPAReconciliationRun.objects.all()
+    template_name = 'netbox_rpki/roachangeplan_confirm.html'
+    action_label = 'Create Plan'
+    button_class = 'primary'
+
+    def get_required_permission(self):
+        return 'netbox_rpki.change_aspareconciliationrun'
+
+    def get_run(self, pk):
+        return get_object_or_404(self.queryset, pk=pk)
+
+    def _render(self, request, reconciliation_run, *, form=None, status=200):
+        return render(request, self.template_name, {
+            'object': reconciliation_run,
+            'change_plan': reconciliation_run,
+            'form': form or ConfirmationForm(),
+            'return_url': self.get_return_url(request, reconciliation_run),
+            'action_label': self.action_label,
+            'button_class': self.button_class,
+            'show_governance_inputs': False,
+        }, status=status)
+
+    def get(self, request, pk):
+        reconciliation_run = self.get_run(pk)
+        return self._render(request, reconciliation_run)
+
+    def post(self, request, pk):
+        reconciliation_run = self.get_run(pk)
+        form = ConfirmationForm(request.POST)
+        if not form.is_valid():
+            return self._render(request, reconciliation_run, form=form, status=400)
+
+        try:
+            plan = create_aspa_change_plan(reconciliation_run)
+        except ValueError as exc:
+            messages.error(request, str(exc))
+            return redirect(reconciliation_run.get_absolute_url())
+
+        messages.success(request, f'Created ASPA change plan {plan.name}.')
+        return redirect(plan.get_absolute_url())
+
+
 class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
     template_name = 'netbox_rpki/operations_dashboard.html'
     expiry_window_days = 30
@@ -382,6 +448,8 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
         'netbox_rpki.view_certificate',
         'netbox_rpki.view_roareconciliationrun',
         'netbox_rpki.view_roachangeplan',
+        'netbox_rpki.view_aspareconciliationrun',
+        'netbox_rpki.view_aspachangeplan',
     ]
     provider_health_priority = {
         models.ProviderSyncHealth.FAILED: 0,
@@ -403,6 +471,8 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
         )
         reconciliation_attention_runs = self.get_reconciliation_attention_runs(request)
         change_plans_requiring_attention = self.get_change_plans_requiring_attention(request)
+        aspa_reconciliation_attention_runs = self.get_aspa_reconciliation_attention_runs(request)
+        aspa_change_plans_requiring_attention = self.get_aspa_change_plans_requiring_attention(request)
 
         return render(request, self.template_name, {
             'provider_accounts': provider_accounts,
@@ -410,6 +480,8 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
             'expiring_certificates': expiring_certificates,
             'reconciliation_attention_runs': reconciliation_attention_runs,
             'change_plans_requiring_attention': change_plans_requiring_attention,
+            'aspa_reconciliation_attention_runs': aspa_reconciliation_attention_runs,
+            'aspa_change_plans_requiring_attention': aspa_change_plans_requiring_attention,
             'expiry_window_days': self.expiry_window_days,
             'expiry_threshold': expiry_threshold,
         })
@@ -587,20 +659,110 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
                 continue
             latest_simulation = plan.simulation_runs.order_by('-started_at', '-created').first()
             latest_lint_run = plan.lint_runs.order_by('-started_at', '-created').first()
+            lint_posture = build_roa_change_plan_lint_posture(plan)
+            replacement_count = (plan.summary_json or {}).get('replacement_count', 0)
+            if (
+                plan.status != models.ROAChangePlanStatus.FAILED
+                and replacement_count == 0
+                and lint_posture['unresolved_blocking_finding_count'] == 0
+                and lint_posture['unresolved_acknowledgement_required_finding_count'] == 0
+                and lint_posture['acknowledged_finding_count'] == 0
+            ):
+                continue
             plans.append({
                 'object': plan,
-                'replacement_count': (plan.summary_json or {}).get('replacement_count', 0),
+                'replacement_count': replacement_count,
                 'warning_count': getattr(latest_lint_run, 'warning_count', 0),
                 'error_count': getattr(latest_lint_run, 'error_count', 0) + getattr(latest_lint_run, 'critical_count', 0),
+                'lint_posture': lint_posture,
+                'blocking_count': lint_posture['unresolved_blocking_finding_count'],
+                'ack_required_count': lint_posture['unresolved_acknowledgement_required_finding_count'],
+                'acknowledged_count': lint_posture['acknowledged_finding_count'],
+                'suppressed_count': lint_posture['suppressed_finding_count'],
                 'simulation_run': latest_simulation,
                 'lint_run': latest_lint_run,
             })
         plans.sort(
             key=lambda item: (
                 item['object'].status == models.ROAChangePlanStatus.FAILED,
-                item['error_count'],
-                item['warning_count'],
+                item['blocking_count'],
+                item['ack_required_count'],
+                item['acknowledged_count'],
                 item['replacement_count'],
+                item['object'].created.timestamp(),
+            ),
+            reverse=True,
+        )
+        return plans[:10]
+
+    def get_aspa_reconciliation_attention_runs(self, request):
+        queryset = (
+            models.ASPAReconciliationRun.objects.restrict(request.user, 'view')
+            .select_related('organization', 'provider_snapshot')
+        )
+        runs = []
+        for run in queryset:
+            summary = dict(run.result_summary_json or {})
+            intent_types = dict(summary.get('intent_result_types') or {})
+            published_types = dict(summary.get('published_result_types') or {})
+            missing_count = intent_types.get(models.ASPAIntentResultType.MISSING, 0)
+            missing_provider_count = intent_types.get(models.ASPAIntentResultType.MISSING_PROVIDER, 0)
+            stale_count = (
+                intent_types.get(models.ASPAIntentResultType.STALE, 0)
+                + published_types.get(models.PublishedASPAResultType.STALE, 0)
+            )
+            extra_provider_count = published_types.get(models.PublishedASPAResultType.EXTRA_PROVIDER, 0)
+            orphaned_count = published_types.get(models.PublishedASPAResultType.ORPHANED, 0)
+            if not any((missing_count, missing_provider_count, stale_count, extra_provider_count, orphaned_count)):
+                continue
+            runs.append({
+                'object': run,
+                'missing_count': missing_count,
+                'missing_provider_count': missing_provider_count,
+                'extra_provider_count': extra_provider_count,
+                'orphaned_count': orphaned_count,
+                'stale_count': stale_count,
+            })
+        runs.sort(
+            key=lambda item: (
+                item['stale_count'],
+                item['orphaned_count'],
+                item['missing_provider_count'],
+                item['extra_provider_count'],
+                item['missing_count'],
+                (item['object'].completed_at or item['object'].started_at or timezone.now()).timestamp(),
+            ),
+            reverse=True,
+        )
+        return runs[:10]
+
+    def get_aspa_change_plans_requiring_attention(self, request):
+        queryset = (
+            models.ASPAChangePlan.objects.restrict(request.user, 'view')
+            .select_related('organization', 'provider_account', 'source_reconciliation_run')
+        )
+        attention_statuses = {
+            models.ASPAChangePlanStatus.DRAFT,
+            models.ASPAChangePlanStatus.APPROVED,
+            models.ASPAChangePlanStatus.FAILED,
+        }
+        plans = []
+        for plan in queryset:
+            if plan.status not in attention_statuses:
+                continue
+            summary = dict(plan.summary_json or {})
+            plans.append({
+                'object': plan,
+                'replacement_count': summary.get('replacement_count', 0),
+                'provider_add_count': summary.get('provider_add_count', 0),
+                'provider_remove_count': summary.get('provider_remove_count', 0),
+            })
+        plans.sort(
+            key=lambda item: (
+                item['object'].status == models.ASPAChangePlanStatus.FAILED,
+                item['provider_remove_count'],
+                item['replacement_count'],
+                item['provider_add_count'],
                 item['object'].created.timestamp(),
             ),
             reverse=True,
@@ -679,7 +841,7 @@ class ROAChangePlanApproveView(ROAChangePlanActionView):
             'maintenance_window_start': plan.maintenance_window_start,
             'maintenance_window_end': plan.maintenance_window_end,
         }
-        return forms.ROAChangePlanApprovalForm(data=data, initial=initial)
+        return forms.ROAChangePlanApprovalForm(data=data, initial=initial, plan=plan)
 
     def _render(self, request, plan, *, form=None, status=200):
         return render(request, self.template_name, {
@@ -711,12 +873,59 @@ class ROAChangePlanApproveView(ROAChangePlanActionView):
                 maintenance_window_start=form.cleaned_data['maintenance_window_start'],
                 maintenance_window_end=form.cleaned_data['maintenance_window_end'],
                 approval_notes=form.cleaned_data['approval_notes'],
+                acknowledged_finding_ids=[finding.pk for finding in form.cleaned_data['acknowledged_findings']],
+                lint_acknowledgement_notes=form.cleaned_data['lint_acknowledgement_notes'],
             )
         except ProviderWriteError as exc:
             messages.error(request, str(exc))
             return redirect(plan.get_absolute_url())
 
         messages.success(request, f'Approved ROA change plan {plan.name}.')
+        return redirect(plan.get_absolute_url())
+
+
+class ROAChangePlanAcknowledgeView(ROAChangePlanActionView):
+    template_name = 'netbox_rpki/roachangeplan_acknowledge.html'
+
+    def get_form(self, data=None, *, plan):
+        initial = {
+            'ticket_reference': plan.ticket_reference,
+            'change_reference': plan.change_reference,
+        }
+        return forms.ROAChangePlanLintAcknowledgementForm(data=data, initial=initial, plan=plan)
+
+    def _render(self, request, plan, *, form=None, status=200):
+        return render(request, self.template_name, {
+            'object': plan,
+            'change_plan': plan,
+            'form': form or self.get_form(plan=plan),
+            'return_url': self.get_return_url(request, plan),
+        }, status=status)
+
+    def get(self, request, pk):
+        plan = self.get_plan(pk)
+        return self._render(request, plan)
+
+    def post(self, request, pk):
+        plan = self.get_plan(pk)
+        form = self.get_form(request.POST, plan=plan)
+        if not form.is_valid():
+            return self._render(request, plan, form=form, status=400)
+
+        try:
+            acknowledge_roa_lint_findings(
+                plan,
+                acknowledged_by=self.get_requested_by(request),
+                ticket_reference=form.cleaned_data['ticket_reference'],
+                change_reference=form.cleaned_data['change_reference'],
+                acknowledged_finding_ids=[finding.pk for finding in form.cleaned_data['acknowledged_findings']],
+                notes=form.cleaned_data['lint_acknowledgement_notes'],
+            )
+        except ProviderWriteError as exc:
+            messages.error(request, str(exc))
+            return redirect(plan.get_absolute_url())
+
+        messages.success(request, f'Recorded lint acknowledgement(s) for {plan.name}.')
         return redirect(plan.get_absolute_url())
 
 
@@ -771,5 +980,249 @@ class ROAChangePlanApplyView(ROAChangePlanActionView):
             messages.warning(
                 request,
                 f'Applied ROA change plan {plan.name}, but the follow-up provider sync did not complete successfully.',
+            )
+        return redirect(plan.get_absolute_url())
+
+
+class ASPAChangePlanPreviewView(ASPAChangePlanActionView):
+    template_name = 'netbox_rpki/roachangeplan_preview.html'
+
+    def _render(self, request, plan, *, execution=None, error_text=None, status=200):
+        try:
+            delta = build_aspa_change_plan_delta(plan)
+        except ProviderWriteError as exc:
+            delta = None
+            error_text = error_text or str(exc)
+            status = 400
+
+        return render(request, self.template_name, {
+            'object': plan,
+            'change_plan': plan,
+            'delta': delta,
+            'execution': execution,
+            'error_text': error_text,
+            'form': ConfirmationForm(),
+            'return_url': self.get_return_url(request, plan),
+        }, status=status)
+
+    def get(self, request, pk):
+        plan = self.get_plan(pk)
+        return self._render(request, plan)
+
+    def post(self, request, pk):
+        plan = self.get_plan(pk)
+        form = ConfirmationForm(request.POST)
+        if not form.is_valid():
+            return self._render(request, plan, status=400)
+
+        try:
+            execution, _ = preview_aspa_change_plan_provider_write(
+                plan,
+                requested_by=self.get_requested_by(request),
+            )
+        except ProviderWriteError as exc:
+            return self._render(request, plan, error_text=str(exc), status=400)
+
+        messages.success(request, f'Recorded ASPA provider preview execution {execution.name}.')
+        return self._render(request, plan, execution=execution)
+
+
+class ROALintFindingSuppressView(View):
+    template_name = 'netbox_rpki/roalintfinding_suppress.html'
+
+    def get_finding(self, pk):
+        return get_object_or_404(models.ROALintFinding.objects.all(), pk=pk)
+
+    def _require_permission(self, request):
+        if not request.user.has_perm('netbox_rpki.change_roalintfinding'):
+            raise PermissionDenied('You do not have permission to suppress ROA lint findings.')
+
+    def get_requested_by(self, request):
+        return getattr(request.user, 'username', '')
+
+    def get(self, request, pk):
+        self._require_permission(request)
+        finding = self.get_finding(pk)
+        form = forms.ROALintFindingSuppressForm(finding=finding)
+        return render(request, self.template_name, {
+            'object': finding,
+            'finding': finding,
+            'form': form,
+            'return_url': finding.get_absolute_url(),
+        })
+
+    def post(self, request, pk):
+        self._require_permission(request)
+        finding = self.get_finding(pk)
+        form = forms.ROALintFindingSuppressForm(request.POST, finding=finding)
+        if not form.is_valid():
+            return render(request, self.template_name, {
+                'object': finding,
+                'finding': finding,
+                'form': form,
+                'return_url': finding.get_absolute_url(),
+            }, status=400)
+
+        suppression = suppress_roa_lint_finding(
+            finding,
+            scope_type=form.cleaned_data['scope_type'],
+            reason=form.cleaned_data['reason'],
+            created_by=self.get_requested_by(request),
+            expires_at=form.cleaned_data['expires_at'],
+            notes=form.cleaned_data['notes'],
+        )
+        messages.success(request, f'Recorded lint suppression {suppression.name}.')
+        return redirect(suppression.get_absolute_url())
+
+
+class ROALintSuppressionLiftView(View):
+    template_name = 'netbox_rpki/roalintsuppression_lift.html'
+
+    def get_suppression(self, pk):
+        return get_object_or_404(models.ROALintSuppression.objects.all(), pk=pk)
+
+    def _require_permission(self, request):
+        if not request.user.has_perm('netbox_rpki.change_roalintsuppression'):
+            raise PermissionDenied('You do not have permission to lift ROA lint suppressions.')
+
+    def get_requested_by(self, request):
+        return getattr(request.user, 'username', '')
+
+    def get(self, request, pk):
+        self._require_permission(request)
+        suppression = self.get_suppression(pk)
+        form = forms.ROALintSuppressionLiftForm()
+        return render(request, self.template_name, {
+            'object': suppression,
+            'suppression': suppression,
+            'form': form,
+            'return_url': suppression.get_absolute_url(),
+        })
+
+    def post(self, request, pk):
+        self._require_permission(request)
+        suppression = self.get_suppression(pk)
+        form = forms.ROALintSuppressionLiftForm(request.POST)
+        if not form.is_valid():
+            return render(request, self.template_name, {
+                'object': suppression,
+                'suppression': suppression,
+                'form': form,
+                'return_url': suppression.get_absolute_url(),
+            }, status=400)
+
+        lift_roa_lint_suppression(
+            suppression,
+            lifted_by=self.get_requested_by(request),
+            lift_reason=form.cleaned_data['lift_reason'],
+        )
+        messages.success(request, f'Lifted lint suppression {suppression.name}.')
+        return redirect(suppression.get_absolute_url())
+
+
+class ASPAChangePlanApproveView(ASPAChangePlanActionView):
+    template_name = 'netbox_rpki/roachangeplan_confirm.html'
+    action_label = 'Approve'
+    button_class = 'primary'
+
+    def get_form(self, data=None, *, plan):
+        initial = {
+            'ticket_reference': plan.ticket_reference,
+            'change_reference': plan.change_reference,
+            'maintenance_window_start': plan.maintenance_window_start,
+            'maintenance_window_end': plan.maintenance_window_end,
+        }
+        return forms.ASPAChangePlanApprovalForm(data=data, initial=initial)
+
+    def _render(self, request, plan, *, form=None, status=200):
+        return render(request, self.template_name, {
+            'object': plan,
+            'change_plan': plan,
+            'form': form or self.get_form(plan=plan),
+            'return_url': self.get_return_url(request, plan),
+            'action_label': self.action_label,
+            'button_class': self.button_class,
+            'show_governance_inputs': True,
+        }, status=status)
+
+    def get(self, request, pk):
+        plan = self.get_plan(pk)
+        return self._render(request, plan)
+
+    def post(self, request, pk):
+        plan = self.get_plan(pk)
+        form = self.get_form(request.POST, plan=plan)
+        if not form.is_valid():
+            return self._render(request, plan, form=form, status=400)
+
+        try:
+            approve_aspa_change_plan(
+                plan,
+                approved_by=self.get_requested_by(request),
+                ticket_reference=form.cleaned_data['ticket_reference'],
+                change_reference=form.cleaned_data['change_reference'],
+                maintenance_window_start=form.cleaned_data['maintenance_window_start'],
+                maintenance_window_end=form.cleaned_data['maintenance_window_end'],
+                approval_notes=form.cleaned_data['approval_notes'],
+            )
+        except ProviderWriteError as exc:
+            messages.error(request, str(exc))
+            return redirect(plan.get_absolute_url())
+
+        messages.success(request, f'Approved ASPA change plan {plan.name}.')
+        return redirect(plan.get_absolute_url())
+
+
+class ASPAChangePlanApplyView(ASPAChangePlanActionView):
+    template_name = 'netbox_rpki/roachangeplan_confirm.html'
+    action_label = 'Apply'
+    button_class = 'success'
+
+    def get(self, request, pk):
+        plan = self.get_plan(pk)
+        try:
+            delta = build_aspa_change_plan_delta(plan)
+        except ProviderWriteError:
+            delta = None
+        return render(request, self.template_name, {
+            'object': plan,
+            'change_plan': plan,
+            'delta': delta,
+            'form': ConfirmationForm(),
+            'return_url': self.get_return_url(request, plan),
+            'action_label': self.action_label,
+            'button_class': self.button_class,
+            'show_governance_inputs': False,
+        })
+
+    def post(self, request, pk):
+        plan = self.get_plan(pk)
+        form = ConfirmationForm(request.POST)
+        if not form.is_valid():
+            return render(request, self.template_name, {
+                'object': plan,
+                'change_plan': plan,
+                'form': form,
+                'return_url': self.get_return_url(request, plan),
+                'action_label': self.action_label,
+                'button_class': self.button_class,
+                'show_governance_inputs': False,
+            }, status=400)
+
+        try:
+            execution, _ = apply_aspa_change_plan_provider_write(
+                plan,
+                requested_by=self.get_requested_by(request),
+            )
+        except ProviderWriteError as exc:
+            messages.error(request, str(exc))
+            return redirect(plan.get_absolute_url())
+
+        if execution.status == models.ValidationRunStatus.COMPLETED:
+            messages.success(request, f'Applied ASPA change plan {plan.name}.')
+        else:
+            messages.warning(
+                request,
+                f'Applied ASPA change plan {plan.name}, but the follow-up provider sync did not complete successfully.',
             )
         return redirect(plan.get_absolute_url())

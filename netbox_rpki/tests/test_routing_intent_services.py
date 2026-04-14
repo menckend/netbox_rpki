@@ -7,7 +7,16 @@ from django.urls import reverse
 from tenancy.models import Tenant
 
 from netbox_rpki import models as rpki_models
-from netbox_rpki.services import create_roa_change_plan, derive_roa_intents, reconcile_roa_intents, run_routing_intent_pipeline
+from netbox_rpki.api.serializers import SERIALIZER_CLASS_MAP
+from netbox_rpki.services import (
+    create_roa_change_plan,
+    derive_roa_intents,
+    lift_roa_lint_suppression,
+    reconcile_roa_intents,
+    run_roa_lint,
+    run_routing_intent_pipeline,
+    suppress_roa_lint_finding,
+)
 from netbox_rpki.tests.base import PluginAPITestCase
 from netbox_rpki.tests.utils import (
     create_test_asn,
@@ -19,6 +28,7 @@ from netbox_rpki.tests.utils import (
     create_test_provider_snapshot,
     create_test_roa,
     create_test_roa_change_plan,
+    create_test_roa_change_plan_item,
     create_test_roa_change_plan_matrix,
     create_test_roa_prefix,
     create_test_routing_intent_profile,
@@ -81,6 +91,22 @@ class RoutingIntentServiceTestCase(TestCase):
         self.assertEqual(best_match.match_kind, rpki_models.ROAIntentMatchKind.LENGTH_BROADER)
         self.assertEqual(intent_result.result_type, rpki_models.ROAIntentResultType.MAX_LENGTH_OVERBROAD)
         self.assertEqual(published_result.result_type, rpki_models.PublishedROAResultType.BROADER_THAN_NEEDED)
+        lint_run = reconciliation_run.lint_runs.get()
+        finding_codes = list(lint_run.findings.values_list('finding_code', flat=True))
+        self.assertIn('intent_max_length_overbroad', finding_codes)
+        self.assertIn('published_broader_than_needed', finding_codes)
+        self.assertEqual(finding_codes.count('replacement_required'), 2)
+        self.assertIn('intent_suppressed', finding_codes)
+        self.assertEqual(
+            lint_run.summary_json['rule_family_counts'],
+            {
+                'intent_safety': 2,
+                'published_hygiene': 1,
+                'plan_risk': 2,
+            },
+        )
+        self.assertEqual(lint_run.summary_json['approval_impact_counts']['blocking'], 0)
+        self.assertEqual(lint_run.summary_json['informational_finding_count'], 5)
 
     def test_reconciliation_supports_provider_imported_scope(self):
         derivation_run = derive_roa_intents(self.profile)
@@ -156,6 +182,222 @@ class RoutingIntentServiceTestCase(TestCase):
         self.assertEqual(reconciliation_run.result_summary_json['replacement_required_published_count'], 1)
         self.assertTrue(reconciliation_run.lint_runs.exists())
         self.assertIn('lint_run_id', reconciliation_run.result_summary_json)
+        lint_run = reconciliation_run.lint_runs.get()
+        finding_codes = list(lint_run.findings.values_list('finding_code', flat=True))
+        self.assertIn('intent_inconsistent_with_published', finding_codes)
+        self.assertIn('intent_max_length_overbroad', finding_codes)
+        self.assertIn('published_inconsistent_with_intent', finding_codes)
+        self.assertIn('replacement_required', finding_codes)
+        self.assertIn('intent_suppressed', finding_codes)
+        self.assertEqual(finding_codes.count('replacement_required'), 2)
+        self.assertEqual(lint_run.summary_json['rule_family_counts']['intent_safety'], 3)
+        self.assertEqual(lint_run.summary_json['rule_family_counts']['published_hygiene'], 1)
+        self.assertEqual(lint_run.summary_json['rule_family_counts']['plan_risk'], 2)
+        self.assertEqual(lint_run.summary_json['blocking_finding_count'], 2)
+
+    def test_direct_plan_lint_flags_broadening_and_uncovered_withdraw(self):
+        derivation_run = derive_roa_intents(self.profile)
+        reconciliation_run = reconcile_roa_intents(derivation_run)
+        plan = create_test_roa_change_plan(
+            organization=self.organization,
+            source_reconciliation_run=reconciliation_run,
+        )
+
+        create_test_roa_change_plan_item(
+            name='Broadening Create',
+            change_plan=plan,
+            action_type=rpki_models.ROAChangePlanAction.CREATE,
+            plan_semantic=rpki_models.ROAChangePlanItemSemantic.CREATE,
+            after_state_json={
+                'prefix_cidr_text': '10.55.0.0/24',
+                'origin_asn_value': self.origin_asn.asn,
+                'max_length': 26,
+            },
+        )
+        create_test_roa_change_plan_item(
+            name='Standalone Withdraw',
+            change_plan=plan,
+            action_type=rpki_models.ROAChangePlanAction.WITHDRAW,
+            plan_semantic=rpki_models.ROAChangePlanItemSemantic.WITHDRAW,
+            before_state_json={
+                'prefix_cidr_text': '10.56.0.0/24',
+                'origin_asn_value': self.origin_asn.asn,
+                'max_length': 24,
+            },
+        )
+
+        lint_run = run_roa_lint(reconciliation_run, change_plan=plan)
+
+        finding_codes = list(lint_run.findings.values_list('finding_code', flat=True))
+        self.assertIn('plan_broadens_authorization', finding_codes)
+        self.assertIn('plan_withdraw_without_replacement', finding_codes)
+        self.assertIn('intent_suppressed', finding_codes)
+        self.assertEqual(lint_run.summary_json['summary_schema_version'], 3)
+        self.assertEqual(
+            lint_run.summary_json['rule_family_counts'],
+            {'intent_safety': 1, 'plan_risk': 2},
+        )
+        self.assertEqual(
+            lint_run.summary_json['approval_impact_counts'],
+            {'informational': 1, 'acknowledgement_required': 2, 'blocking': 0},
+        )
+
+    def test_lint_finding_exposes_operator_explanation_contract(self):
+        derivation_run = derive_roa_intents(self.profile)
+        provider_snapshot = create_test_provider_snapshot(
+            name='Explanation Snapshot',
+            organization=self.organization,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        replacement_import = create_test_imported_roa_authorization(
+            name='Explanation Imported Authorization',
+            provider_snapshot=provider_snapshot,
+            organization=self.organization,
+            prefix=self.primary_prefix,
+            origin_asn=create_test_asn(65571),
+            max_length=26,
+        )
+
+        reconciliation_run = reconcile_roa_intents(
+            derivation_run,
+            comparison_scope=rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
+            provider_snapshot=provider_snapshot,
+        )
+        lint_run = reconciliation_run.lint_runs.get()
+        finding = lint_run.findings.get(
+            finding_code='published_inconsistent_with_intent',
+            published_roa_result__imported_authorization=replacement_import,
+        )
+
+        self.assertEqual(finding.details_json['rule_label'], 'Published ROA inconsistent with intent')
+        self.assertEqual(finding.details_json['approval_impact'], 'blocking')
+        self.assertIn('disagrees with current intent', finding.details_json['operator_message'])
+        self.assertIn('publishing state', finding.details_json['why_it_matters'].lower())
+        self.assertIn('replace the published authorization', finding.details_json['operator_action'].lower())
+        self.assertEqual(finding.details_json['source_kind'], 'published_roa_result')
+        self.assertEqual(finding.details_json['source_name'], finding.published_roa_result.name)
+
+        serializer = SERIALIZER_CLASS_MAP['roalintfinding'](finding, context={'request': None})
+        self.assertEqual(
+            serializer.data['details_json']['rule_label'],
+            'Published ROA inconsistent with intent',
+        )
+        self.assertEqual(serializer.data['details_json']['approval_impact'], 'blocking')
+
+    def test_suppression_marks_rerun_findings_and_lift_reopens_them(self):
+        derivation_run = derive_roa_intents(self.profile)
+        provider_snapshot = create_test_provider_snapshot(
+            name='Suppression Snapshot',
+            organization=self.organization,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        replacement_import = create_test_imported_roa_authorization(
+            name='Suppression Imported Authorization',
+            provider_snapshot=provider_snapshot,
+            organization=self.organization,
+            prefix=self.primary_prefix,
+            origin_asn=create_test_asn(65572),
+            max_length=26,
+        )
+
+        initial_run = reconcile_roa_intents(
+            derivation_run,
+            comparison_scope=rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
+            provider_snapshot=provider_snapshot,
+        )
+        initial_finding = initial_run.lint_runs.get().findings.get(
+            finding_code='published_inconsistent_with_intent',
+            published_roa_result__imported_authorization=replacement_import,
+        )
+        suppression = suppress_roa_lint_finding(
+            initial_finding,
+            scope_type=rpki_models.ROALintSuppressionScope.PROFILE,
+            reason='Known operator exception.',
+            created_by='lint-user',
+        )
+
+        suppressed_run = reconcile_roa_intents(
+            derive_roa_intents(self.profile),
+            comparison_scope=rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
+            provider_snapshot=provider_snapshot,
+        )
+        suppressed_finding = suppressed_run.lint_runs.order_by('-started_at', '-created').first().findings.get(
+            finding_code='published_inconsistent_with_intent',
+            published_roa_result__imported_authorization=replacement_import,
+        )
+        self.assertTrue(suppressed_finding.details_json['suppressed'])
+        self.assertEqual(suppressed_finding.details_json['suppression_id'], suppression.pk)
+        self.assertGreaterEqual(suppressed_run.lint_runs.order_by('-started_at', '-created').first().summary_json['suppressed_finding_count'], 1)
+
+        lift_roa_lint_suppression(suppression, lifted_by='lint-user', lift_reason='Issue changed.')
+
+        reopened_run = reconcile_roa_intents(
+            derive_roa_intents(self.profile),
+            comparison_scope=rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
+            provider_snapshot=provider_snapshot,
+        )
+        reopened_finding = reopened_run.lint_runs.order_by('-started_at', '-created').first().findings.get(
+            finding_code='published_inconsistent_with_intent',
+            published_roa_result__imported_authorization=replacement_import,
+        )
+        self.assertFalse(reopened_finding.details_json['suppressed'])
+
+    def test_suppression_reopens_when_finding_facts_change(self):
+        derivation_run = derive_roa_intents(self.profile)
+        initial_snapshot = create_test_provider_snapshot(
+            name='Suppression Fingerprint Snapshot One',
+            organization=self.organization,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        create_test_imported_roa_authorization(
+            name='Suppression Fingerprint Imported Authorization One',
+            provider_snapshot=initial_snapshot,
+            organization=self.organization,
+            prefix=self.primary_prefix,
+            origin_asn=create_test_asn(65573),
+            max_length=26,
+        )
+
+        initial_run = reconcile_roa_intents(
+            derivation_run,
+            comparison_scope=rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
+            provider_snapshot=initial_snapshot,
+        )
+        initial_finding = initial_run.lint_runs.get().findings.get(
+            finding_code='published_inconsistent_with_intent',
+        )
+        suppress_roa_lint_finding(
+            initial_finding,
+            scope_type=rpki_models.ROALintSuppressionScope.PROFILE,
+            reason='Known operator exception.',
+            created_by='lint-user',
+        )
+
+        changed_snapshot = create_test_provider_snapshot(
+            name='Suppression Fingerprint Snapshot Two',
+            organization=self.organization,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        changed_import = create_test_imported_roa_authorization(
+            name='Suppression Fingerprint Imported Authorization Two',
+            provider_snapshot=changed_snapshot,
+            organization=self.organization,
+            prefix=self.primary_prefix,
+            origin_asn=create_test_asn(65574),
+            max_length=25,
+        )
+
+        changed_run = reconcile_roa_intents(
+            derive_roa_intents(self.profile),
+            comparison_scope=rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
+            provider_snapshot=changed_snapshot,
+        )
+        changed_finding = changed_run.lint_runs.order_by('-started_at', '-created').first().findings.get(
+            finding_code='published_inconsistent_with_intent',
+            published_roa_result__imported_authorization=changed_import,
+        )
+
+        self.assertFalse(changed_finding.details_json['suppressed'])
 
     def test_change_plan_creates_create_and_withdraw_actions(self):
         derivation_run = derive_roa_intents(self.profile)
