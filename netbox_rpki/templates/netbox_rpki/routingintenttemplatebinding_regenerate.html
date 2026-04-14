@@ -1,0 +1,37 @@
+{% extends 'generic/_base.html' %}
+
+{% block title %}Regenerate {{ binding }}{% endblock %}
+
+{% block content %}
+  <div class="row mt-5">
+    <div class="col col-md-8 offset-md-2">
+      <form action="" method="post" class="form">
+        {% csrf_token %}
+        {% for field in form.hidden_fields %}
+          {{ field }}
+        {% endfor %}
+        <div class="card border-warning">
+          <h2 class="card-header">Regenerate Template Binding</h2>
+          <div class="card-body">
+            <p>
+              Regenerate <strong>{{ binding }}</strong> against the current profile inventory and run the standard
+              reconciliation workflow for this single binding.
+            </p>
+            <dl class="row mb-0">
+              <dt class="col-sm-4">Template</dt>
+              <dd class="col-sm-8">{{ binding.template }}</dd>
+              <dt class="col-sm-4">Intent Profile</dt>
+              <dd class="col-sm-8">{{ binding.intent_profile }}</dd>
+              <dt class="col-sm-4">Binding State</dt>
+              <dd class="col-sm-8">{{ binding.state }}</dd>
+            </dl>
+          </div>
+          <div class="card-footer text-end">
+            <a href="{{ return_url }}" class="btn btn-outline-secondary">Cancel</a>
+            <button type="submit" name="_confirm" class="btn btn-primary">Regenerate</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endblock %}

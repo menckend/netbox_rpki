@@ -20,8 +20,11 @@ The plugin still covers the original core inventory objects for organizations, r
 - ASPAs, RSCs, and router certificates
 - validator instances, validation runs, object validation results, and validated ROA or ASPA payload views
 - routing-intent profiles, rules, overrides, and the initial ROA intent and reconciliation result model family
+- reusable routing-intent templates, template rules, template bindings, typed routing-intent exceptions, and bulk intent-run orchestration artifacts
 
 This newer model layer is implemented as schema plus registry-driven plugin surfaces. The writable intent-policy objects are available now, while derivation and reconciliation run or result objects are currently read-only reporting surfaces.
+
+The routing-intent workflow now also includes operator-facing template preview and regeneration actions, organization-scoped queued bulk regeneration, typed exception handling during derivation, and operations-dashboard rollups for stale bindings, expiring exceptions, and recent bulk-run health.
 
 The plugin also includes hosted-provider synchronization and reporting surfaces for Krill and ARIN accounts, including imported publication points, signed-object inventory, certificate observations, provider snapshot or diff summaries, and provider-account rollups used by the API, GraphQL, detail views, and operations dashboard. Current hosted-provider coverage is intentionally limited to Krill and ARIN, and ARIN currently supports hosted ROA synchronization only while the shared reporting contract preserves that capability boundary explicitly.
 
@@ -203,6 +206,7 @@ Validation completed against real development installs of:
 - NetBox 4.5.7
 
 Validation evidence for both versions includes successful plugin bootstrap and `manage.py check` with the plugin enabled. Recent verification against NetBox 4.5.7 also covered the provider-sync, models, imported-provider-registry, API, GraphQL, and view suites together, and browser smoke coverage was run successfully against the NetBox 4.5.0 environment.
+Recent NetBox 4.5.7 verification also covers the routing-intent templating and bulk-authoring workflow through focused service, API, view, job, and dashboard tests plus the full plugin suite in the documented non-interactive environment.
 
 
 ## Installing

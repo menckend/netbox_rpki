@@ -44,6 +44,8 @@ from netbox_rpki.tests.utils import (
     create_test_model,
     create_test_prefix,
     create_test_provider_account,
+    create_test_bulk_intent_run,
+    create_test_bulk_intent_run_scope_result,
     create_test_provider_snapshot_diff,
     create_test_provider_snapshot_diff_item,
     create_test_approval_record,
@@ -82,10 +84,14 @@ from netbox_rpki.tests.utils import (
     create_test_roa_validation_simulation_result,
     create_test_roa_validation_simulation_run,
     create_test_router_certificate,
+    create_test_routing_intent_exception,
     create_test_rsc,
     create_test_rsc_file_hash,
     create_test_routing_intent_profile,
     create_test_routing_intent_rule,
+    create_test_routing_intent_template,
+    create_test_routing_intent_template_binding,
+    create_test_routing_intent_template_rule,
     create_test_signed_object,
     create_test_trust_anchor,
     create_test_trust_anchor_key,
@@ -533,6 +539,10 @@ def _register_scenario_builders() -> None:
             "roaprefix": build_roa_prefix_form_data,
             "certificateprefix": build_certificate_prefix_form_data,
             "certificateasn": build_certificate_asn_form_data,
+            "routingintenttemplate": build_routing_intent_template_form_data,
+            "routingintenttemplaterule": build_routing_intent_template_rule_form_data,
+            "routingintenttemplatebinding": build_routing_intent_template_binding_form_data,
+            "routingintentexception": build_routing_intent_exception_form_data,
         }
     )
     _FILTER_SCENARIO_BUILDERS.update(
@@ -557,6 +567,23 @@ def _register_scenario_builders() -> None:
     )
     _READONLY_INSTANCE_BUILDERS.update(
         {
+            "routingintenttemplate": lambda: build_routing_intent_template_instance(
+                unique_token("routing-intent-template-instance")
+            ),
+            "routingintenttemplaterule": lambda: build_routing_intent_template_rule_instance(
+                unique_token("routing-intent-template-rule-instance")
+            ),
+            "routingintenttemplatebinding": lambda: build_routing_intent_template_binding_instance(
+                unique_token("routing-intent-template-binding-instance")
+            ),
+            "routingintentexception": lambda: build_routing_intent_exception_instance(
+                unique_token("routing-intent-exception-instance")
+            ),
+            "bulkintentrun": lambda: create_test_bulk_intent_run(name=f"Bulk Intent Run {unique_token('bulk-intent-run')}"),
+            "bulkintentrunscoperesult": lambda: create_test_bulk_intent_run_scope_result(
+                name=f"Bulk Intent Scope Result {unique_token('bulk-intent-scope-result')}",
+                scope_key=unique_token('bulk-scope'),
+            ),
             "intentderivationrun": lambda: create_test_intent_derivation_run(name=f"Intent Derivation Run {unique_token('intent-derivation-run')}"),
             "roaintent": lambda: create_test_roa_intent(
                 name=f"ROA Intent {unique_token('roa-intent')}",
@@ -739,6 +766,133 @@ def build_certificate_asn_form_data() -> dict[str, object]:
         "asn": asn.pk,
         "certificate_name2": certificate.pk,
     }
+
+
+def build_routing_intent_template_form_data() -> dict[str, object]:
+    organization = create_unique_organization("routing-intent-template-form-org")
+    return {
+        "name": f"Routing Intent Template {unique_token('routing-intent-template-form')}",
+        "organization": organization.pk,
+        "status": rpki_models.RoutingIntentTemplateStatus.DRAFT,
+        "template_version": 1,
+        "enabled": True,
+    }
+
+
+def build_routing_intent_template_rule_form_data() -> dict[str, object]:
+    organization = create_unique_organization("routing-intent-template-rule-form-org")
+    template = create_test_routing_intent_template(
+        name=f"Routing Intent Template {unique_token('routing-intent-template-rule-form-template')}",
+        organization=organization,
+    )
+    return {
+        "name": f"Routing Intent Template Rule {unique_token('routing-intent-template-rule-form')}",
+        "template": template.pk,
+        "weight": 100,
+        "action": rpki_models.RoutingIntentRuleAction.INCLUDE,
+        "max_length_mode": rpki_models.RoutingIntentRuleMaxLengthMode.INHERIT,
+        "enabled": True,
+    }
+
+
+def build_routing_intent_template_binding_form_data() -> dict[str, object]:
+    organization = create_unique_organization("routing-intent-template-binding-form-org")
+    template = create_test_routing_intent_template(
+        name=f"Routing Intent Template {unique_token('routing-intent-template-binding-form-template')}",
+        organization=organization,
+    )
+    intent_profile = create_test_routing_intent_profile(
+        name=f"Intent Profile {unique_token('routing-intent-template-binding-form-profile')}",
+        organization=organization,
+    )
+    return {
+        "name": f"Routing Intent Template Binding {unique_token('routing-intent-template-binding-form')}",
+        "template": template.pk,
+        "intent_profile": intent_profile.pk,
+        "binding_priority": 100,
+        "max_length_mode": rpki_models.RoutingIntentRuleMaxLengthMode.INHERIT,
+        "state": rpki_models.RoutingIntentTemplateBindingState.PENDING,
+        "enabled": True,
+    }
+
+
+def build_routing_intent_exception_form_data() -> dict[str, object]:
+    organization = create_unique_organization("routing-intent-exception-form-org")
+    intent_profile = create_test_routing_intent_profile(
+        name=f"Intent Profile {unique_token('routing-intent-exception-form-profile')}",
+        organization=organization,
+    )
+    return {
+        "name": f"Routing Intent Exception {unique_token('routing-intent-exception-form')}",
+        "organization": organization.pk,
+        "intent_profile": intent_profile.pk,
+        "exception_type": rpki_models.RoutingIntentExceptionType.TRAFFIC_ENGINEERING,
+        "effect_mode": rpki_models.RoutingIntentExceptionEffectMode.SUPPRESS,
+        "enabled": True,
+    }
+
+
+def build_routing_intent_template_instance(token: str, variant: int = 0):
+    organization = create_unique_organization(f"{token}-org")
+    return create_test_routing_intent_template(
+        name=f"Routing Intent Template {token}",
+        organization=organization,
+        template_version=variant + 1,
+        description=f"Template description {token}",
+        enabled=variant % 2 == 0,
+    )
+
+
+def build_routing_intent_template_rule_instance(token: str, variant: int = 0):
+    organization = create_unique_organization(f"{token}-org")
+    template = create_test_routing_intent_template(
+        name=f"Routing Intent Template {token}",
+        organization=organization,
+    )
+    return create_test_routing_intent_template_rule(
+        name=f"Routing Intent Template Rule {token}",
+        template=template,
+        weight=100 + variant,
+        enabled=variant % 2 == 0,
+    )
+
+
+def build_routing_intent_template_binding_instance(token: str, variant: int = 0):
+    organization = create_unique_organization(f"{token}-org")
+    template = create_test_routing_intent_template(
+        name=f"Routing Intent Template {token}",
+        organization=organization,
+    )
+    intent_profile = create_test_routing_intent_profile(
+        name=f"Intent Profile {token}",
+        organization=organization,
+    )
+    return create_test_routing_intent_template_binding(
+        name=f"Routing Intent Template Binding {token}",
+        template=template,
+        intent_profile=intent_profile,
+        binding_priority=100 + variant,
+        enabled=variant % 2 == 0,
+    )
+
+
+def build_routing_intent_exception_instance(token: str, variant: int = 0):
+    organization = create_unique_organization(f"{token}-org")
+    intent_profile = create_test_routing_intent_profile(
+        name=f"Intent Profile {token}",
+        organization=organization,
+    )
+    return create_test_routing_intent_exception(
+        name=f"Routing Intent Exception {token}",
+        organization=organization,
+        intent_profile=intent_profile,
+        effect_mode=(
+            rpki_models.RoutingIntentExceptionEffectMode.SUPPRESS
+            if variant % 2 == 0
+            else rpki_models.RoutingIntentExceptionEffectMode.FORCE_INCLUDE
+        ),
+        enabled=variant % 2 == 0,
+    )
 
 
 def _build_form_scenario(spec):
@@ -997,6 +1151,11 @@ def build_roa_change_plan_matrix_item_instance():
 
 
 _register_scenario_builders()
+
+# Rebuild the generated scenarios after registering specialized builders so
+# the closures capture the override callables instead of the generic fallbacks.
+FORM_SCENARIOS = tuple(_build_form_scenario(spec) for spec in FORM_OBJECT_SPECS)
+FILTERSET_SCENARIOS = tuple(_build_filterset_scenario(spec) for spec in FILTERSET_OBJECT_SPECS)
 
 
 def _build_table_scenario(spec):

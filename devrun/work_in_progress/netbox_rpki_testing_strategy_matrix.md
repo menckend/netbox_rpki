@@ -27,6 +27,7 @@ Use this lane for:
 - reconciliation logic between NetBox intent and stored RPKI objects
 - ROA linting and maxLength policy analysis
 - RBAC, approvals, audit trail, and workflow logic
+- routing-intent template compilation, typed exception precedence, regeneration-state classification, and bulk-run orchestration
 - negative tests and malformed object handling
 
 This lane is the safest place to exercise logic derived from standards documents such as ROA semantics, validation-state interpretation, and repository object relationships. It is also the most stable foundation for CI.
@@ -89,6 +90,8 @@ This lane should never be required for ordinary development velocity.
 | ROA CRUD data model | Yes | Yes | Yes | Yes | First cross-provider target |
 | ROA import/export transforms | Yes | Yes | Yes | Yes | Live provider details differ |
 | NetBox intent-to-ROA reconciliation | Yes | Yes | Yes | Yes | Mostly plugin-side logic |
+| Routing-intent templating and binding compilation | Yes | Partial | No | No | Core compiler and state logic are local; live providers only matter once provider-backed authoring exists |
+| Queued bulk intent regeneration | Yes | Partial | No | No | Queue and rollup contract are local; live provider effects are a later concern |
 | ROA maxLength linting and policy analysis | Yes | Yes | Partial | Partial | Primarily offline logic |
 | Bulk ROA generation | Yes | Yes | Partial | Partial | Provider limits and workflow differ |
 | ROA lifecycle state sync | Mock first | Yes | Yes | Yes | Adapter-specific pagination and status fields |
@@ -121,6 +124,13 @@ Lane A should prove that the plugin can represent and manipulate the standards-b
 - CRLs
 - publication-point relationships
 - validated-payload overlays, when modeled
+
+For the current routing-intent templating slice, Lane A must also prove:
+- template bindings compile deterministically into the existing derivation pipeline
+- typed exceptions apply in the intended precedence order
+- binding drift classification is stable and explainable
+- queued bulk runs create consistent aggregate artifacts and operator-facing summaries
+- dashboard rollups reflect the same underlying workflow state operators see in detail pages and actions
 
 It should also prove that the plugin can reconcile NetBox routing and IPAM intent to externally visible RPKI state without needing a real hosted provider.
 
@@ -159,6 +169,7 @@ Build and validate locally:
 - generic signed-object framework
 - reconciliation engine
 - linting and policy analysis
+- routing-intent template, binding, exception, and bulk-run service logic
 - RBAC, approvals, and audit behavior
 - import/export abstraction layer
 
@@ -258,6 +269,7 @@ A versioned library of:
 - ROAs
 - ASPAs
 - repository metadata samples
+- routing-intent template, binding, exception, and bulk-run scenarios
 - provider-specific API response fixtures
 
 This library should include both happy-path and malformed cases.

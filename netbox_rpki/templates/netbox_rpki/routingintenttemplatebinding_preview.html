@@ -1,0 +1,92 @@
+{% extends 'generic/_base.html' %}
+
+{% block title %}Preview {{ binding }}{% endblock %}
+
+{% block content %}
+  <div class="row mt-4">
+    <div class="col col-md-10 offset-md-1">
+      <div class="card border-primary mb-3">
+        <h2 class="card-header">Template Binding Preview</h2>
+        <div class="card-body">
+          <p>
+            Previewing compiled routing intent output for <strong>{{ binding }}</strong> in profile
+            <strong>{{ binding.intent_profile }}</strong>.
+          </p>
+
+          <dl class="row mb-0">
+            <dt class="col-sm-4">Compiled Bindings</dt>
+            <dd class="col-sm-8">{{ preview.compiled_policy.template_bindings|length }}</dd>
+            <dt class="col-sm-4">Input Fingerprint</dt>
+            <dd class="col-sm-8"><code>{{ preview.compiled_policy.input_fingerprint }}</code></dd>
+            <dt class="col-sm-4">Preview Result Count</dt>
+            <dd class="col-sm-8">{{ preview.results|length }}</dd>
+          </dl>
+        </div>
+      </div>
+
+      {% if preview.warnings %}
+        <div class="alert alert-warning" role="alert">
+          <h5 class="alert-heading">Warnings</h5>
+          <ul class="mb-0">
+            {% for warning in preview.warnings %}
+              <li>{{ warning }}</li>
+            {% endfor %}
+          </ul>
+        </div>
+      {% endif %}
+
+      <div class="card border-secondary">
+        <h3 class="card-header">Derived Intent Preview</h3>
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table table-hover mb-0">
+              <thead>
+                <tr>
+                  <th>Prefix</th>
+                  <th>Origin ASN</th>
+                  <th>maxLength</th>
+                  <th>Derived State</th>
+                  <th>Exposure</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for result in preview.results %}
+                  <tr>
+                    <td>{{ result.prefix_cidr_text }}</td>
+                    <td>
+                      {% if result.origin_asn_value is not None %}
+                        AS{{ result.origin_asn_value }}
+                      {% else %}
+                        <span class="text-muted">Unresolved</span>
+                      {% endif %}
+                    </td>
+                    <td>{{ result.max_length|default:'None' }}</td>
+                    <td>{{ result.derived_state }}</td>
+                    <td>{{ result.exposure_state }}</td>
+                  </tr>
+                  <tr>
+                    <td colspan="5">
+                      <small class="text-muted">{{ result.explanation }}</small>
+                    </td>
+                  </tr>
+                {% empty %}
+                  <tr>
+                    <td colspan="5" class="text-muted">No preview results were produced.</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card-footer text-end">
+          <a href="{{ return_url }}" class="btn btn-outline-secondary">Back</a>
+          {% if binding.enabled and binding.template.enabled and binding.template.status == 'active' and binding.intent_profile.enabled %}
+            <a href="{% url 'plugins:netbox_rpki:routingintenttemplatebinding_regenerate' pk=binding.pk %}" class="btn btn-primary">
+              Regenerate Binding
+            </a>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

@@ -1,0 +1,52 @@
+{% extends 'generic/_base.html' %}
+
+{% block title %}Run {{ profile }}{% endblock %}
+
+{% block content %}
+  <div class="row mt-5">
+    <div class="col col-md-8 offset-md-2">
+      <form action="" method="post" class="form">
+        {% csrf_token %}
+        {% for field in form.hidden_fields %}
+          {{ field }}
+        {% endfor %}
+        <div class="card border-primary">
+          <h2 class="card-header">Run Routing Intent Profile</h2>
+          <div class="card-body">
+            <p>
+              Queue the standard routing-intent derivation and reconciliation workflow for
+              <strong>{{ profile }}</strong>.
+            </p>
+            <dl class="row">
+              <dt class="col-sm-4">Organization</dt>
+              <dd class="col-sm-8">{{ profile.organization }}</dd>
+              <dt class="col-sm-4">Status</dt>
+              <dd class="col-sm-8">{{ profile.status }}</dd>
+              <dt class="col-sm-4">Enabled</dt>
+              <dd class="col-sm-8">{{ profile.enabled }}</dd>
+            </dl>
+            {% for error in form.non_field_errors %}
+              <div class="alert alert-danger" role="alert">{{ error }}</div>
+            {% endfor %}
+            {% for field in form.visible_fields %}
+              <div class="mb-3">
+                <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                {{ field }}
+                {% if field.help_text %}
+                  <div class="form-text">{{ field.help_text }}</div>
+                {% endif %}
+                {% for error in field.errors %}
+                  <div class="text-danger small">{{ error }}</div>
+                {% endfor %}
+              </div>
+            {% endfor %}
+          </div>
+          <div class="card-footer text-end">
+            <a href="{{ return_url }}" class="btn btn-outline-secondary">Cancel</a>
+            <button type="submit" name="_confirm" class="btn btn-primary">Queue Run</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endblock %}

@@ -26,6 +26,7 @@ Do not describe the plugin as "fully green" after one of these refactors unless 
 5. Registry-wide GraphQL minimal queryability tests pass.
 6. Custom per-object API action tests pass for route presence, allowed verbs, and permission enforcement.
 7. The full plugin suite passes.
+8. When routing-intent operator workflows changed, the focused routing-intent service and operations-dashboard suites pass too.
 
 ---
 
@@ -78,6 +79,10 @@ If the refactor changes what the suite proves, update the following documents in
 2. `devrun/work_in_progress/netbox_rpki_enhancement_backlog.md`
 3. This checklist, if the contract itself changed
 
+If the change touched routing-intent templates, bindings, typed exceptions, bulk runs, or dashboard rollups, also update:
+
+4. `README.md`
+
 ---
 
 ## Suggested Verification Commands
@@ -89,6 +94,8 @@ cd /home/mencken/src/netbox-v4.5.7/netbox
 NETBOX_RPKI_ENABLE=1 /home/mencken/.virtualenvs/netbox-4.5.7/bin/python manage.py test --keepdb --noinput \
   netbox_rpki.tests.test_views \
   netbox_rpki.tests.test_api \
+  netbox_rpki.tests.test_jobs \
+  netbox_rpki.tests.test_routing_intent_services \
   netbox_rpki.tests.test_graphql --verbosity 1
 ```
 
@@ -106,4 +113,4 @@ NETBOX_RPKI_ENABLE=1 /home/mencken/.virtualenvs/netbox-4.5.7/bin/python manage.p
 
 For this plugin, "green" should be read as:
 
-"All registered objects still satisfy the generated UI/API/GraphQL surface contract, all custom actions satisfy their route/method/permission contract, and the full plugin suite passes."
+"All registered objects still satisfy the generated UI/API/GraphQL surface contract, all custom actions satisfy their route/method/permission contract, routing-intent workflow regressions are covered by the focused service or dashboard suites, and the full plugin suite passes."

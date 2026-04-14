@@ -32,6 +32,44 @@ def build_object_urlpatterns(spec):
                 name='organization_run_aspa_reconciliation',
             )
         )
+        urlpatterns.append(
+            path(
+                f'{path_prefix}/<int:pk>/create-bulk-intent-run/',
+                views.OrganizationCreateBulkIntentRunView.as_view(),
+                name='organization_create_bulk_intent_run',
+            )
+        )
+    if spec.registry_key == 'routingintenttemplatebinding':
+        urlpatterns.extend(
+            (
+                path(
+                    f'{path_prefix}/<int:pk>/preview/',
+                    views.RoutingIntentTemplateBindingPreviewView.as_view(),
+                    name='routingintenttemplatebinding_preview',
+                ),
+                path(
+                    f'{path_prefix}/<int:pk>/regenerate/',
+                    views.RoutingIntentTemplateBindingRegenerateView.as_view(),
+                    name='routingintenttemplatebinding_regenerate',
+                ),
+            )
+        )
+    if spec.registry_key == 'routingintentprofile':
+        urlpatterns.append(
+            path(
+                f'{path_prefix}/<int:pk>/run/',
+                views.RoutingIntentProfileRunView.as_view(),
+                name='routingintentprofile_run',
+            )
+        )
+    if spec.registry_key == 'routingintentexception':
+        urlpatterns.append(
+            path(
+                f'{path_prefix}/<int:pk>/approve/',
+                views.RoutingIntentExceptionApproveView.as_view(),
+                name='routingintentexception_approve',
+            )
+        )
     if spec.registry_key == 'roachangeplan':
         urlpatterns.extend(
             (

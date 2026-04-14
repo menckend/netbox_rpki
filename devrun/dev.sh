@@ -5,11 +5,12 @@ source "$(dirname "$0")/common.sh"
 
 usage() {
     cat <<'EOF'
-Usage: ./dev.sh <start|stop|status|seed|e2e>
+Usage: ./dev.sh <start|stop|status|validator|seed|e2e>
 
-  start   Ensure containers, config, migrations, worker, optional Krill, and run the NetBox dev server
-  stop    Stop the NetBox dev server, worker, optional Krill, and container stack
-  status  Show the current NetBox dev environment and process status
+    start   Ensure containers, Routinator, config, migrations, worker, optional Krill, and run the NetBox dev server
+    stop    Stop the NetBox dev server, worker, optional Krill, and container stack
+        status  Show the current NetBox dev environment and process status
+        validator  Create or update the local Routinator validator instance inside NetBox
     seed    Populate the local dev database with reusable RPKI sample data
     e2e     Run Playwright browser tests through the local WSL wrapper
 EOF
@@ -40,6 +41,10 @@ status_dev() {
     "$DEVRUN_DIR/status.sh"
 }
 
+validator_dev() {
+    "$DEVRUN_DIR/configure-routinator-validator.sh"
+}
+
 seed_dev() {
     "$DEVRUN_DIR/seed-data.sh"
 }
@@ -57,6 +62,9 @@ case "${1:-}" in
         ;;
     status)
         status_dev
+        ;;
+    validator)
+        validator_dev
         ;;
     seed)
         seed_dev

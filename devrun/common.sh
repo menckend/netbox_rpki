@@ -16,6 +16,11 @@ KRILL_START_SCRIPT="${KRILL_START_SCRIPT:-$KRILL_ROOT/scripts/start-krill.sh}"
 KRILL_STOP_SCRIPT="${KRILL_STOP_SCRIPT:-$KRILL_ROOT/scripts/stop-krill.sh}"
 KRILL_PID_FILE="${KRILL_PID_FILE:-$KRILL_ROOT/var/run/krill.pid}"
 KRILL_CMD_PATTERN="${KRILL_CMD_PATTERN:-$KRILL_ROOT/cargo-root/bin/krill -c $KRILL_ROOT/etc/krill.conf}"
+ROUTINATOR_RTR_PORT="${ROUTINATOR_RTR_PORT:-3323}"
+ROUTINATOR_HTTP_PORT="${ROUTINATOR_HTTP_PORT:-8323}"
+ROUTINATOR_METRICS_PORT="${ROUTINATOR_METRICS_PORT:-9556}"
+ROUTINATOR_BASE_URL="${ROUTINATOR_BASE_URL:-http://127.0.0.1:${ROUTINATOR_HTTP_PORT}}"
+ROUTINATOR_STATUS_URL="${ROUTINATOR_STATUS_URL:-${ROUTINATOR_BASE_URL}/api/v1/status}"
 
 find_runserver_pids() {
     local pid
@@ -183,6 +188,39 @@ wait_for_redis() {
         sleep 1
     done
     printf 'Redis did not become ready in time.\n' >&2
+    return 1
+}
+
+routinator_status_http_code() {
+    curl -sS -o /dev/null -w '%{http_code}' --max-time 2 "$ROUTINATOR_STATUS_URL" || true
+}
+
+routinator_is_reachable() {
+    case "$(routinator_status_http_code)" in
+        200|301|302|303|307|308|503)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+routinator_is_ready() {
+    [ "$(routinator_status_http_code)" = "200" ]
+}
+
+wait_for_routinator() {
+    local attempt
+
+    for attempt in $(seq 1 30); do
+        if routinator_is_reachable; then
+            return 0
+        fi
+        sleep 1
+    done
+
+    printf 'Routinator did not become reachable at %s in time.\n' "$ROUTINATOR_STATUS_URL" >&2
     return 1
 }
 

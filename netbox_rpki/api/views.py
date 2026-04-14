@@ -2,6 +2,7 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.routers import APIRootView
+from django.utils import timezone
 
 from netbox.api.authentication import TokenWritePermission
 from netbox.api.viewsets import NetBoxModelViewSet
@@ -11,14 +12,22 @@ from netbox_rpki import filtersets as filterset_module
 from netbox_rpki.api.serializers import (
     ASPAReconciliationRunActionSerializer,
     ASPAChangePlanApproveActionSerializer,
+    BulkIntentRunActionSerializer,
     ProviderSnapshotCompareActionSerializer,
+    RoutingIntentProfileRunActionSerializer,
+    RoutingIntentTemplateBindingRunActionSerializer,
     ROAChangePlanAcknowledgeActionSerializer,
     ROAChangePlanApproveActionSerializer,
     ROALintFindingSuppressActionSerializer,
     ROALintSuppressionLiftActionSerializer,
     SERIALIZER_CLASS_MAP,
 )
-from netbox_rpki.jobs import RunAspaReconciliationJob, RunRoutingIntentProfileJob, SyncProviderAccountJob
+from netbox_rpki.jobs import (
+    RunAspaReconciliationJob,
+    RunBulkRoutingIntentJob,
+    RunRoutingIntentProfileJob,
+    SyncProviderAccountJob,
+)
 from netbox_rpki.object_registry import API_OBJECT_SPECS
 from netbox_rpki.object_specs import ObjectSpec
 from netbox_rpki.services.provider_sync_contract import build_provider_account_summary
@@ -36,9 +45,11 @@ from netbox_rpki.services import (
     build_roa_change_plan_lint_posture,
     create_aspa_change_plan,
     create_roa_change_plan,
+    preview_routing_intent_template_binding,
     preview_aspa_change_plan_provider_write,
     preview_roa_change_plan_provider_write,
     lift_roa_lint_suppression,
+    run_routing_intent_template_binding_pipeline,
     simulate_roa_change_plan,
     suppress_roa_lint_finding,
 )
@@ -73,6 +84,48 @@ for object_spec in API_OBJECT_SPECS:
     globals()[object_spec.api.viewset_name] = viewset_class
 
 
+def _serialize_binding_preview_payload(request, binding, preview):
+    payload = dict(SERIALIZER_CLASS_MAP['routingintenttemplatebinding'](binding, context={'request': request}).data)
+    payload['compiled_policy'] = {
+        'input_fingerprint': preview.compiled_policy.input_fingerprint,
+        'warning_count': len(preview.warnings),
+        'warnings': list(preview.warnings),
+        'binding_count': len(preview.compiled_policy.template_bindings),
+        'bindings': [
+            {
+                'binding_id': compiled.binding.pk,
+                'binding_name': compiled.binding.name,
+                'template_id': compiled.binding.template_id,
+                'template_name': compiled.binding.template.name,
+                'template_version': compiled.binding.template.template_version,
+                'template_fingerprint': compiled.template_fingerprint,
+                'binding_fingerprint': compiled.binding_fingerprint,
+                'scoped_prefix_count': len(compiled.prefix_ids),
+                'scoped_asn_count': len(compiled.selected_asns),
+                'active_rule_count': len(compiled.rules),
+            }
+            for compiled in preview.compiled_policy.template_bindings
+        ],
+    }
+    payload['preview_result_count'] = len(preview.results)
+    payload['preview_results'] = [
+        {
+            'prefix_id': result.prefix.pk,
+            'prefix_cidr_text': result.prefix_cidr_text,
+            'origin_asn_id': getattr(result.origin_asn, 'pk', None),
+            'origin_asn_value': result.origin_asn_value,
+            'max_length': result.max_length,
+            'derived_state': result.derived_state,
+            'exposure_state': result.exposure_state,
+            'source_rule_id': getattr(result.source_rule, 'pk', None),
+            'applied_override_id': getattr(result.applied_override, 'pk', None),
+            'explanation': result.explanation,
+        }
+        for result in preview.results
+    ]
+    return payload
+
+
 class RoutingIntentProfileViewSet(VIEWSET_CLASS_MAP['routingintentprofile']):
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -89,8 +142,13 @@ class RoutingIntentProfileViewSet(VIEWSET_CLASS_MAP['routingintentprofile']):
         if not request.user.has_perm('netbox_rpki.change_routingintentprofile', profile):
             raise PermissionDenied('This user does not have permission to run this routing intent profile.')
 
-        comparison_scope = request.data.get('comparison_scope', 'local_roa_records')
-        provider_snapshot_pk = request.data.get('provider_snapshot')
+        input_serializer = RoutingIntentProfileRunActionSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+        comparison_scope = input_serializer.validated_data['comparison_scope']
+        provider_snapshot = input_serializer.validated_data.get('provider_snapshot')
+        provider_snapshot_pk = getattr(provider_snapshot, 'pk', provider_snapshot)
+        if provider_snapshot is not None and provider_snapshot.organization_id != profile.organization_id:
+            raise ValidationError({'provider_snapshot': 'Provider snapshot must belong to the selected organization.'})
         job = RunRoutingIntentProfileJob.enqueue(
             instance=profile,
             user=request.user,
@@ -110,11 +168,94 @@ class RoutingIntentProfileViewSet(VIEWSET_CLASS_MAP['routingintentprofile']):
         return Response(payload)
 
 
+class RoutingIntentExceptionViewSet(VIEWSET_CLASS_MAP['routingintentexception']):
+    def get_queryset(self):
+        queryset = super().get_queryset()
+
+        if getattr(self, 'action', None) == 'approve' and self.request.user.is_authenticated:
+            return self.queryset.model.objects.restrict(self.request.user, 'change')
+
+        return queryset
+
+    @action(detail=True, methods=['post'], permission_classes=[TokenWritePermission])
+    def approve(self, request, pk=None):
+        exception = self.get_object()
+
+        if not request.user.has_perm('netbox_rpki.change_routingintentexception', exception):
+            raise PermissionDenied('This user does not have permission to approve this routing intent exception.')
+
+        exception.approved_at = timezone.now()
+        exception.approved_by = getattr(request.user, 'username', '')
+        exception.save(update_fields=('approved_at', 'approved_by'))
+        return Response(SERIALIZER_CLASS_MAP['routingintentexception'](exception, context={'request': request}).data)
+
+
+class RoutingIntentTemplateBindingViewSet(VIEWSET_CLASS_MAP['routingintenttemplatebinding']):
+    def get_queryset(self):
+        queryset = super().get_queryset()
+
+        if getattr(self, 'action', None) in {'preview', 'regenerate'} and self.request.user.is_authenticated:
+            return self.queryset.model.objects.restrict(self.request.user, 'change')
+
+        return queryset
+
+    def _require_change_permission(self, binding):
+        if not self.request.user.has_perm('netbox_rpki.change_routingintenttemplatebinding', binding):
+            raise PermissionDenied('This user does not have permission to execute actions on this template binding.')
+
+    @action(detail=True, methods=['post'], permission_classes=[TokenWritePermission])
+    def preview(self, request, pk=None):
+        binding = self.get_object()
+        self._require_change_permission(binding)
+
+        try:
+            preview = preview_routing_intent_template_binding(binding)
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+
+        return Response(_serialize_binding_preview_payload(request, binding, preview))
+
+    @action(detail=True, methods=['post'], permission_classes=[TokenWritePermission])
+    def regenerate(self, request, pk=None):
+        binding = self.get_object()
+        self._require_change_permission(binding)
+        input_serializer = RoutingIntentTemplateBindingRunActionSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+        provider_snapshot = input_serializer.validated_data.get('provider_snapshot')
+        comparison_scope = input_serializer.validated_data['comparison_scope']
+
+        if provider_snapshot is not None and provider_snapshot.organization_id != binding.intent_profile.organization_id:
+            raise ValidationError({'provider_snapshot': 'Provider snapshot must belong to the selected organization.'})
+
+        try:
+            derivation_run, reconciliation_run = run_routing_intent_template_binding_pipeline(
+                binding,
+                comparison_scope=comparison_scope,
+                provider_snapshot=provider_snapshot,
+            )
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+
+        binding.refresh_from_db()
+        payload = dict(SERIALIZER_CLASS_MAP['routingintenttemplatebinding'](binding, context={'request': request}).data)
+        payload['comparison_scope'] = comparison_scope
+        payload['provider_snapshot'] = provider_snapshot.pk if provider_snapshot is not None else None
+        payload['derivation_run'] = SERIALIZER_CLASS_MAP['intentderivationrun'](
+            derivation_run,
+            context={'request': request},
+        ).data
+        payload['reconciliation_run'] = SERIALIZER_CLASS_MAP['roareconciliationrun'](
+            reconciliation_run,
+            context={'request': request},
+        ).data
+        return Response(payload)
+
+
 class OrganizationViewSet(VIEWSET_CLASS_MAP['organization']):
     def get_queryset(self):
         queryset = super().get_queryset()
 
-        if getattr(self, 'action', None) == 'run_aspa_reconciliation' and self.request.user.is_authenticated:
+        if getattr(self, 'action', None) in {'run_aspa_reconciliation', 'create_bulk_intent_run'} and self.request.user.is_authenticated:
             return self.queryset.model.objects.restrict(self.request.user, 'change')
 
         return queryset
@@ -147,6 +288,46 @@ class OrganizationViewSet(VIEWSET_CLASS_MAP['organization']):
             'provider_snapshot': provider_snapshot.pk if provider_snapshot is not None else None,
             'job': None,
             'reconciliation_in_progress': not created,
+        }
+        if job is not None:
+            payload['job'] = {
+                'id': job.pk,
+                'status': job.status,
+                'url': job.get_absolute_url(),
+                'existing': not created,
+            }
+        return Response(payload)
+
+    @action(detail=True, methods=['post'], permission_classes=[TokenWritePermission], url_path='create-bulk-intent-run')
+    def create_bulk_intent_run(self, request, pk=None):
+        organization = self.get_object()
+
+        if not request.user.has_perm('netbox_rpki.change_organization', organization):
+            raise PermissionDenied('You do not have permission to create bulk routing-intent runs for this organization.')
+
+        input_serializer = BulkIntentRunActionSerializer(
+            data=request.data,
+            context={'organization': organization},
+        )
+        input_serializer.is_valid(raise_exception=True)
+        job, created = RunBulkRoutingIntentJob.enqueue_for_organization(
+            organization=organization,
+            profiles=tuple(input_serializer.validated_data.get('profiles') or ()),
+            bindings=tuple(input_serializer.validated_data.get('bindings') or ()),
+            comparison_scope=input_serializer.validated_data['comparison_scope'],
+            provider_snapshot=input_serializer.validated_data.get('provider_snapshot'),
+            create_change_plans=input_serializer.validated_data.get('create_change_plans', False),
+            run_name=input_serializer.validated_data.get('run_name') or None,
+            user=request.user,
+        )
+        payload = {
+            'comparison_scope': input_serializer.validated_data['comparison_scope'],
+            'provider_snapshot': getattr(input_serializer.validated_data.get('provider_snapshot'), 'pk', None),
+            'create_change_plans': input_serializer.validated_data.get('create_change_plans', False),
+            'profile_pks': [profile.pk for profile in input_serializer.validated_data.get('profiles') or ()],
+            'binding_pks': [binding.pk for binding in input_serializer.validated_data.get('bindings') or ()],
+            'job': None,
+            'bulk_run_in_progress': not created,
         }
         if job is not None:
             payload['job'] = {
@@ -744,6 +925,10 @@ class ASPAChangePlanViewSet(VIEWSET_CLASS_MAP['aspachangeplan']):
 
 VIEWSET_CLASS_MAP['routingintentprofile'] = RoutingIntentProfileViewSet
 globals()['RoutingIntentProfileViewSet'] = RoutingIntentProfileViewSet
+VIEWSET_CLASS_MAP['routingintentexception'] = RoutingIntentExceptionViewSet
+globals()['RoutingIntentExceptionViewSet'] = RoutingIntentExceptionViewSet
+VIEWSET_CLASS_MAP['routingintenttemplatebinding'] = RoutingIntentTemplateBindingViewSet
+globals()['RoutingIntentTemplateBindingViewSet'] = RoutingIntentTemplateBindingViewSet
 VIEWSET_CLASS_MAP['organization'] = OrganizationViewSet
 globals()['OrganizationViewSet'] = OrganizationViewSet
 VIEWSET_CLASS_MAP['rpkiprovideraccount'] = RpkiProviderAccountViewSet

@@ -282,6 +282,83 @@ class ProviderSnapshotSerializer(SERIALIZER_CLASS_MAP['providersnapshot']):
         )
 
 
+class BulkIntentRunActionSerializer(serializers.Serializer):
+    run_name = serializers.CharField(required=False, allow_blank=True, max_length=200)
+    comparison_scope = serializers.ChoiceField(
+        choices=models.ReconciliationComparisonScope.choices,
+        default=models.ReconciliationComparisonScope.LOCAL_ROA_RECORDS,
+    )
+    provider_snapshot = serializers.PrimaryKeyRelatedField(
+        queryset=models.ProviderSnapshot.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+    create_change_plans = serializers.BooleanField(required=False, default=False)
+    profiles = serializers.PrimaryKeyRelatedField(
+        queryset=models.RoutingIntentProfile.objects.all(),
+        many=True,
+        required=False,
+    )
+    bindings = serializers.PrimaryKeyRelatedField(
+        queryset=models.RoutingIntentTemplateBinding.objects.all(),
+        many=True,
+        required=False,
+    )
+
+    def validate(self, attrs):
+        organization = self.context.get('organization')
+        profiles = attrs.get('profiles') or []
+        bindings = attrs.get('bindings') or []
+        provider_snapshot = attrs.get('provider_snapshot')
+        if not profiles and not bindings:
+            raise serializers.ValidationError(
+                'Select at least one routing intent profile or template binding.'
+            )
+        if organization is None:
+            return attrs
+        invalid_profiles = [profile.pk for profile in profiles if profile.organization_id != organization.pk]
+        if invalid_profiles:
+            raise serializers.ValidationError({
+                'profiles': 'All selected routing intent profiles must belong to the selected organization.'
+            })
+        invalid_bindings = [
+            binding.pk for binding in bindings if binding.intent_profile.organization_id != organization.pk
+        ]
+        if invalid_bindings:
+            raise serializers.ValidationError({
+                'bindings': 'All selected template bindings must belong to the selected organization.'
+            })
+        if provider_snapshot is not None and provider_snapshot.organization_id != organization.pk:
+            raise serializers.ValidationError({
+                'provider_snapshot': 'Provider snapshot must belong to the selected organization.'
+            })
+        return attrs
+
+
+class RoutingIntentProfileRunActionSerializer(serializers.Serializer):
+    comparison_scope = serializers.ChoiceField(
+        choices=models.ReconciliationComparisonScope.choices,
+        default=models.ReconciliationComparisonScope.LOCAL_ROA_RECORDS,
+    )
+    provider_snapshot = serializers.PrimaryKeyRelatedField(
+        queryset=models.ProviderSnapshot.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+
+    def validate(self, attrs):
+        comparison_scope = attrs.get(
+            'comparison_scope',
+            models.ReconciliationComparisonScope.LOCAL_ROA_RECORDS,
+        )
+        provider_snapshot = attrs.get('provider_snapshot')
+        if comparison_scope == models.ReconciliationComparisonScope.PROVIDER_IMPORTED and provider_snapshot is None:
+            raise serializers.ValidationError(
+                {'provider_snapshot': 'Provider snapshot is required for provider-imported ROA reconciliation.'}
+            )
+        return attrs
+
+
 SERIALIZER_CLASS_MAP['providersnapshot'] = ProviderSnapshotSerializer
 globals()['ProviderSnapshotSerializer'] = ProviderSnapshotSerializer
 
@@ -552,6 +629,30 @@ class ASPAReconciliationRunActionSerializer(serializers.Serializer):
         if comparison_scope == models.ReconciliationComparisonScope.PROVIDER_IMPORTED and provider_snapshot is None:
             raise serializers.ValidationError(
                 {'provider_snapshot': 'Provider snapshot is required for provider-imported ASPA reconciliation.'}
+            )
+        return attrs
+
+
+class RoutingIntentTemplateBindingRunActionSerializer(serializers.Serializer):
+    comparison_scope = serializers.ChoiceField(
+        choices=models.ReconciliationComparisonScope.choices,
+        default=models.ReconciliationComparisonScope.LOCAL_ROA_RECORDS,
+    )
+    provider_snapshot = serializers.PrimaryKeyRelatedField(
+        queryset=models.ProviderSnapshot.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+
+    def validate(self, attrs):
+        comparison_scope = attrs.get(
+            'comparison_scope',
+            models.ReconciliationComparisonScope.LOCAL_ROA_RECORDS,
+        )
+        provider_snapshot = attrs.get('provider_snapshot')
+        if comparison_scope == models.ReconciliationComparisonScope.PROVIDER_IMPORTED and provider_snapshot is None:
+            raise serializers.ValidationError(
+                {'provider_snapshot': 'Provider snapshot is required for provider-imported ROA reconciliation.'}
             )
         return attrs
 

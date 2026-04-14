@@ -204,6 +204,51 @@ class ASPAChangePlanApprovalForm(ROAChangePlanApprovalForm):
     pass
 
 
+class RoutingIntentProfileRunActionForm(ConfirmationForm):
+    comparison_scope = forms.ChoiceField(
+        choices=netbox_rpki.models.ReconciliationComparisonScope.choices,
+        initial=netbox_rpki.models.ReconciliationComparisonScope.LOCAL_ROA_RECORDS,
+        label='Comparison Scope',
+    )
+    provider_snapshot = DynamicModelChoiceField(
+        queryset=netbox_rpki.models.ProviderSnapshot.objects.none(),
+        required=False,
+        label='Provider Snapshot',
+        help_text='Required when using provider-imported comparison scope.',
+    )
+
+    fieldsets = (
+        FieldSet(
+            'comparison_scope',
+            'provider_snapshot',
+            name='Execution Options',
+        ),
+    )
+
+    def __init__(self, *args, profile=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        snapshot_queryset = netbox_rpki.models.ProviderSnapshot.objects.none()
+        if profile is not None:
+            snapshot_queryset = netbox_rpki.models.ProviderSnapshot.objects.filter(
+                organization=profile.organization
+            ).order_by('name')
+        self.fields['provider_snapshot'].queryset = snapshot_queryset
+
+    def clean(self):
+        cleaned_data = super().clean()
+        comparison_scope = cleaned_data.get(
+            'comparison_scope',
+            netbox_rpki.models.ReconciliationComparisonScope.LOCAL_ROA_RECORDS,
+        )
+        provider_snapshot = cleaned_data.get('provider_snapshot')
+        if (
+            comparison_scope == netbox_rpki.models.ReconciliationComparisonScope.PROVIDER_IMPORTED
+            and provider_snapshot is None
+        ):
+            raise ValidationError({'provider_snapshot': 'Provider snapshot is required for provider-imported ROA reconciliation.'})
+        return cleaned_data
+
+
 class ROAChangePlanLintAcknowledgementForm(ConfirmationForm):
     ticket_reference = forms.CharField(required=False, max_length=200, label='Ticket Reference')
     change_reference = forms.CharField(required=False, max_length=200, label='Change Reference')
@@ -327,3 +372,91 @@ class ROALintSuppressionLiftForm(ConfirmationForm):
         widget=forms.Textarea(attrs={'rows': 3}),
         help_text='Optional note explaining why the suppression was lifted.',
     )
+
+
+class BulkIntentRunActionForm(ConfirmationForm):
+    run_name = forms.CharField(required=False, max_length=200, label='Run Name')
+    comparison_scope = forms.ChoiceField(
+        choices=netbox_rpki.models.ReconciliationComparisonScope.choices,
+        initial=netbox_rpki.models.ReconciliationComparisonScope.LOCAL_ROA_RECORDS,
+        label='Comparison Scope',
+    )
+    provider_snapshot = forms.ModelChoiceField(
+        queryset=netbox_rpki.models.ProviderSnapshot.objects.none(),
+        required=False,
+        label='Provider Snapshot',
+    )
+    create_change_plans = forms.BooleanField(
+        required=False,
+        label='Create Draft Change Plans',
+        help_text='Create a draft ROA change plan for each qualifying child reconciliation result.',
+    )
+    profiles = forms.ModelMultipleChoiceField(
+        queryset=netbox_rpki.models.RoutingIntentProfile.objects.none(),
+        required=False,
+        label='Intent Profiles',
+        widget=forms.CheckboxSelectMultiple,
+    )
+    bindings = forms.ModelMultipleChoiceField(
+        queryset=netbox_rpki.models.RoutingIntentTemplateBinding.objects.none(),
+        required=False,
+        label='Template Bindings',
+        widget=forms.CheckboxSelectMultiple,
+    )
+
+    fieldsets = (
+        FieldSet(
+            'run_name',
+            'comparison_scope',
+            'provider_snapshot',
+            'create_change_plans',
+            'profiles',
+            'bindings',
+            name='Bulk Routing Intent Run',
+        ),
+    )
+
+    def __init__(self, *args, organization=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.organization = organization
+        profile_queryset = netbox_rpki.models.RoutingIntentProfile.objects.none()
+        binding_queryset = netbox_rpki.models.RoutingIntentTemplateBinding.objects.none()
+        snapshot_queryset = netbox_rpki.models.ProviderSnapshot.objects.none()
+        if organization is not None:
+            profile_queryset = netbox_rpki.models.RoutingIntentProfile.objects.filter(
+                organization=organization
+            ).order_by('name', 'pk')
+            binding_queryset = netbox_rpki.models.RoutingIntentTemplateBinding.objects.filter(
+                intent_profile__organization=organization
+            ).select_related('template', 'intent_profile').order_by(
+                'intent_profile__name',
+                'binding_priority',
+                'name',
+                'pk',
+            )
+            snapshot_queryset = netbox_rpki.models.ProviderSnapshot.objects.filter(
+                organization=organization
+            ).order_by('-created', '-pk')
+
+        self.fields['profiles'].queryset = profile_queryset
+        self.fields['bindings'].queryset = binding_queryset
+        self.fields['provider_snapshot'].queryset = snapshot_queryset
+        self.fields['profiles'].label_from_instance = lambda obj: f'{obj.name} ({obj.status})'
+        self.fields['bindings'].label_from_instance = (
+            lambda obj: f'{obj.intent_profile.name} / {obj.template.name} / {obj.name}'
+        )
+
+    def clean(self):
+        cleaned_data = super().clean()
+        profiles = cleaned_data.get('profiles')
+        bindings = cleaned_data.get('bindings')
+        provider_snapshot = cleaned_data.get('provider_snapshot')
+        if not profiles and not bindings:
+            raise ValidationError('Select at least one routing intent profile or template binding.')
+        if (
+            self.organization is not None
+            and provider_snapshot is not None
+            and provider_snapshot.organization_id != self.organization.pk
+        ):
+            raise ValidationError({'provider_snapshot': 'Provider snapshot must belong to the selected organization.'})
+        return cleaned_data

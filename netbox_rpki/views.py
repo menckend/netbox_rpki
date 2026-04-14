@@ -14,13 +14,14 @@ from utilities.forms import ConfirmationForm
 from utilities.views import ContentTypePermissionRequiredMixin
 
 from netbox_rpki import models, forms, tables, filtersets
-from netbox_rpki.jobs import RunAspaReconciliationJob, SyncProviderAccountJob
+from netbox_rpki.jobs import RunAspaReconciliationJob, RunBulkRoutingIntentJob, RunRoutingIntentProfileJob, SyncProviderAccountJob
 from netbox_rpki.detail_specs import (
     CERTIFICATE_DETAIL_SPEC,
     DETAIL_SPEC_BY_MODEL,
     DetailFieldSpec,
     ORGANIZATION_DETAIL_SPEC,
     ROA_DETAIL_SPEC,
+    ROUTING_INTENT_TEMPLATE_BINDING_DETAIL_SPEC,
 )
 from netbox_rpki.object_registry import SIMPLE_DETAIL_VIEW_OBJECT_SPECS, VIEW_OBJECT_SPECS
 from netbox_rpki.object_specs import ObjectSpec
@@ -36,8 +37,10 @@ from netbox_rpki.services import (
     build_roa_change_plan_delta,
     create_aspa_change_plan,
     lift_roa_lint_suppression,
+    preview_routing_intent_template_binding,
     preview_aspa_change_plan_provider_write,
     preview_roa_change_plan_provider_write,
+    run_routing_intent_template_binding_pipeline,
     suppress_roa_lint_finding,
 )
 from netbox_rpki.services.provider_sync_contract import build_provider_account_rollup
@@ -347,6 +350,141 @@ class ProviderAccountSyncView(generic.ObjectEditView):
         return redirect(provider_account.get_absolute_url())
 
 
+class RoutingIntentTemplateBindingActionView(generic.ObjectEditView):
+    queryset = models.RoutingIntentTemplateBinding.objects.all()
+
+    def get_required_permission(self):
+        return 'netbox_rpki.change_routingintenttemplatebinding'
+
+    def get_binding(self, pk):
+        return get_object_or_404(self.queryset, pk=pk)
+
+
+class RoutingIntentTemplateBindingPreviewView(RoutingIntentTemplateBindingActionView):
+    template_name = 'netbox_rpki/routingintenttemplatebinding_preview.html'
+
+    def get(self, request, pk):
+        binding = self.get_binding(pk)
+        try:
+            preview = preview_routing_intent_template_binding(binding)
+        except ValueError as exc:
+            messages.error(request, str(exc))
+            return redirect(binding.get_absolute_url())
+
+        return render(request, self.template_name, {
+            'object': binding,
+            'binding': binding,
+            'preview': preview,
+            'return_url': self.get_return_url(request, binding),
+        })
+
+
+class RoutingIntentTemplateBindingRegenerateView(RoutingIntentTemplateBindingActionView):
+    template_name = 'netbox_rpki/routingintenttemplatebinding_regenerate.html'
+
+    def _render(self, request, binding, *, form=None, status=200):
+        return render(request, self.template_name, {
+            'object': binding,
+            'binding': binding,
+            'form': form or ConfirmationForm(),
+            'return_url': self.get_return_url(request, binding),
+        }, status=status)
+
+    def get(self, request, pk):
+        binding = self.get_binding(pk)
+        return self._render(request, binding)
+
+    def post(self, request, pk):
+        binding = self.get_binding(pk)
+        form = ConfirmationForm(request.POST)
+        if not form.is_valid():
+            return self._render(request, binding, form=form, status=400)
+
+        try:
+            _derivation_run, reconciliation_run = run_routing_intent_template_binding_pipeline(binding)
+        except ValueError as exc:
+            messages.error(request, str(exc))
+            return redirect(binding.get_absolute_url())
+
+        messages.success(request, f'Regenerated routing intent template binding {binding.name}.')
+        return redirect(reconciliation_run.get_absolute_url())
+
+
+class RoutingIntentProfileRunView(generic.ObjectEditView):
+    queryset = models.RoutingIntentProfile.objects.all()
+    template_name = 'netbox_rpki/routingintentprofile_run.html'
+
+    def get_required_permission(self):
+        return 'netbox_rpki.change_routingintentprofile'
+
+    def get_profile(self, pk):
+        return get_object_or_404(self.queryset, pk=pk)
+
+    def _render(self, request, profile, *, form=None, status=200):
+        return render(request, self.template_name, {
+            'object': profile,
+            'profile': profile,
+            'form': form or forms.RoutingIntentProfileRunActionForm(profile=profile),
+            'return_url': self.get_return_url(request, profile),
+        }, status=status)
+
+    def get(self, request, pk):
+        profile = self.get_profile(pk)
+        return self._render(request, profile)
+
+    def post(self, request, pk):
+        profile = self.get_profile(pk)
+        form = forms.RoutingIntentProfileRunActionForm(request.POST, profile=profile)
+        if not form.is_valid():
+            return self._render(request, profile, form=form, status=400)
+
+        provider_snapshot = form.cleaned_data.get('provider_snapshot')
+        job = RunRoutingIntentProfileJob.enqueue(
+            instance=profile,
+            user=request.user,
+            profile_pk=profile.pk,
+            comparison_scope=form.cleaned_data['comparison_scope'],
+            provider_snapshot_pk=getattr(provider_snapshot, 'pk', provider_snapshot),
+        )
+        messages.success(request, f'Enqueued routing-intent profile job {job.pk} for {profile.name}.')
+        return redirect(profile.get_absolute_url())
+
+
+class RoutingIntentExceptionApproveView(generic.ObjectEditView):
+    queryset = models.RoutingIntentException.objects.all()
+    template_name = 'netbox_rpki/routingintentexception_approve.html'
+
+    def get_required_permission(self):
+        return 'netbox_rpki.change_routingintentexception'
+
+    def get_exception(self, pk):
+        return get_object_or_404(self.queryset, pk=pk)
+
+    def _render(self, request, exception, *, form=None, status=200):
+        return render(request, self.template_name, {
+            'object': exception,
+            'routing_intent_exception': exception,
+            'form': form or ConfirmationForm(),
+            'return_url': self.get_return_url(request, exception),
+        }, status=status)
+
+    def get(self, request, pk):
+        exception = self.get_exception(pk)
+        return self._render(request, exception)
+
+    def post(self, request, pk):
+        exception = self.get_exception(pk)
+        form = ConfirmationForm(request.POST)
+        if not form.is_valid():
+            return self._render(request, exception, form=form, status=400)
+
+        exception.approved_at = timezone.now()
+        exception.approved_by = getattr(request.user, 'username', '')
+        exception.save(update_fields=('approved_at', 'approved_by'))
+        messages.success(request, f'Approved routing intent exception {exception.name}.')
+        return redirect(exception.get_absolute_url())
+
+
 class OrganizationRunAspaReconciliationView(generic.ObjectEditView):
     queryset = models.Organization.objects.all()
     template_name = 'netbox_rpki/organization_aspa_reconcile.html'
@@ -394,6 +532,53 @@ class OrganizationRunAspaReconciliationView(generic.ObjectEditView):
                 request,
                 f'Organization {organization.name} already has an ASPA reconciliation in progress.',
             )
+        return redirect(organization.get_absolute_url())
+
+
+class OrganizationCreateBulkIntentRunView(generic.ObjectEditView):
+    queryset = models.Organization.objects.all()
+    template_name = 'netbox_rpki/organization_bulk_intent_run.html'
+
+    def get_required_permission(self):
+        return 'netbox_rpki.change_organization'
+
+    def get_organization(self, pk):
+        return get_object_or_404(self.queryset, pk=pk)
+
+    def _render(self, request, organization, *, form=None, status=200):
+        return render(request, self.template_name, {
+            'object': organization,
+            'organization': organization,
+            'form': form or forms.BulkIntentRunActionForm(organization=organization),
+            'return_url': self.get_return_url(request, organization),
+        }, status=status)
+
+    def get(self, request, pk):
+        organization = self.get_organization(pk)
+        return self._render(request, organization)
+
+    def post(self, request, pk):
+        organization = self.get_organization(pk)
+        form = forms.BulkIntentRunActionForm(request.POST, organization=organization)
+        if not form.is_valid():
+            return self._render(request, organization, form=form, status=400)
+
+        job, created = RunBulkRoutingIntentJob.enqueue_for_organization(
+            organization=organization,
+            profiles=tuple(form.cleaned_data.get('profiles') or ()),
+            bindings=tuple(form.cleaned_data.get('bindings') or ()),
+            comparison_scope=form.cleaned_data['comparison_scope'],
+            provider_snapshot=form.cleaned_data.get('provider_snapshot'),
+            create_change_plans=form.cleaned_data.get('create_change_plans', False),
+            run_name=form.cleaned_data.get('run_name') or None,
+            user=request.user,
+        )
+        if created:
+            messages.success(request, f'Enqueued bulk routing-intent job {job.pk} for {organization.name}.')
+        elif job is not None:
+            messages.warning(request, f'Bulk routing-intent job {job.pk} is already queued for {organization.name}.')
+        else:
+            messages.warning(request, f'{organization.name} already has a matching bulk routing-intent run in progress.')
         return redirect(organization.get_absolute_url())
 
 
@@ -446,6 +631,9 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
     additional_permissions = [
         'netbox_rpki.view_roa',
         'netbox_rpki.view_certificate',
+        'netbox_rpki.view_routingintenttemplatebinding',
+        'netbox_rpki.view_routingintentexception',
+        'netbox_rpki.view_bulkintentrun',
         'netbox_rpki.view_roareconciliationrun',
         'netbox_rpki.view_roachangeplan',
         'netbox_rpki.view_aspareconciliationrun',
@@ -469,6 +657,13 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
             today=today,
             expiry_threshold=expiry_threshold,
         )
+        stale_bindings = self.get_stale_bindings(request)
+        expiring_exceptions = self.get_expiring_exceptions(
+            request,
+            today=today,
+            expiry_threshold=expiry_threshold,
+        )
+        bulk_run_rollup = self.get_bulk_run_rollup(request)
         reconciliation_attention_runs = self.get_reconciliation_attention_runs(request)
         change_plans_requiring_attention = self.get_change_plans_requiring_attention(request)
         aspa_reconciliation_attention_runs = self.get_aspa_reconciliation_attention_runs(request)
@@ -478,6 +673,9 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
             'provider_accounts': provider_accounts,
             'expiring_roas': expiring_roas,
             'expiring_certificates': expiring_certificates,
+            'stale_bindings': stale_bindings,
+            'expiring_exceptions': expiring_exceptions,
+            'bulk_run_rollup': bulk_run_rollup,
             'reconciliation_attention_runs': reconciliation_attention_runs,
             'change_plans_requiring_attention': change_plans_requiring_attention,
             'aspa_reconciliation_attention_runs': aspa_reconciliation_attention_runs,
@@ -606,6 +804,105 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
             }
             for certificate in queryset
         ]
+
+    def get_stale_bindings(self, request):
+        attention_states = {
+            models.RoutingIntentTemplateBindingState.STALE,
+            models.RoutingIntentTemplateBindingState.PENDING,
+            models.RoutingIntentTemplateBindingState.INVALID,
+        }
+        queryset = (
+            models.RoutingIntentTemplateBinding.objects.restrict(request.user, 'view')
+            .select_related('template', 'intent_profile', 'intent_profile__organization')
+            .filter(
+                enabled=True,
+                template__enabled=True,
+                intent_profile__enabled=True,
+                state__in=attention_states,
+            )
+            .order_by('state', 'binding_priority', 'name')
+        )
+        bindings = []
+        for binding in queryset:
+            summary = dict(binding.summary_json or {})
+            bindings.append({
+                'object': binding,
+                'organization': binding.intent_profile.organization,
+                'reason_summary': summary.get('regeneration_reason_summary') or summary.get('error') or 'Regeneration required',
+                'reason_codes': summary.get('regeneration_reason_codes') or (),
+                'status_badge_class': self.get_binding_state_badge_class(binding.state),
+            })
+        return bindings[:10]
+
+    def get_expiring_exceptions(self, request, *, today, expiry_threshold):
+        queryset = (
+            models.RoutingIntentException.objects.restrict(request.user, 'view')
+            .select_related('organization', 'intent_profile', 'template_binding')
+            .filter(
+                enabled=True,
+                ends_at__isnull=False,
+                ends_at__date__lte=expiry_threshold,
+            )
+            .order_by('ends_at', 'name')
+        )
+        return [
+            {
+                'object': exception,
+                'organization': exception.organization,
+                'expiry_text': self.get_expiry_text(timezone.localtime(exception.ends_at).date(), today=today),
+                'expiry_badge_class': self.get_expiry_badge_class(timezone.localtime(exception.ends_at).date(), today=today),
+                'lifecycle_text': self.get_exception_lifecycle_text(exception),
+            }
+            for exception in queryset[:10]
+        ]
+
+    def get_bulk_run_rollup(self, request):
+        queryset = (
+            models.BulkIntentRun.objects.restrict(request.user, 'view')
+            .select_related('organization')
+            .order_by('-started_at', '-created')
+        )
+        runs = []
+        running_count = 0
+        failed_count = 0
+        completed_count = 0
+        attention_count = 0
+        for bulk_run in queryset:
+            summary = dict(bulk_run.summary_json or {})
+            failed_scope_count = summary.get('failed_scope_count', 0)
+            scope_result_count = summary.get('scope_result_count', 0)
+            change_plan_count = summary.get('change_plan_count', 0)
+            status_badge_class = self.get_validation_status_badge_class(bulk_run.status)
+            needs_attention = (
+                bulk_run.status in {models.ValidationRunStatus.PENDING, models.ValidationRunStatus.RUNNING, models.ValidationRunStatus.FAILED}
+                or failed_scope_count > 0
+            )
+            if bulk_run.status in {models.ValidationRunStatus.PENDING, models.ValidationRunStatus.RUNNING}:
+                running_count += 1
+            elif bulk_run.status == models.ValidationRunStatus.FAILED:
+                failed_count += 1
+            elif bulk_run.status == models.ValidationRunStatus.COMPLETED:
+                completed_count += 1
+            if needs_attention:
+                attention_count += 1
+            runs.append({
+                'object': bulk_run,
+                'scope_result_count': scope_result_count,
+                'change_plan_count': change_plan_count,
+                'failed_scope_count': failed_scope_count,
+                'status_badge_class': status_badge_class,
+                'status_text': bulk_run.get_status_display(),
+                'summary_text': summary.get('error') or (
+                    f"{scope_result_count} scope result(s), {change_plan_count} change plan(s)"
+                ),
+            })
+        return {
+            'runs': runs[:10],
+            'running_count': running_count,
+            'failed_count': failed_count,
+            'completed_count': completed_count,
+            'attention_count': attention_count,
+        }
 
     def get_reconciliation_attention_runs(self, request):
         queryset = (
@@ -784,6 +1081,36 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
         if days_remaining <= 7:
             return 'warning text-dark'
         return 'info'
+
+    def get_exception_lifecycle_text(self, exception):
+        now = timezone.now()
+        if not exception.enabled:
+            return 'Disabled'
+        if not exception.approved_at or not exception.approved_by:
+            return 'Pending Approval'
+        if exception.starts_at and exception.starts_at > now:
+            return 'Scheduled'
+        if exception.ends_at and exception.ends_at < now:
+            return 'Expired'
+        return 'Active'
+
+    def get_binding_state_badge_class(self, state):
+        if state == models.RoutingIntentTemplateBindingState.INVALID:
+            return 'danger'
+        if state == models.RoutingIntentTemplateBindingState.STALE:
+            return 'warning text-dark'
+        if state == models.RoutingIntentTemplateBindingState.PENDING:
+            return 'info'
+        return 'secondary'
+
+    def get_validation_status_badge_class(self, status):
+        if status == models.ValidationRunStatus.FAILED:
+            return 'danger'
+        if status == models.ValidationRunStatus.RUNNING:
+            return 'warning text-dark'
+        if status == models.ValidationRunStatus.PENDING:
+            return 'info'
+        return 'success'
 
 
 class ROAChangePlanPreviewView(ROAChangePlanActionView):

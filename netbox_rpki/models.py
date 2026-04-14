@@ -146,6 +146,39 @@ class IntentRunTriggerMode(models.TextChoices):
     SYNC_FOLLOWUP = "sync_followup", "Sync Follow-Up"
 
 
+class RoutingIntentTemplateStatus(models.TextChoices):
+    DRAFT = "draft", "Draft"
+    ACTIVE = "active", "Active"
+    ARCHIVED = "archived", "Archived"
+
+
+class RoutingIntentTemplateBindingState(models.TextChoices):
+    CURRENT = "current", "Current"
+    STALE = "stale", "Stale"
+    PENDING = "pending", "Pending Regeneration"
+    INVALID = "invalid", "Invalid"
+
+
+class RoutingIntentExceptionType(models.TextChoices):
+    TRAFFIC_ENGINEERING = "traffic_engineering", "Traffic Engineering"
+    ANYCAST = "anycast", "Anycast"
+    MITIGATION = "mitigation", "Mitigation"
+    CUSTOMER_EDGE = "customer_edge", "Customer Edge"
+
+
+class RoutingIntentExceptionEffectMode(models.TextChoices):
+    BROADEN = "broaden", "Broaden"
+    NARROW = "narrow", "Narrow"
+    SUPPRESS = "suppress", "Suppress"
+    TEMPORARY_REPLACEMENT = "temporary_replacement", "Temporary Replacement"
+
+
+class BulkIntentTargetMode(models.TextChoices):
+    PROFILES = "profiles", "Profiles"
+    BINDINGS = "bindings", "Bindings"
+    MIXED = "mixed", "Mixed"
+
+
 class ROAIntentDerivedState(models.TextChoices):
     ACTIVE = "active", "Active"
     SUPPRESSED = "suppressed", "Suppressed"
@@ -1826,6 +1859,406 @@ class ROAIntentOverride(NamedRpkiStandardModel):
 
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:roaintentoverride", args=[self.pk])
+
+
+class RoutingIntentTemplate(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='routing_intent_templates'
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=RoutingIntentTemplateStatus.choices,
+        default=RoutingIntentTemplateStatus.DRAFT,
+    )
+    description = models.TextField(blank=True)
+    enabled = models.BooleanField(default=True)
+    template_version = models.PositiveIntegerField(default=1)
+    template_fingerprint = models.CharField(max_length=128, blank=True)
+
+    class Meta:
+        ordering = ("name",)
+        constraints = (
+            models.UniqueConstraint(
+                fields=("organization", "name"),
+                name="netbox_rpki_routingintenttemplate_org_name_unique",
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def clean(self):
+        super().clean()
+        if self.template_version < 1:
+            raise ValidationError({'template_version': ['Template version must be at least 1.']})
+
+
+class RoutingIntentTemplateRule(NamedRpkiStandardModel):
+    template = models.ForeignKey(
+        to='RoutingIntentTemplate',
+        on_delete=models.PROTECT,
+        related_name='rules'
+    )
+    weight = models.PositiveIntegerField(default=100)
+    action = models.CharField(
+        max_length=32,
+        choices=RoutingIntentRuleAction.choices,
+        default=RoutingIntentRuleAction.INCLUDE,
+    )
+    address_family = models.CharField(
+        max_length=8,
+        choices=AddressFamily.choices,
+        blank=True,
+    )
+    match_tenant = models.ForeignKey(
+        to='tenancy.Tenant',
+        on_delete=models.PROTECT,
+        related_name='routing_intent_template_rules',
+        blank=True,
+        null=True
+    )
+    match_vrf = models.ForeignKey(
+        to='ipam.VRF',
+        on_delete=models.PROTECT,
+        related_name='routing_intent_template_rules',
+        blank=True,
+        null=True
+    )
+    match_site = models.ForeignKey(
+        to='dcim.Site',
+        on_delete=models.PROTECT,
+        related_name='routing_intent_template_rules',
+        blank=True,
+        null=True
+    )
+    match_region = models.ForeignKey(
+        to='dcim.Region',
+        on_delete=models.PROTECT,
+        related_name='routing_intent_template_rules',
+        blank=True,
+        null=True
+    )
+    match_role = models.CharField(max_length=100, blank=True)
+    match_tag = models.CharField(max_length=100, blank=True)
+    match_custom_field = models.CharField(max_length=255, blank=True)
+    origin_asn = models.ForeignKey(
+        to=ASN,
+        on_delete=models.PROTECT,
+        related_name='routing_intent_template_rules',
+        blank=True,
+        null=True
+    )
+    max_length_mode = models.CharField(
+        max_length=32,
+        choices=RoutingIntentRuleMaxLengthMode.choices,
+        default=RoutingIntentRuleMaxLengthMode.INHERIT,
+    )
+    max_length_value = models.PositiveSmallIntegerField(blank=True, null=True)
+    enabled = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ("template", "weight", "name")
+        constraints = (
+            models.UniqueConstraint(
+                fields=("template", "name"),
+                name="netbox_rpki_routingintenttemplaterule_template_name_unique",
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+
+class RoutingIntentTemplateBinding(NamedRpkiStandardModel):
+    template = models.ForeignKey(
+        to='RoutingIntentTemplate',
+        on_delete=models.PROTECT,
+        related_name='bindings'
+    )
+    intent_profile = models.ForeignKey(
+        to='RoutingIntentProfile',
+        on_delete=models.PROTECT,
+        related_name='template_bindings'
+    )
+    enabled = models.BooleanField(default=True)
+    binding_priority = models.PositiveIntegerField(default=100)
+    binding_label = models.CharField(max_length=200, blank=True)
+    origin_asn_override = models.ForeignKey(
+        to=ASN,
+        on_delete=models.PROTECT,
+        related_name='routing_intent_template_bindings',
+        blank=True,
+        null=True
+    )
+    max_length_mode = models.CharField(
+        max_length=32,
+        choices=RoutingIntentRuleMaxLengthMode.choices,
+        default=RoutingIntentRuleMaxLengthMode.INHERIT,
+    )
+    max_length_value = models.PositiveSmallIntegerField(blank=True, null=True)
+    prefix_selector_query = models.TextField(blank=True)
+    asn_selector_query = models.TextField(blank=True)
+    state = models.CharField(
+        max_length=32,
+        choices=RoutingIntentTemplateBindingState.choices,
+        default=RoutingIntentTemplateBindingState.PENDING,
+    )
+    last_compiled_fingerprint = models.CharField(max_length=128, blank=True)
+    summary_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("intent_profile", "binding_priority", "name")
+        constraints = (
+            models.UniqueConstraint(
+                fields=("intent_profile", "name"),
+                name="netbox_rpki_routingintenttemplatebinding_profile_name_unique",
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def clean(self):
+        super().clean()
+        template_org_id = getattr(getattr(self, 'template', None), 'organization_id', None)
+        profile_org_id = getattr(getattr(self, 'intent_profile', None), 'organization_id', None)
+        if template_org_id is not None and profile_org_id is not None and template_org_id != profile_org_id:
+            raise ValidationError({'template': ['Template organization must match the bound routing intent profile organization.']})
+
+
+class RoutingIntentException(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='routing_intent_exceptions'
+    )
+    intent_profile = models.ForeignKey(
+        to='RoutingIntentProfile',
+        on_delete=models.PROTECT,
+        related_name='routing_intent_exceptions',
+        blank=True,
+        null=True
+    )
+    template_binding = models.ForeignKey(
+        to='RoutingIntentTemplateBinding',
+        on_delete=models.PROTECT,
+        related_name='exceptions',
+        blank=True,
+        null=True
+    )
+    exception_type = models.CharField(
+        max_length=32,
+        choices=RoutingIntentExceptionType.choices,
+        default=RoutingIntentExceptionType.TRAFFIC_ENGINEERING,
+    )
+    effect_mode = models.CharField(
+        max_length=32,
+        choices=RoutingIntentExceptionEffectMode.choices,
+        default=RoutingIntentExceptionEffectMode.SUPPRESS,
+    )
+    prefix = models.ForeignKey(
+        to=Prefix,
+        on_delete=models.PROTECT,
+        related_name='routing_intent_exceptions',
+        blank=True,
+        null=True
+    )
+    prefix_cidr_text = models.CharField(max_length=64, blank=True)
+    origin_asn = models.ForeignKey(
+        to=ASN,
+        on_delete=models.PROTECT,
+        related_name='routing_intent_exceptions',
+        blank=True,
+        null=True
+    )
+    origin_asn_value = models.PositiveBigIntegerField(blank=True, null=True)
+    max_length = models.PositiveSmallIntegerField(blank=True, null=True)
+    tenant_scope = models.ForeignKey(
+        to='tenancy.Tenant',
+        on_delete=models.PROTECT,
+        related_name='routing_intent_exceptions',
+        blank=True,
+        null=True
+    )
+    vrf_scope = models.ForeignKey(
+        to='ipam.VRF',
+        on_delete=models.PROTECT,
+        related_name='routing_intent_exceptions',
+        blank=True,
+        null=True
+    )
+    site_scope = models.ForeignKey(
+        to='dcim.Site',
+        on_delete=models.PROTECT,
+        related_name='routing_intent_exceptions',
+        blank=True,
+        null=True
+    )
+    region_scope = models.ForeignKey(
+        to='dcim.Region',
+        on_delete=models.PROTECT,
+        related_name='routing_intent_exceptions',
+        blank=True,
+        null=True
+    )
+    starts_at = models.DateTimeField(blank=True, null=True)
+    ends_at = models.DateTimeField(blank=True, null=True)
+    reason = models.TextField(blank=True)
+    approved_by = models.CharField(max_length=200, blank=True)
+    approved_at = models.DateTimeField(blank=True, null=True)
+    enabled = models.BooleanField(default=True)
+    summary_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("name",)
+        constraints = (
+            models.CheckConstraint(
+                condition=models.Q(intent_profile__isnull=False) | models.Q(template_binding__isnull=False),
+                name="netbox_rpki_routingintentexception_requires_scope_target",
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def clean(self):
+        super().clean()
+        if self.intent_profile_id is None and self.template_binding_id is None:
+            raise ValidationError(
+                {'intent_profile': ['Either an intent profile or a template binding is required for an exception.']}
+            )
+        if self.ends_at and self.starts_at and self.ends_at < self.starts_at:
+            raise ValidationError({'ends_at': ['End time must be on or after the start time.']})
+        if self.intent_profile_id and self.intent_profile.organization_id != self.organization_id:
+            raise ValidationError({'intent_profile': ['Intent profile organization must match the exception organization.']})
+        binding = getattr(self, 'template_binding', None)
+        if binding is not None:
+            binding_profile = getattr(binding, 'intent_profile', None)
+            binding_profile_id = getattr(binding, 'intent_profile_id', None)
+            if binding_profile is not None and binding_profile.organization_id != self.organization_id:
+                raise ValidationError({'template_binding': ['Template binding organization must match the exception organization.']})
+            if self.intent_profile_id and binding_profile_id is not None and binding_profile_id != self.intent_profile_id:
+                raise ValidationError({'template_binding': ['Template binding must belong to the selected intent profile.']})
+
+
+class BulkIntentRun(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='bulk_intent_runs'
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=ValidationRunStatus.choices,
+        default=ValidationRunStatus.PENDING,
+    )
+    trigger_mode = models.CharField(
+        max_length=32,
+        choices=IntentRunTriggerMode.choices,
+        default=IntentRunTriggerMode.MANUAL,
+    )
+    target_mode = models.CharField(
+        max_length=32,
+        choices=BulkIntentTargetMode.choices,
+        default=BulkIntentTargetMode.BINDINGS,
+    )
+    baseline_fingerprint = models.CharField(max_length=128, blank=True)
+    resulting_fingerprint = models.CharField(max_length=128, blank=True)
+    started_at = models.DateTimeField(blank=True, null=True)
+    completed_at = models.DateTimeField(blank=True, null=True)
+    summary_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("-started_at", "name")
+
+    def __str__(self):
+        return self.name
+
+
+class BulkIntentRunScopeResult(NamedRpkiStandardModel):
+    bulk_run = models.ForeignKey(
+        to='BulkIntentRun',
+        on_delete=models.PROTECT,
+        related_name='scope_results'
+    )
+    intent_profile = models.ForeignKey(
+        to='RoutingIntentProfile',
+        on_delete=models.PROTECT,
+        related_name='bulk_run_scope_results',
+        blank=True,
+        null=True
+    )
+    template_binding = models.ForeignKey(
+        to='RoutingIntentTemplateBinding',
+        on_delete=models.PROTECT,
+        related_name='bulk_run_scope_results',
+        blank=True,
+        null=True
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=ValidationRunStatus.choices,
+        default=ValidationRunStatus.PENDING,
+    )
+    scope_kind = models.CharField(max_length=32, blank=True)
+    scope_key = models.CharField(max_length=200, blank=True)
+    derivation_run = models.ForeignKey(
+        to='IntentDerivationRun',
+        on_delete=models.PROTECT,
+        related_name='bulk_scope_results',
+        blank=True,
+        null=True
+    )
+    reconciliation_run = models.ForeignKey(
+        to='ROAReconciliationRun',
+        on_delete=models.PROTECT,
+        related_name='bulk_scope_results',
+        blank=True,
+        null=True
+    )
+    change_plan = models.ForeignKey(
+        to='ROAChangePlan',
+        on_delete=models.PROTECT,
+        related_name='bulk_scope_results',
+        blank=True,
+        null=True
+    )
+    prefix_count_scanned = models.PositiveIntegerField(default=0)
+    intent_count_emitted = models.PositiveIntegerField(default=0)
+    plan_item_count = models.PositiveIntegerField(default=0)
+    summary_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("name",)
+        constraints = (
+            models.UniqueConstraint(
+                fields=("bulk_run", "scope_key"),
+                name="netbox_rpki_bulkintentrunscoperesult_scope_key_unique",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(intent_profile__isnull=False) | models.Q(template_binding__isnull=False),
+                name="netbox_rpki_bulkintentrunscoperesult_requires_target",
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def clean(self):
+        super().clean()
+        if self.intent_profile_id is None and self.template_binding_id is None:
+            raise ValidationError(
+                {'intent_profile': ['Either an intent profile or a template binding is required for a bulk scope result.']}
+            )
+        if self.template_binding_id and self.intent_profile_id:
+            if self.template_binding.intent_profile_id != self.intent_profile_id:
+                raise ValidationError({'template_binding': ['Template binding must belong to the selected intent profile.']})
+        if self.intent_profile_id and self.intent_profile.organization_id != self.bulk_run.organization_id:
+            raise ValidationError({'intent_profile': ['Intent profile organization must match the bulk run organization.']})
+        if self.template_binding_id and self.template_binding.intent_profile.organization_id != self.bulk_run.organization_id:
+            raise ValidationError({'template_binding': ['Template binding organization must match the bulk run organization.']})
 
 
 class IntentDerivationRun(NamedRpkiStandardModel):

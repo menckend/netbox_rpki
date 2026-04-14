@@ -1,0 +1,44 @@
+{% extends 'generic/_base.html' %}
+
+{% block title %}Create Bulk Intent Run{% endblock %}
+
+{% block content %}
+  <div class="row mt-5">
+    <div class="col col-lg-8 offset-lg-2">
+      <form action="" method="post" class="form">
+        {% csrf_token %}
+        {% for field in form.hidden_fields %}
+          {{ field }}
+        {% endfor %}
+        <div class="card border-warning">
+          <h2 class="card-header">Create Bulk Intent Run</h2>
+          <div class="card-body">
+            <p>
+              Run the routing-intent derivation and reconciliation workflow across a selected set of profiles or
+              template bindings for <strong>{{ organization }}</strong>.
+            </p>
+            {% for field in form.visible_fields %}
+              <div class="mb-3">
+                {{ field.label_tag }}
+                {{ field }}
+                {% if field.help_text %}
+                  <div class="form-text">{{ field.help_text }}</div>
+                {% endif %}
+                {% for error in field.errors %}
+                  <div class="text-danger">{{ error }}</div>
+                {% endfor %}
+              </div>
+            {% endfor %}
+            {% for error in form.non_field_errors %}
+              <div class="text-danger">{{ error }}</div>
+            {% endfor %}
+          </div>
+          <div class="card-footer text-end">
+            <a href="{{ return_url }}" class="btn btn-outline-secondary">Cancel</a>
+            <button type="submit" name="_confirm" class="btn btn-primary">Create Run</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endblock %}

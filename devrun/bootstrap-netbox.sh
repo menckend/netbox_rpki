@@ -7,6 +7,7 @@ require_command docker
 require_command python3
 require_command pg_isready
 require_command redis-cli
+require_command curl
 
 generate_password() {
     python3 - <<'PY'
@@ -70,13 +71,16 @@ ensure_compose_env() {
     POSTGRES_DB="netbox"
     POSTGRES_USER="netbox"
     POSTGRES_PASSWORD="$NETBOX_DATABASE_PASSWORD"
+    ROUTINATOR_RTR_PORT="${ROUTINATOR_RTR_PORT:-3323}"
+    ROUTINATOR_HTTP_PORT="${ROUTINATOR_HTTP_PORT:-8323}"
+    ROUTINATOR_METRICS_PORT="${ROUTINATOR_METRICS_PORT:-9556}"
 
     if [ -f "$ENV_FILE" ]; then
         while IFS='=' read -r key value; do
             key="${key%$'\r'}"
             value="${value%$'\r'}"
             case "$key" in
-                POSTGRES_DB|POSTGRES_USER|POSTGRES_PASSWORD)
+                POSTGRES_DB|POSTGRES_USER|POSTGRES_PASSWORD|ROUTINATOR_RTR_PORT|ROUTINATOR_HTTP_PORT|ROUTINATOR_METRICS_PORT)
                     export "$key=$value"
                     ;;
             esac
@@ -85,12 +89,18 @@ ensure_compose_env() {
         POSTGRES_DB="${POSTGRES_DB:-netbox}"
         POSTGRES_USER="${POSTGRES_USER:-netbox}"
         POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-$NETBOX_DATABASE_PASSWORD}"
+        ROUTINATOR_RTR_PORT="${ROUTINATOR_RTR_PORT:-3323}"
+        ROUTINATOR_HTTP_PORT="${ROUTINATOR_HTTP_PORT:-8323}"
+        ROUTINATOR_METRICS_PORT="${ROUTINATOR_METRICS_PORT:-9556}"
     fi
 
     cat > "$ENV_FILE" <<EOF
 POSTGRES_DB=$POSTGRES_DB
 POSTGRES_USER=$POSTGRES_USER
 POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+ROUTINATOR_RTR_PORT=$ROUTINATOR_RTR_PORT
+ROUTINATOR_HTTP_PORT=$ROUTINATOR_HTTP_PORT
+ROUTINATOR_METRICS_PORT=$ROUTINATOR_METRICS_PORT
 EOF
     chmod 600 "$ENV_FILE"
 }
@@ -207,10 +217,14 @@ ensure_compose_env
 docker_compose up -d
 wait_for_postgres
 wait_for_redis
+if ! wait_for_routinator; then
+    printf 'Routinator is still starting in the background at %s.\n' "$ROUTINATOR_BASE_URL" >&2
+fi
 ensure_database_permissions
 ensure_netbox_source_link
 write_configuration
 run_manage_tasks
+"$DEVRUN_DIR/configure-routinator-validator.sh"
 
 printf 'CREDENTIALS_FILE=%s\n' "$CREDENTIALS_FILE"
 printf 'ENV_FILE=%s\n' "$ENV_FILE"

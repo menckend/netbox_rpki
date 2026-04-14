@@ -22,6 +22,27 @@
             </div>
             <div class="col col-md-3">
               <div class="border rounded p-3 h-100">
+                <div class="text-muted small text-uppercase">Bindings Requiring Regeneration</div>
+                <div class="fs-2 fw-semibold">{{ stale_bindings|length }}</div>
+                <div class="text-muted">Pending, stale, or invalid template bindings</div>
+              </div>
+            </div>
+            <div class="col col-md-3">
+              <div class="border rounded p-3 h-100">
+                <div class="text-muted small text-uppercase">Exceptions Expiring Within {{ expiry_window_days }} Days</div>
+                <div class="fs-2 fw-semibold">{{ expiring_exceptions|length }}</div>
+                <div class="text-muted">Enabled intent exceptions nearing end time</div>
+              </div>
+            </div>
+            <div class="col col-md-3">
+              <div class="border rounded p-3 h-100">
+                <div class="text-muted small text-uppercase">Bulk Runs Requiring Attention</div>
+                <div class="fs-2 fw-semibold">{{ bulk_run_rollup.attention_count }}</div>
+                <div class="text-muted">{{ bulk_run_rollup.running_count }} active, {{ bulk_run_rollup.failed_count }} failed</div>
+              </div>
+            </div>
+            <div class="col col-md-3">
+              <div class="border rounded p-3 h-100">
                 <div class="text-muted small text-uppercase">Reconciliation Runs Requiring Attention</div>
                 <div class="fs-2 fw-semibold">{{ reconciliation_attention_runs|length }}</div>
                 <div class="text-muted">Replacement drift or lint warnings present</div>
@@ -64,6 +85,141 @@
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row mb-4">
+    <div class="col col-md-12">
+      <div class="card">
+        <h5 class="card-header">Bindings Requiring Regeneration</h5>
+        {% if stale_bindings %}
+          <div class="card-body table-responsive">
+            <table class="table table-hover align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Organization</th>
+                  <th>Template</th>
+                  <th>Intent Profile</th>
+                  <th>State</th>
+                  <th>Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in stale_bindings %}
+                  <tr>
+                    <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
+                    <td><a href="{{ item.organization.get_absolute_url }}">{{ item.organization }}</a></td>
+                    <td><a href="{{ item.object.template.get_absolute_url }}">{{ item.object.template }}</a></td>
+                    <td><a href="{{ item.object.intent_profile.get_absolute_url }}">{{ item.object.intent_profile }}</a></td>
+                    <td><span class="badge bg-{{ item.status_badge_class }}">{{ item.object.get_state_display }}</span></td>
+                    <td>{{ item.reason_summary }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="card-body text-muted">No template bindings currently require regeneration.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="row mb-4">
+    <div class="col col-md-12">
+      <div class="card">
+        <h5 class="card-header">Intent Exceptions Nearing Expiry</h5>
+        {% if expiring_exceptions %}
+          <div class="card-body table-responsive">
+            <table class="table table-hover align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Organization</th>
+                  <th>Intent Profile</th>
+                  <th>Template Binding</th>
+                  <th>Effect</th>
+                  <th>Lifecycle</th>
+                  <th>Ends At</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in expiring_exceptions %}
+                  <tr>
+                    <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
+                    <td><a href="{{ item.organization.get_absolute_url }}">{{ item.organization }}</a></td>
+                    <td>
+                      {% if item.object.intent_profile %}
+                        <a href="{{ item.object.intent_profile.get_absolute_url }}">{{ item.object.intent_profile }}</a>
+                      {% else %}
+                        <span class="text-muted">None</span>
+                      {% endif %}
+                    </td>
+                    <td>
+                      {% if item.object.template_binding %}
+                        <a href="{{ item.object.template_binding.get_absolute_url }}">{{ item.object.template_binding }}</a>
+                      {% else %}
+                        <span class="text-muted">None</span>
+                      {% endif %}
+                    </td>
+                    <td>{{ item.object.get_effect_mode_display }}</td>
+                    <td>{{ item.lifecycle_text }}</td>
+                    <td>{{ item.object.ends_at }}</td>
+                    <td><span class="badge bg-{{ item.expiry_badge_class }}">{{ item.expiry_text }}</span></td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="card-body text-muted">No enabled intent exceptions are currently within the expiry window.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="row mb-4">
+    <div class="col col-md-12">
+      <div class="card">
+        <h5 class="card-header">Recent Bulk Intent Runs</h5>
+        {% if bulk_run_rollup.runs %}
+          <div class="card-body table-responsive">
+            <table class="table table-hover align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Organization</th>
+                  <th>Status</th>
+                  <th>Target Mode</th>
+                  <th>Started At</th>
+                  <th>Completed At</th>
+                  <th>Outcome</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in bulk_run_rollup.runs %}
+                  <tr>
+                    <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
+                    <td><a href="{{ item.object.organization.get_absolute_url }}">{{ item.object.organization }}</a></td>
+                    <td><span class="badge bg-{{ item.status_badge_class }}">{{ item.status_text }}</span></td>
+                    <td>{{ item.object.get_target_mode_display }}</td>
+                    <td>{{ item.object.started_at|default:'-' }}</td>
+                    <td>{{ item.object.completed_at|default:'-' }}</td>
+                    <td>
+                      <div>{{ item.summary_text }}</div>
+                      <div class="text-muted small">{{ item.failed_scope_count }} failed scope(s)</div>
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="card-body text-muted">No bulk intent runs have been recorded yet.</div>
+        {% endif %}
       </div>
     </div>
   </div>

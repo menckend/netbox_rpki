@@ -33,6 +33,71 @@ class PublishedAuthorization:
     stale: bool
 
 
+@dataclass(frozen=True)
+class CompiledTemplateBinding:
+    binding: rpki_models.RoutingIntentTemplateBinding
+    rules: tuple[rpki_models.RoutingIntentTemplateRule, ...]
+    prefix_ids: frozenset[int]
+    selected_asns: tuple[ASN, ...]
+    default_origin_asn: ASN | None
+    template_fingerprint: str
+    binding_fingerprint: str
+    warnings: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class CompiledRoutingIntentException:
+    exception: rpki_models.RoutingIntentException
+    fingerprint: str
+
+
+@dataclass(frozen=True)
+class RoutingIntentBindingRegenerationAssessment:
+    binding: rpki_models.RoutingIntentTemplateBinding
+    state: str
+    changed: bool
+    previous_fingerprint: str | None
+    current_fingerprint: str | None
+    reason_codes: tuple[str, ...]
+    reason_summary: str
+
+
+@dataclass(frozen=True)
+class CompiledRoutingIntentPolicy:
+    profile: rpki_models.RoutingIntentProfile
+    prefixes: tuple[Prefix, ...]
+    selected_asns: tuple[ASN, ...]
+    default_origin_asn: ASN | None
+    local_rules: tuple[rpki_models.RoutingIntentRule, ...]
+    exceptions: tuple[CompiledRoutingIntentException, ...]
+    overrides: tuple[rpki_models.ROAIntentOverride, ...]
+    template_bindings: tuple[CompiledTemplateBinding, ...]
+    warnings: tuple[str, ...]
+    input_fingerprint: str
+
+
+@dataclass(frozen=True)
+class ROAIntentPreviewResult:
+    prefix: Prefix
+    prefix_cidr_text: str
+    origin_asn: ASN | None
+    origin_asn_value: int | None
+    max_length: int | None
+    derived_state: str
+    exposure_state: str
+    source_rule: rpki_models.RoutingIntentRule | None
+    applied_override: rpki_models.ROAIntentOverride | None
+    explanation: str
+
+
+@dataclass(frozen=True)
+class RoutingIntentDerivationPreview:
+    profile: rpki_models.RoutingIntentProfile
+    compiled_policy: CompiledRoutingIntentPolicy
+    results: tuple[ROAIntentPreviewResult, ...]
+    warnings: tuple[str, ...]
+
+
 MATCH_SCORES = {
     rpki_models.ROAIntentMatchKind.EXACT: 100,
     rpki_models.ROAIntentMatchKind.LENGTH_NARROWER: 90,
@@ -305,22 +370,131 @@ def _override_specificity(override: rpki_models.ROAIntentOverride) -> tuple[int,
     )
 
 
+def _exception_matches_prefix(
+    prefix: Prefix,
+    compiled_exception: CompiledRoutingIntentException,
+    *,
+    profile: rpki_models.RoutingIntentProfile,
+    active_binding_ids: frozenset[int],
+    now,
+) -> bool:
+    exception = compiled_exception.exception
+    if exception.intent_profile_id and exception.intent_profile_id != profile.pk:
+        return False
+    if exception.template_binding_id and exception.template_binding_id not in active_binding_ids:
+        return False
+    if not exception.approved_at or not exception.approved_by:
+        return False
+
+    if exception.starts_at and exception.starts_at > now:
+        return False
+    if exception.ends_at and exception.ends_at < now:
+        return False
+
+    if exception.prefix_id and exception.prefix_id != prefix.pk:
+        return False
+    if exception.prefix_cidr_text and exception.prefix_cidr_text != str(prefix.prefix):
+        return False
+
+    if exception.tenant_scope_id and exception.tenant_scope_id != prefix.tenant_id:
+        return False
+    if exception.vrf_scope_id and exception.vrf_scope_id != prefix.vrf_id:
+        return False
+
+    site = _resolve_prefix_site(prefix)
+    if exception.site_scope_id and getattr(site, 'pk', None) != exception.site_scope_id:
+        return False
+
+    region = _resolve_prefix_region(prefix)
+    if exception.region_scope_id and getattr(region, 'pk', None) != exception.region_scope_id:
+        return False
+
+    return True
+
+
+def _exception_specificity(compiled_exception: CompiledRoutingIntentException) -> tuple[int, int, int, int, int]:
+    exception = compiled_exception.exception
+    return (
+        1 if exception.prefix_id or exception.prefix_cidr_text else 0,
+        sum(
+            1
+            for field_name in ('tenant_scope_id', 'vrf_scope_id', 'site_scope_id', 'region_scope_id')
+            if getattr(exception, field_name)
+        ),
+        1 if exception.template_binding_id else 0,
+        1 if exception.intent_profile_id else 0,
+        exception.pk,
+    )
+
+
 def _default_max_length(profile: rpki_models.RoutingIntentProfile, prefix: Prefix) -> int:
     return prefix.prefix.prefixlen
 
 
-def _resolve_default_origin_asn(selected_asns) -> tuple[ASN | None, list[str]]:
+def _resolve_default_origin_asn(selected_asns, *, context_label: str = 'profile') -> tuple[ASN | None, list[str]]:
     warnings = []
     if len(selected_asns) == 1:
         return selected_asns[0], warnings
     if not selected_asns:
-        warnings.append('No ASN matched the profile ASN selector; intents without explicit origin rules will be shadowed.')
+        warnings.append(f'No ASN matched the {context_label} ASN selector; intents without explicit origin rules will be shadowed.')
     else:
-        warnings.append('Multiple ASNs matched the profile ASN selector; intents without explicit origin rules will be shadowed.')
+        warnings.append(f'Multiple ASNs matched the {context_label} ASN selector; intents without explicit origin rules will be shadowed.')
     return None, warnings
 
 
-def _fingerprint_queryset(prefixes, asns, profile, rules, overrides) -> str:
+def _materialize_template_fingerprint(
+    template: rpki_models.RoutingIntentTemplate,
+    rules: tuple[rpki_models.RoutingIntentTemplateRule, ...],
+) -> str:
+    payload = '|'.join(
+        (
+            str(template.organization_id),
+            template.name,
+            template.status,
+            str(template.enabled),
+            str(template.template_version),
+            *(
+                ':'.join(
+                    (
+                        rule.name,
+                        str(rule.weight),
+                        rule.action,
+                        rule.address_family or '',
+                        str(rule.match_tenant_id or ''),
+                        str(rule.match_vrf_id or ''),
+                        str(rule.match_site_id or ''),
+                        str(rule.match_region_id or ''),
+                        rule.match_role or '',
+                        rule.match_tag or '',
+                        rule.match_custom_field or '',
+                        str(rule.origin_asn_id or ''),
+                        rule.max_length_mode,
+                        str(rule.max_length_value or ''),
+                        str(rule.enabled),
+                    )
+                )
+                for rule in rules
+            ),
+        )
+    )
+    return hashlib.sha256(payload.encode('utf-8')).hexdigest()
+
+
+def _resolve_binding_default_max_length(
+    binding: rpki_models.RoutingIntentTemplateBinding,
+    prefix: Prefix,
+) -> int | None:
+    if binding.max_length_mode == rpki_models.RoutingIntentRuleMaxLengthMode.EXPLICIT and binding.max_length_value is not None:
+        return binding.max_length_value
+    if binding.max_length_mode in {
+        rpki_models.RoutingIntentRuleMaxLengthMode.EXACT,
+        rpki_models.RoutingIntentRuleMaxLengthMode.INHERIT,
+    }:
+        return prefix.prefix.prefixlen
+    return None
+
+
+def _fingerprint_queryset(prefixes, asns, profile, rules, overrides, template_bindings=()) -> str:
     payload = '|'.join(
         [
             str(profile.pk),
@@ -330,7 +504,34 @@ def _fingerprint_queryset(prefixes, asns, profile, rules, overrides) -> str:
             ','.join(str(asn.pk) for asn in asns),
             ','.join(str(rule.pk) for rule in rules),
             ','.join(str(override.pk) for override in overrides),
+            ','.join(template_bindings),
         ]
+    )
+    return hashlib.sha256(payload.encode('utf-8')).hexdigest()
+
+
+def _materialize_exception_fingerprint(exception: rpki_models.RoutingIntentException) -> str:
+    payload = '|'.join(
+        (
+            str(exception.pk),
+            str(exception.organization_id),
+            str(exception.intent_profile_id or ''),
+            str(exception.template_binding_id or ''),
+            exception.exception_type,
+            exception.effect_mode,
+            str(exception.prefix_id or ''),
+            exception.prefix_cidr_text or '',
+            str(exception.origin_asn_id or ''),
+            str(exception.origin_asn_value or ''),
+            str(exception.max_length or ''),
+            str(exception.tenant_scope_id or ''),
+            str(exception.vrf_scope_id or ''),
+            str(exception.site_scope_id or ''),
+            str(exception.region_scope_id or ''),
+            exception.starts_at.isoformat() if exception.starts_at else '',
+            exception.ends_at.isoformat() if exception.ends_at else '',
+            str(exception.enabled),
+        )
     )
     return hashlib.sha256(payload.encode('utf-8')).hexdigest()
 
@@ -341,16 +542,218 @@ def _resolve_origin_value(origin_asn: ASN | None, origin_asn_value: int | None) 
     return getattr(origin_asn, 'asn', None)
 
 
-def derive_roa_intents(
+def _build_binding_summary_payload(
+    binding: rpki_models.RoutingIntentTemplateBinding,
+    *,
+    template_rules,
+    template_fingerprint: str,
+    binding_fingerprint: str,
+    scoped_prefixes,
+    scoped_asns,
+    binding_warnings,
+):
+    return {
+        'template_id': binding.template_id,
+        'template_version': binding.template.template_version,
+        'template_fingerprint': template_fingerprint,
+        'binding_fingerprint': binding_fingerprint,
+        'scoped_prefix_count': len(scoped_prefixes),
+        'scoped_asn_count': len(scoped_asns),
+        'active_rule_count': len(template_rules),
+        'warning_count': len(binding_warnings),
+        'warnings': list(binding_warnings),
+    }
+
+
+def _classify_binding_regeneration(
+    binding: rpki_models.RoutingIntentTemplateBinding,
+    *,
+    binding_fingerprint: str,
+    summary_payload: dict,
+) -> RoutingIntentBindingRegenerationAssessment:
+    previous_fingerprint = binding.last_compiled_fingerprint or None
+    previous_summary = dict(binding.summary_json or {})
+    reason_codes: list[str] = []
+
+    if previous_fingerprint is None:
+        state = rpki_models.RoutingIntentTemplateBindingState.PENDING
+        reason_codes.append('never_compiled')
+    elif previous_fingerprint == binding_fingerprint:
+        state = rpki_models.RoutingIntentTemplateBindingState.CURRENT
+    else:
+        state = rpki_models.RoutingIntentTemplateBindingState.STALE
+        if previous_summary.get('template_fingerprint') != summary_payload['template_fingerprint']:
+            reason_codes.append('template_policy_changed')
+        if previous_summary.get('template_version') != summary_payload['template_version']:
+            reason_codes.append('template_version_changed')
+        if previous_summary.get('scoped_prefix_count') != summary_payload['scoped_prefix_count']:
+            reason_codes.append('prefix_scope_changed')
+        if previous_summary.get('scoped_asn_count') != summary_payload['scoped_asn_count']:
+            reason_codes.append('asn_scope_changed')
+        if previous_summary.get('warning_count') != summary_payload['warning_count']:
+            reason_codes.append('warning_profile_changed')
+        if not reason_codes:
+            reason_codes.append('binding_parameters_changed')
+
+    reason_summary_map = {
+        'never_compiled': 'Binding has not been regenerated yet.',
+        'template_policy_changed': 'Template policy fingerprint changed.',
+        'template_version_changed': 'Template version changed.',
+        'prefix_scope_changed': 'Scoped prefix selection changed.',
+        'asn_scope_changed': 'Scoped ASN selection changed.',
+        'warning_profile_changed': 'Compilation warnings changed.',
+        'binding_parameters_changed': 'Binding inputs changed.',
+    }
+    if not reason_codes:
+        reason_summary = 'No material drift detected.'
+    else:
+        reason_summary = ' '.join(reason_summary_map[code] for code in reason_codes)
+
+    return RoutingIntentBindingRegenerationAssessment(
+        binding=binding,
+        state=state,
+        changed=state == rpki_models.RoutingIntentTemplateBindingState.STALE,
+        previous_fingerprint=previous_fingerprint,
+        current_fingerprint=binding_fingerprint,
+        reason_codes=tuple(reason_codes),
+        reason_summary=reason_summary,
+    )
+
+
+def _build_compiled_template_binding(
+    binding: rpki_models.RoutingIntentTemplateBinding,
+    *,
+    profile_prefixes: tuple[Prefix, ...],
+    profile_selected_asns: tuple[ASN, ...],
+    persist_state: bool = False,
+    commit_current: bool = False,
+) -> CompiledTemplateBinding:
+    binding_warnings: list[str] = []
+    prefix_queryset = Prefix.objects.filter(pk__in=[prefix.pk for prefix in profile_prefixes]).select_related(
+        'tenant', 'vrf', 'role', '_site', '_region'
+    )
+    asn_queryset = ASN.objects.filter(pk__in=[asn.pk for asn in profile_selected_asns]).select_related('tenant')
+
+    try:
+        scoped_prefixes = tuple(
+            _apply_selector(
+                PrefixFilterSet,
+                prefix_queryset,
+                rpki_models.RoutingIntentSelectorMode.FILTERED,
+                binding.prefix_selector_query,
+            )
+        )
+        scoped_asns = tuple(
+            _apply_selector(
+                ASNFilterSet,
+                asn_queryset,
+                rpki_models.RoutingIntentSelectorMode.FILTERED,
+                binding.asn_selector_query,
+            )
+        )
+    except RoutingIntentExecutionError as exc:
+        if persist_state:
+            binding.state = rpki_models.RoutingIntentTemplateBindingState.INVALID
+            binding.summary_json = {'error': str(exc)}
+            binding.save(update_fields=('state', 'summary_json'))
+        raise
+
+    template_rules = tuple(
+        binding.template.rules.filter(enabled=True)
+        .select_related('origin_asn', 'match_tenant', 'match_vrf', 'match_site', 'match_region')
+        .order_by('weight', 'name', 'pk')
+    )
+    template_fingerprint = _materialize_template_fingerprint(binding.template, template_rules)
+    binding_default_origin_asn = binding.origin_asn_override
+    if binding_default_origin_asn is None:
+        binding_default_origin_asn, binding_origin_warnings = _resolve_default_origin_asn(
+            scoped_asns,
+            context_label=f'binding "{binding.name}"',
+        )
+        binding_warnings.extend(binding_origin_warnings)
+
+    binding_fingerprint_payload = '|'.join(
+        (
+            str(binding.pk),
+            str(binding.intent_profile_id),
+            str(binding.binding_priority),
+            str(binding.enabled),
+            binding.binding_label or '',
+            str(binding.origin_asn_override_id or ''),
+            binding.max_length_mode,
+            str(binding.max_length_value or ''),
+            binding.prefix_selector_query or '',
+            binding.asn_selector_query or '',
+            str(binding.template.template_version),
+            template_fingerprint,
+            ','.join(str(prefix.pk) for prefix in scoped_prefixes),
+            ','.join(str(asn.pk) for asn in scoped_asns),
+            str(getattr(binding_default_origin_asn, 'asn', '')),
+        )
+    )
+    binding_fingerprint = hashlib.sha256(binding_fingerprint_payload.encode('utf-8')).hexdigest()
+    summary_payload = _build_binding_summary_payload(
+        binding,
+        template_rules=template_rules,
+        template_fingerprint=template_fingerprint,
+        binding_fingerprint=binding_fingerprint,
+        scoped_prefixes=scoped_prefixes,
+        scoped_asns=scoped_asns,
+        binding_warnings=binding_warnings,
+    )
+    regeneration_assessment = _classify_binding_regeneration(
+        binding,
+        binding_fingerprint=binding_fingerprint,
+        summary_payload=summary_payload,
+    )
+
+    if persist_state:
+        if binding.template.template_fingerprint != template_fingerprint:
+            binding.template.template_fingerprint = template_fingerprint
+            binding.template.save(update_fields=('template_fingerprint',))
+        binding.state = (
+            rpki_models.RoutingIntentTemplateBindingState.CURRENT
+            if commit_current
+            else regeneration_assessment.state
+        )
+        if commit_current:
+            binding.last_compiled_fingerprint = binding_fingerprint
+        binding.summary_json = {
+            **summary_payload,
+            'previous_binding_fingerprint': regeneration_assessment.previous_fingerprint,
+            'regeneration_reason_codes': list(regeneration_assessment.reason_codes),
+            'regeneration_reason_summary': regeneration_assessment.reason_summary,
+            'candidate_binding_fingerprint': binding_fingerprint,
+        }
+        update_fields = ['state', 'summary_json']
+        if commit_current:
+            update_fields.append('last_compiled_fingerprint')
+        binding.save(update_fields=tuple(update_fields))
+
+    return CompiledTemplateBinding(
+        binding=binding,
+        rules=template_rules,
+        prefix_ids=frozenset(prefix.pk for prefix in scoped_prefixes),
+        selected_asns=scoped_asns,
+        default_origin_asn=binding_default_origin_asn,
+        template_fingerprint=template_fingerprint,
+        binding_fingerprint=binding_fingerprint,
+        warnings=tuple(binding_warnings),
+    )
+
+
+def compile_routing_intent_policy(
     profile: rpki_models.RoutingIntentProfile,
     *,
-    trigger_mode: str = rpki_models.IntentRunTriggerMode.MANUAL,
-    run_name: str | None = None,
-) -> rpki_models.IntentDerivationRun:
+    bindings: tuple[rpki_models.RoutingIntentTemplateBinding, ...] | None = None,
+    include_inactive_bindings: bool = False,
+    persist_state: bool = False,
+    commit_binding_state: bool = False,
+) -> CompiledRoutingIntentPolicy:
     if not profile.enabled:
         raise RoutingIntentExecutionError('Routing intent profile is disabled.')
 
-    prefixes = list(
+    prefixes = tuple(
         _apply_selector(
             PrefixFilterSet,
             Prefix.objects.all().select_related('tenant', 'vrf', 'role', '_site', '_region'),
@@ -358,7 +761,7 @@ def derive_roa_intents(
             profile.prefix_selector_query,
         )
     )
-    selected_asns = list(
+    selected_asns = tuple(
         _apply_selector(
             ASNFilterSet,
             ASN.objects.all().select_related('tenant'),
@@ -366,68 +769,270 @@ def derive_roa_intents(
             profile.asn_selector_query,
         )
     )
-    rules = list(profile.rules.filter(enabled=True).select_related('origin_asn', 'match_tenant', 'match_vrf', 'match_site', 'match_region').order_by('weight', 'name', 'pk'))
-    overrides = list(
+    local_rules = tuple(
+        profile.rules.filter(enabled=True)
+        .select_related('origin_asn', 'match_tenant', 'match_vrf', 'match_site', 'match_region')
+        .order_by('weight', 'name', 'pk')
+    )
+    overrides = tuple(
         profile.organization.roa_intent_overrides.filter(enabled=True)
         .select_related('intent_profile', 'prefix', 'origin_asn', 'tenant_scope', 'vrf_scope', 'site_scope', 'region_scope')
     )
-    default_origin_asn, warnings = _resolve_default_origin_asn(selected_asns)
-    now = timezone.now()
 
-    derivation_run = rpki_models.IntentDerivationRun.objects.create(
-        name=run_name or f'{profile.name} Derivation {now:%Y-%m-%d %H:%M:%S}',
-        organization=profile.organization,
-        intent_profile=profile,
-        tenant=profile.tenant,
-        status=rpki_models.ValidationRunStatus.RUNNING,
-        trigger_mode=trigger_mode,
-        started_at=now,
-        input_fingerprint=_fingerprint_queryset(prefixes, selected_asns, profile, rules, overrides),
-        prefix_count_scanned=len(prefixes),
-        warning_count=len(warnings),
-        error_summary='\n'.join(warnings),
+    default_origin_asn, warnings = _resolve_default_origin_asn(selected_asns)
+
+    if bindings is None:
+        candidate_bindings = tuple(
+            profile.template_bindings.select_related('template', 'origin_asn_override')
+            .order_by('binding_priority', 'template__name', 'pk')
+        )
+    else:
+        candidate_bindings = tuple(bindings)
+
+    candidate_binding_ids = frozenset(binding.pk for binding in candidate_bindings)
+    exception_queryset = (
+        profile.organization.routing_intent_exceptions.filter(enabled=True)
+        .select_related(
+            'intent_profile',
+            'template_binding',
+            'prefix',
+            'origin_asn',
+            'tenant_scope',
+            'vrf_scope',
+            'site_scope',
+            'region_scope',
+        )
+    )
+    compiled_exceptions = tuple(
+        CompiledRoutingIntentException(
+            exception=exception,
+            fingerprint=_materialize_exception_fingerprint(exception),
+        )
+        for exception in exception_queryset
+        if (
+            exception.intent_profile_id in (None, profile.pk)
+            and (exception.template_binding_id is None or exception.template_binding_id in candidate_binding_ids)
+            and exception.approved_at
+            and exception.approved_by
+        )
     )
 
-    emitted_count = 0
-    for prefix in prefixes:
+    compiled_bindings = []
+    for binding in candidate_bindings:
+        if binding.intent_profile_id != profile.pk:
+            raise RoutingIntentExecutionError(
+                f'Template binding {binding.pk} does not belong to routing intent profile {profile.pk}.'
+            )
+        if not include_inactive_bindings:
+            if not binding.enabled:
+                continue
+            if not binding.template.enabled:
+                warnings.append(
+                    f'Template binding {binding.name} was skipped because template {binding.template.name} is disabled.'
+                )
+                continue
+            if binding.template.status != rpki_models.RoutingIntentTemplateStatus.ACTIVE:
+                warnings.append(
+                    f'Template binding {binding.name} was skipped because template {binding.template.name} is not active.'
+                )
+                continue
+        compiled_binding = _build_compiled_template_binding(
+            binding,
+            profile_prefixes=prefixes,
+            profile_selected_asns=selected_asns,
+            persist_state=persist_state,
+            commit_current=commit_binding_state,
+        )
+        compiled_bindings.append(compiled_binding)
+        warnings.extend(compiled_binding.warnings)
+
+    return CompiledRoutingIntentPolicy(
+        profile=profile,
+        prefixes=prefixes,
+        selected_asns=selected_asns,
+        default_origin_asn=default_origin_asn,
+        local_rules=local_rules,
+        exceptions=compiled_exceptions,
+        overrides=overrides,
+        template_bindings=tuple(compiled_bindings),
+        warnings=tuple(warnings),
+        input_fingerprint=_fingerprint_queryset(
+            prefixes,
+            selected_asns,
+            profile,
+            local_rules,
+            overrides,
+            template_bindings=tuple(
+                (
+                    *[binding.binding_fingerprint for binding in compiled_bindings],
+                    *[compiled_exception.fingerprint for compiled_exception in compiled_exceptions],
+                )
+            ),
+        ),
+    )
+
+
+def _apply_rule_effect(
+    prefix: Prefix,
+    rule,
+    *,
+    included: bool,
+    origin_asn: ASN | None,
+    origin_asn_value: int | None,
+    max_length: int | None,
+):
+    if not _prefix_matches_rule(prefix, rule):
+        return included, origin_asn, origin_asn_value, max_length, False
+
+    if rule.action == rpki_models.RoutingIntentRuleAction.EXCLUDE:
+        included = False
+    elif rule.action in (
+        rpki_models.RoutingIntentRuleAction.INCLUDE,
+        rpki_models.RoutingIntentRuleAction.REQUIRE_TAG,
+        rpki_models.RoutingIntentRuleAction.REQUIRE_CF,
+    ):
         included = True
-        origin_asn = default_origin_asn
-        origin_asn_value = getattr(default_origin_asn, 'asn', None)
+    elif rule.action == rpki_models.RoutingIntentRuleAction.SET_ORIGIN and rule.origin_asn_id:
+        included = True
+        origin_asn = rule.origin_asn
+        origin_asn_value = rule.origin_asn.asn
+    elif rule.action == rpki_models.RoutingIntentRuleAction.SET_MAX_LENGTH:
+        included = True
+        if rule.max_length_mode == rpki_models.RoutingIntentRuleMaxLengthMode.EXPLICIT and rule.max_length_value is not None:
+            max_length = rule.max_length_value
+        else:
+            max_length = prefix.prefix.prefixlen
+
+    return included, origin_asn, origin_asn_value, max_length, True
+
+
+def _evaluate_compiled_roa_intents(
+    compiled_policy: CompiledRoutingIntentPolicy,
+):
+    profile = compiled_policy.profile
+    now = timezone.now()
+    warnings = list(compiled_policy.warnings)
+    results = []
+    active_binding_ids = frozenset(compiled_binding.binding.pk for compiled_binding in compiled_policy.template_bindings)
+
+    for prefix in compiled_policy.prefixes:
+        included = True
+        origin_asn = compiled_policy.default_origin_asn
+        origin_asn_value = getattr(compiled_policy.default_origin_asn, 'asn', None)
         max_length = _default_max_length(profile, prefix)
         source_rule = None
         applied_override = None
         explanation_parts = [f'Selected prefix {prefix.prefix} from profile query.']
+        last_template_binding_name = None
 
-        for rule in rules:
-            if not _prefix_matches_rule(prefix, rule):
+        for compiled_binding in compiled_policy.template_bindings:
+            if prefix.pk not in compiled_binding.prefix_ids:
                 continue
 
-            source_rule = rule
-            explanation_parts.append(f'Applied rule {rule.name} ({rule.action}).')
+            before_template_state = (included, origin_asn_value, max_length)
+            binding_changed_state = False
+            explanation_parts.append(f'Applied template binding {compiled_binding.binding.name}.')
 
-            if rule.action == rpki_models.RoutingIntentRuleAction.EXCLUDE:
+            if compiled_binding.default_origin_asn is not None:
+                included = True
+                origin_asn = compiled_binding.default_origin_asn
+                origin_asn_value = compiled_binding.default_origin_asn.asn
+                binding_changed_state = True
+                explanation_parts.append(
+                    f'Binding {compiled_binding.binding.name} resolved default origin ASN to AS{origin_asn_value}.'
+                )
+
+            binding_max_length = _resolve_binding_default_max_length(compiled_binding.binding, prefix)
+            if binding_max_length is not None:
+                included = True
+                max_length = binding_max_length
+                binding_changed_state = True
+                explanation_parts.append(
+                    f'Binding {compiled_binding.binding.name} resolved default maxLength to {binding_max_length}.'
+                )
+
+            for template_rule in compiled_binding.rules:
+                included, origin_asn, origin_asn_value, max_length, matched = _apply_rule_effect(
+                    prefix,
+                    template_rule,
+                    included=included,
+                    origin_asn=origin_asn,
+                    origin_asn_value=origin_asn_value,
+                    max_length=max_length,
+                )
+                if matched:
+                    binding_changed_state = True
+                    explanation_parts.append(
+                        f'Applied template rule {template_rule.name} from binding {compiled_binding.binding.name} ({template_rule.action}).'
+                    )
+
+            after_template_state = (included, origin_asn_value, max_length)
+            if last_template_binding_name and binding_changed_state and after_template_state != before_template_state:
+                warnings.append(
+                    'Template binding {binding} overrode template-derived policy from binding {prior} for prefix {prefix}.'.format(
+                        binding=compiled_binding.binding.name,
+                        prior=last_template_binding_name,
+                        prefix=prefix.prefix,
+                    )
+                )
+            if binding_changed_state:
+                last_template_binding_name = compiled_binding.binding.name
+
+        for rule in compiled_policy.local_rules:
+            included, origin_asn, origin_asn_value, max_length, matched = _apply_rule_effect(
+                prefix,
+                rule,
+                included=included,
+                origin_asn=origin_asn,
+                origin_asn_value=origin_asn_value,
+                max_length=max_length,
+            )
+            if matched:
+                source_rule = rule
+                explanation_parts.append(f'Applied rule {rule.name} ({rule.action}).')
+
+        matching_exceptions = sorted(
+            (
+                compiled_exception
+                for compiled_exception in compiled_policy.exceptions
+                if _exception_matches_prefix(
+                    prefix,
+                    compiled_exception,
+                    profile=profile,
+                    active_binding_ids=active_binding_ids,
+                    now=now,
+                )
+            ),
+            key=_exception_specificity,
+            reverse=True,
+        )
+        for compiled_exception in matching_exceptions:
+            exception = compiled_exception.exception
+            explanation_parts.append(
+                f'Applied exception {exception.name} ({exception.effect_mode}).'
+            )
+            if exception.effect_mode == rpki_models.RoutingIntentExceptionEffectMode.SUPPRESS:
                 included = False
-            elif rule.action in (
-                rpki_models.RoutingIntentRuleAction.INCLUDE,
-                rpki_models.RoutingIntentRuleAction.REQUIRE_TAG,
-                rpki_models.RoutingIntentRuleAction.REQUIRE_CF,
-            ):
+            else:
                 included = True
-            elif rule.action == rpki_models.RoutingIntentRuleAction.SET_ORIGIN and rule.origin_asn_id:
-                included = True
-                origin_asn = rule.origin_asn
-                origin_asn_value = rule.origin_asn.asn
-            elif rule.action == rpki_models.RoutingIntentRuleAction.SET_MAX_LENGTH:
-                included = True
-                if rule.max_length_mode == rpki_models.RoutingIntentRuleMaxLengthMode.EXPLICIT and rule.max_length_value is not None:
-                    max_length = rule.max_length_value
-                else:
-                    max_length = prefix.prefix.prefixlen
+                exception_origin_value = _resolve_origin_value(exception.origin_asn, exception.origin_asn_value)
+                if exception_origin_value is not None:
+                    origin_asn = exception.origin_asn
+                    origin_asn_value = exception_origin_value
+                if exception.effect_mode == rpki_models.RoutingIntentExceptionEffectMode.TEMPORARY_REPLACEMENT:
+                    if exception.max_length is not None:
+                        max_length = exception.max_length
+                elif exception.effect_mode == rpki_models.RoutingIntentExceptionEffectMode.BROADEN:
+                    if exception.max_length is not None:
+                        max_length = max(max_length, exception.max_length) if max_length is not None else exception.max_length
+                elif exception.effect_mode == rpki_models.RoutingIntentExceptionEffectMode.NARROW:
+                    if exception.max_length is not None:
+                        max_length = min(max_length, exception.max_length) if max_length is not None else exception.max_length
 
         matching_overrides = sorted(
             (
                 override
-                for override in overrides
+                for override in compiled_policy.overrides
                 if _override_matches_prefix(prefix, override, profile=profile, now=now)
             ),
             key=_override_specificity,
@@ -467,43 +1072,101 @@ def derive_roa_intents(
             if prefix.status == 'active'
             else rpki_models.ROAIntentExposureState.ELIGIBLE_NOT_ADVERTISED
         )
-
         prefix_text = str(prefix.prefix)
-        resolved_origin_value = _resolve_origin_value(origin_asn, origin_asn_value)
-        intent_name = f'{prefix_text} -> AS{resolved_origin_value if resolved_origin_value is not None else "unresolved"}'
+
+        results.append(
+            {
+                'prefix': prefix,
+                'prefix_cidr_text': prefix_text,
+                'address_family': rpki_models.AddressFamily.IPV6 if prefix.family == 6 else rpki_models.AddressFamily.IPV4,
+                'origin_asn': origin_asn,
+                'origin_asn_value': _resolve_origin_value(origin_asn, origin_asn_value),
+                'max_length': max_length,
+                'derived_state': derived_state,
+                'exposure_state': exposure_state,
+                'scope_tenant': prefix.tenant,
+                'scope_vrf': prefix.vrf,
+                'scope_site': _resolve_prefix_site(prefix),
+                'scope_region': _resolve_prefix_region(prefix),
+                'source_rule': source_rule,
+                'applied_override': applied_override,
+                'explanation': ' '.join(explanation_parts),
+                'is_as0': is_as0,
+            }
+        )
+
+    return tuple(results), tuple(warnings)
+
+
+def derive_roa_intents(
+    profile: rpki_models.RoutingIntentProfile,
+    *,
+    trigger_mode: str = rpki_models.IntentRunTriggerMode.MANUAL,
+    run_name: str | None = None,
+    compiled_policy: CompiledRoutingIntentPolicy | None = None,
+) -> rpki_models.IntentDerivationRun:
+    compiled_policy = compiled_policy or compile_routing_intent_policy(
+        profile,
+        persist_state=True,
+        commit_binding_state=True,
+    )
+    if compiled_policy.profile.pk != profile.pk:
+        raise RoutingIntentExecutionError('Compiled policy does not belong to the selected routing intent profile.')
+
+    preview_rows, warnings = _evaluate_compiled_roa_intents(compiled_policy)
+    now = timezone.now()
+
+    derivation_run = rpki_models.IntentDerivationRun.objects.create(
+        name=run_name or f'{profile.name} Derivation {now:%Y-%m-%d %H:%M:%S}',
+        organization=profile.organization,
+        intent_profile=profile,
+        tenant=profile.tenant,
+        status=rpki_models.ValidationRunStatus.RUNNING,
+        trigger_mode=trigger_mode,
+        started_at=now,
+        input_fingerprint=compiled_policy.input_fingerprint,
+        prefix_count_scanned=len(compiled_policy.prefixes),
+        warning_count=len(warnings),
+        error_summary='\n'.join(warnings),
+    )
+
+    emitted_count = 0
+    for row in preview_rows:
+        resolved_origin_value = row['origin_asn_value']
+        intent_name = f'{row["prefix_cidr_text"]} -> AS{resolved_origin_value if resolved_origin_value is not None else "unresolved"}'
 
         rpki_models.ROAIntent.objects.create(
             name=intent_name,
             derivation_run=derivation_run,
             organization=profile.organization,
             intent_profile=profile,
-            tenant=prefix.tenant or profile.tenant,
+            tenant=row['prefix'].tenant or profile.tenant,
             intent_key=rpki_models.ROAIntent.build_intent_key(
-                prefix_cidr_text=prefix_text,
-                address_family=rpki_models.AddressFamily.IPV6 if prefix.family == 6 else rpki_models.AddressFamily.IPV4,
+                prefix_cidr_text=row['prefix_cidr_text'],
+                address_family=row['address_family'],
                 origin_asn_value=resolved_origin_value,
-                max_length=max_length,
-                tenant_id=prefix.tenant_id,
-                vrf_id=prefix.vrf_id,
-                site_id=getattr(_resolve_prefix_site(prefix), 'pk', None),
-                region_id=getattr(_resolve_prefix_region(prefix), 'pk', None),
+                max_length=row['max_length'],
+                tenant_id=row['prefix'].tenant_id,
+                vrf_id=row['prefix'].vrf_id,
+                site_id=getattr(row['scope_site'], 'pk', None),
+                region_id=getattr(row['scope_region'], 'pk', None),
             ),
-            prefix=prefix,
-            prefix_cidr_text=prefix_text,
-            address_family=rpki_models.AddressFamily.IPV6 if prefix.family == 6 else rpki_models.AddressFamily.IPV4,
-            origin_asn=origin_asn,
+            prefix=row['prefix'],
+            prefix_cidr_text=row['prefix_cidr_text'],
+            address_family=row['address_family'],
+            origin_asn=row['origin_asn'],
             origin_asn_value=resolved_origin_value,
-            is_as0=is_as0,
-            max_length=max_length,
-            scope_tenant=prefix.tenant,
-            scope_vrf=prefix.vrf,
-            scope_site=_resolve_prefix_site(prefix),
-            scope_region=_resolve_prefix_region(prefix),
-            source_rule=source_rule,
-            applied_override=applied_override,
-            derived_state=derived_state,
-            exposure_state=exposure_state,
-            explanation=' '.join(explanation_parts),
+            is_as0=row['is_as0'],
+            max_length=row['max_length'],
+            scope_tenant=row['scope_tenant'],
+            scope_vrf=row['scope_vrf'],
+            scope_site=row['scope_site'],
+            scope_region=row['scope_region'],
+            source_rule=row['source_rule'],
+            applied_override=row['applied_override'],
+            derived_state=row['derived_state'],
+            exposure_state=row['exposure_state'],
+            explanation=row['explanation'],
         )
         emitted_count += 1
 
@@ -520,6 +1183,98 @@ def derive_roa_intents(
         'error_summary',
     ))
     return derivation_run
+
+
+def preview_routing_intent_template_binding(
+    binding: rpki_models.RoutingIntentTemplateBinding,
+) -> RoutingIntentDerivationPreview:
+    compiled_policy = compile_routing_intent_policy(
+        binding.intent_profile,
+        bindings=(binding,),
+        include_inactive_bindings=True,
+        persist_state=False,
+    )
+    preview_rows, warnings = _evaluate_compiled_roa_intents(compiled_policy)
+    return RoutingIntentDerivationPreview(
+        profile=binding.intent_profile,
+        compiled_policy=compiled_policy,
+        results=tuple(
+            ROAIntentPreviewResult(
+                prefix=row['prefix'],
+                prefix_cidr_text=row['prefix_cidr_text'],
+                origin_asn=row['origin_asn'],
+                origin_asn_value=row['origin_asn_value'],
+                max_length=row['max_length'],
+                derived_state=row['derived_state'],
+                exposure_state=row['exposure_state'],
+                source_rule=row['source_rule'],
+                applied_override=row['applied_override'],
+                explanation=row['explanation'],
+            )
+            for row in preview_rows
+        ),
+        warnings=warnings,
+    )
+
+
+def refresh_routing_intent_template_binding_state(
+    binding: rpki_models.RoutingIntentTemplateBinding,
+) -> RoutingIntentBindingRegenerationAssessment:
+    compile_routing_intent_policy(
+        binding.intent_profile,
+        bindings=(binding,),
+        include_inactive_bindings=True,
+        persist_state=True,
+        commit_binding_state=False,
+    )
+    binding.refresh_from_db()
+    summary = dict(binding.summary_json or {})
+    return RoutingIntentBindingRegenerationAssessment(
+        binding=binding,
+        state=binding.state,
+        changed=binding.state == rpki_models.RoutingIntentTemplateBindingState.STALE,
+        previous_fingerprint=summary.get('previous_binding_fingerprint'),
+        current_fingerprint=summary.get('candidate_binding_fingerprint') or binding.last_compiled_fingerprint or None,
+        reason_codes=tuple(summary.get('regeneration_reason_codes') or ()),
+        reason_summary=summary.get('regeneration_reason_summary') or '',
+    )
+
+
+def run_routing_intent_template_binding_pipeline(
+    binding: rpki_models.RoutingIntentTemplateBinding,
+    *,
+    trigger_mode: str = rpki_models.IntentRunTriggerMode.MANUAL,
+    comparison_scope: str = rpki_models.ReconciliationComparisonScope.LOCAL_ROA_RECORDS,
+    provider_snapshot: rpki_models.ProviderSnapshot | int | None = None,
+) -> tuple[rpki_models.IntentDerivationRun, rpki_models.ROAReconciliationRun]:
+    if not binding.enabled:
+        raise RoutingIntentExecutionError('Routing intent template binding is disabled.')
+    if not binding.template.enabled:
+        raise RoutingIntentExecutionError('Routing intent template is disabled.')
+    if binding.template.status != rpki_models.RoutingIntentTemplateStatus.ACTIVE:
+        raise RoutingIntentExecutionError('Routing intent template must be active before regeneration.')
+
+    compiled_policy = compile_routing_intent_policy(
+        binding.intent_profile,
+        bindings=(binding,),
+        persist_state=True,
+        commit_binding_state=True,
+    )
+    if not compiled_policy.template_bindings:
+        raise RoutingIntentExecutionError('No active compiled policy was produced for this template binding.')
+
+    derivation_run = derive_roa_intents(
+        binding.intent_profile,
+        trigger_mode=trigger_mode,
+        run_name=f'{binding.name} Derivation {timezone.now():%Y-%m-%d %H:%M:%S}',
+        compiled_policy=compiled_policy,
+    )
+    reconciliation_run = reconcile_roa_intents(
+        derivation_run,
+        comparison_scope=comparison_scope,
+        provider_snapshot=provider_snapshot,
+    )
+    return derivation_run, reconciliation_run
 
 
 def _network_contains(container: IPNetwork, member: IPNetwork) -> bool:

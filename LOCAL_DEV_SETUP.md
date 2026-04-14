@@ -139,7 +139,7 @@ cd ~/src/netbox_rpki/devrun
 
 On first run this does all of the environment preparation that should be automated:
 
-- starts the local PostgreSQL and Redis containers from [`docker-compose.yml`](/home/mencken/src/netbox_rpki/devrun/docker-compose.yml)
+- starts the local PostgreSQL, Redis, and Routinator containers from [`docker-compose.yml`](/home/mencken/src/netbox_rpki/devrun/docker-compose.yml)
 - creates or refreshes `devrun/.env`
 - creates `~/.config/netbox-rpki-dev/credentials.env`
 - writes NetBox `configuration.py` at `~/src/netbox-v4.5.7/netbox/netbox/configuration.py`
@@ -148,8 +148,10 @@ On first run this does all of the environment preparation that should be automat
 - runs `manage.py collectstatic`
 - runs `manage.py check`
 - creates or updates the local `admin` superuser
+- creates or updates a `ValidatorInstance` named `Local Routinator` pointing at the local validator endpoint
 - starts an RQ worker
 - starts the NetBox development server
+- starts Routinator with HTTP status available at `http://127.0.0.1:8323/api/v1/status` by default and ASPA support enabled
 - starts Krill too, if a compatible Krill workspace exists
 
 You do not need to hand-maintain `configuration.py`, database credentials, or the local admin user if you use `./dev.sh start`.
@@ -236,9 +238,15 @@ This reports:
 - NetBox project path
 - virtualenv path
 - generated config and credentials paths
-- whether `runserver`, the worker, and Krill are running
+- whether `runserver`, the worker, Krill, and Routinator are running or reachable
 - Docker container status
 - PostgreSQL and Redis reachability
+
+`devrun/.env` now also carries the local Routinator port bindings used by Docker Compose:
+
+- `ROUTINATOR_RTR_PORT` default `3323`
+- `ROUTINATOR_HTTP_PORT` default `8323`
+- `ROUTINATOR_METRICS_PORT` default `9556`
 
 ### Seed reusable sample data
 

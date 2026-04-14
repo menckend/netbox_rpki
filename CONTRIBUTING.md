@@ -640,6 +640,7 @@ For local development and browser testing, prefer the wrappers in `devrun/`:
 
 - `./dev.sh start`
 - `./dev.sh status`
+- `./dev.sh validator`
 - `./dev.sh seed`
 - `./dev.sh e2e`
 - `./dev.sh stop`

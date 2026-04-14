@@ -1187,3 +1187,144 @@ class GovernanceModelBehaviorTestCase(TestCase):
 
         with self.assertRaises(ValidationError):
             approval_record.full_clean()
+
+
+class RoutingIntentTemplateModelBehaviorTestCase(TestCase):
+    def test_template_version_must_be_positive(self):
+        template = rpki_models.RoutingIntentTemplate(
+            name='Invalid Template',
+            organization=create_test_organization(org_id='template-version-org', name='Template Version Org'),
+            template_version=0,
+        )
+
+        with self.assertRaises(ValidationError):
+            template.full_clean()
+
+    def test_template_binding_requires_matching_organization(self):
+        template = rpki_models.RoutingIntentTemplate(
+            name='Cross Org Template',
+            organization=create_test_organization(org_id='tmpl-org', name='Template Org')
+        )
+        profile = create_test_routing_intent_profile(
+            organization=create_test_organization(org_id='profile-org', name='Profile Org')
+        )
+        binding = rpki_models.RoutingIntentTemplateBinding(
+            name='Cross Org Binding',
+            template=template,
+            intent_profile=profile,
+        )
+
+        with self.assertRaises(ValidationError):
+            binding.full_clean()
+
+    def test_exception_requires_scope_target(self):
+        exception = rpki_models.RoutingIntentException(
+            name='Missing Scope Target',
+            organization=create_test_organization(org_id='exception-org', name='Exception Org'),
+            exception_type=rpki_models.RoutingIntentExceptionType.ANYCAST,
+            effect_mode=rpki_models.RoutingIntentExceptionEffectMode.SUPPRESS,
+        )
+
+        with self.assertRaises(ValidationError):
+            exception.full_clean()
+
+    def test_exception_validates_binding_and_profile_alignment(self):
+        organization = create_test_organization(org_id='aligned-org', name='Aligned Org')
+        profile = create_test_routing_intent_profile(organization=organization)
+        template = rpki_models.RoutingIntentTemplate(
+            name='Aligned Template',
+            organization=organization,
+        )
+        binding = rpki_models.RoutingIntentTemplateBinding(
+            name='Aligned Binding',
+            template=template,
+            intent_profile=profile,
+        )
+        other_profile = create_test_routing_intent_profile(
+            organization=organization,
+            name='Other Profile',
+        )
+        exception = rpki_models.RoutingIntentException(
+            name='Misaligned Exception',
+            organization=organization,
+            intent_profile=other_profile,
+            template_binding=binding,
+            exception_type=rpki_models.RoutingIntentExceptionType.TRAFFIC_ENGINEERING,
+            effect_mode=rpki_models.RoutingIntentExceptionEffectMode.SUPPRESS,
+        )
+
+        with self.assertRaises(ValidationError):
+            exception.full_clean()
+
+    def test_bulk_scope_result_validates_binding_and_bulk_run_organization(self):
+        organization = create_test_organization(org_id='bulk-org', name='Bulk Org')
+        profile = create_test_routing_intent_profile(organization=organization)
+        template = rpki_models.RoutingIntentTemplate(
+            name='Bulk Template',
+            organization=organization,
+        )
+        binding = rpki_models.RoutingIntentTemplateBinding(
+            name='Bulk Binding',
+            template=template,
+            intent_profile=profile,
+        )
+        other_bulk_run = rpki_models.BulkIntentRun(
+            name='Other Bulk Run',
+            organization=create_test_organization(org_id='other-bulk-org', name='Other Bulk Org')
+        )
+        scope_result = rpki_models.BulkIntentRunScopeResult(
+            name='Cross Org Scope Result',
+            bulk_run=other_bulk_run,
+            intent_profile=profile,
+            template_binding=binding,
+            scope_key='cross-org-binding',
+        )
+
+        with self.assertRaises(ValidationError):
+            scope_result.full_clean()
+
+    def test_new_slice_one_models_have_expected_string_representations(self):
+        organization = create_test_organization(org_id='slice-one-org', name='Slice One Org')
+        profile = create_test_routing_intent_profile(organization=organization)
+        template = rpki_models.RoutingIntentTemplate(
+            name='Reusable Template',
+            organization=organization,
+            status=rpki_models.RoutingIntentTemplateStatus.ACTIVE,
+        )
+        rule = rpki_models.RoutingIntentTemplateRule(
+            name='Template Rule',
+            template=template,
+        )
+        binding = rpki_models.RoutingIntentTemplateBinding(
+            name='Template Binding',
+            template=template,
+            intent_profile=profile,
+            state=rpki_models.RoutingIntentTemplateBindingState.CURRENT,
+        )
+        exception = rpki_models.RoutingIntentException(
+            name='Template Exception',
+            organization=organization,
+            intent_profile=profile,
+            template_binding=binding,
+            exception_type=rpki_models.RoutingIntentExceptionType.TRAFFIC_ENGINEERING,
+            effect_mode=rpki_models.RoutingIntentExceptionEffectMode.SUPPRESS,
+        )
+        bulk_run = rpki_models.BulkIntentRun(
+            name='Bulk Run',
+            organization=organization,
+            started_at=timezone.now(),
+        )
+        scope_result = rpki_models.BulkIntentRunScopeResult(
+            name='Scope Result',
+            bulk_run=bulk_run,
+            intent_profile=profile,
+            template_binding=binding,
+            scope_key='binding:1',
+        )
+
+        self.assertEqual(str(template), 'Reusable Template')
+        self.assertEqual(str(rule), 'Template Rule')
+        self.assertEqual(str(binding), 'Template Binding')
+        self.assertEqual(str(exception), 'Template Exception')
+        self.assertEqual(str(bulk_run), 'Bulk Run')
+        self.assertEqual(str(scope_result), 'Scope Result')

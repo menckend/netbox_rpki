@@ -30,5 +30,28 @@ services:
       timeout: 5s
       retries: 10
 
+  routinator:
+    image: nlnetlabs/routinator:latest
+    container_name: netbox-rpki-routinator
+    restart: unless-stopped
+    command:
+      - --repository-dir
+      - /home/routinator/.rpki-cache/repository
+      - --enable-aspa
+      - server
+      - --rtr
+      - 0.0.0.0:3323
+      - --http
+      - 0.0.0.0:8323
+      - --http
+      - 0.0.0.0:9556
+    ports:
+      - "127.0.0.1:${ROUTINATOR_RTR_PORT}:3323"
+      - "127.0.0.1:${ROUTINATOR_HTTP_PORT}:8323"
+      - "127.0.0.1:${ROUTINATOR_METRICS_PORT}:9556"
+    volumes:
+      - routinator_cache:/home/routinator/.rpki-cache
+
 volumes:
   postgres_data:
+  routinator_cache:

@@ -1,0 +1,41 @@
+{% extends 'generic/_base.html' %}
+
+{% block title %}Approve {{ routing_intent_exception }}{% endblock %}
+
+{% block content %}
+  <div class="row mt-5">
+    <div class="col col-md-8 offset-md-2">
+      <form action="" method="post" class="form">
+        {% csrf_token %}
+        {% for field in form.hidden_fields %}
+          {{ field }}
+        {% endfor %}
+        <div class="card border-warning">
+          <h2 class="card-header">Approve Routing Intent Exception</h2>
+          <div class="card-body">
+            <p>
+              Approve <strong>{{ routing_intent_exception }}</strong> so it becomes eligible for
+              routing-intent compilation while active.
+            </p>
+            <dl class="row mb-0">
+              <dt class="col-sm-4">Organization</dt>
+              <dd class="col-sm-8">{{ routing_intent_exception.organization }}</dd>
+              <dt class="col-sm-4">Intent Profile</dt>
+              <dd class="col-sm-8">{{ routing_intent_exception.intent_profile|default:'None' }}</dd>
+              <dt class="col-sm-4">Template Binding</dt>
+              <dd class="col-sm-8">{{ routing_intent_exception.template_binding|default:'None' }}</dd>
+              <dt class="col-sm-4">Effect Mode</dt>
+              <dd class="col-sm-8">{{ routing_intent_exception.effect_mode }}</dd>
+              <dt class="col-sm-4">Ends At</dt>
+              <dd class="col-sm-8">{{ routing_intent_exception.ends_at|default:'None' }}</dd>
+            </dl>
+          </div>
+          <div class="card-footer text-end">
+            <a href="{{ return_url }}" class="btn btn-outline-secondary">Cancel</a>
+            <button type="submit" name="_confirm" class="btn btn-primary">Approve Exception</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endblock %}

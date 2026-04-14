@@ -1,19 +1,26 @@
+from datetime import timedelta
 from unittest.mock import patch
 
 from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from tenancy.models import Tenant
 
 from netbox_rpki import models as rpki_models
 from netbox_rpki.api.serializers import SERIALIZER_CLASS_MAP
 from netbox_rpki.services import (
+    compile_routing_intent_policy,
     create_roa_change_plan,
     derive_roa_intents,
     lift_roa_lint_suppression,
+    preview_routing_intent_template_binding,
+    refresh_routing_intent_template_binding_state,
     reconcile_roa_intents,
+    run_bulk_routing_intent_pipeline,
     run_roa_lint,
+    run_routing_intent_template_binding_pipeline,
     run_routing_intent_pipeline,
     suppress_roa_lint_finding,
 )
@@ -32,6 +39,11 @@ from netbox_rpki.tests.utils import (
     create_test_roa_change_plan_matrix,
     create_test_roa_prefix,
     create_test_routing_intent_profile,
+    create_test_routing_intent_exception,
+    create_test_routing_intent_rule,
+    create_test_routing_intent_template,
+    create_test_routing_intent_template_binding,
+    create_test_routing_intent_template_rule,
     create_test_roa_intent_override,
 )
 
@@ -76,6 +88,543 @@ class RoutingIntentServiceTestCase(TestCase):
         self.assertEqual(intents[1].prefix, self.secondary_prefix)
         self.assertEqual(intents[1].derived_state, rpki_models.ROAIntentDerivedState.SUPPRESSED)
         self.assertEqual(intents[1].applied_override, self.suppress_override)
+
+    def test_template_binding_derivation_applies_selector_narrowing_and_persists_binding_state(self):
+        profile = create_test_routing_intent_profile(
+            name='Template Binding Profile',
+            organization=self.organization,
+            status=rpki_models.RoutingIntentProfileStatus.ACTIVE,
+            selector_mode=rpki_models.RoutingIntentSelectorMode.FILTERED,
+            prefix_selector_query=f'tenant_id={self.tenant.pk}',
+            asn_selector_query='id=999999999',
+        )
+        template = create_test_routing_intent_template(
+            name='Reusable Tenant Template',
+            organization=self.organization,
+            status=rpki_models.RoutingIntentTemplateStatus.ACTIVE,
+        )
+        create_test_routing_intent_template_rule(
+            name='Template Include',
+            template=template,
+            action=rpki_models.RoutingIntentRuleAction.INCLUDE,
+        )
+        binding = create_test_routing_intent_template_binding(
+            name='Primary Prefix Binding',
+            template=template,
+            intent_profile=profile,
+            origin_asn_override=self.origin_asn,
+            max_length_mode=rpki_models.RoutingIntentRuleMaxLengthMode.EXPLICIT,
+            max_length_value=25,
+            prefix_selector_query=f'id={self.primary_prefix.pk}',
+        )
+
+        derivation_run = derive_roa_intents(profile)
+        intents = {intent.prefix_id: intent for intent in derivation_run.roa_intents.all()}
+        binding.refresh_from_db()
+
+        self.assertEqual(intents[self.primary_prefix.pk].derived_state, rpki_models.ROAIntentDerivedState.ACTIVE)
+        self.assertEqual(intents[self.primary_prefix.pk].origin_asn, self.origin_asn)
+        self.assertEqual(intents[self.primary_prefix.pk].max_length, 25)
+        self.assertEqual(intents[self.secondary_prefix.pk].derived_state, rpki_models.ROAIntentDerivedState.SHADOWED)
+        self.assertEqual(binding.state, rpki_models.RoutingIntentTemplateBindingState.CURRENT)
+        self.assertTrue(binding.last_compiled_fingerprint)
+        self.assertEqual(binding.summary_json['scoped_prefix_count'], 1)
+        self.assertEqual(binding.summary_json['template_id'], template.pk)
+        self.assertEqual(binding.summary_json['regeneration_reason_summary'], 'Binding has not been regenerated yet.')
+
+    def test_local_profile_rules_override_template_derived_policy(self):
+        profile = create_test_routing_intent_profile(
+            name='Template Override Profile',
+            organization=self.organization,
+            status=rpki_models.RoutingIntentProfileStatus.ACTIVE,
+            selector_mode=rpki_models.RoutingIntentSelectorMode.FILTERED,
+            prefix_selector_query=f'id={self.primary_prefix.pk}',
+            asn_selector_query='id=999999999',
+        )
+        template_origin = create_test_asn(65581)
+        local_origin = create_test_asn(65582)
+        template = create_test_routing_intent_template(
+            name='Template Override Source',
+            organization=self.organization,
+            status=rpki_models.RoutingIntentTemplateStatus.ACTIVE,
+        )
+        create_test_routing_intent_template_rule(
+            name='Template Set Origin',
+            template=template,
+            action=rpki_models.RoutingIntentRuleAction.SET_ORIGIN,
+            origin_asn=template_origin,
+        )
+        create_test_routing_intent_template_binding(
+            name='Template Binding',
+            template=template,
+            intent_profile=profile,
+            max_length_mode=rpki_models.RoutingIntentRuleMaxLengthMode.EXPLICIT,
+            max_length_value=24,
+        )
+        local_rule = create_test_routing_intent_rule(
+            name='Local Set Origin',
+            intent_profile=profile,
+            action=rpki_models.RoutingIntentRuleAction.SET_ORIGIN,
+            origin_asn=local_origin,
+            match_tenant=self.tenant,
+        )
+
+        derivation_run = derive_roa_intents(profile)
+        intent = derivation_run.roa_intents.get(prefix=self.primary_prefix)
+
+        self.assertEqual(intent.origin_asn, local_origin)
+        self.assertEqual(intent.source_rule, local_rule)
+        self.assertIn('Applied template rule Template Set Origin', intent.explanation)
+        self.assertIn('Applied rule Local Set Origin', intent.explanation)
+
+    def test_typed_exception_suppresses_prefix_after_local_rules(self):
+        local_origin = create_test_asn(65587)
+        create_test_routing_intent_rule(
+            name='Include Local Prefix',
+            intent_profile=self.profile,
+            action=rpki_models.RoutingIntentRuleAction.SET_ORIGIN,
+            origin_asn=local_origin,
+            match_tenant=self.tenant,
+        )
+        create_test_routing_intent_exception(
+            name='Suppress Primary Prefix',
+            organization=self.organization,
+            intent_profile=self.profile,
+            prefix=self.primary_prefix,
+            exception_type=rpki_models.RoutingIntentExceptionType.MITIGATION,
+            effect_mode=rpki_models.RoutingIntentExceptionEffectMode.SUPPRESS,
+            approved_at=timezone.now(),
+            approved_by='approver',
+        )
+
+        derivation_run = derive_roa_intents(self.profile)
+        primary_intent = derivation_run.roa_intents.get(prefix=self.primary_prefix)
+
+        self.assertEqual(primary_intent.derived_state, rpki_models.ROAIntentDerivedState.SUPPRESSED)
+        self.assertIn('Applied exception Suppress Primary Prefix (suppress).', primary_intent.explanation)
+
+    def test_binding_scoped_temporary_replacement_updates_origin_and_max_length(self):
+        profile = create_test_routing_intent_profile(
+            name='Exception Binding Profile',
+            organization=self.organization,
+            status=rpki_models.RoutingIntentProfileStatus.ACTIVE,
+            selector_mode=rpki_models.RoutingIntentSelectorMode.FILTERED,
+            prefix_selector_query=f'id={self.primary_prefix.pk}',
+            asn_selector_query='id=999999999',
+        )
+        template = create_test_routing_intent_template(
+            name='Exception Template',
+            organization=self.organization,
+            status=rpki_models.RoutingIntentTemplateStatus.ACTIVE,
+        )
+        create_test_routing_intent_template_rule(
+            name='Exception Include',
+            template=template,
+            action=rpki_models.RoutingIntentRuleAction.INCLUDE,
+        )
+        binding = create_test_routing_intent_template_binding(
+            name='Exception Binding',
+            template=template,
+            intent_profile=profile,
+            prefix_selector_query=f'id={self.primary_prefix.pk}',
+        )
+        replacement_origin = create_test_asn(65588)
+        create_test_routing_intent_exception(
+            name='Temporary Replacement',
+            organization=self.organization,
+            intent_profile=profile,
+            template_binding=binding,
+            prefix=self.primary_prefix,
+            exception_type=rpki_models.RoutingIntentExceptionType.TRAFFIC_ENGINEERING,
+            effect_mode=rpki_models.RoutingIntentExceptionEffectMode.TEMPORARY_REPLACEMENT,
+            origin_asn=replacement_origin,
+            max_length=27,
+            approved_at=timezone.now(),
+            approved_by='approver',
+        )
+
+        derivation_run = derive_roa_intents(profile)
+        primary_intent = derivation_run.roa_intents.get(prefix=self.primary_prefix)
+
+        self.assertEqual(primary_intent.origin_asn, replacement_origin)
+        self.assertEqual(primary_intent.max_length, 27)
+        self.assertIn('Applied exception Temporary Replacement (temporary_replacement).', primary_intent.explanation)
+
+    def test_expired_exception_does_not_apply(self):
+        create_test_routing_intent_exception(
+            name='Expired Suppression',
+            organization=self.organization,
+            intent_profile=self.profile,
+            prefix=self.primary_prefix,
+            effect_mode=rpki_models.RoutingIntentExceptionEffectMode.SUPPRESS,
+            starts_at=timezone.now() - timedelta(days=2),
+            ends_at=timezone.now() - timedelta(days=1),
+            approved_at=timezone.now() - timedelta(days=3),
+            approved_by='approver',
+        )
+
+        derivation_run = derive_roa_intents(self.profile)
+        primary_intent = derivation_run.roa_intents.get(prefix=self.primary_prefix)
+
+        self.assertEqual(primary_intent.derived_state, rpki_models.ROAIntentDerivedState.ACTIVE)
+        self.assertNotIn('Expired Suppression', primary_intent.explanation)
+
+    def test_legacy_override_still_outranks_typed_exception(self):
+        replacement_origin = create_test_asn(65589)
+        create_test_routing_intent_exception(
+            name='Exception Replacement',
+            organization=self.organization,
+            intent_profile=self.profile,
+            prefix=self.primary_prefix,
+            effect_mode=rpki_models.RoutingIntentExceptionEffectMode.TEMPORARY_REPLACEMENT,
+            origin_asn=replacement_origin,
+            max_length=28,
+            approved_at=timezone.now(),
+            approved_by='approver',
+        )
+        override_origin = create_test_asn(65590)
+        override = create_test_roa_intent_override(
+            name='Override Replacement',
+            organization=self.organization,
+            intent_profile=self.profile,
+            prefix=self.primary_prefix,
+            action=rpki_models.ROAIntentOverrideAction.REPLACE_ORIGIN,
+            origin_asn=override_origin,
+        )
+
+        derivation_run = derive_roa_intents(self.profile)
+        primary_intent = derivation_run.roa_intents.get(prefix=self.primary_prefix)
+
+        self.assertEqual(primary_intent.origin_asn, override_origin)
+        self.assertEqual(primary_intent.applied_override, override)
+
+    def test_unapproved_exception_does_not_apply_until_approved(self):
+        create_test_routing_intent_exception(
+            name='Pending Approval Suppression',
+            organization=self.organization,
+            intent_profile=self.profile,
+            prefix=self.primary_prefix,
+            effect_mode=rpki_models.RoutingIntentExceptionEffectMode.SUPPRESS,
+        )
+
+        derivation_run = derive_roa_intents(self.profile)
+        primary_intent = derivation_run.roa_intents.get(prefix=self.primary_prefix)
+
+        self.assertEqual(primary_intent.derived_state, rpki_models.ROAIntentDerivedState.ACTIVE)
+        self.assertNotIn('Pending Approval Suppression', primary_intent.explanation)
+
+    def test_refresh_binding_state_reports_noop_when_fingerprint_is_unchanged(self):
+        template = create_test_routing_intent_template(
+            name='Refresh Noop Template',
+            organization=self.organization,
+            status=rpki_models.RoutingIntentTemplateStatus.ACTIVE,
+        )
+        create_test_routing_intent_template_rule(
+            name='Refresh Noop Include',
+            template=template,
+            action=rpki_models.RoutingIntentRuleAction.INCLUDE,
+        )
+        binding = create_test_routing_intent_template_binding(
+            name='Refresh Noop Binding',
+            template=template,
+            intent_profile=self.profile,
+            origin_asn_override=self.origin_asn,
+            prefix_selector_query=f'id={self.primary_prefix.pk}',
+        )
+
+        run_routing_intent_template_binding_pipeline(binding)
+        assessment = refresh_routing_intent_template_binding_state(binding)
+        binding.refresh_from_db()
+
+        self.assertEqual(assessment.state, rpki_models.RoutingIntentTemplateBindingState.CURRENT)
+        self.assertFalse(assessment.changed)
+        self.assertEqual(assessment.reason_summary, 'No material drift detected.')
+        self.assertEqual(binding.state, rpki_models.RoutingIntentTemplateBindingState.CURRENT)
+
+    def test_refresh_binding_state_marks_stale_when_template_policy_changes(self):
+        template = create_test_routing_intent_template(
+            name='Refresh Stale Template',
+            organization=self.organization,
+            status=rpki_models.RoutingIntentTemplateStatus.ACTIVE,
+        )
+        rule = create_test_routing_intent_template_rule(
+            name='Refresh Stale Include',
+            template=template,
+            action=rpki_models.RoutingIntentRuleAction.INCLUDE,
+        )
+        binding = create_test_routing_intent_template_binding(
+            name='Refresh Stale Binding',
+            template=template,
+            intent_profile=self.profile,
+            origin_asn_override=self.origin_asn,
+            prefix_selector_query=f'id={self.primary_prefix.pk}',
+        )
+
+        run_routing_intent_template_binding_pipeline(binding)
+        rule.origin_asn = create_test_asn(65591)
+        rule.action = rpki_models.RoutingIntentRuleAction.SET_ORIGIN
+        rule.save()
+
+        assessment = refresh_routing_intent_template_binding_state(binding)
+        binding.refresh_from_db()
+
+        self.assertEqual(assessment.state, rpki_models.RoutingIntentTemplateBindingState.STALE)
+        self.assertTrue(assessment.changed)
+        self.assertIn('template_policy_changed', assessment.reason_codes)
+        self.assertEqual(binding.state, rpki_models.RoutingIntentTemplateBindingState.STALE)
+
+    def test_refresh_binding_state_marks_pending_before_first_regeneration(self):
+        template = create_test_routing_intent_template(
+            name='Refresh Pending Template',
+            organization=self.organization,
+            status=rpki_models.RoutingIntentTemplateStatus.ACTIVE,
+        )
+        create_test_routing_intent_template_rule(
+            name='Refresh Pending Include',
+            template=template,
+            action=rpki_models.RoutingIntentRuleAction.INCLUDE,
+        )
+        binding = create_test_routing_intent_template_binding(
+            name='Refresh Pending Binding',
+            template=template,
+            intent_profile=self.profile,
+            origin_asn_override=self.origin_asn,
+            prefix_selector_query=f'id={self.primary_prefix.pk}',
+        )
+
+        assessment = refresh_routing_intent_template_binding_state(binding)
+        binding.refresh_from_db()
+
+        self.assertEqual(assessment.state, rpki_models.RoutingIntentTemplateBindingState.PENDING)
+        self.assertFalse(assessment.changed)
+        self.assertIn('never_compiled', assessment.reason_codes)
+        self.assertEqual(binding.state, rpki_models.RoutingIntentTemplateBindingState.PENDING)
+
+    def test_non_material_template_comment_change_does_not_mark_binding_stale(self):
+        template = create_test_routing_intent_template(
+            name='Refresh Comment Template',
+            organization=self.organization,
+            status=rpki_models.RoutingIntentTemplateStatus.ACTIVE,
+        )
+        create_test_routing_intent_template_rule(
+            name='Refresh Comment Include',
+            template=template,
+            action=rpki_models.RoutingIntentRuleAction.INCLUDE,
+        )
+        binding = create_test_routing_intent_template_binding(
+            name='Refresh Comment Binding',
+            template=template,
+            intent_profile=self.profile,
+            origin_asn_override=self.origin_asn,
+            prefix_selector_query=f'id={self.primary_prefix.pk}',
+        )
+
+        run_routing_intent_template_binding_pipeline(binding)
+        template.comments = 'presentation-only note'
+        template.save(update_fields=('comments',))
+
+        assessment = refresh_routing_intent_template_binding_state(binding)
+
+        self.assertEqual(assessment.state, rpki_models.RoutingIntentTemplateBindingState.CURRENT)
+
+    def test_higher_priority_template_binding_wins_and_emits_warning(self):
+        profile = create_test_routing_intent_profile(
+            name='Binding Priority Profile',
+            organization=self.organization,
+            status=rpki_models.RoutingIntentProfileStatus.ACTIVE,
+            selector_mode=rpki_models.RoutingIntentSelectorMode.FILTERED,
+            prefix_selector_query=f'id={self.primary_prefix.pk}',
+            asn_selector_query='id=999999999',
+        )
+        lower_origin = create_test_asn(65583)
+        higher_origin = create_test_asn(65584)
+        lower_template = create_test_routing_intent_template(
+            name='Lower Priority Template',
+            organization=self.organization,
+            status=rpki_models.RoutingIntentTemplateStatus.ACTIVE,
+        )
+        higher_template = create_test_routing_intent_template(
+            name='Higher Priority Template',
+            organization=self.organization,
+            status=rpki_models.RoutingIntentTemplateStatus.ACTIVE,
+        )
+        create_test_routing_intent_template_rule(
+            name='Lower Origin Rule',
+            template=lower_template,
+            action=rpki_models.RoutingIntentRuleAction.SET_ORIGIN,
+            origin_asn=lower_origin,
+        )
+        create_test_routing_intent_template_rule(
+            name='Higher Origin Rule',
+            template=higher_template,
+            action=rpki_models.RoutingIntentRuleAction.SET_ORIGIN,
+            origin_asn=higher_origin,
+        )
+        create_test_routing_intent_template_binding(
+            name='Lower Binding',
+            template=lower_template,
+            intent_profile=profile,
+            binding_priority=100,
+        )
+        create_test_routing_intent_template_binding(
+            name='Higher Binding',
+            template=higher_template,
+            intent_profile=profile,
+            binding_priority=200,
+        )
+
+        derivation_run = derive_roa_intents(profile)
+        intent = derivation_run.roa_intents.get(prefix=self.primary_prefix)
+
+        self.assertEqual(intent.origin_asn, higher_origin)
+        self.assertGreaterEqual(derivation_run.warning_count, 1)
+        self.assertIn('overrode template-derived policy', derivation_run.error_summary)
+
+    def test_preview_template_binding_compiles_without_writing_derivation_rows(self):
+        profile = create_test_routing_intent_profile(
+            name='Preview Binding Profile',
+            organization=self.organization,
+            status=rpki_models.RoutingIntentProfileStatus.ACTIVE,
+            selector_mode=rpki_models.RoutingIntentSelectorMode.FILTERED,
+            prefix_selector_query=f'id={self.primary_prefix.pk}',
+            asn_selector_query='id=999999999',
+        )
+        template = create_test_routing_intent_template(
+            name='Preview Template',
+            organization=self.organization,
+            status=rpki_models.RoutingIntentTemplateStatus.DRAFT,
+            enabled=False,
+        )
+        create_test_routing_intent_template_rule(
+            name='Preview Include',
+            template=template,
+            action=rpki_models.RoutingIntentRuleAction.INCLUDE,
+        )
+        binding = create_test_routing_intent_template_binding(
+            name='Preview Binding',
+            template=template,
+            intent_profile=profile,
+            origin_asn_override=self.origin_asn,
+        )
+
+        preview = preview_routing_intent_template_binding(binding)
+
+        self.assertEqual(rpki_models.IntentDerivationRun.objects.filter(intent_profile=profile).count(), 0)
+        self.assertEqual(len(preview.results), 1)
+        self.assertEqual(preview.results[0].origin_asn, self.origin_asn)
+        self.assertEqual(preview.results[0].derived_state, rpki_models.ROAIntentDerivedState.ACTIVE)
+        self.assertEqual(preview.compiled_policy.template_bindings[0].binding.pk, binding.pk)
+
+    def test_compiled_policy_accepts_explicit_binding_subset(self):
+        profile = create_test_routing_intent_profile(
+            name='Compiled Binding Subset Profile',
+            organization=self.organization,
+            status=rpki_models.RoutingIntentProfileStatus.ACTIVE,
+            selector_mode=rpki_models.RoutingIntentSelectorMode.FILTERED,
+            prefix_selector_query=f'id={self.primary_prefix.pk}',
+            asn_selector_query='id=999999999',
+        )
+        template = create_test_routing_intent_template(
+            name='Subset Template',
+            organization=self.organization,
+            status=rpki_models.RoutingIntentTemplateStatus.DRAFT,
+            enabled=False,
+        )
+        binding = create_test_routing_intent_template_binding(
+            name='Subset Binding',
+            template=template,
+            intent_profile=profile,
+            origin_asn_override=self.origin_asn,
+        )
+
+        compiled_policy = compile_routing_intent_policy(
+            profile,
+            bindings=(binding,),
+            include_inactive_bindings=True,
+            persist_state=False,
+        )
+
+        self.assertEqual(len(compiled_policy.template_bindings), 1)
+        self.assertEqual(compiled_policy.template_bindings[0].binding.pk, binding.pk)
+
+    def test_bulk_pipeline_runs_across_profiles_and_creates_scope_results(self):
+        second_prefix = create_test_prefix('10.57.0.0/24', tenant=self.tenant, status='active')
+        second_profile = create_test_routing_intent_profile(
+            name='Bulk Profile Two',
+            organization=self.organization,
+            status=rpki_models.RoutingIntentProfileStatus.ACTIVE,
+            selector_mode=rpki_models.RoutingIntentSelectorMode.FILTERED,
+            prefix_selector_query=f'id={second_prefix.pk}',
+            asn_selector_query=f'id={self.origin_asn.pk}',
+        )
+
+        bulk_run = run_bulk_routing_intent_pipeline(
+            organization=self.organization,
+            profiles=(self.profile, second_profile),
+        )
+
+        self.assertEqual(bulk_run.status, rpki_models.ValidationRunStatus.COMPLETED)
+        self.assertEqual(bulk_run.target_mode, rpki_models.BulkIntentTargetMode.PROFILES)
+        self.assertEqual(bulk_run.scope_results.count(), 2)
+        self.assertEqual(bulk_run.summary_json['scope_result_count'], 2)
+        self.assertTrue(bulk_run.resulting_fingerprint)
+        self.assertEqual(
+            set(bulk_run.scope_results.values_list('scope_key', flat=True)),
+            {f'profile:{self.profile.pk}', f'profile:{second_profile.pk}'},
+        )
+
+    def test_bulk_pipeline_runs_across_bindings_and_can_create_change_plans(self):
+        profile = create_test_routing_intent_profile(
+            name='Bulk Binding Profile',
+            organization=self.organization,
+            status=rpki_models.RoutingIntentProfileStatus.ACTIVE,
+            selector_mode=rpki_models.RoutingIntentSelectorMode.FILTERED,
+            prefix_selector_query=f'id={self.primary_prefix.pk}',
+            asn_selector_query='id=999999999',
+        )
+        template = create_test_routing_intent_template(
+            name='Bulk Binding Template',
+            organization=self.organization,
+            status=rpki_models.RoutingIntentTemplateStatus.ACTIVE,
+        )
+        create_test_routing_intent_template_rule(
+            name='Bulk Binding Include',
+            template=template,
+            action=rpki_models.RoutingIntentRuleAction.INCLUDE,
+        )
+        binding = create_test_routing_intent_template_binding(
+            name='Bulk Binding',
+            template=template,
+            intent_profile=profile,
+            origin_asn_override=self.origin_asn,
+            prefix_selector_query=f'id={self.primary_prefix.pk}',
+        )
+
+        bulk_run = run_bulk_routing_intent_pipeline(
+            bindings=(binding,),
+            create_change_plans=True,
+        )
+
+        scope_result = bulk_run.scope_results.get()
+        self.assertEqual(bulk_run.status, rpki_models.ValidationRunStatus.COMPLETED)
+        self.assertEqual(bulk_run.target_mode, rpki_models.BulkIntentTargetMode.BINDINGS)
+        self.assertEqual(scope_result.template_binding, binding)
+        self.assertIsNotNone(scope_result.change_plan)
+        self.assertEqual(bulk_run.summary_json['change_plan_count'], 1)
+        self.assertEqual(scope_result.scope_key, f'binding:{binding.pk}')
+
+    def test_bulk_pipeline_rejects_cross_organization_targets(self):
+        other_org = create_test_organization(org_id='bulk-other-org', name='Bulk Other Org')
+        other_profile = create_test_routing_intent_profile(
+            name='Cross Org Profile',
+            organization=other_org,
+            status=rpki_models.RoutingIntentProfileStatus.ACTIVE,
+        )
+
+        with self.assertRaisesMessage(ValueError, 'same organization'):
+            run_bulk_routing_intent_pipeline(
+                profiles=(self.profile, other_profile),
+            )
 
     def test_reconciliation_flags_overbroad_roa(self):
         derivation_run = derive_roa_intents(self.profile)

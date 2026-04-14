@@ -3,7 +3,13 @@ from core.choices import JobStatusChoices
 from core.models import Job
 
 from netbox_rpki import models as rpki_models
-from netbox_rpki.services import run_aspa_reconciliation_pipeline, run_routing_intent_pipeline, sync_provider_account
+from netbox_rpki.services import (
+    build_bulk_routing_intent_baseline_fingerprint,
+    run_aspa_reconciliation_pipeline,
+    run_bulk_routing_intent_pipeline,
+    run_routing_intent_pipeline,
+    sync_provider_account,
+)
 
 
 class RunRoutingIntentProfileJob(JobRunner):
@@ -117,6 +123,166 @@ class RunAspaReconciliationJob(JobRunner):
         }
         self.job.save(update_fields=('data',))
         self.logger.info(f'Completed ASPA reconciliation run {reconciliation_run.pk}')
+
+
+class RunBulkRoutingIntentJob(JobRunner):
+    class Meta:
+        name = 'Bulk Routing Intent Run'
+
+    @classmethod
+    def _normalize_pk_tuple(cls, values):
+        return tuple(sorted(int(getattr(value, 'pk', value)) for value in (values or ())))
+
+    @classmethod
+    def get_job_name(
+        cls,
+        organization: rpki_models.Organization | int,
+        *,
+        profiles=(),
+        bindings=(),
+        comparison_scope: str = rpki_models.ReconciliationComparisonScope.LOCAL_ROA_RECORDS,
+        provider_snapshot=None,
+        create_change_plans: bool = False,
+    ) -> str:
+        organization_pk = organization.pk if hasattr(organization, 'pk') else organization
+        baseline_fingerprint = build_bulk_routing_intent_baseline_fingerprint(
+            profiles=cls._normalize_pk_tuple(profiles),
+            bindings=cls._normalize_pk_tuple(bindings),
+            comparison_scope=comparison_scope,
+            provider_snapshot=provider_snapshot,
+            create_change_plans=create_change_plans,
+        )
+        return f'{cls.name} [{organization_pk}:{baseline_fingerprint[:12]}]'
+
+    @classmethod
+    def get_active_job_for_request(
+        cls,
+        organization: rpki_models.Organization | int,
+        *,
+        profiles=(),
+        bindings=(),
+        comparison_scope: str = rpki_models.ReconciliationComparisonScope.LOCAL_ROA_RECORDS,
+        provider_snapshot=None,
+        create_change_plans: bool = False,
+    ):
+        return Job.objects.filter(
+            name=cls.get_job_name(
+                organization,
+                profiles=profiles,
+                bindings=bindings,
+                comparison_scope=comparison_scope,
+                provider_snapshot=provider_snapshot,
+                create_change_plans=create_change_plans,
+            ),
+            status__in=JobStatusChoices.ENQUEUED_STATE_CHOICES,
+        ).order_by('created').first()
+
+    @classmethod
+    def enqueue_for_organization(
+        cls,
+        organization: rpki_models.Organization | int,
+        *,
+        profiles=(),
+        bindings=(),
+        comparison_scope: str = rpki_models.ReconciliationComparisonScope.LOCAL_ROA_RECORDS,
+        provider_snapshot=None,
+        create_change_plans: bool = False,
+        run_name: str | None = None,
+        user=None,
+        schedule_at=None,
+    ):
+        if not isinstance(organization, rpki_models.Organization):
+            organization = rpki_models.Organization.objects.get(pk=organization)
+
+        profile_pks = cls._normalize_pk_tuple(profiles)
+        binding_pks = cls._normalize_pk_tuple(bindings)
+        baseline_fingerprint = build_bulk_routing_intent_baseline_fingerprint(
+            profiles=profile_pks,
+            bindings=binding_pks,
+            comparison_scope=comparison_scope,
+            provider_snapshot=provider_snapshot,
+            create_change_plans=create_change_plans,
+        )
+
+        existing_job = cls.get_active_job_for_request(
+            organization,
+            profiles=profile_pks,
+            bindings=binding_pks,
+            comparison_scope=comparison_scope,
+            provider_snapshot=provider_snapshot,
+            create_change_plans=create_change_plans,
+        )
+        if existing_job is not None:
+            return existing_job, False
+
+        if rpki_models.BulkIntentRun.objects.filter(
+            organization=organization,
+            status=rpki_models.ValidationRunStatus.RUNNING,
+            baseline_fingerprint=baseline_fingerprint,
+        ).exists():
+            return None, False
+
+        job = cls.enqueue(
+            name=cls.get_job_name(
+                organization,
+                profiles=profile_pks,
+                bindings=binding_pks,
+                comparison_scope=comparison_scope,
+                provider_snapshot=provider_snapshot,
+                create_change_plans=create_change_plans,
+            ),
+            user=user,
+            schedule_at=schedule_at,
+            organization_pk=organization.pk,
+            profile_pks=profile_pks,
+            binding_pks=binding_pks,
+            comparison_scope=comparison_scope,
+            provider_snapshot_pk=getattr(provider_snapshot, 'pk', provider_snapshot),
+            create_change_plans=create_change_plans,
+            run_name=run_name,
+        )
+        return job, True
+
+    def run(
+        self,
+        organization_pk,
+        profile_pks=(),
+        binding_pks=(),
+        comparison_scope=rpki_models.ReconciliationComparisonScope.LOCAL_ROA_RECORDS,
+        provider_snapshot_pk=None,
+        create_change_plans=False,
+        run_name=None,
+        *args,
+        **kwargs,
+    ):
+        organization = rpki_models.Organization.objects.get(pk=organization_pk)
+        profiles = tuple(rpki_models.RoutingIntentProfile.objects.filter(pk__in=tuple(profile_pks)).order_by('pk'))
+        bindings = tuple(
+            rpki_models.RoutingIntentTemplateBinding.objects.filter(pk__in=tuple(binding_pks)).order_by('pk')
+        )
+        self.logger.info(
+            f'Running bulk routing-intent pipeline for organization {organization.name} ({organization.pk})'
+        )
+        bulk_run = run_bulk_routing_intent_pipeline(
+            organization=organization,
+            profiles=profiles,
+            bindings=bindings,
+            comparison_scope=comparison_scope,
+            provider_snapshot=provider_snapshot_pk,
+            create_change_plans=create_change_plans,
+            run_name=run_name,
+        )
+        self.job.data = {
+            'organization_pk': organization.pk,
+            'bulk_intent_run_pk': bulk_run.pk,
+            'profile_pks': list(profile_pks),
+            'binding_pks': list(binding_pks),
+            'comparison_scope': comparison_scope,
+            'provider_snapshot_pk': provider_snapshot_pk,
+            'create_change_plans': create_change_plans,
+        }
+        self.job.save(update_fields=('data',))
+        self.logger.info(f'Completed bulk routing-intent run {bulk_run.pk}')
 
 
 class SyncProviderAccountJob(JobRunner):

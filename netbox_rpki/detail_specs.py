@@ -7,6 +7,7 @@ from typing import Any
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.urls import reverse
+from django.utils import timezone
 
 from netbox_rpki import models
 from netbox_rpki.services import build_roa_change_plan_lint_posture
@@ -123,6 +124,11 @@ ORGANIZATION_DETAIL_SPEC = DetailSpec(
             label='Run ASPA Reconciliation',
             direct_url=lambda obj: reverse('plugins:netbox_rpki:organization_run_aspa_reconciliation', kwargs={'pk': obj.pk}),
         ),
+        DetailActionSpec(
+            permission='netbox_rpki.change_organization',
+            label='Create Bulk Intent Run',
+            direct_url=lambda obj: reverse('plugins:netbox_rpki:organization_create_bulk_intent_run', kwargs={'pk': obj.pk}),
+        ),
     ),
     bottom_tables=(
         DetailTableSpec(
@@ -169,6 +175,73 @@ def get_profile_prefix_selector(profile: models.RoutingIntentProfile) -> str | N
 
 def get_profile_asn_selector(profile: models.RoutingIntentProfile) -> str | None:
     return profile.asn_selector_query or None
+
+
+def get_binding_prefix_selector(binding: models.RoutingIntentTemplateBinding) -> str | None:
+    return binding.prefix_selector_query or None
+
+
+def get_binding_asn_selector(binding: models.RoutingIntentTemplateBinding) -> str | None:
+    return binding.asn_selector_query or None
+
+
+def get_binding_summary(binding: models.RoutingIntentTemplateBinding) -> str | None:
+    return get_pretty_json(binding.summary_json)
+
+
+def get_exception_lifecycle_status(exception: models.RoutingIntentException) -> str:
+    now = timezone.now()
+    if not exception.enabled:
+        return 'Disabled'
+    if not exception.approved_at or not exception.approved_by:
+        return 'Pending Approval'
+    if exception.starts_at and exception.starts_at > now:
+        return 'Scheduled'
+    if exception.ends_at and exception.ends_at < now:
+        return 'Expired'
+    return 'Active'
+
+
+def get_exception_scope_summary(exception: models.RoutingIntentException) -> str:
+    parts = []
+    if exception.intent_profile_id:
+        parts.append(f'Profile: {exception.intent_profile}')
+    if exception.template_binding_id:
+        parts.append(f'Binding: {exception.template_binding}')
+    if exception.prefix_id:
+        parts.append(f'Prefix: {exception.prefix}')
+    elif exception.prefix_cidr_text:
+        parts.append(f'Prefix: {exception.prefix_cidr_text}')
+    if exception.origin_asn_id:
+        parts.append(f'Origin ASN: {exception.origin_asn}')
+    elif exception.origin_asn_value:
+        parts.append(f'Origin ASN: AS{exception.origin_asn_value}')
+    return ', '.join(parts) or 'Organization-scoped exception'
+
+
+def get_exception_summary(exception: models.RoutingIntentException) -> str | None:
+    return get_pretty_json(exception.summary_json)
+
+
+def exception_can_approve(exception: models.RoutingIntentException) -> bool:
+    return bool(exception.enabled and (not exception.approved_at or not exception.approved_by))
+
+
+def get_bulk_run_summary(bulk_run: models.BulkIntentRun) -> str | None:
+    return get_pretty_json(bulk_run.summary_json)
+
+
+def get_bulk_scope_result_summary(scope_result: models.BulkIntentRunScopeResult) -> str | None:
+    return get_pretty_json(scope_result.summary_json)
+
+
+def binding_can_regenerate(binding: models.RoutingIntentTemplateBinding) -> bool:
+    return (
+        binding.enabled
+        and binding.template.enabled
+        and binding.template.status == models.RoutingIntentTemplateStatus.ACTIVE
+        and binding.intent_profile.enabled
+    )
 
 
 def get_run_result_summary(run: models.ROAReconciliationRun) -> str | None:
@@ -890,6 +963,14 @@ ROUTING_INTENT_PROFILE_DETAIL_SPEC = DetailSpec(
             empty_text='None',
         ),
     ),
+    actions=(
+        DetailActionSpec(
+            permission='netbox_rpki.change_routingintentprofile',
+            label='Run Profile',
+            direct_url=lambda obj: reverse('plugins:netbox_rpki:routingintentprofile_run', kwargs={'pk': obj.pk}),
+            visible=lambda obj: obj.enabled,
+        ),
+    ),
     side_tables=(
         DetailTableSpec(
             title='Routing Intent Rules',
@@ -918,6 +999,154 @@ ROUTING_INTENT_PROFILE_DETAIL_SPEC = DetailSpec(
             table_class_name='ROAIntentTable',
             queryset=lambda obj: obj.roa_intents.all(),
         ),
+    ),
+)
+
+
+ROUTING_INTENT_EXCEPTION_DETAIL_SPEC = DetailSpec(
+    model=models.RoutingIntentException,
+    list_url_name='plugins:netbox_rpki:routingintentexception_list',
+    breadcrumb_label='Routing Intent Exceptions',
+    card_title='Routing Intent Exception',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Organization', value=lambda obj: obj.organization, kind='link'),
+        DetailFieldSpec(label='Intent Profile', value=lambda obj: obj.intent_profile, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Template Binding', value=lambda obj: obj.template_binding, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Exception Type', value=lambda obj: obj.exception_type),
+        DetailFieldSpec(label='Effect Mode', value=lambda obj: obj.effect_mode),
+        DetailFieldSpec(label='Lifecycle Status', value=get_exception_lifecycle_status),
+        DetailFieldSpec(label='Enabled', value=lambda obj: obj.enabled),
+        DetailFieldSpec(label='Scope Summary', value=get_exception_scope_summary, kind='code'),
+        DetailFieldSpec(label='Starts At', value=lambda obj: obj.starts_at, empty_text='None'),
+        DetailFieldSpec(label='Ends At', value=lambda obj: obj.ends_at, empty_text='None'),
+        DetailFieldSpec(label='Approved At', value=lambda obj: obj.approved_at, empty_text='None'),
+        DetailFieldSpec(label='Approved By', value=lambda obj: obj.approved_by or None, empty_text='None'),
+        DetailFieldSpec(label='Reason', value=lambda obj: obj.reason or None, kind='code', empty_text='None'),
+        DetailFieldSpec(label='Summary', value=get_exception_summary, kind='code', empty_text='None'),
+    ),
+    actions=(
+        DetailActionSpec(
+            permission='netbox_rpki.change_routingintentexception',
+            label='Approve Exception',
+            direct_url=lambda obj: reverse('plugins:netbox_rpki:routingintentexception_approve', kwargs={'pk': obj.pk}),
+            visible=exception_can_approve,
+        ),
+    ),
+)
+
+
+ROUTING_INTENT_TEMPLATE_BINDING_DETAIL_SPEC = DetailSpec(
+    model=models.RoutingIntentTemplateBinding,
+    list_url_name='plugins:netbox_rpki:routingintenttemplatebinding_list',
+    breadcrumb_label='Routing Intent Template Bindings',
+    card_title='Routing Intent Template Binding',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Template', value=lambda obj: obj.template, kind='link'),
+        DetailFieldSpec(label='Intent Profile', value=lambda obj: obj.intent_profile, kind='link'),
+        DetailFieldSpec(label='Enabled', value=lambda obj: obj.enabled),
+        DetailFieldSpec(label='Binding Priority', value=lambda obj: obj.binding_priority),
+        DetailFieldSpec(label='Binding Label', value=lambda obj: obj.binding_label or None, empty_text='None'),
+        DetailFieldSpec(label='State', value=lambda obj: obj.state),
+        DetailFieldSpec(
+            label='Origin ASN Override',
+            value=lambda obj: obj.origin_asn_override,
+            kind='link',
+            empty_text='None',
+        ),
+        DetailFieldSpec(label='Max Length Mode', value=lambda obj: obj.max_length_mode),
+        DetailFieldSpec(label='Max Length Value', value=lambda obj: obj.max_length_value, empty_text='None'),
+        DetailFieldSpec(label='Last Compiled Fingerprint', value=lambda obj: obj.last_compiled_fingerprint or None, empty_text='None'),
+        DetailFieldSpec(
+            label='Prefix Selector Query',
+            value=get_binding_prefix_selector,
+            kind='code',
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='ASN Selector Query',
+            value=get_binding_asn_selector,
+            kind='code',
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='Summary',
+            value=get_binding_summary,
+            kind='code',
+            empty_text='None',
+        ),
+    ),
+    actions=(
+        DetailActionSpec(
+            permission='netbox_rpki.change_routingintenttemplatebinding',
+            label='Preview Binding',
+            direct_url=lambda obj: reverse('plugins:netbox_rpki:routingintenttemplatebinding_preview', kwargs={'pk': obj.pk}),
+        ),
+        DetailActionSpec(
+            permission='netbox_rpki.change_routingintenttemplatebinding',
+            label='Regenerate Binding',
+            direct_url=lambda obj: reverse('plugins:netbox_rpki:routingintenttemplatebinding_regenerate', kwargs={'pk': obj.pk}),
+            visible=binding_can_regenerate,
+        ),
+    ),
+    side_tables=(
+        DetailTableSpec(
+            title='Binding Exceptions',
+            table_class_name='RoutingIntentExceptionTable',
+            queryset=lambda obj: obj.exceptions.all(),
+        ),
+    ),
+)
+
+
+BULK_INTENT_RUN_DETAIL_SPEC = DetailSpec(
+    model=models.BulkIntentRun,
+    list_url_name='plugins:netbox_rpki:bulkintentrun_list',
+    breadcrumb_label='Bulk Intent Runs',
+    card_title='Bulk Intent Run',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Organization', value=lambda obj: obj.organization, kind='link'),
+        DetailFieldSpec(label='Status', value=lambda obj: obj.status),
+        DetailFieldSpec(label='Trigger Mode', value=lambda obj: obj.trigger_mode),
+        DetailFieldSpec(label='Target Mode', value=lambda obj: obj.target_mode),
+        DetailFieldSpec(label='Baseline Fingerprint', value=lambda obj: obj.baseline_fingerprint or None, empty_text='None'),
+        DetailFieldSpec(label='Resulting Fingerprint', value=lambda obj: obj.resulting_fingerprint or None, empty_text='None'),
+        DetailFieldSpec(label='Started At', value=lambda obj: obj.started_at, empty_text='None'),
+        DetailFieldSpec(label='Completed At', value=lambda obj: obj.completed_at, empty_text='None'),
+        DetailFieldSpec(label='Summary', value=get_bulk_run_summary, kind='code', empty_text='None'),
+    ),
+    bottom_tables=(
+        DetailTableSpec(
+            title='Scope Results',
+            table_class_name='BulkIntentRunScopeResultTable',
+            queryset=lambda obj: obj.scope_results.all(),
+        ),
+    ),
+)
+
+
+BULK_INTENT_RUN_SCOPE_RESULT_DETAIL_SPEC = DetailSpec(
+    model=models.BulkIntentRunScopeResult,
+    list_url_name='plugins:netbox_rpki:bulkintentrunscoperesult_list',
+    breadcrumb_label='Bulk Intent Run Scope Results',
+    card_title='Bulk Intent Scope Result',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Bulk Run', value=lambda obj: obj.bulk_run, kind='link'),
+        DetailFieldSpec(label='Intent Profile', value=lambda obj: obj.intent_profile, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Template Binding', value=lambda obj: obj.template_binding, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Status', value=lambda obj: obj.status),
+        DetailFieldSpec(label='Scope Kind', value=lambda obj: obj.scope_kind or None, empty_text='None'),
+        DetailFieldSpec(label='Scope Key', value=lambda obj: obj.scope_key or None, empty_text='None'),
+        DetailFieldSpec(label='Derivation Run', value=lambda obj: obj.derivation_run, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Reconciliation Run', value=lambda obj: obj.reconciliation_run, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Change Plan', value=lambda obj: obj.change_plan, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Prefixes Scanned', value=lambda obj: obj.prefix_count_scanned),
+        DetailFieldSpec(label='Intents Emitted', value=lambda obj: obj.intent_count_emitted),
+        DetailFieldSpec(label='Planned Items', value=lambda obj: obj.plan_item_count),
+        DetailFieldSpec(label='Summary', value=get_bulk_scope_result_summary, kind='code', empty_text='None'),
     ),
 )
 
@@ -2032,6 +2261,10 @@ DETAIL_SPEC_BY_MODEL = {
     models.ProviderSnapshotDiff: PROVIDER_SNAPSHOT_DIFF_DETAIL_SPEC,
     models.ProviderSnapshotDiffItem: PROVIDER_SNAPSHOT_DIFF_ITEM_DETAIL_SPEC,
     models.RoutingIntentProfile: ROUTING_INTENT_PROFILE_DETAIL_SPEC,
+    models.RoutingIntentTemplateBinding: ROUTING_INTENT_TEMPLATE_BINDING_DETAIL_SPEC,
+    models.RoutingIntentException: ROUTING_INTENT_EXCEPTION_DETAIL_SPEC,
+    models.BulkIntentRun: BULK_INTENT_RUN_DETAIL_SPEC,
+    models.BulkIntentRunScopeResult: BULK_INTENT_RUN_SCOPE_RESULT_DETAIL_SPEC,
     models.ASPAReconciliationRun: ASPA_RECONCILIATION_RUN_DETAIL_SPEC,
     models.ASPAIntentResult: ASPA_INTENT_RESULT_DETAIL_SPEC,
     models.PublishedASPAResult: PUBLISHED_ASPA_RESULT_DETAIL_SPEC,

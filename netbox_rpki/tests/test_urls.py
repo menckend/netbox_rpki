@@ -71,9 +71,38 @@ class UrlRegistrationTestCase(SimpleTestCase):
                 self.assertEqual(reverse(view_name, kwargs={'pk': 1}), path)
                 self.assertEqual(resolve(path).view_name, view_name)
 
+    def test_routing_intent_template_binding_custom_action_routes_reverse_and_resolve(self):
+        expected_routes = {
+            'plugins:netbox_rpki:routingintenttemplatebinding_preview': '/plugins/netbox_rpki/routingintenttemplatebindings/1/preview/',
+            'plugins:netbox_rpki:routingintenttemplatebinding_regenerate': '/plugins/netbox_rpki/routingintenttemplatebindings/1/regenerate/',
+        }
+
+        for view_name, path in expected_routes.items():
+            with self.subTest(view_name=view_name):
+                self.assertEqual(reverse(view_name, kwargs={'pk': 1}), path)
+                self.assertEqual(resolve(path).view_name, view_name)
+
+    def test_routing_intent_profile_and_exception_custom_action_routes_reverse_and_resolve(self):
+        expected_routes = {
+            'plugins:netbox_rpki:routingintentprofile_run': '/plugins/netbox_rpki/routingintentprofiles/1/run/',
+            'plugins:netbox_rpki:routingintentexception_approve': '/plugins/netbox_rpki/routingintentexceptions/1/approve/',
+        }
+
+        for view_name, path in expected_routes.items():
+            with self.subTest(view_name=view_name):
+                self.assertEqual(reverse(view_name, kwargs={'pk': 1}), path)
+                self.assertEqual(resolve(path).view_name, view_name)
+
     def test_provider_account_sync_route_reverses_and_resolves(self):
         view_name = 'plugins:netbox_rpki:provideraccount_sync'
         path = '/plugins/netbox_rpki/provideraccounts/1/sync/'
+
+        self.assertEqual(reverse(view_name, kwargs={'pk': 1}), path)
+        self.assertEqual(resolve(path).view_name, view_name)
+
+    def test_organization_bulk_intent_run_route_reverses_and_resolves(self):
+        view_name = 'plugins:netbox_rpki:organization_create_bulk_intent_run'
+        path = '/plugins/netbox_rpki/orgs/1/create-bulk-intent-run/'
 
         self.assertEqual(reverse(view_name, kwargs={'pk': 1}), path)
         self.assertEqual(resolve(path).view_name, view_name)

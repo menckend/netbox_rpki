@@ -19,6 +19,7 @@ from netbox_rpki.tests.utils import (
     create_test_aspa_change_plan,
     create_test_aspa_intent,
     create_test_aspa_provider,
+    create_test_bulk_intent_run,
     create_test_certificate,
     create_test_certificate_asn,
     create_test_certificate_prefix,
@@ -52,7 +53,11 @@ from netbox_rpki.tests.utils import (
     create_test_roa_reconciliation_run,
     create_test_roa_prefix,
     create_test_routing_intent_profile,
+    create_test_routing_intent_exception,
     create_test_routing_intent_rule,
+    create_test_routing_intent_template,
+    create_test_routing_intent_template_binding,
+    create_test_routing_intent_template_rule,
     create_test_provider_account,
     create_test_provider_snapshot,
     create_test_router_certificate,
@@ -771,6 +776,198 @@ class ProviderSnapshotDiffDetailViewTestCase(PluginViewTestCase):
         self.assertContains(response, '&quot;state&quot;: &quot;after&quot;')
 
 
+class RoutingIntentTemplateBindingActionViewTestCase(PluginViewTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='binding-view-org', name='Binding View Org')
+        cls.prefix = create_test_prefix('10.144.0.0/24', status='active')
+        cls.origin_asn = create_test_asn(65644)
+        cls.profile = create_test_routing_intent_profile(
+            name='Binding View Profile',
+            organization=cls.organization,
+            status=rpki_models.RoutingIntentProfileStatus.ACTIVE,
+            selector_mode=rpki_models.RoutingIntentSelectorMode.FILTERED,
+            prefix_selector_query=f'id={cls.prefix.pk}',
+            asn_selector_query='id=999999999',
+        )
+        cls.template = create_test_routing_intent_template(
+            name='Binding View Template',
+            organization=cls.organization,
+            status=rpki_models.RoutingIntentTemplateStatus.ACTIVE,
+        )
+        create_test_routing_intent_template_rule(
+            name='Binding View Include',
+            template=cls.template,
+            action=rpki_models.RoutingIntentRuleAction.INCLUDE,
+        )
+        cls.binding = create_test_routing_intent_template_binding(
+            name='Binding View Binding',
+            template=cls.template,
+            intent_profile=cls.profile,
+            origin_asn_override=cls.origin_asn,
+            prefix_selector_query=f'id={cls.prefix.pk}',
+        )
+
+    def test_binding_detail_shows_preview_and_regenerate_buttons(self):
+        self.add_permissions(
+            'netbox_rpki.view_routingintenttemplatebinding',
+            'netbox_rpki.change_routingintenttemplatebinding',
+            'netbox_rpki.view_routingintentexception',
+        )
+
+        response = self.client.get(self.binding.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(
+            response,
+            reverse('plugins:netbox_rpki:routingintenttemplatebinding_preview', kwargs={'pk': self.binding.pk}),
+        )
+        self.assertContains(
+            response,
+            reverse('plugins:netbox_rpki:routingintenttemplatebinding_regenerate', kwargs={'pk': self.binding.pk}),
+        )
+
+    def test_binding_preview_view_renders_compiled_results(self):
+        self.add_permissions(
+            'netbox_rpki.view_routingintenttemplatebinding',
+            'netbox_rpki.change_routingintenttemplatebinding',
+            'netbox_rpki.view_routingintentexception',
+        )
+
+        response = self.client.get(
+            reverse('plugins:netbox_rpki:routingintenttemplatebinding_preview', kwargs={'pk': self.binding.pk})
+        )
+
+        self.assertHttpStatus(response, 200)
+        self.assertTemplateUsed(response, 'netbox_rpki/routingintenttemplatebinding_preview.html')
+        self.assertContains(response, 'Template Binding Preview')
+        self.assertContains(response, str(self.prefix.prefix))
+        self.assertContains(response, f'AS{self.origin_asn.asn}')
+
+    def test_binding_regenerate_view_executes_pipeline_and_redirects(self):
+        self.add_permissions(
+            'netbox_rpki.view_routingintenttemplatebinding',
+            'netbox_rpki.change_routingintenttemplatebinding',
+            'netbox_rpki.view_roareconciliationrun',
+            'netbox_rpki.view_roalintrun',
+        )
+
+        response = self.client.post(
+            reverse('plugins:netbox_rpki:routingintenttemplatebinding_regenerate', kwargs={'pk': self.binding.pk}),
+            {'confirm': True},
+        )
+
+        self.binding.refresh_from_db()
+        latest_reconciliation = self.binding.intent_profile.reconciliation_runs.order_by('-started_at', '-created').first()
+
+        self.assertIsNotNone(latest_reconciliation)
+        self.assertRedirects(response, latest_reconciliation.get_absolute_url())
+        self.assertEqual(self.binding.state, rpki_models.RoutingIntentTemplateBindingState.CURRENT)
+
+
+class RoutingIntentProfileActionViewTestCase(PluginViewTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='profile-view-org', name='Profile View Org')
+        cls.profile = create_test_routing_intent_profile(
+            name='Profile View Profile',
+            organization=cls.organization,
+            status=rpki_models.RoutingIntentProfileStatus.ACTIVE,
+        )
+        cls.provider_account = create_test_provider_account(
+            name='Profile View Provider',
+            organization=cls.organization,
+            org_handle='ORG-PROFILE-VIEW',
+        )
+        cls.provider_snapshot = create_test_provider_snapshot(
+            name='Profile View Snapshot',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+        )
+
+    def test_profile_detail_shows_run_button(self):
+        self.add_permissions('netbox_rpki.view_routingintentprofile', 'netbox_rpki.change_routingintentprofile')
+
+        response = self.client.get(self.profile.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(
+            response,
+            reverse('plugins:netbox_rpki:routingintentprofile_run', kwargs={'pk': self.profile.pk}),
+        )
+
+    def test_profile_run_view_enqueues_job(self):
+        self.add_permissions('netbox_rpki.view_routingintentprofile', 'netbox_rpki.change_routingintentprofile')
+
+        class StubJob:
+            pk = 885
+            status = 'queued'
+
+            @staticmethod
+            def get_absolute_url():
+                return '/core/jobs/885/'
+
+        with patch('netbox_rpki.views.RunRoutingIntentProfileJob.enqueue', return_value=StubJob()) as enqueue_mock:
+            response = self.client.post(
+                reverse('plugins:netbox_rpki:routingintentprofile_run', kwargs={'pk': self.profile.pk}),
+                {
+                    'confirm': True,
+                    'comparison_scope': rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
+                    'provider_snapshot': self.provider_snapshot.pk,
+                },
+            )
+
+        self.assertRedirects(response, self.profile.get_absolute_url())
+        enqueue_mock.assert_called_once_with(
+            instance=self.profile,
+            user=self.user,
+            profile_pk=self.profile.pk,
+            comparison_scope=rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
+            provider_snapshot_pk=self.provider_snapshot.pk,
+        )
+
+
+class RoutingIntentExceptionActionViewTestCase(PluginViewTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='exception-view-org', name='Exception View Org')
+        cls.profile = create_test_routing_intent_profile(
+            name='Exception View Profile',
+            organization=cls.organization,
+            status=rpki_models.RoutingIntentProfileStatus.ACTIVE,
+        )
+        cls.exception = create_test_routing_intent_exception(
+            name='Exception View Exception',
+            organization=cls.organization,
+            intent_profile=cls.profile,
+        )
+
+    def test_exception_detail_shows_approve_button_and_lifecycle_status(self):
+        self.add_permissions('netbox_rpki.view_routingintentexception', 'netbox_rpki.change_routingintentexception')
+
+        response = self.client.get(self.exception.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'Pending Approval')
+        self.assertContains(
+            response,
+            reverse('plugins:netbox_rpki:routingintentexception_approve', kwargs={'pk': self.exception.pk}),
+        )
+
+    def test_exception_approve_view_sets_actor_and_timestamp(self):
+        self.add_permissions('netbox_rpki.view_routingintentexception', 'netbox_rpki.change_routingintentexception')
+
+        response = self.client.post(
+            reverse('plugins:netbox_rpki:routingintentexception_approve', kwargs={'pk': self.exception.pk}),
+            {'confirm': True},
+        )
+
+        self.assertRedirects(response, self.exception.get_absolute_url())
+        self.exception.refresh_from_db()
+        self.assertEqual(self.exception.approved_by, self.user.username)
+        self.assertIsNotNone(self.exception.approved_at)
+
+
 class OrganizationAspaReconciliationViewTestCase(PluginViewTestCase):
     @classmethod
     def setUpTestData(cls):
@@ -844,6 +1041,111 @@ class OrganizationAspaReconciliationViewTestCase(PluginViewTestCase):
 
         self.assertRedirects(response, self.organization.get_absolute_url())
         enqueue_mock.assert_called_once_with(self.organization, user=self.user)
+
+
+class OrganizationBulkIntentRunViewTestCase(PluginViewTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='organization-bulk-ui', name='Organization Bulk UI')
+        cls.prefix = create_test_prefix('10.86.0.0/24', status='active')
+        cls.origin_asn = create_test_asn(65412)
+        cls.profile = create_test_routing_intent_profile(
+            name='Organization Bulk UI Profile',
+            organization=cls.organization,
+            status=rpki_models.RoutingIntentProfileStatus.ACTIVE,
+            selector_mode=rpki_models.RoutingIntentSelectorMode.FILTERED,
+            prefix_selector_query=f'id={cls.prefix.pk}',
+            asn_selector_query=f'id={cls.origin_asn.pk}',
+        )
+        cls.template = create_test_routing_intent_template(
+            name='Organization Bulk UI Template',
+            organization=cls.organization,
+            status=rpki_models.RoutingIntentTemplateStatus.ACTIVE,
+        )
+        create_test_routing_intent_template_rule(
+            name='Organization Bulk UI Include',
+            template=cls.template,
+            action=rpki_models.RoutingIntentRuleAction.INCLUDE,
+        )
+        cls.binding = create_test_routing_intent_template_binding(
+            name='Organization Bulk UI Binding',
+            template=cls.template,
+            intent_profile=cls.profile,
+            origin_asn_override=cls.origin_asn,
+            prefix_selector_query=f'id={cls.prefix.pk}',
+        )
+        cls.bulk_run = rpki_models.BulkIntentRun.objects.create(
+            name='Organization Bulk UI Run',
+            organization=cls.organization,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+            target_mode=rpki_models.BulkIntentTargetMode.BINDINGS,
+        )
+
+    def test_organization_detail_shows_bulk_intent_run_action(self):
+        self.add_permissions('netbox_rpki.view_organization', 'netbox_rpki.change_organization')
+
+        response = self.client.get(self.organization.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'Create Bulk Intent Run')
+        self.assertContains(
+            response,
+            reverse('plugins:netbox_rpki:organization_create_bulk_intent_run', kwargs={'pk': self.organization.pk}),
+        )
+
+    def test_organization_bulk_intent_run_view_renders_form(self):
+        self.add_permissions('netbox_rpki.view_organization', 'netbox_rpki.change_organization')
+
+        response = self.client.get(
+            reverse('plugins:netbox_rpki:organization_create_bulk_intent_run', kwargs={'pk': self.organization.pk})
+        )
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'Create Bulk Intent Run')
+        self.assertContains(response, self.profile.name)
+        self.assertContains(response, self.binding.name)
+
+    def test_organization_bulk_intent_run_view_enqueues_job_and_redirects(self):
+        self.add_permissions(
+            'netbox_rpki.view_organization',
+            'netbox_rpki.change_organization',
+        )
+
+        class StubJob:
+            pk = 883
+            status = 'queued'
+
+            @staticmethod
+            def get_absolute_url():
+                return '/core/jobs/883/'
+
+        with patch(
+            'netbox_rpki.views.RunBulkRoutingIntentJob.enqueue_for_organization',
+            return_value=(StubJob(), True),
+        ) as enqueue_mock:
+            response = self.client.post(
+                reverse('plugins:netbox_rpki:organization_create_bulk_intent_run', kwargs={'pk': self.organization.pk}),
+                {
+                    'confirm': True,
+                    'run_name': 'UI Bulk Run',
+                    'profiles': [self.profile.pk],
+                    'bindings': [self.binding.pk],
+                    'create_change_plans': 'on',
+                    'comparison_scope': rpki_models.ReconciliationComparisonScope.LOCAL_ROA_RECORDS,
+                },
+            )
+
+        self.assertRedirects(response, self.organization.get_absolute_url())
+        enqueue_mock.assert_called_once_with(
+            organization=self.organization,
+            profiles=(self.profile,),
+            bindings=(self.binding,),
+            comparison_scope=rpki_models.ReconciliationComparisonScope.LOCAL_ROA_RECORDS,
+            provider_snapshot=None,
+            create_change_plans=True,
+            run_name='UI Bulk Run',
+            user=self.user,
+        )
 
 
 class AspaDetailViewTestCase(PluginViewTestCase):
@@ -1209,6 +1511,98 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
             origin_as=create_test_asn(64522),
             valid_to=date.today() + timedelta(days=75),
         )
+        cls.intent_profile = create_test_routing_intent_profile(
+            name='Operations Intent Profile',
+            organization=cls.organization,
+        )
+        cls.intent_template = create_test_routing_intent_template(
+            name='Operations Intent Template',
+            organization=cls.organization,
+            status=rpki_models.RoutingIntentTemplateStatus.ACTIVE,
+        )
+        cls.stale_binding = create_test_routing_intent_template_binding(
+            name='Operations Stale Binding',
+            template=cls.intent_template,
+            intent_profile=cls.intent_profile,
+            state=rpki_models.RoutingIntentTemplateBindingState.STALE,
+            last_compiled_fingerprint='stale-fingerprint',
+            summary_json={
+                'regeneration_reason_codes': ['template_rules_changed'],
+                'regeneration_reason_summary': 'Template policy changed since the last regeneration.',
+            },
+        )
+        cls.pending_binding = create_test_routing_intent_template_binding(
+            name='Operations Pending Binding',
+            template=cls.intent_template,
+            intent_profile=cls.intent_profile,
+            state=rpki_models.RoutingIntentTemplateBindingState.PENDING,
+            summary_json={},
+        )
+        cls.current_binding = create_test_routing_intent_template_binding(
+            name='Operations Current Binding',
+            template=cls.intent_template,
+            intent_profile=cls.intent_profile,
+            state=rpki_models.RoutingIntentTemplateBindingState.CURRENT,
+            last_compiled_fingerprint='current-fingerprint',
+            summary_json={
+                'regeneration_reason_codes': [],
+                'regeneration_reason_summary': 'No relevant input changes detected.',
+            },
+        )
+        cls.expiring_exception = create_test_routing_intent_exception(
+            name='Operations Expiring Exception',
+            organization=cls.organization,
+            intent_profile=cls.intent_profile,
+            template_binding=cls.stale_binding,
+            effect_mode=rpki_models.RoutingIntentExceptionEffectMode.TEMPORARY_REPLACEMENT,
+            ends_at=timezone.now() + timedelta(days=5),
+        )
+        cls.future_exception = create_test_routing_intent_exception(
+            name='Operations Future Exception',
+            organization=cls.organization,
+            intent_profile=cls.intent_profile,
+            effect_mode=rpki_models.RoutingIntentExceptionEffectMode.SUPPRESS,
+            ends_at=timezone.now() + timedelta(days=60),
+        )
+        cls.failed_bulk_run = create_test_bulk_intent_run(
+            name='Operations Failed Bulk Run',
+            organization=cls.organization,
+            status=rpki_models.ValidationRunStatus.FAILED,
+            target_mode=rpki_models.BulkIntentTargetMode.BINDINGS,
+            started_at=timezone.now() - timedelta(hours=2),
+            completed_at=timezone.now() - timedelta(hours=1, minutes=30),
+            summary_json={
+                'scope_result_count': 1,
+                'change_plan_count': 0,
+                'failed_scope_count': 1,
+                'error': 'Template binding regeneration failed.',
+            },
+        )
+        cls.running_bulk_run = create_test_bulk_intent_run(
+            name='Operations Running Bulk Run',
+            organization=cls.organization,
+            status=rpki_models.ValidationRunStatus.RUNNING,
+            target_mode=rpki_models.BulkIntentTargetMode.PROFILES,
+            started_at=timezone.now() - timedelta(minutes=20),
+            summary_json={
+                'scope_result_count': 2,
+                'change_plan_count': 1,
+                'failed_scope_count': 0,
+            },
+        )
+        cls.completed_bulk_run = create_test_bulk_intent_run(
+            name='Operations Completed Bulk Run',
+            organization=cls.organization,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+            target_mode=rpki_models.BulkIntentTargetMode.MIXED,
+            started_at=timezone.now() - timedelta(days=1),
+            completed_at=timezone.now() - timedelta(days=1, minutes=-5),
+            summary_json={
+                'scope_result_count': 3,
+                'change_plan_count': 2,
+                'failed_scope_count': 0,
+            },
+        )
         cls.aspa_provider_account = create_test_provider_account(
             name='ASPA Operations Account',
             organization=cls.organization,
@@ -1260,6 +1654,9 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
             'netbox_rpki.view_providersnapshotdiff',
             'netbox_rpki.view_roa',
             'netbox_rpki.view_certificate',
+            'netbox_rpki.view_routingintenttemplatebinding',
+            'netbox_rpki.view_routingintentexception',
+            'netbox_rpki.view_bulkintentrun',
             'netbox_rpki.view_roareconciliationrun',
             'netbox_rpki.view_roachangeplan',
             'netbox_rpki.view_aspareconciliationrun',
@@ -1274,6 +1671,21 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
         self.assertContains(response, self.failed_provider_account.name)
         self.assertContains(response, self.stale_provider_account.name)
         self.assertNotContains(response, self.healthy_provider_account.name)
+        self.assertContains(response, 'Bindings Requiring Regeneration')
+        self.assertContains(response, self.stale_binding.name)
+        self.assertContains(response, self.pending_binding.name)
+        self.assertNotContains(response, self.current_binding.name)
+        self.assertContains(response, 'Template policy changed since the last regeneration.')
+        self.assertContains(response, 'Intent Exceptions Nearing Expiry')
+        self.assertContains(response, self.expiring_exception.name)
+        self.assertNotContains(response, self.future_exception.name)
+        self.assertContains(response, 'Expires in 5 day(s)')
+        self.assertContains(response, 'Pending Approval')
+        self.assertContains(response, 'Recent Bulk Intent Runs')
+        self.assertContains(response, self.failed_bulk_run.name)
+        self.assertContains(response, self.running_bulk_run.name)
+        self.assertContains(response, self.completed_bulk_run.name)
+        self.assertContains(response, 'Template binding regeneration failed.')
         self.assertContains(response, 'Freshness')
         self.assertContains(response, 'Family Coverage')
         self.assertContains(response, self.failed_comparison_snapshot.name)
@@ -1303,6 +1715,9 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
             'netbox_rpki.view_providersnapshotdiff',
             'netbox_rpki.view_roa',
             'netbox_rpki.view_certificate',
+            'netbox_rpki.view_routingintenttemplatebinding',
+            'netbox_rpki.view_routingintentexception',
+            'netbox_rpki.view_bulkintentrun',
             'netbox_rpki.view_roareconciliationrun',
             'netbox_rpki.view_roachangeplan',
             'netbox_rpki.view_aspareconciliationrun',
@@ -1316,6 +1731,7 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
         self.assertContains(response, self.arin_account.name)
         self.assertContains(response, '9 families: 1 pending, 8 not implemented')
         self.assertContains(response, 'Last success:')
+        self.assertContains(response, 'Bulk Runs Requiring Attention')
 
 
 class GeneratedSurfaceContractTestCase(PluginViewTestCase):

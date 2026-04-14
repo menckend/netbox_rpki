@@ -897,6 +897,259 @@ def create_test_roa_intent_override(
     )
 
 
+def create_test_routing_intent_template(
+    name='Routing Intent Template 1',
+    organization=None,
+    status=None,
+    description='',
+    enabled=True,
+    template_version=1,
+    template_fingerprint='',
+    **kwargs,
+):
+    if organization is None:
+        organization = create_test_organization()
+    return rpki_models.RoutingIntentTemplate.objects.create(
+        name=name,
+        organization=organization,
+        status=status or rpki_models.RoutingIntentTemplateStatus.DRAFT,
+        description=description,
+        enabled=enabled,
+        template_version=template_version,
+        template_fingerprint=template_fingerprint,
+        **kwargs,
+    )
+
+
+def create_test_routing_intent_template_rule(
+    name='Routing Intent Template Rule 1',
+    template=None,
+    weight=100,
+    action=None,
+    address_family='',
+    match_tenant=None,
+    match_vrf=None,
+    match_site=None,
+    match_region=None,
+    match_role='',
+    match_tag='',
+    match_custom_field='',
+    origin_asn=None,
+    max_length_mode=None,
+    max_length_value=None,
+    enabled=True,
+    **kwargs,
+):
+    if template is None:
+        template = create_test_routing_intent_template()
+    return rpki_models.RoutingIntentTemplateRule.objects.create(
+        name=name,
+        template=template,
+        weight=weight,
+        action=action or rpki_models.RoutingIntentRuleAction.INCLUDE,
+        address_family=address_family,
+        match_tenant=match_tenant,
+        match_vrf=match_vrf,
+        match_site=match_site,
+        match_region=match_region,
+        match_role=match_role,
+        match_tag=match_tag,
+        match_custom_field=match_custom_field,
+        origin_asn=origin_asn,
+        max_length_mode=max_length_mode or rpki_models.RoutingIntentRuleMaxLengthMode.INHERIT,
+        max_length_value=max_length_value,
+        enabled=enabled,
+        **kwargs,
+    )
+
+
+def create_test_routing_intent_template_binding(
+    name='Routing Intent Template Binding 1',
+    template=None,
+    intent_profile=None,
+    enabled=True,
+    binding_priority=100,
+    binding_label='',
+    origin_asn_override=None,
+    max_length_mode=None,
+    max_length_value=None,
+    prefix_selector_query='',
+    asn_selector_query='',
+    state=None,
+    last_compiled_fingerprint='',
+    summary_json=None,
+    **kwargs,
+):
+    if template is None and intent_profile is None:
+        organization = create_test_organization()
+        template = create_test_routing_intent_template(organization=organization)
+        intent_profile = create_test_routing_intent_profile(organization=organization)
+    elif template is None:
+        template = create_test_routing_intent_template(organization=intent_profile.organization)
+    elif intent_profile is None:
+        intent_profile = create_test_routing_intent_profile(organization=template.organization)
+    return rpki_models.RoutingIntentTemplateBinding.objects.create(
+        name=name,
+        template=template,
+        intent_profile=intent_profile,
+        enabled=enabled,
+        binding_priority=binding_priority,
+        binding_label=binding_label,
+        origin_asn_override=origin_asn_override,
+        max_length_mode=max_length_mode or rpki_models.RoutingIntentRuleMaxLengthMode.INHERIT,
+        max_length_value=max_length_value,
+        prefix_selector_query=prefix_selector_query,
+        asn_selector_query=asn_selector_query,
+        state=state or rpki_models.RoutingIntentTemplateBindingState.PENDING,
+        last_compiled_fingerprint=last_compiled_fingerprint,
+        summary_json=summary_json or {},
+        **kwargs,
+    )
+
+
+def create_test_routing_intent_exception(
+    name='Routing Intent Exception 1',
+    organization=None,
+    intent_profile=None,
+    template_binding=None,
+    exception_type=None,
+    effect_mode=None,
+    prefix=None,
+    prefix_cidr_text='',
+    origin_asn=None,
+    origin_asn_value=None,
+    max_length=None,
+    tenant_scope=None,
+    vrf_scope=None,
+    site_scope=None,
+    region_scope=None,
+    starts_at=None,
+    ends_at=None,
+    reason='',
+    approved_by='',
+    approved_at=None,
+    enabled=True,
+    summary_json=None,
+    **kwargs,
+):
+    if organization is None:
+        if template_binding is not None:
+            organization = template_binding.intent_profile.organization
+        elif intent_profile is not None:
+            organization = intent_profile.organization
+        else:
+            organization = create_test_organization()
+    if intent_profile is None and template_binding is not None:
+        intent_profile = template_binding.intent_profile
+    elif intent_profile is None and template_binding is None:
+        intent_profile = create_test_routing_intent_profile(organization=organization)
+    return rpki_models.RoutingIntentException.objects.create(
+        name=name,
+        organization=organization,
+        intent_profile=intent_profile,
+        template_binding=template_binding,
+        exception_type=exception_type or rpki_models.RoutingIntentExceptionType.TRAFFIC_ENGINEERING,
+        effect_mode=effect_mode or rpki_models.RoutingIntentExceptionEffectMode.SUPPRESS,
+        prefix=prefix,
+        prefix_cidr_text=prefix_cidr_text,
+        origin_asn=origin_asn,
+        origin_asn_value=origin_asn_value,
+        max_length=max_length,
+        tenant_scope=tenant_scope,
+        vrf_scope=vrf_scope,
+        site_scope=site_scope,
+        region_scope=region_scope,
+        starts_at=starts_at,
+        ends_at=ends_at,
+        reason=reason,
+        approved_by=approved_by,
+        approved_at=approved_at,
+        enabled=enabled,
+        summary_json=summary_json or {},
+        **kwargs,
+    )
+
+
+def create_test_bulk_intent_run(
+    name='Bulk Intent Run 1',
+    organization=None,
+    status=None,
+    trigger_mode=None,
+    target_mode=None,
+    baseline_fingerprint='',
+    resulting_fingerprint='',
+    started_at=None,
+    completed_at=None,
+    summary_json=None,
+    **kwargs,
+):
+    if organization is None:
+        organization = create_test_organization()
+    return rpki_models.BulkIntentRun.objects.create(
+        name=name,
+        organization=organization,
+        status=status or rpki_models.ValidationRunStatus.PENDING,
+        trigger_mode=trigger_mode or rpki_models.IntentRunTriggerMode.MANUAL,
+        target_mode=target_mode or rpki_models.BulkIntentTargetMode.BINDINGS,
+        baseline_fingerprint=baseline_fingerprint,
+        resulting_fingerprint=resulting_fingerprint,
+        started_at=started_at,
+        completed_at=completed_at,
+        summary_json=summary_json or {},
+        **kwargs,
+    )
+
+
+def create_test_bulk_intent_run_scope_result(
+    name='Bulk Intent Run Scope Result 1',
+    bulk_run=None,
+    intent_profile=None,
+    template_binding=None,
+    status=None,
+    scope_kind='',
+    scope_key='scope-1',
+    derivation_run=None,
+    reconciliation_run=None,
+    change_plan=None,
+    prefix_count_scanned=0,
+    intent_count_emitted=0,
+    plan_item_count=0,
+    summary_json=None,
+    **kwargs,
+):
+    if bulk_run is None and intent_profile is None and template_binding is None:
+        organization = create_test_organization()
+        bulk_run = create_test_bulk_intent_run(organization=organization)
+        intent_profile = create_test_routing_intent_profile(organization=organization)
+    elif bulk_run is None:
+        if template_binding is not None:
+            organization = template_binding.intent_profile.organization
+        else:
+            organization = intent_profile.organization
+        bulk_run = create_test_bulk_intent_run(organization=organization)
+    if intent_profile is None and template_binding is not None:
+        intent_profile = template_binding.intent_profile
+    elif intent_profile is None:
+        intent_profile = create_test_routing_intent_profile(organization=bulk_run.organization)
+    return rpki_models.BulkIntentRunScopeResult.objects.create(
+        name=name,
+        bulk_run=bulk_run,
+        intent_profile=intent_profile,
+        template_binding=template_binding,
+        status=status or rpki_models.ValidationRunStatus.PENDING,
+        scope_kind=scope_kind,
+        scope_key=scope_key,
+        derivation_run=derivation_run,
+        reconciliation_run=reconciliation_run,
+        change_plan=change_plan,
+        prefix_count_scanned=prefix_count_scanned,
+        intent_count_emitted=intent_count_emitted,
+        plan_item_count=plan_item_count,
+        summary_json=summary_json or {},
+        **kwargs,
+    )
+
+
 def create_test_intent_derivation_run(
     name='Intent Derivation Run 1',
     organization=None,
