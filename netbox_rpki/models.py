@@ -5,6 +5,7 @@ from datetime import timedelta
 import ipam
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models import Q
 from django.urls import reverse
 from django.urls.exceptions import NoReverseMatch
 from django.utils import timezone
@@ -2601,6 +2602,67 @@ class RpkiProviderAccount(NamedRpkiStandardModel):
     @property
     def sync_health_display(self) -> str:
         return ProviderSyncHealth(self.sync_health).label
+
+
+class LifecycleHealthPolicy(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='lifecycle_health_policies',
+    )
+    provider_account = models.ForeignKey(
+        to='RpkiProviderAccount',
+        on_delete=models.PROTECT,
+        related_name='lifecycle_health_policies',
+        blank=True,
+        null=True,
+    )
+    enabled = models.BooleanField(default=True)
+    sync_stale_after_minutes = models.PositiveIntegerField(default=120)
+    roa_expiry_warning_days = models.PositiveIntegerField(default=30)
+    certificate_expiry_warning_days = models.PositiveIntegerField(default=30)
+    exception_expiry_warning_days = models.PositiveIntegerField(default=30)
+    publication_exchange_failure_threshold = models.PositiveIntegerField(default=1)
+    publication_stale_after_minutes = models.PositiveIntegerField(default=180)
+    certificate_expired_grace_minutes = models.PositiveIntegerField(default=0)
+    alert_repeat_after_minutes = models.PositiveIntegerField(default=360)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ('name',)
+        constraints = (
+            models.UniqueConstraint(
+                fields=('organization',),
+                condition=Q(provider_account__isnull=True),
+                name='nb_rpki_lchpolicy_org_default_unique',
+            ),
+            models.UniqueConstraint(
+                fields=('provider_account',),
+                condition=Q(provider_account__isnull=False),
+                name='nb_rpki_lchpolicy_provider_unique',
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def clean(self):
+        super().clean()
+        if (
+            self.provider_account_id is not None
+            and self.organization_id is not None
+            and self.provider_account.organization_id != self.organization_id
+        ):
+            raise ValidationError(
+                {
+                    'provider_account': (
+                        'Provider account must belong to the same organization as the lifecycle health policy.'
+                    )
+                }
+            )
+
+    def get_absolute_url(self):
+        return reverse('plugins:netbox_rpki:lifecyclehealthpolicy', args=[self.pk])
 
 
 class ProviderSyncRun(NamedRpkiStandardModel):

@@ -34,6 +34,7 @@ from netbox_rpki.tests.utils import (
     create_test_aspa_provider,
     create_test_imported_aspa,
     create_test_imported_certificate_observation,
+    create_test_lifecycle_health_policy,
     create_test_imported_publication_point,
     create_test_imported_signed_object,
     create_test_manifest_entry,
@@ -653,6 +654,77 @@ class ASPAModelValidationTestCase(TestCase):
 
         with self.assertRaises(ValidationError):
             match.full_clean()
+
+
+class LifecycleHealthPolicyModelTestCase(TestCase):
+    def test_provider_account_override_must_match_policy_organization(self):
+        policy_organization = create_test_organization(org_id='lifecycle-policy-org', name='Lifecycle Policy Org')
+        provider_organization = create_test_organization(org_id='lifecycle-provider-org', name='Lifecycle Provider Org')
+        provider_account = create_test_provider_account(
+            name='Lifecycle Provider Account',
+            organization=provider_organization,
+            org_handle='ORG-LIFECYCLE-PROVIDER',
+        )
+        policy = rpki_models.LifecycleHealthPolicy(
+            name='Mismatched Lifecycle Policy',
+            organization=policy_organization,
+            provider_account=provider_account,
+        )
+
+        with self.assertRaises(ValidationError) as context:
+            policy.full_clean()
+
+        self.assertEqual(
+            context.exception.message_dict,
+            {
+                'provider_account': [
+                    'Provider account must belong to the same organization as the lifecycle health policy.'
+                ]
+            },
+        )
+
+    def test_default_policy_is_unique_per_organization(self):
+        organization = create_test_organization(org_id='lifecycle-default-org', name='Lifecycle Default Org')
+        create_test_lifecycle_health_policy(
+            name='Default Lifecycle Policy',
+            organization=organization,
+        )
+
+        with transaction.atomic():
+            with self.assertRaises(IntegrityError):
+                create_test_lifecycle_health_policy(
+                    name='Duplicate Default Lifecycle Policy',
+                    organization=organization,
+                )
+
+    def test_provider_account_override_is_unique(self):
+        organization = create_test_organization(org_id='lifecycle-override-org', name='Lifecycle Override Org')
+        provider_account = create_test_provider_account(
+            name='Lifecycle Override Provider',
+            organization=organization,
+            org_handle='ORG-LIFECYCLE-OVERRIDE',
+        )
+        create_test_lifecycle_health_policy(
+            name='Provider Override Policy',
+            organization=organization,
+            provider_account=provider_account,
+        )
+
+        with transaction.atomic():
+            with self.assertRaises(IntegrityError):
+                create_test_lifecycle_health_policy(
+                    name='Duplicate Provider Override Policy',
+                    organization=organization,
+                    provider_account=provider_account,
+                )
+
+    def test_get_absolute_url_uses_lifecycle_policy_route(self):
+        policy = create_test_lifecycle_health_policy(name='Lifecycle URL Policy')
+
+        self.assertEqual(
+            policy.get_absolute_url(),
+            reverse('plugins:netbox_rpki:lifecyclehealthpolicy', args=[policy.pk]),
+        )
 
 
 class PriorityOneModelBehaviorTestCase(TestCase):

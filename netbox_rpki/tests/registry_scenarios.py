@@ -67,6 +67,7 @@ from netbox_rpki.tests.utils import (
     create_test_imported_parent_link,
     create_test_imported_child_link,
     create_test_imported_resource_entitlement,
+    create_test_lifecycle_health_policy,
     create_test_imported_publication_point,
     create_test_imported_signed_object,
     create_test_repository,
@@ -547,6 +548,7 @@ def _register_scenario_builders() -> None:
             "routingintenttemplatebinding": build_routing_intent_template_binding_form_data,
             "routingintentexception": build_routing_intent_exception_form_data,
             "roalintruleconfig": build_roa_lint_rule_config_form_data,
+            "lifecyclehealthpolicy": build_lifecycle_health_policy_form_data,
         }
     )
     _FILTER_SCENARIO_BUILDERS.update(
@@ -611,6 +613,9 @@ def _register_scenario_builders() -> None:
             ),
             "roalintruleconfig": lambda: create_test_roa_lint_rule_config(
                 name=f"ROA Lint Rule Config {unique_token('roa-lint-rule-config')}"
+            ),
+            "lifecyclehealthpolicy": lambda: create_test_lifecycle_health_policy(
+                name=f"Lifecycle Health Policy {unique_token('lifecycle-health-policy')}"
             ),
             "roalintsuppression": lambda: create_test_roa_lint_suppression(
                 name=f"ROA Lint Suppression {unique_token('roa-lint-suppression')}"
@@ -851,6 +856,30 @@ def build_roa_lint_rule_config_form_data() -> dict[str, object]:
         "name": f"ROA Lint Rule Config {unique_token('roa-lint-rule-config-form')}",
         "organization": organization.pk,
         "finding_code": "intent_max_length_overbroad",
+    }
+
+
+def build_lifecycle_health_policy_form_data() -> dict[str, object]:
+    organization = create_unique_organization("lifecycle-health-policy-form-org")
+    provider_account = create_test_provider_account(
+        name=f"Provider Account {unique_token('lifecycle-health-policy-form-provider')}",
+        organization=organization,
+        org_handle=f"ORG-{unique_token('lifecycle-policy')}",
+    )
+    return {
+        "name": f"Lifecycle Health Policy {unique_token('lifecycle-health-policy-form')}",
+        "organization": organization.pk,
+        "provider_account": provider_account.pk,
+        "enabled": True,
+        "sync_stale_after_minutes": 120,
+        "roa_expiry_warning_days": 30,
+        "certificate_expiry_warning_days": 30,
+        "exception_expiry_warning_days": 30,
+        "publication_exchange_failure_threshold": 1,
+        "publication_stale_after_minutes": 180,
+        "certificate_expired_grace_minutes": 0,
+        "alert_repeat_after_minutes": 360,
+        "notes": "Lifecycle thresholds for tests.",
     }
 
 
