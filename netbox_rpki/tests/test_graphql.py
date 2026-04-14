@@ -53,6 +53,7 @@ from netbox_rpki.tests.utils import (
     create_test_imported_resource_entitlement,
     create_test_imported_roa_authorization,
     create_test_imported_signed_object,
+    create_test_lifecycle_health_policy,
     create_test_manifest,
     create_test_provider_account,
     create_test_provider_snapshot,
@@ -451,6 +452,11 @@ class ProviderReportingGraphQLTestCase(APITestCase):
     @classmethod
     def setUpTestData(cls):
         cls.organization = create_test_organization(org_id='provider-graphql-org', name='Provider GraphQL Org')
+        create_test_lifecycle_health_policy(
+            name='Provider GraphQL Org Default Policy',
+            organization=cls.organization,
+            sync_stale_after_minutes=150,
+        )
         cls.provider_account = create_test_provider_account(
             name='GraphQL Provider Account',
             organization=cls.organization,
@@ -464,6 +470,12 @@ class ProviderReportingGraphQLTestCase(APITestCase):
             provider_type='arin',
             ca_handle='graphql-ca-2',
             org_handle='ORG-GRAPHQL-2',
+        )
+        create_test_lifecycle_health_policy(
+            name='Provider GraphQL Override Policy',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+            sync_stale_after_minutes=20,
         )
         cls.base_snapshot = create_test_provider_snapshot(
             name='GraphQL Base Snapshot',
@@ -583,6 +595,75 @@ class ProviderReportingGraphQLTestCase(APITestCase):
         self.assertHttpStatus(response, 200)
         return json.loads(response.content)
 
+    def grant_model_permission(self, model, *, constraints=None):
+        object_type = ObjectType.objects.get_for_model(model)
+        permission = ObjectPermission(
+            name=f'{model._meta.label_lower}-view',
+            actions=['view'],
+            constraints=constraints,
+        )
+        permission.save()
+        permission.users.add(self.user)
+        permission.object_types.add(object_type)
+        return permission
+
+    def test_provider_reporting_queries_expose_lifecycle_health_summary(self):
+        self.add_permissions(
+            'netbox_rpki.view_rpkiprovideraccount',
+            'netbox_rpki.view_providersnapshot',
+            'netbox_rpki.view_providersnapshotdiff',
+        )
+
+        data = self.graphql_request(
+            f'''
+            {{
+                netbox_rpki_provideraccount(id: {self.provider_account.pk}) {{
+                    id
+                    last_sync_rollup
+                    lifecycle_health_summary
+                }}
+                provider_account_summary
+            }}
+            '''
+        )
+
+        self.assertNotIn('errors', data)
+        account = data['data']['netbox_rpki_provideraccount']
+        self.assertEqual(account['lifecycle_health_summary']['summary_schema_version'], 1)
+        self.assertEqual(account['lifecycle_health_summary']['policy']['source'], 'provider_account_override')
+        self.assertEqual(account['lifecycle_health_summary']['policy']['thresholds']['sync_stale_after_minutes'], 20)
+        self.assertEqual(account['last_sync_rollup']['lifecycle_health_summary']['summary_schema_version'], 1)
+        summary_account = next(
+            row
+            for row in data['data']['provider_account_summary']['accounts']
+            if row['provider_account_id'] == self.provider_account.pk
+        )
+        self.assertEqual(summary_account['lifecycle_health_summary']['policy']['source'], 'provider_account_override')
+
+    def test_provider_reporting_lifecycle_summary_hides_invisible_related_objects(self):
+        self.add_permissions('netbox_rpki.view_rpkiprovideraccount')
+        self.grant_model_permission(rpki_models.ProviderSnapshot, constraints={'id': 0})
+        self.grant_model_permission(rpki_models.ProviderSnapshotDiff, constraints={'id': 0})
+
+        data = self.graphql_request(
+            f'''
+            {{
+                netbox_rpki_provideraccount(id: {self.provider_account.pk}) {{
+                    id
+                    last_sync_rollup
+                    lifecycle_health_summary
+                }}
+            }}
+            '''
+        )
+
+        self.assertNotIn('errors', data)
+        account = data['data']['netbox_rpki_provideraccount']
+        self.assertIsNone(account['last_sync_rollup']['latest_snapshot_id'])
+        self.assertIsNone(account['last_sync_rollup']['latest_diff_id'])
+        self.assertIsNone(account['lifecycle_health_summary']['diff']['latest_snapshot_id'])
+        self.assertIsNone(account['lifecycle_health_summary']['diff']['latest_diff_id'])
+
     def test_provider_reporting_queries_expose_summary_and_diff_lookup(self):
         self.add_permissions(
             'netbox_rpki.view_rpkiprovideraccount',
@@ -609,6 +690,7 @@ class ProviderReportingGraphQLTestCase(APITestCase):
                 supports_aspa_write
                 aspa_write_mode
                 last_sync_rollup
+                lifecycle_health_summary
             }}
             provider_snapshot_latest_diff(snapshot_id: "{self.comparison_snapshot.pk}") {{
                 id
@@ -716,6 +798,10 @@ class ProviderReportingGraphQLTestCase(APITestCase):
         self.assertEqual(
             data['data']['netbox_rpki_provideraccount']['last_sync_rollup']['supported_families'],
             [rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS],
+        )
+        self.assertEqual(
+            data['data']['netbox_rpki_provideraccount']['lifecycle_health_summary']['summary_schema_version'],
+            1,
         )
         self.assertEqual(data['data']['provider_snapshot_summary']['total_snapshots'], 3)
         self.assertEqual(data['data']['provider_snapshot_summary']['with_diff_count'], 1)

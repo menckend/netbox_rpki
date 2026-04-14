@@ -25,6 +25,44 @@ def create_test_organization(org_id='org-1', name='Organization 1', **kwargs):
     return rpki_models.Organization.objects.create(org_id=org_id, name=name, **kwargs)
 
 
+def create_test_lifecycle_health_policy(
+    name='Lifecycle Health Policy 1',
+    organization=None,
+    provider_account=None,
+    enabled=True,
+    sync_stale_after_minutes=120,
+    roa_expiry_warning_days=30,
+    certificate_expiry_warning_days=30,
+    exception_expiry_warning_days=30,
+    publication_exchange_failure_threshold=1,
+    publication_stale_after_minutes=180,
+    certificate_expired_grace_minutes=0,
+    alert_repeat_after_minutes=360,
+    notes='',
+    **kwargs,
+):
+    if organization is None:
+        organization = create_test_organization()
+    if provider_account is not None and provider_account.organization_id != organization.pk:
+        organization = provider_account.organization
+    return rpki_models.LifecycleHealthPolicy.objects.create(
+        name=name,
+        organization=organization,
+        provider_account=provider_account,
+        enabled=enabled,
+        sync_stale_after_minutes=sync_stale_after_minutes,
+        roa_expiry_warning_days=roa_expiry_warning_days,
+        certificate_expiry_warning_days=certificate_expiry_warning_days,
+        exception_expiry_warning_days=exception_expiry_warning_days,
+        publication_exchange_failure_threshold=publication_exchange_failure_threshold,
+        publication_stale_after_minutes=publication_stale_after_minutes,
+        certificate_expired_grace_minutes=certificate_expired_grace_minutes,
+        alert_repeat_after_minutes=alert_repeat_after_minutes,
+        notes=notes,
+        **kwargs,
+    )
+
+
 def create_test_certificate(
     name='Certificate 1',
     rpki_org=None,

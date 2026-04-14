@@ -47,6 +47,7 @@ from netbox_rpki.tests.utils import (
     create_test_imported_certificate_observation,
     create_test_imported_publication_point,
     create_test_imported_signed_object,
+    create_test_lifecycle_health_policy,
     create_test_manifest,
     create_test_organization,
     create_test_object_validation_result,
@@ -170,6 +171,31 @@ class RpkiProviderAccountSerializerTestCase(TestCase):
         self.assertEqual(serializer.data['sync_health_display'], 'Stale')
         self.assertIn('next_sync_due_at', serializer.data)
 
+    def test_provider_account_serializer_exposes_lifecycle_health_summary(self):
+        organization = create_test_organization(
+            org_id='provider-serializer-lifecycle-org',
+            name='Provider Serializer Lifecycle Org',
+        )
+        create_test_lifecycle_health_policy(
+            name='Provider Serializer Lifecycle Policy',
+            organization=organization,
+            sync_stale_after_minutes=45,
+        )
+        provider_account = create_test_provider_account(
+            name='Provider Serializer Lifecycle Account',
+            organization=organization,
+            org_handle='ORG-PROVIDER-SERIALIZER-LIFECYCLE',
+        )
+
+        serializer = api_serializers.RpkiProviderAccountSerializer(provider_account, context={'request': None})
+
+        self.assertEqual(serializer.data['lifecycle_health_summary']['summary_schema_version'], 1)
+        self.assertEqual(serializer.data['lifecycle_health_summary']['policy']['source'], 'organization_default')
+        self.assertEqual(
+            serializer.data['lifecycle_health_summary']['policy']['thresholds']['sync_stale_after_minutes'],
+            45,
+        )
+
     def test_provider_account_serializer_exposes_arin_rollup_capabilities_and_transport(self):
         organization = create_test_organization(org_id='provider-serializer-arin-org', name='Provider Serializer ARIN Org')
         provider_account = create_test_provider_account(
@@ -212,12 +238,23 @@ class RpkiProviderAccountSummaryAPITestCase(PluginAPITestCase):
     @classmethod
     def setUpTestData(cls):
         cls.organization = create_test_organization(org_id='provider-summary-api-org', name='Provider Summary API Org')
+        create_test_lifecycle_health_policy(
+            name='Provider Summary API Org Default Policy',
+            organization=cls.organization,
+            sync_stale_after_minutes=90,
+        )
         cls.arin_account = create_test_provider_account(
             name='Provider Summary API ARIN',
             organization=cls.organization,
             provider_type=rpki_models.ProviderType.ARIN,
             transport=rpki_models.ProviderSyncTransport.OTE,
             org_handle='ORG-PROVIDER-SUMMARY-ARIN',
+        )
+        create_test_lifecycle_health_policy(
+            name='Provider Summary API ARIN Override Policy',
+            organization=cls.organization,
+            provider_account=cls.arin_account,
+            sync_stale_after_minutes=15,
         )
         cls.arin_account.last_sync_summary_json = build_provider_sync_summary(
             cls.arin_account,
@@ -1576,6 +1613,7 @@ class ProviderAccountSummaryAPITestCase(PluginAPITestCase):
         self.assertTrue(any(account['latest_snapshot_id'] == self.healthy_snapshot.pk for account in response.data['accounts']))
         self.assertTrue(any(account['latest_diff_id'] == self.healthy_diff.pk for account in response.data['accounts']))
         self.assertTrue(any('family_rollups' in account for account in response.data['accounts']))
+        self.assertEqual(response.data['accounts'][0]['lifecycle_health_summary']['summary_schema_version'], 1)
         self.assertEqual(response.data['sync_due_count'], 2)
         self.assertEqual(response.data['roa_write_supported_count'], 1)
         self.assertEqual(response.data['aspa_write_supported_count'], 1)
