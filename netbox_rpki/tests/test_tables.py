@@ -10,6 +10,16 @@ from netbox_rpki.tests.registry_scenarios import (
 )
 
 
+PRIORITY6_EXPECTED_DEFAULT_COLUMNS = {
+    'routingintenttemplate': ('name', 'organization', 'status', 'enabled', 'comments', 'tenant', 'tags'),
+    'routingintenttemplaterule': ('name', 'template', 'action', 'enabled', 'comments', 'tenant', 'tags'),
+    'routingintenttemplatebinding': ('name', 'template', 'intent_profile', 'state', 'enabled', 'comments', 'tenant', 'tags'),
+    'routingintentexception': ('name', 'organization', 'exception_type', 'effect_mode', 'enabled', 'comments', 'tenant', 'tags'),
+    'bulkintentrun': ('name', 'organization', 'status', 'target_mode', 'started_at', 'comments', 'tenant', 'tags'),
+    'bulkintentrunscoperesult': ('name', 'bulk_run', 'intent_profile', 'template_binding', 'status', 'comments', 'tenant', 'tags'),
+}
+
+
 class TableRegistrySmokeTestCase(TestCase):
     def test_all_objects_expose_table_specs(self):
         self.assertEqual(
@@ -40,3 +50,17 @@ class GeneratedTableRenderingTestCase(TestCase):
                         table = table_class(queryset)
                         table.order_by = f'{direction}{column_name}'
                         table.as_html(fake_request)
+
+
+class Priority6TableContractTestCase(TestCase):
+    def test_priority6_generated_table_fields_and_defaults_remain_stable(self):
+        for registry_key, expected_default_columns in PRIORITY6_EXPECTED_DEFAULT_COLUMNS.items():
+            object_spec = get_object_spec(registry_key)
+            table_class = getattr(tables, object_spec.table.class_name)
+            expected_fields = ('pk', 'id') + object_spec.api.fields[2:] + ('comments', 'tenant', 'tags')
+
+            with self.subTest(object_key=registry_key):
+                self.assertEqual(object_spec.table.fields, expected_fields)
+                self.assertEqual(object_spec.table.default_columns, expected_default_columns)
+                self.assertEqual(table_class.Meta.fields, expected_fields)
+                self.assertEqual(table_class.Meta.default_columns, expected_default_columns)

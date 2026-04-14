@@ -2480,6 +2480,10 @@ def create_test_roa_validation_simulation_run(
     predicted_valid_count=0,
     predicted_invalid_count=0,
     predicted_not_found_count=0,
+    plan_fingerprint='',
+    overall_approval_posture=rpki_models.ROAValidationSimulationApprovalImpact.INFORMATIONAL,
+    is_current_for_plan=False,
+    partially_constrained=False,
     summary_json=None,
     **kwargs,
 ):
@@ -2496,6 +2500,10 @@ def create_test_roa_validation_simulation_run(
         predicted_valid_count=predicted_valid_count,
         predicted_invalid_count=predicted_invalid_count,
         predicted_not_found_count=predicted_not_found_count,
+        plan_fingerprint=plan_fingerprint,
+        overall_approval_posture=overall_approval_posture,
+        is_current_for_plan=is_current_for_plan,
+        partially_constrained=partially_constrained,
         summary_json=summary_json or {},
         **kwargs,
     )
@@ -2506,6 +2514,8 @@ def create_test_roa_validation_simulation_result(
     simulation_run=None,
     change_plan_item=None,
     outcome_type=None,
+    approval_impact=rpki_models.ROAValidationSimulationApprovalImpact.INFORMATIONAL,
+    scenario_type='',
     details_json=None,
     computed_at=None,
     **kwargs,
@@ -2518,6 +2528,8 @@ def create_test_roa_validation_simulation_result(
         tenant=simulation_run.tenant,
         change_plan_item=change_plan_item,
         outcome_type=outcome_type or rpki_models.ROAValidationSimulationOutcome.NOT_FOUND,
+        approval_impact=approval_impact,
+        scenario_type=scenario_type,
         details_json=details_json or {},
         computed_at=computed_at,
         **kwargs,
@@ -2859,6 +2871,7 @@ def create_test_approval_record(
     maintenance_window_start=None,
     maintenance_window_end=None,
     notes='',
+    simulation_review_json=None,
     **kwargs,
 ):
     if organization is None:
@@ -2882,6 +2895,7 @@ def create_test_approval_record(
         maintenance_window_start=maintenance_window_start,
         maintenance_window_end=maintenance_window_end,
         notes=notes,
+        simulation_review_json=simulation_review_json or {},
         **kwargs,
     )
 

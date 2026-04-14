@@ -140,6 +140,7 @@ cd ~/src/netbox_rpki/devrun
 On first run this does all of the environment preparation that should be automated:
 
 - starts the local PostgreSQL, Redis, and Routinator containers from [`docker-compose.yml`](/home/mencken/src/netbox_rpki/devrun/docker-compose.yml)
+- starts the local IRRd lab container from [`docker-compose.yml`](/home/mencken/src/netbox_rpki/devrun/docker-compose.yml)
 - creates or refreshes `devrun/.env`
 - creates `~/.config/netbox-rpki-dev/credentials.env`
 - writes NetBox `configuration.py` at `~/src/netbox-v4.5.7/netbox/netbox/configuration.py`
@@ -152,9 +153,57 @@ On first run this does all of the environment preparation that should be automat
 - starts an RQ worker
 - starts the NetBox development server
 - starts Routinator with HTTP status available at `http://127.0.0.1:8323/api/v1/status` by default and ASPA support enabled
+- starts IRRd with HTTP status available at `http://127.0.0.1:6080/v1/status/` by default and whois available on `127.0.0.1:6043`
 - starts Krill too, if a compatible Krill workspace exists
 
 You do not need to hand-maintain `configuration.py`, database credentials, or the local admin user if you use `./dev.sh start`.
+
+### 7. Explicit local IRRd install and verification procedure
+
+This repo now installs the local IRRd lab as a Docker-built devrun service. There is no separate host-level IRRd package install step.
+
+The exact procedure used locally was:
+
+```bash
+cd ~/src/netbox_rpki/devrun
+./dev.sh start
+./dev.sh irrd status
+curl -sS http://127.0.0.1:6080/v1/status/ | head -n 20
+curl -sS 'http://127.0.0.1:6080/v1/whois/?q=!v'
+```
+
+What this does behind the scenes:
+
+- builds the local Docker image from [`devrun/irrd/Dockerfile`](/home/mencken/src/netbox_rpki/devrun/irrd/Dockerfile)
+- runs the container entrypoint in [`devrun/irrd/entrypoint.sh`](/home/mencken/src/netbox_rpki/devrun/irrd/entrypoint.sh)
+- creates a dedicated PostgreSQL role and database for IRRd inside the existing local Postgres container
+- writes the IRRd YAML config inside the container at startup
+- runs `irrd_database_upgrade`
+- starts IRRd in the foreground with HTTP on port `6080` and whois on port `6043`
+
+Important practical notes from the actual bootstrap:
+
+- the first IRRd image build is materially slower than the other local services because it installs the Python package and its build dependencies inside the image
+- the service is considered ready when `./dev.sh irrd status` reports it ready and `http://127.0.0.1:6080/v1/status/` returns HTTP `200`
+- a useful end-to-end query check is `curl -sS 'http://127.0.0.1:6080/v1/whois/?q=!v'`, which should return `IRRd -- version 4.5.2`
+
+If you want to build or restart only IRRd without touching the full NetBox loop, use:
+
+```bash
+cd ~/src/netbox_rpki/devrun
+./dev.sh irrd start
+./dev.sh irrd status
+./dev.sh irrd logs
+```
+
+If you change [`devrun/irrd/Dockerfile`](/home/mencken/src/netbox_rpki/devrun/irrd/Dockerfile) or [`devrun/irrd/entrypoint.sh`](/home/mencken/src/netbox_rpki/devrun/irrd/entrypoint.sh), force a rebuild and recreate explicitly:
+
+```bash
+cd ~/src/netbox_rpki/devrun
+docker compose up -d --build --force-recreate irrd
+```
+
+That is the exact rebuild path used while wiring IRRd into this local environment.
 
 ## Optional Krill Workspace
 
@@ -205,6 +254,8 @@ After the first successful bootstrap, these generated files matter:
 - `~/.config/netbox-rpki-dev/*.log`
   Logs from migrations, checks, collectstatic, seeding, and superuser creation.
 
+The Docker-managed IRRd state is also retained in the `devrun_irrd_state` volume.
+
 ## Normal Daily Workflow
 
 The common loop is:
@@ -238,7 +289,7 @@ This reports:
 - NetBox project path
 - virtualenv path
 - generated config and credentials paths
-- whether `runserver`, the worker, Krill, and Routinator are running or reachable
+- whether `runserver`, the worker, Krill, Routinator, and IRRd are running or reachable
 - Docker container status
 - PostgreSQL and Redis reachability
 
@@ -247,6 +298,75 @@ This reports:
 - `ROUTINATOR_RTR_PORT` default `3323`
 - `ROUTINATOR_HTTP_PORT` default `8323`
 - `ROUTINATOR_METRICS_PORT` default `9556`
+
+It also carries the local IRRd lab settings used by Docker Compose:
+
+- `IRRD_DATABASE_NAME` default `irrd`
+- `IRRD_DATABASE_USER` default `irrd`
+- `IRRD_HTTP_PORT` default `6080`
+- `IRRD_WHOIS_PORT` default `6043`
+- `IRRD_SOURCE` default `LOCAL-IRR`
+- `IRRD_OVERRIDE_PASSWORD` generated automatically for local dev-only seed and override use
+
+The generated credentials file also includes `IRRD_DATABASE_PASSWORD` for the local IRRd database user.
+
+### Manage the local IRRd lab directly
+
+```bash
+cd ~/src/netbox_rpki/devrun
+./dev.sh irrd start
+./dev.sh irrd status
+./dev.sh irrd seed
+./dev.sh irrd logs
+./dev.sh irrd stop
+```
+
+This is useful when you want to work on the IRR integration contract without restarting the full NetBox development loop.
+
+The expected ready-state output is:
+
+- IRRd reachable at `http://127.0.0.1:6080`
+- whois listening on local port `6043`
+- health visible through `http://127.0.0.1:6080/v1/status/`
+
+To load the deterministic first-wave `LOCAL-IRR` dataset into the local lab:
+
+```bash
+cd ~/src/netbox_rpki/devrun
+./dev.sh irrd seed
+```
+
+The seed loader posts a fixed RPSL fixture set into the authoritative `LOCAL-IRR` source through IRRd's local HTTP submit API using the generated dev-only override password. The fixture currently includes:
+
+- one maintainer object
+- one person object
+- one aut-num object
+- one as-set object
+- one route-set object
+- one IPv4 route object
+- one IPv6 route object
+
+The seed file template lives in [`devrun/irrd/fixtures/local-authoritative.rpsl`](/home/mencken/src/netbox_rpki/devrun/irrd/fixtures/local-authoritative.rpsl).
+
+To verify that the seed actually landed without requiring a local `whois` client, use the HTTP whois endpoint directly:
+
+```bash
+cd ~/src/netbox_rpki/devrun
+for q in LOCAL-IRR-MNT LOCAL-IRR-PERSON AS64500 203.0.113.0/24 2001:db8:fbf4::/48 AS64500:RS-LOCAL-EDGE; do
+  echo "--- $q ---"
+  curl -sS --get --data-urlencode "q=$q" http://127.0.0.1:6080/v1/whois/
+  echo
+done
+```
+
+Expected results after a successful seed:
+
+- `LOCAL-IRR-MNT` returns the maintainer object
+- `LOCAL-IRR-PERSON` returns the contact object
+- `AS64500` returns the local `aut-num`
+- `203.0.113.0/24` returns the IPv4 route object
+- `2001:db8:fbf4::/48` returns the IPv6 route object
+- `AS64500:RS-LOCAL-EDGE` returns the route-set object
 
 ### Seed reusable sample data
 
@@ -269,7 +389,7 @@ This stops:
 - the NetBox development server
 - the RQ worker
 - Krill, if the external Krill workspace is installed
-- the local PostgreSQL and Redis containers
+- the local PostgreSQL, Redis, Routinator, and IRRd containers
 
 ## Running Tests During Development
 

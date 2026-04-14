@@ -144,6 +144,8 @@ Close this refinement slice when:
 
 ### Priority 5: ROV Impact Simulation
 
+- [ROV Impact Simulation Plan](netbox_rpki_rov_impact_simulation_plan.md)
+
 - **Status:** Partially complete
 - **End state:** before approval or apply, operators can see predicted validation outcomes and blast radius for proposed changes
 - **Current state:** change-plan creation can persist `ROAValidationSimulationRun` and `ROAValidationSimulationResult` records, API surfaces expose the latest simulation summary, and operators can review predicted valid, invalid, and not-found counts from plan detail and aggregate surfaces
@@ -151,6 +153,8 @@ Close this refinement slice when:
 - **Closure order:** continue iterating after linting, keeping the work attached to the same reconciliation and plan contracts
 
 ### Priority 6: Bulk Generation and Templating
+
+- [Bulk Generation and Templating Plan](netbox_rpki_bulk_generation_and_templating_plan.md)
 
 - **Status:** Partially complete
 - **End state:** large estates can generate and maintain ROA intent through reusable policy templates, regeneration logic, and bulk workflows
@@ -183,6 +187,8 @@ Close this refinement slice when:
 - **Closure order:** alongside provider-sync maturation, because reporting quality depends on sync and publication evidence quality
 
 ### Priority 10: IRR Coordination
+
+- [IRR Coordination Plan](netbox_rpki_irr_coordination_plan.md)
 
 - **Status:** Not started
 - **End state:** ROA intent and IRR route-object intent can be compared, reported, and eventually coordinated

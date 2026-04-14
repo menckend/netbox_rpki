@@ -63,6 +63,18 @@ case "$(routinator_status_http_code)" in
 		;;
 esac
 
+case "$(irrd_status_http_code)" in
+	200)
+		printf 'IRRd: ready at %s (whois on port %s)\n\n' "$IRRD_BASE_URL" "$IRRD_WHOIS_PORT"
+		;;
+	000|'')
+		printf 'IRRd: unreachable at %s\n\n' "$IRRD_BASE_URL"
+		;;
+	*)
+		printf 'IRRd: reachable at %s (HTTP %s)\n\n' "$IRRD_BASE_URL" "$(irrd_status_http_code)"
+		;;
+esac
+
 docker_compose ps
 printf '\nPostgreSQL: '
 pg_isready -h 127.0.0.1 -p 5432 || true

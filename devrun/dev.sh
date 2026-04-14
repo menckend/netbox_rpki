@@ -5,12 +5,13 @@ source "$(dirname "$0")/common.sh"
 
 usage() {
     cat <<'EOF'
-Usage: ./dev.sh <start|stop|status|validator|seed|e2e>
+Usage: ./dev.sh <start|stop|status|validator|irrd|seed|e2e>
 
     start   Ensure containers, Routinator, config, migrations, worker, optional Krill, and run the NetBox dev server
     stop    Stop the NetBox dev server, worker, optional Krill, and container stack
         status  Show the current NetBox dev environment and process status
         validator  Create or update the local Routinator validator instance inside NetBox
+    irrd    Manage the local IRRd lab service (start|stop|status|logs|seed)
     seed    Populate the local dev database with reusable RPKI sample data
     e2e     Run Playwright browser tests through the local WSL wrapper
 EOF
@@ -45,6 +46,10 @@ validator_dev() {
     "$DEVRUN_DIR/configure-routinator-validator.sh"
 }
 
+irrd_dev() {
+    "$DEVRUN_DIR/irrd-service.sh" "$@"
+}
+
 seed_dev() {
     "$DEVRUN_DIR/seed-data.sh"
 }
@@ -65,6 +70,10 @@ case "${1:-}" in
         ;;
     validator)
         validator_dev
+        ;;
+    irrd)
+        shift
+        irrd_dev "$@"
         ;;
     seed)
         seed_dev

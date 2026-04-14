@@ -4383,6 +4383,7 @@ class ApprovalRecord(NamedRpkiStandardModel):
     maintenance_window_start = models.DateTimeField(blank=True, null=True)
     maintenance_window_end = models.DateTimeField(blank=True, null=True)
     notes = models.TextField(blank=True)
+    simulation_review_json = models.JSONField(default=dict, blank=True)
 
     class Meta:
         ordering = ('-recorded_at', '-created', 'name')
@@ -4768,6 +4769,18 @@ class ASPAChangePlanItem(NamedRpkiStandardModel):
             )
 
 
+class ROAValidationSimulationOutcome(models.TextChoices):
+    VALID = "valid", "Valid"
+    INVALID = "invalid", "Invalid"
+    NOT_FOUND = "not_found", "Not Found"
+
+
+class ROAValidationSimulationApprovalImpact(models.TextChoices):
+    INFORMATIONAL = "informational", "Informational"
+    ACKNOWLEDGEMENT_REQUIRED = "acknowledgement_required", "Acknowledgement Required"
+    BLOCKING = "blocking", "Blocking"
+
+
 class ROAValidationSimulationRun(NamedRpkiStandardModel):
     change_plan = models.ForeignKey(
         to='ROAChangePlan',
@@ -4785,22 +4798,28 @@ class ROAValidationSimulationRun(NamedRpkiStandardModel):
     predicted_valid_count = models.PositiveIntegerField(default=0)
     predicted_invalid_count = models.PositiveIntegerField(default=0)
     predicted_not_found_count = models.PositiveIntegerField(default=0)
+    plan_fingerprint = models.CharField(max_length=64, blank=True)
+    overall_approval_posture = models.CharField(
+        max_length=32,
+        choices=ROAValidationSimulationApprovalImpact.choices,
+        default=ROAValidationSimulationApprovalImpact.INFORMATIONAL,
+    )
+    is_current_for_plan = models.BooleanField(default=False)
+    partially_constrained = models.BooleanField(default=False)
     summary_json = models.JSONField(default=dict, blank=True)
 
     class Meta:
         ordering = ("-started_at", "name")
+        indexes = (
+            models.Index(fields=('change_plan', 'overall_approval_posture'), name='nb_rpki_simrun_plan_post_idx'),
+            models.Index(fields=('change_plan', 'is_current_for_plan'), name='nb_rpki_simrun_plan_curr_idx'),
+        )
 
     def __str__(self):
         return self.name
 
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:roavalidationsimulationrun", args=[self.pk])
-
-
-class ROAValidationSimulationOutcome(models.TextChoices):
-    VALID = "valid", "Valid"
-    INVALID = "invalid", "Invalid"
-    NOT_FOUND = "not_found", "Not Found"
 
 
 class ROAValidationSimulationResult(NamedRpkiStandardModel):
@@ -4821,11 +4840,21 @@ class ROAValidationSimulationResult(NamedRpkiStandardModel):
         choices=ROAValidationSimulationOutcome.choices,
         default=ROAValidationSimulationOutcome.NOT_FOUND,
     )
+    approval_impact = models.CharField(
+        max_length=32,
+        choices=ROAValidationSimulationApprovalImpact.choices,
+        default=ROAValidationSimulationApprovalImpact.INFORMATIONAL,
+    )
+    scenario_type = models.CharField(max_length=64, blank=True)
     details_json = models.JSONField(default=dict, blank=True)
     computed_at = models.DateTimeField(blank=True, null=True)
 
     class Meta:
         ordering = ("name",)
+        indexes = (
+            models.Index(fields=('simulation_run', 'approval_impact'), name='nb_rpki_simres_run_appr_idx'),
+            models.Index(fields=('simulation_run', 'scenario_type'), name='nb_rpki_simres_run_scen_idx'),
+        )
 
     def __str__(self):
         return self.name

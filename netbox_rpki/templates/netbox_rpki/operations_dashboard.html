@@ -477,7 +477,14 @@
                     <td>{{ item.suppressed_count }}</td>
                     <td>
                       {% if item.simulation_run %}
-                        <a href="{{ item.simulation_run.get_absolute_url }}">{{ item.simulation_run.predicted_valid_count }} valid / {{ item.simulation_run.predicted_invalid_count }} invalid / {{ item.simulation_run.predicted_not_found_count }} not-found</a>
+                        <div><a href="{{ item.simulation_run.get_absolute_url }}">{{ item.simulation_posture.status }}</a></div>
+                        <div class="text-muted small">
+                          {{ item.simulation_run.predicted_valid_count }} valid / {{ item.simulation_run.predicted_invalid_count }} invalid / {{ item.simulation_run.predicted_not_found_count }} not-found
+                        </div>
+                        <div class="text-muted small">
+                          {{ item.simulation_blocking_count }} blocking / {{ item.simulation_ack_required_count }} ack-required
+                          {% if not item.simulation_posture.is_current_for_plan %} / stale{% endif %}
+                        </div>
                       {% else %}
                         <span class="text-muted">No simulation</span>
                       {% endif %}

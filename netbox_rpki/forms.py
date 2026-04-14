@@ -136,6 +136,13 @@ class ROAChangePlanApprovalForm(ConfirmationForm):
         widget=forms.CheckboxSelectMultiple,
         help_text='Select acknowledgement-required lint findings reviewed and accepted for this change plan.',
     )
+    acknowledged_simulation_results = forms.ModelMultipleChoiceField(
+        queryset=netbox_rpki.models.ROAValidationSimulationResult.objects.none(),
+        required=False,
+        label='Acknowledge Approval-Required Simulation Results',
+        widget=forms.CheckboxSelectMultiple,
+        help_text='Select simulation results reviewed and accepted for this change plan.',
+    )
     lint_acknowledgement_notes = forms.CharField(
         required=False,
         label='Lint Acknowledgement Notes',
@@ -151,6 +158,7 @@ class ROAChangePlanApprovalForm(ConfirmationForm):
             'maintenance_window_end',
             'approval_notes',
             'acknowledged_findings',
+            'acknowledged_simulation_results',
             'lint_acknowledgement_notes',
             name='Governance',
         ),
@@ -182,6 +190,28 @@ class ROAChangePlanApprovalForm(ConfirmationForm):
             self.fields['acknowledged_findings'].help_text = (
                 'No current unsuppressed acknowledgement-required lint findings remain to acknowledge.'
             )
+        simulation_queryset = netbox_rpki.models.ROAValidationSimulationResult.objects.none()
+        latest_simulation_run_id = (plan.summary_json or {}).get('simulation_run_id') if plan is not None else None
+        if latest_simulation_run_id:
+            latest_simulation_run = plan.simulation_runs.filter(pk=latest_simulation_run_id).first()
+            if latest_simulation_run is not None:
+                ack_required_ids = []
+                for result in latest_simulation_run.results.all():
+                    if result.approval_impact == 'acknowledgement_required':
+                        ack_required_ids.append(result.pk)
+                simulation_queryset = netbox_rpki.models.ROAValidationSimulationResult.objects.filter(pk__in=ack_required_ids)
+                self.fields['acknowledged_simulation_results'].queryset = simulation_queryset
+                self.fields['acknowledged_simulation_results'].label_from_instance = (
+                    lambda obj: (
+                        f'[{obj.outcome_type}] '
+                        f'{obj.scenario_type or obj.details_json.get("scenario_type", obj.name)}: '
+                        f'{obj.details_json.get("operator_message", obj.name)}'
+                    )
+                )
+        if not simulation_queryset.exists():
+            self.fields['acknowledged_simulation_results'].help_text = (
+                'No current acknowledgement-required simulation results remain to acknowledge.'
+            )
 
     def clean(self):
         cleaned_data = super().clean()
@@ -196,6 +226,16 @@ class ROAChangePlanApprovalForm(ConfirmationForm):
             if not selected_ids.issubset(valid_ids):
                 raise ValidationError({
                     'acknowledged_findings': 'Only current unsuppressed acknowledgement-required findings may be acknowledged.'
+                })
+        acknowledged_simulation_results = cleaned_data.get('acknowledged_simulation_results')
+        if acknowledged_simulation_results is not None:
+            valid_ids = set(self.fields['acknowledged_simulation_results'].queryset.values_list('pk', flat=True))
+            selected_ids = {result.pk for result in acknowledged_simulation_results}
+            if not selected_ids.issubset(valid_ids):
+                raise ValidationError({
+                    'acknowledged_simulation_results': (
+                        'Only current acknowledgement-required simulation results may be acknowledged.'
+                    )
                 })
         return cleaned_data
 

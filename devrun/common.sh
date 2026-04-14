@@ -21,6 +21,13 @@ ROUTINATOR_HTTP_PORT="${ROUTINATOR_HTTP_PORT:-8323}"
 ROUTINATOR_METRICS_PORT="${ROUTINATOR_METRICS_PORT:-9556}"
 ROUTINATOR_BASE_URL="${ROUTINATOR_BASE_URL:-http://127.0.0.1:${ROUTINATOR_HTTP_PORT}}"
 ROUTINATOR_STATUS_URL="${ROUTINATOR_STATUS_URL:-${ROUTINATOR_BASE_URL}/api/v1/status}"
+IRRD_DATABASE_NAME="${IRRD_DATABASE_NAME:-irrd}"
+IRRD_DATABASE_USER="${IRRD_DATABASE_USER:-irrd}"
+IRRD_HTTP_PORT="${IRRD_HTTP_PORT:-6080}"
+IRRD_WHOIS_PORT="${IRRD_WHOIS_PORT:-6043}"
+IRRD_SOURCE="${IRRD_SOURCE:-LOCAL-IRR}"
+IRRD_BASE_URL="${IRRD_BASE_URL:-http://127.0.0.1:${IRRD_HTTP_PORT}}"
+IRRD_STATUS_URL="${IRRD_STATUS_URL:-${IRRD_BASE_URL}/v1/status/}"
 
 find_runserver_pids() {
     local pid
@@ -221,6 +228,28 @@ wait_for_routinator() {
     done
 
     printf 'Routinator did not become reachable at %s in time.\n' "$ROUTINATOR_STATUS_URL" >&2
+    return 1
+}
+
+irrd_status_http_code() {
+    curl -sS -o /dev/null -w '%{http_code}' --max-time 2 "$IRRD_STATUS_URL" || true
+}
+
+irrd_is_reachable() {
+    [ "$(irrd_status_http_code)" = "200" ]
+}
+
+wait_for_irrd() {
+    local attempt
+
+    for attempt in $(seq 1 60); do
+        if irrd_is_reachable; then
+            return 0
+        fi
+        sleep 1
+    done
+
+    printf 'IRRd did not become reachable at %s in time.\n' "$IRRD_STATUS_URL" >&2
     return 1
 }
 

@@ -22,6 +22,7 @@ from netbox_rpki.services import (
     preview_roa_change_plan_provider_write,
     reconcile_aspa_intents,
     reconcile_roa_intents,
+    simulate_roa_change_plan,
 )
 from netbox_rpki.tests.base import PluginAPITestCase, PluginViewTestCase
 from netbox_rpki.tests.utils import (
@@ -37,7 +38,9 @@ from netbox_rpki.tests.utils import (
     create_test_provider_sync_run,
     create_test_provider_write_execution,
     create_test_roa_change_plan,
+    create_test_roa_change_plan_item,
     create_test_roa_change_plan_matrix,
+    create_test_roa_lint_run,
     create_test_routing_intent_profile,
 )
 
@@ -52,6 +55,56 @@ def current_ack_required_finding_ids(plan):
         if finding.details_json.get('approval_impact') == 'acknowledgement_required'
         and not finding.details_json.get('suppressed')
     ]
+
+
+def current_ack_required_simulation_result_ids(plan):
+    simulation_run = plan.simulation_runs.order_by('-started_at', '-created').first()
+    if simulation_run is None:
+        return []
+    return [
+        result.pk
+        for result in simulation_run.results.all()
+        if result.approval_impact == 'acknowledgement_required'
+    ]
+
+
+def build_clean_simulation_plan(
+    *,
+    organization,
+    reconciliation_run,
+    provider_account,
+    provider_snapshot,
+    prefix_text,
+    origin_asn_value,
+    max_length_value,
+    plan_name,
+):
+    plan = create_test_roa_change_plan(
+        name=plan_name,
+        organization=organization,
+        source_reconciliation_run=reconciliation_run,
+        provider_account=provider_account,
+        provider_snapshot=provider_snapshot,
+    )
+    create_test_roa_change_plan_item(
+        name=f'{plan_name} Item',
+        change_plan=plan,
+        action_type=rpki_models.ROAChangePlanAction.CREATE,
+        plan_semantic=rpki_models.ROAChangePlanItemSemantic.CREATE,
+        provider_operation=rpki_models.ProviderWriteOperation.ADD_ROUTE,
+        after_state_json={
+            'prefix_cidr_text': prefix_text,
+            'origin_asn_value': origin_asn_value,
+            'max_length_value': max_length_value,
+        },
+    )
+    create_test_roa_lint_run(
+        name=f'{plan_name} Clean Lint',
+        reconciliation_run=reconciliation_run,
+        change_plan=plan,
+    )
+    simulate_roa_change_plan(plan)
+    return plan
 
 
 class ProviderWriteServiceTestCase(TestCase):
@@ -319,6 +372,82 @@ class ProviderWriteServiceTestCase(TestCase):
         with self.assertRaisesMessage(ProviderWriteError, 'unresolved blocking lint finding'):
             approve_roa_change_plan(plan, approved_by='approval-user')
 
+    def test_approve_denies_acknowledgement_required_simulation_results_until_acknowledged(self):
+        plan = build_clean_simulation_plan(
+            organization=self.organization,
+            reconciliation_run=self.reconciliation_run,
+            provider_account=self.provider_account,
+            provider_snapshot=self.provider_snapshot,
+            prefix_text=str(self.primary_prefix.prefix),
+            origin_asn_value=self.primary_asn.asn,
+            max_length_value=26,
+            plan_name='Simulation Ack Approval Plan',
+        )
+
+        self.assertGreater(len(current_ack_required_simulation_result_ids(plan)), 0)
+        with self.assertRaisesMessage(ProviderWriteError, 'acknowledgement-required simulation results'):
+            approve_roa_change_plan(
+                plan,
+                approved_by='approval-user',
+                acknowledged_finding_ids=current_ack_required_finding_ids(plan),
+            )
+
+    def test_approve_accepts_acknowledged_simulation_results(self):
+        plan = build_clean_simulation_plan(
+            organization=self.organization,
+            reconciliation_run=self.reconciliation_run,
+            provider_account=self.provider_account,
+            provider_snapshot=self.provider_snapshot,
+            prefix_text=str(self.primary_prefix.prefix),
+            origin_asn_value=self.primary_asn.asn,
+            max_length_value=26,
+            plan_name='Simulation Ack Accepted Plan',
+        )
+
+        approve_roa_change_plan(
+            plan,
+            approved_by='approval-user',
+            acknowledged_finding_ids=current_ack_required_finding_ids(plan),
+            acknowledged_simulation_result_ids=current_ack_required_simulation_result_ids(plan),
+        )
+        plan.refresh_from_db()
+        approval_record = plan.approval_records.get()
+
+        self.assertEqual(plan.status, rpki_models.ROAChangePlanStatus.APPROVED)
+        self.assertEqual(
+            plan.summary_json['approved_simulation_result_ids'],
+            current_ack_required_simulation_result_ids(plan),
+        )
+        self.assertEqual(
+            approval_record.simulation_review_json['acknowledged_result_ids'],
+            current_ack_required_simulation_result_ids(plan),
+        )
+        self.assertEqual(
+            approval_record.simulation_review_json['overall_approval_posture'],
+            rpki_models.ROAValidationSimulationApprovalImpact.ACKNOWLEDGEMENT_REQUIRED,
+        )
+        self.assertEqual(
+            approval_record.simulation_review_json['acknowledged_result_count'],
+            len(current_ack_required_simulation_result_ids(plan)),
+        )
+        self.assertEqual(
+            approval_record.simulation_review_json,
+            plan.summary_json['approved_simulation_review'],
+        )
+
+    def test_approve_denies_stale_simulation_fingerprint(self):
+        plan = create_roa_change_plan(self.reconciliation_run, name='Stale Simulation Approval Plan')
+        create_item = plan.items.filter(action_type=rpki_models.ROAChangePlanAction.CREATE).first()
+        create_item.after_state_json['max_length_value'] = 25
+        create_item.save(update_fields=('after_state_json',))
+
+        with self.assertRaisesMessage(ProviderWriteError, 'simulation run is refreshed for the current plan state'):
+            approve_roa_change_plan(
+                plan,
+                approved_by='approval-user',
+                acknowledged_finding_ids=current_ack_required_finding_ids(plan),
+            )
+
     def test_acknowledge_records_lint_acknowledgements_without_approving_plan(self):
         plan = create_roa_change_plan(self.reconciliation_run, name='Standalone Ack Plan')
         ack_required_finding = plan.lint_runs.get().findings.get(finding_code='plan_withdraw_without_replacement')
@@ -540,7 +669,11 @@ class ROAChangePlanActionAPITestCase(PluginAPITestCase):
         cls.plan = create_roa_change_plan(cls.reconciliation_run)
 
     def test_preview_action_returns_delta_and_execution(self):
-        self.add_permissions('netbox_rpki.view_roachangeplan', 'netbox_rpki.change_roachangeplan')
+        self.add_permissions(
+            'netbox_rpki.view_roachangeplan',
+            'netbox_rpki.change_roachangeplan',
+            'netbox_rpki.view_approvalrecord',
+        )
         url = reverse('plugins-api:netbox_rpki-api:roachangeplan-preview', kwargs={'pk': self.plan.pk})
 
         response = self.client.post(url, {}, format='json', **self.header)
@@ -553,7 +686,11 @@ class ROAChangePlanActionAPITestCase(PluginAPITestCase):
         self.assertIn('latest_simulation_summary', response.data)
 
     def test_approve_action_transitions_plan(self):
-        self.add_permissions('netbox_rpki.view_roachangeplan', 'netbox_rpki.change_roachangeplan')
+        self.add_permissions(
+            'netbox_rpki.view_roachangeplan',
+            'netbox_rpki.change_roachangeplan',
+            'netbox_rpki.view_approvalrecord',
+        )
         url = reverse('plugins-api:netbox_rpki-api:roachangeplan-approve', kwargs={'pk': self.plan.pk})
 
         response = self.client.post(
@@ -644,6 +781,65 @@ class ROAChangePlanActionAPITestCase(PluginAPITestCase):
 
         self.assertHttpStatus(response, 400)
         self.assertEqual(plan.status, rpki_models.ROAChangePlanStatus.DRAFT)
+
+    def test_approve_action_denies_ack_required_simulation_results_until_acknowledged(self):
+        plan = build_clean_simulation_plan(
+            organization=self.organization,
+            reconciliation_run=self.reconciliation_run,
+            provider_account=self.provider_account,
+            provider_snapshot=self.provider_snapshot,
+            prefix_text=str(self.primary_prefix.prefix),
+            origin_asn_value=self.primary_asn.asn,
+            max_length_value=26,
+            plan_name='API Simulation Ack Approval Plan',
+        )
+        self.add_permissions('netbox_rpki.view_roachangeplan', 'netbox_rpki.change_roachangeplan')
+        url = reverse('plugins-api:netbox_rpki-api:roachangeplan-approve', kwargs={'pk': plan.pk})
+
+        response = self.client.post(
+            url,
+            {'acknowledged_finding_ids': []},
+            format='json',
+            **self.header,
+        )
+
+        self.assertHttpStatus(response, 400)
+        self.assertEqual(plan.status, rpki_models.ROAChangePlanStatus.DRAFT)
+
+    def test_approve_action_accepts_acknowledged_simulation_results(self):
+        plan = build_clean_simulation_plan(
+            organization=self.organization,
+            reconciliation_run=self.reconciliation_run,
+            provider_account=self.provider_account,
+            provider_snapshot=self.provider_snapshot,
+            prefix_text=str(self.primary_prefix.prefix),
+            origin_asn_value=self.primary_asn.asn,
+            max_length_value=26,
+            plan_name='API Simulation Ack Accepted Plan',
+        )
+        self.add_permissions('netbox_rpki.view_roachangeplan', 'netbox_rpki.change_roachangeplan')
+        url = reverse('plugins-api:netbox_rpki-api:roachangeplan-approve', kwargs={'pk': plan.pk})
+
+        response = self.client.post(
+            url,
+            {
+                'acknowledged_simulation_result_ids': current_ack_required_simulation_result_ids(plan),
+            },
+            format='json',
+            **self.header,
+        )
+
+        self.assertHttpStatus(response, 200)
+        plan.refresh_from_db()
+        self.assertEqual(plan.status, rpki_models.ROAChangePlanStatus.APPROVED)
+        self.assertEqual(
+            response.data['approval_record']['simulation_review_json'],
+            plan.summary_json['approved_simulation_review'],
+        )
+        self.assertEqual(
+            response.data['approval_record']['simulation_review_json']['acknowledged_result_ids'],
+            current_ack_required_simulation_result_ids(plan),
+        )
 
     def test_apply_action_runs_provider_write_flow(self):
         self.add_permissions('netbox_rpki.view_roachangeplan', 'netbox_rpki.change_roachangeplan')
@@ -909,6 +1105,42 @@ class ROAChangePlanActionViewTestCase(PluginViewTestCase):
         self.assertEqual(self.plan.ticket_reference, 'UI-CHG-88')
         self.assertEqual(self.plan.change_reference, 'UI-CAB-12')
         self.assertEqual(self.plan.approval_records.count(), 1)
+
+    def test_approve_view_shows_and_accepts_acknowledgement_required_simulation_results(self):
+        plan = build_clean_simulation_plan(
+            organization=self.organization,
+            reconciliation_run=self.reconciliation_run,
+            provider_account=self.provider_account,
+            provider_snapshot=self.provider_snapshot,
+            prefix_text=str(self.primary_prefix.prefix),
+            origin_asn_value=self.primary_asn.asn,
+            max_length_value=26,
+            plan_name='UI Simulation Ack Plan',
+        )
+        self.add_permissions('netbox_rpki.view_roachangeplan', 'netbox_rpki.change_roachangeplan')
+        url = reverse('plugins:netbox_rpki:roachangeplan_approve', kwargs={'pk': plan.pk})
+
+        get_response = self.client.get(url)
+
+        self.assertHttpStatus(get_response, 200)
+        self.assertContains(get_response, 'Acknowledge Approval-Required Simulation Results')
+
+        post_response = self.client.post(
+            url,
+            {
+                'confirm': True,
+                'acknowledged_simulation_results': current_ack_required_simulation_result_ids(plan),
+            },
+        )
+
+        plan.refresh_from_db()
+        self.assertRedirects(post_response, plan.get_absolute_url())
+        self.assertEqual(plan.status, rpki_models.ROAChangePlanStatus.APPROVED)
+        approval_record = plan.approval_records.get()
+        self.assertEqual(
+            approval_record.simulation_review_json['acknowledged_result_ids'],
+            current_ack_required_simulation_result_ids(plan),
+        )
 
     def test_lint_finding_suppress_and_lift_views(self):
         finding = self.plan.lint_runs.get().findings.first()

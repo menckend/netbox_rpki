@@ -1,0 +1,60 @@
+mntner:         LOCAL-IRR-MNT
+descr:          Local IRRd devrun maintainer
+admin-c:        LOCAL-IRR-PERSON
+upd-to:         irrd-dev@example.invalid
+mnt-nfy:        irrd-dev@example.invalid
+auth:           BCRYPT-PW {{MNTNER_AUTH_HASH}}
+mnt-by:         LOCAL-IRR-MNT
+remarks:        Seeded by devrun/seed-irrd-data.sh
+source:         {{IRRD_SOURCE}}
+
+person:         Local IRRd Dev Contact
+address:        123 Example Street
+phone:          +1-555-0100
+e-mail:         irrd-dev@example.invalid
+nic-hdl:        LOCAL-IRR-PERSON
+mnt-by:         LOCAL-IRR-MNT
+remarks:        Seeded by devrun/seed-irrd-data.sh
+source:         {{IRRD_SOURCE}}
+
+aut-num:        AS64500
+as-name:        AS-LOCAL-IRR
+descr:          Local IRRd devrun origin ASN
+admin-c:        LOCAL-IRR-PERSON
+tech-c:         LOCAL-IRR-PERSON
+mnt-by:         LOCAL-IRR-MNT
+remarks:        Seeded by devrun/seed-irrd-data.sh
+source:         {{IRRD_SOURCE}}
+
+as-set:         AS64500:AS-LOCAL-CUSTOMERS
+descr:          Local IRRd devrun customer set
+members:        AS64500
+admin-c:        LOCAL-IRR-PERSON
+tech-c:         LOCAL-IRR-PERSON
+mnt-by:         LOCAL-IRR-MNT
+remarks:        Seeded by devrun/seed-irrd-data.sh
+source:         {{IRRD_SOURCE}}
+
+route-set:      AS64500:RS-LOCAL-EDGE
+descr:          Local IRRd devrun edge route set
+admin-c:        LOCAL-IRR-PERSON
+tech-c:         LOCAL-IRR-PERSON
+mnt-by:         LOCAL-IRR-MNT
+remarks:        Seeded by devrun/seed-irrd-data.sh
+source:         {{IRRD_SOURCE}}
+
+route:          203.0.113.0/24
+descr:          Local IRRd devrun IPv4 route object
+origin:         AS64500
+member-of:      AS64500:RS-LOCAL-EDGE
+mnt-by:         LOCAL-IRR-MNT
+remarks:        Seeded by devrun/seed-irrd-data.sh
+source:         {{IRRD_SOURCE}}
+
+route6:         2001:db8:fbf4::/48
+descr:          Local IRRd devrun IPv6 route object
+origin:         AS64500
+member-of:      AS64500:RS-LOCAL-EDGE
+mnt-by:         LOCAL-IRR-MNT
+remarks:        Seeded by devrun/seed-irrd-data.sh
+source:         {{IRRD_SOURCE}}

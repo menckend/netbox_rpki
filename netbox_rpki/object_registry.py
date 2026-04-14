@@ -2707,6 +2707,7 @@ OBJECT_SPECS = (
             "maintenance_window_start",
             "maintenance_window_end",
             "notes",
+            "simulation_review_json",
         ),
         brief_fields=(
             "name",

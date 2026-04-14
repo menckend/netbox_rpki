@@ -22,7 +22,11 @@ from .roa_lint import (
     run_roa_lint,
     suppress_roa_lint_finding,
 )
-from .rov_simulation import simulate_roa_change_plan
+from .rov_simulation import (
+    build_roa_change_plan_simulation_posture,
+    require_roa_change_plan_simulation_approvable,
+    simulate_roa_change_plan,
+)
 from .aspa_intent import (
     ASPAReconciliationExecutionError,
     reconcile_aspa_intents,
@@ -65,6 +69,7 @@ __all__ = (
     'build_bulk_routing_intent_baseline_fingerprint',
     'build_roa_change_plan_lint_posture',
     'build_roa_change_plan_delta',
+    'build_roa_change_plan_simulation_posture',
     'compile_routing_intent_policy',
     'create_roa_change_plan',
     'create_aspa_change_plan',
@@ -77,6 +82,7 @@ __all__ = (
     'refresh_roa_change_plan_lint_posture',
     'reconcile_aspa_intents',
     'reconcile_roa_intents',
+    'require_roa_change_plan_simulation_approvable',
     'run_roa_lint',
     'run_routing_intent_template_binding_pipeline',
     'run_aspa_reconciliation_pipeline',

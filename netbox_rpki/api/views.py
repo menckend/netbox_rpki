@@ -43,6 +43,7 @@ from netbox_rpki.services import (
     approve_aspa_change_plan,
     approve_roa_change_plan,
     build_roa_change_plan_lint_posture,
+    build_roa_change_plan_simulation_posture,
     create_aspa_change_plan,
     create_roa_change_plan,
     preview_routing_intent_template_binding,
@@ -697,6 +698,20 @@ class ROAChangePlanViewSet(VIEWSET_CLASS_MAP['roachangeplan']):
         provider_backed_count = 0
         replacement_count_total = 0
         simulated_plan_count = 0
+        simulation_current_plan_count = 0
+        simulation_missing_count = 0
+        simulation_pending_count = 0
+        simulation_stale_count = 0
+        simulation_blocking_plan_count = 0
+        simulation_ack_required_plan_count = 0
+        simulation_informational_plan_count = 0
+        simulation_partially_constrained_plan_count = 0
+        simulation_status_counts: dict[str, int] = {}
+        simulation_approval_impact_totals = {
+            rpki_models.ROAValidationSimulationApprovalImpact.INFORMATIONAL: 0,
+            rpki_models.ROAValidationSimulationApprovalImpact.ACKNOWLEDGEMENT_REQUIRED: 0,
+            rpki_models.ROAValidationSimulationApprovalImpact.BLOCKING: 0,
+        }
         lint_warning_total = 0
         lint_error_total = 0
         lint_blocking_total = 0
@@ -709,9 +724,29 @@ class ROAChangePlanViewSet(VIEWSET_CLASS_MAP['roachangeplan']):
             if plan.is_provider_backed:
                 provider_backed_count += 1
             replacement_count_total += (plan.summary_json or {}).get('replacement_count', 0)
-            simulation_run = plan.simulation_runs.order_by('-started_at', '-created').first()
-            if simulation_run is not None:
+            simulation_posture = build_roa_change_plan_simulation_posture(plan)
+            if simulation_posture['has_simulation']:
                 simulated_plan_count += 1
+            if simulation_posture['is_current_for_plan']:
+                simulation_current_plan_count += 1
+            if simulation_posture['partially_constrained']:
+                simulation_partially_constrained_plan_count += 1
+            simulation_status = simulation_posture['status']
+            simulation_status_counts[simulation_status] = simulation_status_counts.get(simulation_status, 0) + 1
+            if simulation_status == 'missing':
+                simulation_missing_count += 1
+            elif simulation_status == 'pending':
+                simulation_pending_count += 1
+            elif simulation_status == 'stale':
+                simulation_stale_count += 1
+            elif simulation_status == rpki_models.ROAValidationSimulationApprovalImpact.BLOCKING:
+                simulation_blocking_plan_count += 1
+            elif simulation_status == rpki_models.ROAValidationSimulationApprovalImpact.ACKNOWLEDGEMENT_REQUIRED:
+                simulation_ack_required_plan_count += 1
+            elif simulation_status == rpki_models.ROAValidationSimulationApprovalImpact.INFORMATIONAL:
+                simulation_informational_plan_count += 1
+            for impact, count in (simulation_posture['approval_impact_counts'] or {}).items():
+                simulation_approval_impact_totals[impact] = simulation_approval_impact_totals.get(impact, 0) + count
             lint_run = plan.lint_runs.order_by('-started_at', '-created').first()
             if lint_run is not None:
                 lint_warning_total += lint_run.warning_count
@@ -729,6 +764,16 @@ class ROAChangePlanViewSet(VIEWSET_CLASS_MAP['roachangeplan']):
             'provider_backed_count': provider_backed_count,
             'replacement_count_total': replacement_count_total,
             'simulated_plan_count': simulated_plan_count,
+            'simulation_current_plan_count': simulation_current_plan_count,
+            'simulation_missing_count': simulation_missing_count,
+            'simulation_pending_count': simulation_pending_count,
+            'simulation_stale_count': simulation_stale_count,
+            'simulation_blocking_plan_count': simulation_blocking_plan_count,
+            'simulation_acknowledgement_required_plan_count': simulation_ack_required_plan_count,
+            'simulation_informational_plan_count': simulation_informational_plan_count,
+            'simulation_partially_constrained_plan_count': simulation_partially_constrained_plan_count,
+            'simulation_status_counts': simulation_status_counts,
+            'simulation_approval_impact_totals': simulation_approval_impact_totals,
             'lint_warning_total': lint_warning_total,
             'lint_error_total': lint_error_total,
             'lint_blocking_total': lint_blocking_total,

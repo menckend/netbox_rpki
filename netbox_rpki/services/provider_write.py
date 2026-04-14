@@ -10,6 +10,7 @@ from netbox_rpki import models as rpki_models
 from netbox_rpki.services.provider_sync import sync_provider_account
 from netbox_rpki.services.provider_sync_krill import krill_aspas_url, krill_routes_url, krill_ssl_context
 from netbox_rpki.services.roa_lint import build_roa_change_plan_lint_posture, refresh_roa_change_plan_lint_posture
+from netbox_rpki.services.rov_simulation import require_roa_change_plan_simulation_approvable
 
 
 class ProviderWriteError(ValueError):
@@ -239,6 +240,7 @@ def _create_approval_record_for_plan(
     maintenance_window_start,
     maintenance_window_end,
     approval_notes: str,
+    simulation_review_json: dict | None = None,
 ) -> rpki_models.ApprovalRecord:
     payload = {
         'name': _build_approval_record_name(plan, approved_at),
@@ -252,6 +254,7 @@ def _create_approval_record_for_plan(
         'maintenance_window_start': maintenance_window_start,
         'maintenance_window_end': maintenance_window_end,
         'notes': approval_notes,
+        'simulation_review_json': simulation_review_json or {},
     }
     if isinstance(plan, rpki_models.ASPAChangePlan):
         payload['aspa_change_plan'] = plan
@@ -261,6 +264,49 @@ def _create_approval_record_for_plan(
     approval_record.full_clean(validate_unique=False)
     approval_record.save()
     return approval_record
+
+
+def _build_simulation_review_audit(
+    *,
+    simulation_run: rpki_models.ROAValidationSimulationRun,
+    acknowledged_simulation_result_ids: list[int],
+) -> dict:
+    summary = dict(simulation_run.summary_json or {})
+    acknowledged_id_set = set(acknowledged_simulation_result_ids or [])
+    ack_required_results = []
+    acknowledged_results = []
+    for result in simulation_run.results.order_by('pk'):
+        approval_impact = result.approval_impact or (result.details_json or {}).get('approval_impact')
+        if approval_impact != rpki_models.ROAValidationSimulationApprovalImpact.ACKNOWLEDGEMENT_REQUIRED:
+            continue
+        ack_required_results.append(result)
+        if result.pk in acknowledged_id_set:
+            details = dict(result.details_json or {})
+            acknowledged_results.append({
+                'id': result.pk,
+                'name': result.name,
+                'change_plan_item_id': result.change_plan_item_id,
+                'approval_impact': approval_impact,
+                'scenario_type': result.scenario_type or details.get('scenario_type'),
+                'operator_message': details.get('operator_message'),
+                'why_it_matters': details.get('why_it_matters'),
+                'operator_action': details.get('operator_action'),
+            })
+
+    ack_required_ids = [result.pk for result in ack_required_results]
+    return {
+        'simulation_run_id': simulation_run.pk,
+        'simulation_plan_fingerprint': simulation_run.plan_fingerprint or summary.get('plan_fingerprint'),
+        'overall_approval_posture': simulation_run.overall_approval_posture or summary.get('overall_approval_posture'),
+        'is_current_for_plan': simulation_run.is_current_for_plan,
+        'partially_constrained': simulation_run.partially_constrained,
+        'approval_impact_counts': dict(summary.get('approval_impact_counts') or {}),
+        'scenario_type_counts': dict(summary.get('scenario_type_counts') or {}),
+        'acknowledgement_required_result_ids': ack_required_ids,
+        'acknowledged_result_ids': sorted(acknowledged_id_set),
+        'acknowledged_result_count': len(acknowledged_results),
+        'acknowledged_results': acknowledged_results,
+    }
 
 
 def _create_lint_acknowledgements_for_plan(
@@ -350,11 +396,13 @@ def approve_roa_change_plan(
     maintenance_window_end=None,
     approval_notes: str = '',
     acknowledged_finding_ids: list[int] | None = None,
+    acknowledged_simulation_result_ids: list[int] | None = None,
     lint_acknowledgement_notes: str = '',
 ) -> rpki_models.ROAChangePlan:
     plan = _normalize_plan(plan)
     _require_approvable(plan)
     acknowledged_finding_ids = acknowledged_finding_ids or []
+    acknowledged_simulation_result_ids = acknowledged_simulation_result_ids or []
     posture = build_roa_change_plan_lint_posture(
         plan,
         acknowledged_finding_ids=acknowledged_finding_ids,
@@ -369,9 +417,20 @@ def approve_roa_change_plan(
         raise ProviderWriteError(
             'This ROA change plan has acknowledgement-required lint findings that must be acknowledged before approval.'
         )
+    try:
+        simulation_run = require_roa_change_plan_simulation_approvable(
+            plan,
+            acknowledged_simulation_result_ids=acknowledged_simulation_result_ids,
+        )
+    except ValueError as exc:
+        raise ProviderWriteError(str(exc)) from exc
 
     approved_at = timezone.now()
     with transaction.atomic():
+        simulation_review_json = _build_simulation_review_audit(
+            simulation_run=simulation_run,
+            acknowledged_simulation_result_ids=acknowledged_simulation_result_ids,
+        )
         plan.status = rpki_models.ROAChangePlanStatus.APPROVED
         plan.ticket_reference = ticket_reference
         plan.change_reference = change_reference
@@ -379,6 +438,15 @@ def approve_roa_change_plan(
         plan.maintenance_window_end = maintenance_window_end
         plan.approved_at = approved_at
         plan.approved_by = approved_by
+        plan.summary_json['approved_simulation_run_id'] = simulation_run.pk
+        plan.summary_json['approved_simulation_plan_fingerprint'] = (
+            simulation_run.plan_fingerprint or (simulation_run.summary_json or {}).get('plan_fingerprint')
+        )
+        plan.summary_json['approved_simulation_overall_approval_posture'] = (
+            simulation_run.overall_approval_posture or (simulation_run.summary_json or {}).get('overall_approval_posture')
+        )
+        plan.summary_json['approved_simulation_result_ids'] = acknowledged_simulation_result_ids
+        plan.summary_json['approved_simulation_review'] = simulation_review_json
         plan.full_clean(validate_unique=False)
         plan.save(update_fields=(
             'status',
@@ -388,6 +456,7 @@ def approve_roa_change_plan(
             'maintenance_window_end',
             'approved_at',
             'approved_by',
+            'summary_json',
         ))
         _create_approval_record_for_plan(
             plan=plan,
@@ -398,6 +467,7 @@ def approve_roa_change_plan(
             maintenance_window_start=maintenance_window_start,
             maintenance_window_end=maintenance_window_end,
             approval_notes=approval_notes,
+            simulation_review_json=simulation_review_json,
         )
         _create_lint_acknowledgements_for_plan(
             plan=plan,

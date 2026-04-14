@@ -332,11 +332,97 @@ def get_lint_suppression_fact_context(suppression: models.ROALintSuppression) ->
 
 
 def get_simulation_run_summary(run: models.ROAValidationSimulationRun) -> str | None:
-    return get_pretty_json(run.summary_json)
+    summary = dict(run.summary_json or {})
+    summary.setdefault('plan_fingerprint', run.plan_fingerprint)
+    summary.setdefault('overall_approval_posture', run.overall_approval_posture)
+    summary.setdefault('is_current_for_plan', run.is_current_for_plan)
+    summary.setdefault('partially_constrained', run.partially_constrained)
+    return get_pretty_json(summary)
 
 
 def get_simulation_result_details(result: models.ROAValidationSimulationResult) -> str | None:
-    return get_pretty_json(result.details_json)
+    details = dict(result.details_json or {})
+    details.setdefault('approval_impact', result.approval_impact)
+    details.setdefault('scenario_type', result.scenario_type)
+    return get_pretty_json(details)
+
+
+def get_latest_plan_simulation_run(plan: models.ROAChangePlan) -> models.ROAValidationSimulationRun | None:
+    return plan.simulation_runs.order_by('-started_at', '-created').first()
+
+
+def get_latest_plan_simulation_posture(plan: models.ROAChangePlan) -> str | None:
+    simulation_run = get_latest_plan_simulation_run(plan)
+    if simulation_run is None:
+        return None
+    return simulation_run.overall_approval_posture
+
+
+def get_latest_plan_simulation_is_current(plan: models.ROAChangePlan) -> bool | None:
+    simulation_run = get_latest_plan_simulation_run(plan)
+    if simulation_run is None:
+        return None
+    return simulation_run.is_current_for_plan
+
+
+def get_latest_plan_simulation_partially_constrained(plan: models.ROAChangePlan) -> bool | None:
+    simulation_run = get_latest_plan_simulation_run(plan)
+    if simulation_run is None:
+        return None
+    return simulation_run.partially_constrained
+
+
+def get_latest_plan_simulation_summary(plan: models.ROAChangePlan) -> str | None:
+    simulation_run = get_latest_plan_simulation_run(plan)
+    if simulation_run is None:
+        return None
+    return get_simulation_run_summary(simulation_run)
+
+
+def get_simulation_run_approval_impact_counts(run: models.ROAValidationSimulationRun) -> str | None:
+    return get_pretty_json((run.summary_json or {}).get('approval_impact_counts') or {})
+
+
+def get_simulation_run_scenario_type_counts(run: models.ROAValidationSimulationRun) -> str | None:
+    return get_pretty_json((run.summary_json or {}).get('scenario_type_counts') or {})
+
+
+def get_simulation_result_operator_message(result: models.ROAValidationSimulationResult) -> str | None:
+    return (result.details_json or {}).get('operator_message')
+
+
+def get_simulation_result_why_it_matters(result: models.ROAValidationSimulationResult) -> str | None:
+    return (result.details_json or {}).get('why_it_matters')
+
+
+def get_simulation_result_operator_action(result: models.ROAValidationSimulationResult) -> str | None:
+    return (result.details_json or {}).get('operator_action')
+
+
+def get_simulation_result_impact_scope(result: models.ROAValidationSimulationResult) -> str | None:
+    return (result.details_json or {}).get('impact_scope')
+
+
+def get_simulation_result_before_coverage(result: models.ROAValidationSimulationResult) -> str | None:
+    return get_pretty_json((result.details_json or {}).get('before_coverage') or {})
+
+
+def get_simulation_result_after_coverage(result: models.ROAValidationSimulationResult) -> str | None:
+    return get_pretty_json((result.details_json or {}).get('after_coverage') or {})
+
+
+def get_simulation_result_affected_prefixes(result: models.ROAValidationSimulationResult) -> str | None:
+    prefixes = (result.details_json or {}).get('affected_prefixes') or []
+    return ', '.join(str(prefix) for prefix in prefixes) or None
+
+
+def get_simulation_result_affected_origin_asns(result: models.ROAValidationSimulationResult) -> str | None:
+    origin_asns = (result.details_json or {}).get('affected_origin_asns') or []
+    return ', '.join(str(asn) for asn in origin_asns) or None
+
+
+def get_approval_record_simulation_review(record: models.ApprovalRecord) -> str | None:
+    return get_pretty_json(record.simulation_review_json)
 
 
 def get_plan_provider_capability(plan) -> str | None:
@@ -799,6 +885,33 @@ ROA_CHANGE_PLAN_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(label='Apply Requested By', value=lambda obj: obj.apply_requested_by, empty_text='None'),
         DetailFieldSpec(label='Applied At', value=lambda obj: obj.applied_at, empty_text='None'),
         DetailFieldSpec(label='Failed At', value=lambda obj: obj.failed_at, empty_text='None'),
+        DetailFieldSpec(
+            label='Latest Simulation Run',
+            value=get_latest_plan_simulation_run,
+            kind='link',
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='Latest Simulation Posture',
+            value=get_latest_plan_simulation_posture,
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='Latest Simulation Is Current',
+            value=get_latest_plan_simulation_is_current,
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='Latest Simulation Partially Constrained',
+            value=get_latest_plan_simulation_partially_constrained,
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='Latest Simulation Summary',
+            value=get_latest_plan_simulation_summary,
+            kind='code',
+            empty_text='None',
+        ),
         DetailFieldSpec(
             label='Provider Write Capability',
             value=get_plan_provider_capability,
@@ -1642,6 +1755,34 @@ ROA_LINT_ACKNOWLEDGEMENT_DETAIL_SPEC = DetailSpec(
 )
 
 
+APPROVAL_RECORD_DETAIL_SPEC = DetailSpec(
+    model=models.ApprovalRecord,
+    list_url_name='plugins:netbox_rpki:approvalrecord_list',
+    breadcrumb_label='Approval Records',
+    card_title='Approval Record',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Organization', value=lambda obj: obj.organization, kind='link'),
+        DetailFieldSpec(label='Change Plan', value=lambda obj: obj.change_plan, kind='link', empty_text='None'),
+        DetailFieldSpec(label='ASPA Change Plan', value=lambda obj: obj.aspa_change_plan, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Disposition', value=lambda obj: obj.disposition),
+        DetailFieldSpec(label='Recorded By', value=lambda obj: obj.recorded_by, empty_text='None'),
+        DetailFieldSpec(label='Recorded At', value=lambda obj: obj.recorded_at, empty_text='None'),
+        DetailFieldSpec(label='Ticket Reference', value=lambda obj: obj.ticket_reference, empty_text='None'),
+        DetailFieldSpec(label='Change Reference', value=lambda obj: obj.change_reference, empty_text='None'),
+        DetailFieldSpec(label='Maintenance Window Start', value=lambda obj: obj.maintenance_window_start, empty_text='None'),
+        DetailFieldSpec(label='Maintenance Window End', value=lambda obj: obj.maintenance_window_end, empty_text='None'),
+        DetailFieldSpec(label='Notes', value=lambda obj: obj.notes, empty_text='None'),
+        DetailFieldSpec(
+            label='Simulation Review',
+            value=get_approval_record_simulation_review,
+            kind='code',
+            empty_text='None',
+        ),
+    ),
+)
+
+
 ROA_VALIDATION_SIMULATION_RUN_DETAIL_SPEC = DetailSpec(
     model=models.ROAValidationSimulationRun,
     list_url_name='plugins:netbox_rpki:roavalidationsimulationrun_list',
@@ -1657,6 +1798,22 @@ ROA_VALIDATION_SIMULATION_RUN_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(label='Predicted Valid Count', value=lambda obj: obj.predicted_valid_count),
         DetailFieldSpec(label='Predicted Invalid Count', value=lambda obj: obj.predicted_invalid_count),
         DetailFieldSpec(label='Predicted Not Found Count', value=lambda obj: obj.predicted_not_found_count),
+        DetailFieldSpec(label='Plan Fingerprint', value=lambda obj: obj.plan_fingerprint, empty_text='None'),
+        DetailFieldSpec(label='Overall Approval Posture', value=lambda obj: obj.overall_approval_posture),
+        DetailFieldSpec(label='Current For Plan', value=lambda obj: obj.is_current_for_plan),
+        DetailFieldSpec(label='Partially Constrained', value=lambda obj: obj.partially_constrained),
+        DetailFieldSpec(
+            label='Approval Impact Counts',
+            value=get_simulation_run_approval_impact_counts,
+            kind='code',
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='Scenario Type Counts',
+            value=get_simulation_run_scenario_type_counts,
+            kind='code',
+            empty_text='None',
+        ),
         DetailFieldSpec(label='Summary', value=get_simulation_run_summary, kind='code', empty_text='None'),
     ),
     bottom_tables=(
@@ -1679,6 +1836,26 @@ ROA_VALIDATION_SIMULATION_RESULT_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(label='Simulation Run', value=lambda obj: obj.simulation_run, kind='link'),
         DetailFieldSpec(label='Change Plan Item', value=lambda obj: obj.change_plan_item, kind='link', empty_text='None'),
         DetailFieldSpec(label='Outcome Type', value=lambda obj: obj.outcome_type),
+        DetailFieldSpec(label='Approval Impact', value=lambda obj: obj.approval_impact),
+        DetailFieldSpec(label='Scenario Type', value=lambda obj: obj.scenario_type, empty_text='None'),
+        DetailFieldSpec(label='Impact Scope', value=get_simulation_result_impact_scope, empty_text='None'),
+        DetailFieldSpec(label='Operator Message', value=get_simulation_result_operator_message, empty_text='None'),
+        DetailFieldSpec(label='Why It Matters', value=get_simulation_result_why_it_matters, empty_text='None'),
+        DetailFieldSpec(label='Operator Action', value=get_simulation_result_operator_action, empty_text='None'),
+        DetailFieldSpec(
+            label='Before Coverage',
+            value=get_simulation_result_before_coverage,
+            kind='code',
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='After Coverage',
+            value=get_simulation_result_after_coverage,
+            kind='code',
+            empty_text='None',
+        ),
+        DetailFieldSpec(label='Affected Prefixes', value=get_simulation_result_affected_prefixes, empty_text='None'),
+        DetailFieldSpec(label='Affected Origin ASNs', value=get_simulation_result_affected_origin_asns, empty_text='None'),
         DetailFieldSpec(label='Computed At', value=lambda obj: obj.computed_at, empty_text='None'),
         DetailFieldSpec(label='Details', value=get_simulation_result_details, kind='code', empty_text='None'),
     ),
@@ -2275,6 +2452,7 @@ DETAIL_SPEC_BY_MODEL = {
     models.ROALintFinding: ROA_LINT_FINDING_DETAIL_SPEC,
     models.ROALintAcknowledgement: ROA_LINT_ACKNOWLEDGEMENT_DETAIL_SPEC,
     models.ROALintSuppression: ROA_LINT_SUPPRESSION_DETAIL_SPEC,
+    models.ApprovalRecord: APPROVAL_RECORD_DETAIL_SPEC,
     models.ROAIntentResult: ROA_INTENT_RESULT_DETAIL_SPEC,
     models.PublishedROAResult: PUBLISHED_ROA_RESULT_DETAIL_SPEC,
     models.ROAChangePlanItem: ROA_CHANGE_PLAN_ITEM_DETAIL_SPEC,

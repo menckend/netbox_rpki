@@ -52,6 +52,39 @@ services:
     volumes:
       - routinator_cache:/home/routinator/.rpki-cache
 
+  irrd:
+    build:
+      context: ./irrd
+    container_name: netbox-rpki-irrd
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      IRRD_DATABASE_NAME: ${IRRD_DATABASE_NAME}
+      IRRD_DATABASE_USER: ${IRRD_DATABASE_USER}
+      IRRD_DATABASE_PASSWORD: ${IRRD_DATABASE_PASSWORD}
+      IRRD_HTTP_PORT: 8000
+      IRRD_WHOIS_PORT: 6043
+      IRRD_EXTERNAL_HTTP_URL: http://127.0.0.1:${IRRD_HTTP_PORT}/
+      IRRD_SOURCE: ${IRRD_SOURCE}
+      IRRD_OVERRIDE_PASSWORD: ${IRRD_OVERRIDE_PASSWORD}
+    ports:
+      - "127.0.0.1:${IRRD_HTTP_PORT}:8000"
+      - "127.0.0.1:${IRRD_WHOIS_PORT}:6043"
+    volumes:
+      - irrd_state:/var/lib/irrd
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/v1/status/"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
 volumes:
   postgres_data:
   routinator_cache:
+  irrd_state:

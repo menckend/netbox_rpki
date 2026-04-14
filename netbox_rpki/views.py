@@ -33,6 +33,7 @@ from netbox_rpki.services import (
     approve_aspa_change_plan,
     build_aspa_change_plan_delta,
     build_roa_change_plan_lint_posture,
+    build_roa_change_plan_simulation_posture,
     approve_roa_change_plan,
     build_roa_change_plan_delta,
     create_aspa_change_plan,
@@ -954,9 +955,12 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
         for plan in queryset:
             if plan.status not in attention_statuses:
                 continue
-            latest_simulation = plan.simulation_runs.order_by('-started_at', '-created').first()
             latest_lint_run = plan.lint_runs.order_by('-started_at', '-created').first()
             lint_posture = build_roa_change_plan_lint_posture(plan)
+            simulation_posture = build_roa_change_plan_simulation_posture(plan)
+            latest_simulation = None
+            if simulation_posture['run_id'] is not None:
+                latest_simulation = plan.simulation_runs.filter(pk=simulation_posture['run_id']).first()
             replacement_count = (plan.summary_json or {}).get('replacement_count', 0)
             if (
                 plan.status != models.ROAChangePlanStatus.FAILED
@@ -964,6 +968,7 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
                 and lint_posture['unresolved_blocking_finding_count'] == 0
                 and lint_posture['unresolved_acknowledgement_required_finding_count'] == 0
                 and lint_posture['acknowledged_finding_count'] == 0
+                and not simulation_posture['awaiting_review']
             ):
                 continue
             plans.append({
@@ -976,12 +981,28 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
                 'ack_required_count': lint_posture['unresolved_acknowledgement_required_finding_count'],
                 'acknowledged_count': lint_posture['acknowledged_finding_count'],
                 'suppressed_count': lint_posture['suppressed_finding_count'],
+                'simulation_posture': simulation_posture,
+                'simulation_blocking_count': simulation_posture['approval_impact_counts'].get(
+                    models.ROAValidationSimulationApprovalImpact.BLOCKING, 0
+                ),
+                'simulation_ack_required_count': simulation_posture['approval_impact_counts'].get(
+                    models.ROAValidationSimulationApprovalImpact.ACKNOWLEDGEMENT_REQUIRED, 0
+                ),
                 'simulation_run': latest_simulation,
                 'lint_run': latest_lint_run,
             })
         plans.sort(
             key=lambda item: (
                 item['object'].status == models.ROAChangePlanStatus.FAILED,
+                item['simulation_posture']['status'] in {
+                    'missing',
+                    'pending',
+                    'stale',
+                    models.ROAValidationSimulationApprovalImpact.BLOCKING,
+                    models.ROAValidationSimulationApprovalImpact.ACKNOWLEDGEMENT_REQUIRED,
+                },
+                item['simulation_blocking_count'],
+                item['simulation_ack_required_count'],
                 item['blocking_count'],
                 item['ack_required_count'],
                 item['acknowledged_count'],
@@ -1201,6 +1222,9 @@ class ROAChangePlanApproveView(ROAChangePlanActionView):
                 maintenance_window_end=form.cleaned_data['maintenance_window_end'],
                 approval_notes=form.cleaned_data['approval_notes'],
                 acknowledged_finding_ids=[finding.pk for finding in form.cleaned_data['acknowledged_findings']],
+                acknowledged_simulation_result_ids=[
+                    result.pk for result in form.cleaned_data['acknowledged_simulation_results']
+                ],
                 lint_acknowledgement_notes=form.cleaned_data['lint_acknowledgement_notes'],
             )
         except ProviderWriteError as exc:

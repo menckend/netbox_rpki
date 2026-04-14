@@ -19,4 +19,7 @@ wait_for_redis
 if ! wait_for_routinator; then
     printf 'Routinator is still starting in the background at %s.\n' "$ROUTINATOR_BASE_URL" >&2
 fi
+if ! wait_for_irrd; then
+    printf 'IRRd is still starting in the background at %s.\n' "$IRRD_BASE_URL" >&2
+fi
 docker_compose ps

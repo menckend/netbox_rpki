@@ -18,10 +18,12 @@ from netbox_rpki.services import (
     preview_routing_intent_template_binding,
     refresh_routing_intent_template_binding_state,
     reconcile_roa_intents,
+    RoutingIntentExecutionError,
     run_bulk_routing_intent_pipeline,
     run_roa_lint,
     run_routing_intent_template_binding_pipeline,
     run_routing_intent_pipeline,
+    simulate_roa_change_plan,
     suppress_roa_lint_finding,
 )
 from netbox_rpki.tests.base import PluginAPITestCase
@@ -37,6 +39,7 @@ from netbox_rpki.tests.utils import (
     create_test_roa_change_plan,
     create_test_roa_change_plan_item,
     create_test_roa_change_plan_matrix,
+    create_test_roa_intent,
     create_test_roa_prefix,
     create_test_routing_intent_profile,
     create_test_routing_intent_exception,
@@ -514,6 +517,226 @@ class RoutingIntentServiceTestCase(TestCase):
         self.assertEqual(preview.results[0].origin_asn, self.origin_asn)
         self.assertEqual(preview.results[0].derived_state, rpki_models.ROAIntentDerivedState.ACTIVE)
         self.assertEqual(preview.compiled_policy.template_bindings[0].binding.pk, binding.pk)
+
+    def test_binding_regeneration_persists_stable_summary_contract_keys(self):
+        template = create_test_routing_intent_template(
+            name='Summary Contract Template',
+            organization=self.organization,
+            status=rpki_models.RoutingIntentTemplateStatus.ACTIVE,
+        )
+        create_test_routing_intent_template_rule(
+            name='Summary Contract Include',
+            template=template,
+            action=rpki_models.RoutingIntentRuleAction.INCLUDE,
+        )
+        binding = create_test_routing_intent_template_binding(
+            name='Summary Contract Binding',
+            template=template,
+            intent_profile=self.profile,
+            origin_asn_override=self.origin_asn,
+            prefix_selector_query=f'id={self.primary_prefix.pk}',
+        )
+
+        run_routing_intent_template_binding_pipeline(binding)
+        binding.refresh_from_db()
+        summary = binding.summary_json
+
+        self.assertEqual(binding.state, rpki_models.RoutingIntentTemplateBindingState.CURRENT)
+        self.assertTrue(
+            {
+                'template_id',
+                'template_version',
+                'template_fingerprint',
+                'binding_fingerprint',
+                'scoped_prefix_count',
+                'scoped_asn_count',
+                'active_rule_count',
+                'warning_count',
+                'warnings',
+                'previous_binding_fingerprint',
+                'regeneration_reason_codes',
+                'regeneration_reason_summary',
+                'candidate_binding_fingerprint',
+            }.issubset(summary)
+        )
+        self.assertEqual(summary['template_id'], template.pk)
+        self.assertEqual(summary['template_version'], template.template_version)
+        self.assertEqual(summary['scoped_prefix_count'], 1)
+        self.assertEqual(summary['scoped_asn_count'], 1)
+        self.assertEqual(summary['warning_count'], 0)
+        self.assertEqual(summary['warnings'], [])
+        self.assertIsNone(summary['previous_binding_fingerprint'])
+        self.assertEqual(summary['regeneration_reason_codes'], ['never_compiled'])
+        self.assertEqual(summary['candidate_binding_fingerprint'], binding.last_compiled_fingerprint)
+
+    def test_invalid_binding_selector_persists_error_only_summary_payload(self):
+        template = create_test_routing_intent_template(
+            name='Invalid Selector Template',
+            organization=self.organization,
+            status=rpki_models.RoutingIntentTemplateStatus.ACTIVE,
+        )
+        create_test_routing_intent_template_rule(
+            name='Invalid Selector Include',
+            template=template,
+            action=rpki_models.RoutingIntentRuleAction.INCLUDE,
+        )
+        binding = create_test_routing_intent_template_binding(
+            name='Invalid Selector Binding',
+            template=template,
+            intent_profile=self.profile,
+            origin_asn_override=self.origin_asn,
+            prefix_selector_query='not_a_real_filter=value',
+        )
+
+        assessment = refresh_routing_intent_template_binding_state(binding)
+
+        binding.refresh_from_db()
+
+        self.assertEqual(assessment.state, rpki_models.RoutingIntentTemplateBindingState.PENDING)
+        self.assertEqual(binding.state, rpki_models.RoutingIntentTemplateBindingState.PENDING)
+        self.assertIn('template_id', binding.summary_json)
+        self.assertIn('candidate_binding_fingerprint', binding.summary_json)
+        self.assertNotIn('error', binding.summary_json)
+
+    def test_bulk_pipeline_persists_stable_summary_contract_on_mixed_success(self):
+        binding_profile = create_test_routing_intent_profile(
+            name='Mixed Bulk Binding Profile',
+            organization=self.organization,
+            status=rpki_models.RoutingIntentProfileStatus.ACTIVE,
+            selector_mode=rpki_models.RoutingIntentSelectorMode.FILTERED,
+            prefix_selector_query=f'id={self.primary_prefix.pk}',
+            asn_selector_query='id=999999999',
+        )
+        template = create_test_routing_intent_template(
+            name='Mixed Bulk Template',
+            organization=self.organization,
+            status=rpki_models.RoutingIntentTemplateStatus.ACTIVE,
+        )
+        create_test_routing_intent_template_rule(
+            name='Mixed Bulk Include',
+            template=template,
+            action=rpki_models.RoutingIntentRuleAction.INCLUDE,
+        )
+        binding = create_test_routing_intent_template_binding(
+            name='Mixed Bulk Binding',
+            template=template,
+            intent_profile=binding_profile,
+            origin_asn_override=self.origin_asn,
+            prefix_selector_query=f'id={self.primary_prefix.pk}',
+        )
+
+        bulk_run = run_bulk_routing_intent_pipeline(
+            organization=self.organization,
+            profiles=(self.profile,),
+            bindings=(binding,),
+            create_change_plans=True,
+        )
+
+        bulk_summary = bulk_run.summary_json
+        scope_results = {scope.scope_kind: scope for scope in bulk_run.scope_results.all()}
+        profile_scope = scope_results['profile']
+        binding_scope = scope_results['binding']
+
+        self.assertEqual(bulk_run.target_mode, rpki_models.BulkIntentTargetMode.MIXED)
+        self.assertTrue(
+            {
+                'comparison_scope',
+                'provider_snapshot_id',
+                'create_change_plans',
+                'profile_target_count',
+                'binding_target_count',
+                'scope_result_count',
+                'change_plan_count',
+                'failed_scope_count',
+                'completed_scope_keys',
+            }.issubset(bulk_summary)
+        )
+        self.assertEqual(bulk_summary['comparison_scope'], rpki_models.ReconciliationComparisonScope.LOCAL_ROA_RECORDS)
+        self.assertEqual(bulk_summary['profile_target_count'], 1)
+        self.assertEqual(bulk_summary['binding_target_count'], 1)
+        self.assertEqual(bulk_summary['scope_result_count'], 2)
+        self.assertEqual(bulk_summary['change_plan_count'], 2)
+        self.assertEqual(bulk_summary['failed_scope_count'], 0)
+        self.assertEqual(set(bulk_summary['completed_scope_keys']), {f'profile:{self.profile.pk}', f'binding:{binding.pk}'})
+
+        self.assertTrue(
+            {'comparison_scope', 'provider_snapshot_id', 'warning_count', 'reconciliation_status', 'change_plan_id'}.issubset(
+                profile_scope.summary_json
+            )
+        )
+        self.assertNotIn('binding_fingerprint', profile_scope.summary_json)
+        self.assertIsNotNone(profile_scope.summary_json['change_plan_id'])
+
+        self.assertTrue(
+            {
+                'comparison_scope',
+                'provider_snapshot_id',
+                'warning_count',
+                'reconciliation_status',
+                'change_plan_id',
+                'binding_fingerprint',
+            }.issubset(binding_scope.summary_json)
+        )
+        self.assertEqual(binding_scope.summary_json['binding_fingerprint'], binding.last_compiled_fingerprint)
+        self.assertIsNotNone(binding_scope.summary_json['change_plan_id'])
+
+    def test_bulk_pipeline_persists_failed_summary_contract_before_reraising(self):
+        profile = create_test_routing_intent_profile(
+            name='Failed Bulk Binding Profile',
+            organization=self.organization,
+            status=rpki_models.RoutingIntentProfileStatus.ACTIVE,
+            selector_mode=rpki_models.RoutingIntentSelectorMode.FILTERED,
+            prefix_selector_query=f'id={self.primary_prefix.pk}',
+            asn_selector_query='id=999999999',
+        )
+        template = create_test_routing_intent_template(
+            name='Failed Bulk Template',
+            organization=self.organization,
+            status=rpki_models.RoutingIntentTemplateStatus.DRAFT,
+        )
+        create_test_routing_intent_template_rule(
+            name='Failed Bulk Include',
+            template=template,
+            action=rpki_models.RoutingIntentRuleAction.INCLUDE,
+        )
+        binding = create_test_routing_intent_template_binding(
+            name='Failed Bulk Binding',
+            template=template,
+            intent_profile=profile,
+            origin_asn_override=self.origin_asn,
+            prefix_selector_query=f'id={self.primary_prefix.pk}',
+        )
+
+        with self.assertRaisesMessage(RoutingIntentExecutionError, 'must be active before regeneration'):
+            run_bulk_routing_intent_pipeline(
+                organization=self.organization,
+                bindings=(binding,),
+                run_name='Failed Bulk Contract Run',
+            )
+
+        bulk_run = rpki_models.BulkIntentRun.objects.get(name='Failed Bulk Contract Run')
+        bulk_summary = bulk_run.summary_json
+
+        self.assertEqual(bulk_run.status, rpki_models.ValidationRunStatus.FAILED)
+        self.assertTrue(
+            {
+                'comparison_scope',
+                'provider_snapshot_id',
+                'create_change_plans',
+                'profile_target_count',
+                'binding_target_count',
+                'scope_result_count',
+                'change_plan_count',
+                'failed_scope_count',
+                'error',
+            }.issubset(bulk_summary)
+        )
+        self.assertEqual(bulk_summary['profile_target_count'], 0)
+        self.assertEqual(bulk_summary['binding_target_count'], 1)
+        self.assertEqual(bulk_summary['scope_result_count'], 0)
+        self.assertEqual(bulk_summary['change_plan_count'], 0)
+        self.assertEqual(bulk_summary['failed_scope_count'], 1)
+        self.assertIn('must be active before regeneration', bulk_summary['error'])
 
     def test_compiled_policy_accepts_explicit_binding_subset(self):
         profile = create_test_routing_intent_profile(
@@ -1092,12 +1315,106 @@ class RoutingIntentServiceTestCase(TestCase):
         self.assertIn('lint_run_id', reconciliation_run.result_summary_json)
         self.assertIn('lint_run_id', plan.summary_json)
         self.assertIn('simulation_run_id', plan.summary_json)
+        self.assertIn('simulation_plan_fingerprint', plan.summary_json)
+        self.assertIn('latest_simulation_summary', plan.summary_json)
 
         lint_run = plan.lint_runs.get()
         simulation_run = plan.simulation_runs.get()
         self.assertGreater(lint_run.finding_count, 0)
         self.assertEqual(simulation_run.result_count, plan.items.count())
         self.assertGreaterEqual(simulation_run.predicted_valid_count, 1)
+        self.assertIn('approval_impact_counts', simulation_run.summary_json)
+        self.assertIn('scenario_type_counts', simulation_run.summary_json)
+        self.assertEqual(
+            simulation_run.summary_json['plan_fingerprint'],
+            plan.summary_json['simulation_plan_fingerprint'],
+        )
+        self.assertEqual(plan.summary_json['latest_simulation_summary'], simulation_run.summary_json)
+        self.assertEqual(simulation_run.plan_fingerprint, simulation_run.summary_json['plan_fingerprint'])
+        self.assertEqual(
+            simulation_run.overall_approval_posture,
+            simulation_run.summary_json['overall_approval_posture'],
+        )
+        self.assertEqual(simulation_run.is_current_for_plan, simulation_run.summary_json['is_current_for_plan'])
+        self.assertEqual(
+            simulation_run.partially_constrained,
+            simulation_run.summary_json['partially_constrained'],
+        )
+        self.assertIn(
+            simulation_run.summary_json['overall_approval_posture'],
+            {'informational', 'acknowledgement_required', 'blocking'},
+        )
+        result = simulation_run.results.order_by('pk').first()
+        self.assertIn('scenario_type', result.details_json)
+        self.assertIn('approval_impact', result.details_json)
+        self.assertIn('operator_message', result.details_json)
+        self.assertIn('before_coverage', result.details_json)
+        self.assertIn('after_coverage', result.details_json)
+        self.assertEqual(result.scenario_type, result.details_json['scenario_type'])
+        self.assertEqual(result.approval_impact, result.details_json['approval_impact'])
+        self.assertEqual(
+            result.details_json['plan_fingerprint'],
+            simulation_run.summary_json['plan_fingerprint'],
+        )
+
+    def test_simulation_marks_incomplete_create_state_as_acknowledgement_required(self):
+        plan = create_test_roa_change_plan(
+            name='Incomplete Simulation Plan',
+            organization=self.organization,
+        )
+        create_test_roa_change_plan_item(
+            name='Incomplete Simulation Item',
+            change_plan=plan,
+            action_type=rpki_models.ROAChangePlanAction.CREATE,
+            plan_semantic=rpki_models.ROAChangePlanItemSemantic.CREATE,
+            after_state_json={'prefix_cidr_text': str(self.primary_prefix.prefix)},
+        )
+
+        simulation_run = simulate_roa_change_plan(plan)
+        result = simulation_run.results.get()
+
+        self.assertEqual(result.outcome_type, rpki_models.ROAValidationSimulationOutcome.INVALID)
+        self.assertEqual(result.details_json['scenario_type'], 'insufficient_state_requires_review')
+        self.assertEqual(result.details_json['approval_impact'], 'acknowledgement_required')
+        self.assertTrue(simulation_run.summary_json['partially_constrained'])
+
+    def test_simulation_marks_withdraw_without_replacement_as_blocking(self):
+        derivation_run = derive_roa_intents(self.profile)
+        plan = create_test_roa_change_plan(
+            name='Blocking Simulation Plan',
+            organization=self.organization,
+        )
+        intent = create_test_roa_intent(
+            name='Blocking Simulation Intent',
+            organization=self.organization,
+            derivation_run=derivation_run,
+            intent_profile=self.profile,
+            prefix=self.primary_prefix,
+            prefix_cidr_text=str(self.primary_prefix.prefix),
+            origin_asn=self.origin_asn,
+            origin_asn_value=self.origin_asn.asn,
+            max_length=24,
+        )
+        create_test_roa_change_plan_item(
+            name='Blocking Withdraw Item',
+            change_plan=plan,
+            action_type=rpki_models.ROAChangePlanAction.WITHDRAW,
+            plan_semantic=rpki_models.ROAChangePlanItemSemantic.WITHDRAW,
+            roa_intent=intent,
+            before_state_json={
+                'prefix_cidr_text': str(self.primary_prefix.prefix),
+                'origin_asn_value': self.origin_asn.asn,
+                'max_length_value': 24,
+            },
+            after_state_json={},
+        )
+
+        simulation_run = simulate_roa_change_plan(plan)
+        result = simulation_run.results.get()
+
+        self.assertEqual(result.outcome_type, rpki_models.ROAValidationSimulationOutcome.NOT_FOUND)
+        self.assertEqual(result.details_json['approval_impact'], 'blocking')
+        self.assertEqual(simulation_run.summary_json['overall_approval_posture'], 'blocking')
 
     def test_change_plan_items_record_plan_semantics(self):
         scenario = create_test_roa_change_plan_matrix()

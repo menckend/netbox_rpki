@@ -44,7 +44,9 @@ from netbox_rpki.tests.utils import (
     create_test_imported_signed_object,
     create_test_manifest,
     create_test_roa,
+    create_test_roa_change_plan,
     create_test_roa_change_plan_matrix,
+    create_test_roa_change_plan_item,
     create_test_aspa_reconciliation_run,
     create_test_roa_intent,
     create_test_roa_intent_match,
@@ -52,6 +54,8 @@ from netbox_rpki.tests.utils import (
     create_test_roa_intent_result,
     create_test_roa_reconciliation_run,
     create_test_roa_prefix,
+    create_test_roa_validation_simulation_result,
+    create_test_roa_validation_simulation_run,
     create_test_routing_intent_profile,
     create_test_routing_intent_exception,
     create_test_routing_intent_rule,
@@ -1708,6 +1712,86 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
         self.assertContains(response, 'Suppressed')
         self.assertContains(response, scenario.provider_plan.name)
 
+    def test_operations_dashboard_surfaces_missing_simulation_attention(self):
+        self.add_permissions(
+            'netbox_rpki.view_rpkiprovideraccount',
+            'netbox_rpki.view_providersnapshot',
+            'netbox_rpki.view_providersnapshotdiff',
+            'netbox_rpki.view_roa',
+            'netbox_rpki.view_certificate',
+            'netbox_rpki.view_routingintenttemplatebinding',
+            'netbox_rpki.view_routingintentexception',
+            'netbox_rpki.view_bulkintentrun',
+            'netbox_rpki.view_roareconciliationrun',
+            'netbox_rpki.view_roachangeplan',
+            'netbox_rpki.view_aspareconciliationrun',
+            'netbox_rpki.view_aspachangeplan',
+        )
+        simulation_missing_plan = create_test_roa_change_plan(
+            name='Dashboard Missing Simulation Plan',
+            organization=self.organization,
+        )
+
+        response = self.client.get(reverse('plugins:netbox_rpki:operations_dashboard'))
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, simulation_missing_plan.name)
+        self.assertContains(response, 'No simulation')
+
+    def test_operations_dashboard_surfaces_blocking_simulation_posture_and_counts(self):
+        self.add_permissions(
+            'netbox_rpki.view_rpkiprovideraccount',
+            'netbox_rpki.view_providersnapshot',
+            'netbox_rpki.view_providersnapshotdiff',
+            'netbox_rpki.view_roa',
+            'netbox_rpki.view_certificate',
+            'netbox_rpki.view_routingintenttemplatebinding',
+            'netbox_rpki.view_routingintentexception',
+            'netbox_rpki.view_bulkintentrun',
+            'netbox_rpki.view_roareconciliationrun',
+            'netbox_rpki.view_roachangeplan',
+            'netbox_rpki.view_aspareconciliationrun',
+            'netbox_rpki.view_aspachangeplan',
+            'netbox_rpki.view_roavalidationsimulationrun',
+        )
+        plan = create_test_roa_change_plan(
+            name='Dashboard Blocking Simulation Plan',
+            organization=self.organization,
+            summary_json={'simulation_run_id': 0},
+        )
+        simulation_run = create_test_roa_validation_simulation_run(
+            name='Dashboard Blocking Simulation Run',
+            change_plan=plan,
+            plan_fingerprint='dashboard-blocking-fingerprint',
+            overall_approval_posture=rpki_models.ROAValidationSimulationApprovalImpact.BLOCKING,
+            is_current_for_plan=False,
+            predicted_valid_count=0,
+            predicted_invalid_count=2,
+            predicted_not_found_count=1,
+            summary_json={
+                'plan_fingerprint': 'dashboard-blocking-fingerprint',
+                'approval_impact_counts': {
+                    rpki_models.ROAValidationSimulationApprovalImpact.INFORMATIONAL: 0,
+                    rpki_models.ROAValidationSimulationApprovalImpact.ACKNOWLEDGEMENT_REQUIRED: 1,
+                    rpki_models.ROAValidationSimulationApprovalImpact.BLOCKING: 2,
+                },
+                'scenario_type_counts': {'withdraw_without_replacement_blocks_intended_route': 2},
+                'overall_approval_posture': rpki_models.ROAValidationSimulationApprovalImpact.BLOCKING,
+                'is_current_for_plan': False,
+                'partially_constrained': False,
+            },
+        )
+        plan.summary_json = {'simulation_run_id': simulation_run.pk}
+        plan.save(update_fields=('summary_json',))
+
+        response = self.client.get(reverse('plugins:netbox_rpki:operations_dashboard'))
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, plan.name)
+        self.assertContains(response, 'blocking')
+        self.assertContains(response, '2 blocking / 1 ack-required')
+        self.assertContains(response, '/ stale')
+
     def test_operations_dashboard_shows_arin_roa_only_family_coverage(self):
         self.add_permissions(
             'netbox_rpki.view_rpkiprovideraccount',
@@ -2523,3 +2607,109 @@ class CertificateAsnViewTestCase(GeneratedObjectViewTestMixin, PluginViewTestCas
     def assert_valid_edit_result(self, instance):
         instance.refresh_from_db()
         self.assertEqual(instance.certificate_name2, self.certificates[2])
+
+
+class ROAValidationSimulationDetailViewTestCase(PluginViewTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='simulation-view-org', name='Simulation View Org')
+        cls.plan = create_test_roa_change_plan(
+            name='Simulation View Plan',
+            organization=cls.organization,
+            summary_json={
+                'simulation_run_id': 0,
+                'simulation_plan_fingerprint': 'plan-fingerprint-123',
+            },
+        )
+        cls.plan_item = create_test_roa_change_plan_item(
+            name='Simulation View Plan Item',
+            change_plan=cls.plan,
+            action_type=rpki_models.ROAChangePlanAction.CREATE,
+            plan_semantic='reshape',
+        )
+        cls.simulation_run = create_test_roa_validation_simulation_run(
+            name='Simulation View Run',
+            change_plan=cls.plan,
+            plan_fingerprint='plan-fingerprint-123',
+            overall_approval_posture=rpki_models.ROAValidationSimulationApprovalImpact.ACKNOWLEDGEMENT_REQUIRED,
+            is_current_for_plan=True,
+            partially_constrained=True,
+            result_count=1,
+            predicted_valid_count=1,
+            summary_json={
+                'plan_fingerprint': 'plan-fingerprint-123',
+                'approval_impact_counts': {
+                    rpki_models.ROAValidationSimulationApprovalImpact.INFORMATIONAL: 0,
+                    rpki_models.ROAValidationSimulationApprovalImpact.ACKNOWLEDGEMENT_REQUIRED: 1,
+                    rpki_models.ROAValidationSimulationApprovalImpact.BLOCKING: 0,
+                },
+                'scenario_type_counts': {
+                    'authorization_broadened_requires_ack': 1,
+                },
+                'overall_approval_posture': rpki_models.ROAValidationSimulationApprovalImpact.ACKNOWLEDGEMENT_REQUIRED,
+                'is_current_for_plan': True,
+                'partially_constrained': True,
+            },
+        )
+        cls.plan.summary_json = {
+            'simulation_run_id': cls.simulation_run.pk,
+            'simulation_plan_fingerprint': 'plan-fingerprint-123',
+        }
+        cls.plan.save(update_fields=('summary_json',))
+        cls.simulation_result = create_test_roa_validation_simulation_result(
+            name='Simulation View Result',
+            simulation_run=cls.simulation_run,
+            change_plan_item=cls.plan_item,
+            outcome_type=rpki_models.ROAValidationSimulationOutcome.VALID,
+            approval_impact=rpki_models.ROAValidationSimulationApprovalImpact.ACKNOWLEDGEMENT_REQUIRED,
+            scenario_type='authorization_broadened_requires_ack',
+            details_json={
+                'scenario_type': 'authorization_broadened_requires_ack',
+                'impact_scope': 'collateral',
+                'approval_impact': rpki_models.ROAValidationSimulationApprovalImpact.ACKNOWLEDGEMENT_REQUIRED,
+                'plan_fingerprint': 'plan-fingerprint-123',
+                'operator_message': 'The intended route remains covered, but the plan broadens authorization.',
+                'why_it_matters': 'A broader ROA may validate routes that were not intended to be authorized.',
+                'operator_action': 'Acknowledge the broader authorization risk before approval.',
+                'before_coverage': {'covers_intended_route': True},
+                'after_coverage': {'covers_intended_route': True},
+                'affected_prefixes': ['10.0.0.0/24'],
+                'affected_origin_asns': [64496],
+            },
+        )
+
+    def test_change_plan_detail_shows_latest_simulation_posture(self):
+        self.add_permissions(
+            'netbox_rpki.view_roachangeplan',
+            'netbox_rpki.view_roavalidationsimulationrun',
+        )
+
+        response = self.client.get(self.plan.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'Latest Simulation Posture')
+        self.assertContains(response, 'acknowledgement_required')
+        self.assertContains(response, 'Latest Simulation Is Current')
+        self.assertContains(response, 'plan-fingerprint-123')
+
+    def test_simulation_run_detail_shows_normalized_summary_fields(self):
+        self.add_permissions('netbox_rpki.view_roavalidationsimulationrun')
+
+        response = self.client.get(self.simulation_run.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'Overall Approval Posture')
+        self.assertContains(response, 'Current For Plan')
+        self.assertContains(response, 'Partially Constrained')
+        self.assertContains(response, 'authorization_broadened_requires_ack')
+
+    def test_simulation_result_detail_shows_operator_explanation_fields(self):
+        self.add_permissions('netbox_rpki.view_roavalidationsimulationresult')
+
+        response = self.client.get(self.simulation_result.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'Operator Message')
+        self.assertContains(response, 'Why It Matters')
+        self.assertContains(response, 'Operator Action')
+        self.assertContains(response, 'Acknowledge the broader authorization risk before approval.')

@@ -27,6 +27,22 @@ from netbox_rpki.services.provider_sync_evidence import (
 )
 
 
+def _simulation_run_summary(run):
+    summary = dict(run.summary_json or {})
+    summary.setdefault('plan_fingerprint', run.plan_fingerprint)
+    summary.setdefault('overall_approval_posture', run.overall_approval_posture)
+    summary.setdefault('is_current_for_plan', run.is_current_for_plan)
+    summary.setdefault('partially_constrained', run.partially_constrained)
+    return summary
+
+
+def _simulation_result_details(result):
+    details = dict(result.details_json or {})
+    details.setdefault('approval_impact', result.approval_impact)
+    details.setdefault('scenario_type', result.scenario_type)
+    return details
+
+
 def build_serializer_class(spec: ObjectSpec) -> type[NetBoxModelSerializer]:
     meta_class = type(
         "Meta",
@@ -149,6 +165,7 @@ class ROAChangePlanSerializer(SERIALIZER_CLASS_MAP['roachangeplan']):
     latest_lint_posture = serializers.SerializerMethodField()
     latest_simulation_run = serializers.SerializerMethodField()
     latest_simulation_summary = serializers.SerializerMethodField()
+    latest_simulation_posture = serializers.SerializerMethodField()
 
     class Meta(SERIALIZER_CLASS_MAP['roachangeplan'].Meta):
         fields = SERIALIZER_CLASS_MAP['roachangeplan'].Meta.fields + (
@@ -157,6 +174,7 @@ class ROAChangePlanSerializer(SERIALIZER_CLASS_MAP['roachangeplan']):
             'latest_lint_posture',
             'latest_simulation_run',
             'latest_simulation_summary',
+            'latest_simulation_posture',
         )
 
     def get_latest_lint_run(self, obj):
@@ -186,11 +204,144 @@ class ROAChangePlanSerializer(SERIALIZER_CLASS_MAP['roachangeplan']):
         simulation_run = obj.simulation_runs.order_by('-started_at', '-created').first()
         if simulation_run is None:
             return None
-        return simulation_run.summary_json
+        return _simulation_run_summary(simulation_run)
+
+    def get_latest_simulation_posture(self, obj):
+        simulation_run = obj.simulation_runs.order_by('-started_at', '-created').first()
+        if simulation_run is None:
+            return None
+        summary = _simulation_run_summary(simulation_run)
+        return {
+            'run_id': simulation_run.pk,
+            'plan_fingerprint': summary.get('plan_fingerprint'),
+            'overall_approval_posture': summary.get('overall_approval_posture'),
+            'is_current_for_plan': summary.get('is_current_for_plan'),
+            'partially_constrained': summary.get('partially_constrained'),
+            'approval_impact_counts': summary.get('approval_impact_counts') or {},
+            'scenario_type_counts': summary.get('scenario_type_counts') or {},
+        }
 
 
 SERIALIZER_CLASS_MAP['roachangeplan'] = ROAChangePlanSerializer
 globals()['ROAChangePlanSerializer'] = ROAChangePlanSerializer
+
+
+class ROAValidationSimulationRunSerializer(SERIALIZER_CLASS_MAP['roavalidationsimulationrun']):
+    approval_impact_counts = serializers.SerializerMethodField()
+    scenario_type_counts = serializers.SerializerMethodField()
+    affected_intended_route_count = serializers.SerializerMethodField()
+    affected_collateral_route_count = serializers.SerializerMethodField()
+    normalized_summary = serializers.SerializerMethodField()
+
+    class Meta(SERIALIZER_CLASS_MAP['roavalidationsimulationrun'].Meta):
+        fields = SERIALIZER_CLASS_MAP['roavalidationsimulationrun'].Meta.fields + (
+            'plan_fingerprint',
+            'overall_approval_posture',
+            'is_current_for_plan',
+            'partially_constrained',
+            'approval_impact_counts',
+            'scenario_type_counts',
+            'affected_intended_route_count',
+            'affected_collateral_route_count',
+            'normalized_summary',
+        )
+
+    def get_approval_impact_counts(self, obj):
+        return _simulation_run_summary(obj).get('approval_impact_counts') or {}
+
+    def get_scenario_type_counts(self, obj):
+        return _simulation_run_summary(obj).get('scenario_type_counts') or {}
+
+    def get_affected_intended_route_count(self, obj):
+        return _simulation_run_summary(obj).get('affected_intended_route_count', 0)
+
+    def get_affected_collateral_route_count(self, obj):
+        return _simulation_run_summary(obj).get('affected_collateral_route_count', 0)
+
+    def get_normalized_summary(self, obj):
+        return _simulation_run_summary(obj)
+
+
+SERIALIZER_CLASS_MAP['roavalidationsimulationrun'] = ROAValidationSimulationRunSerializer
+globals()['ROAValidationSimulationRunSerializer'] = ROAValidationSimulationRunSerializer
+
+
+class ROAValidationSimulationResultSerializer(SERIALIZER_CLASS_MAP['roavalidationsimulationresult']):
+    operator_message = serializers.SerializerMethodField()
+    why_it_matters = serializers.SerializerMethodField()
+    operator_action = serializers.SerializerMethodField()
+    impact_scope = serializers.SerializerMethodField()
+    plan_fingerprint = serializers.SerializerMethodField()
+    before_coverage = serializers.SerializerMethodField()
+    after_coverage = serializers.SerializerMethodField()
+    affected_prefixes = serializers.SerializerMethodField()
+    affected_origin_asns = serializers.SerializerMethodField()
+    collateral_impact_count = serializers.SerializerMethodField()
+    transition_risk = serializers.SerializerMethodField()
+    explanation = serializers.SerializerMethodField()
+    normalized_details = serializers.SerializerMethodField()
+
+    class Meta(SERIALIZER_CLASS_MAP['roavalidationsimulationresult'].Meta):
+        fields = SERIALIZER_CLASS_MAP['roavalidationsimulationresult'].Meta.fields + (
+            'approval_impact',
+            'scenario_type',
+            'operator_message',
+            'why_it_matters',
+            'operator_action',
+            'impact_scope',
+            'plan_fingerprint',
+            'before_coverage',
+            'after_coverage',
+            'affected_prefixes',
+            'affected_origin_asns',
+            'collateral_impact_count',
+            'transition_risk',
+            'explanation',
+            'normalized_details',
+        )
+
+    def get_operator_message(self, obj):
+        return _simulation_result_details(obj).get('operator_message')
+
+    def get_why_it_matters(self, obj):
+        return _simulation_result_details(obj).get('why_it_matters')
+
+    def get_operator_action(self, obj):
+        return _simulation_result_details(obj).get('operator_action')
+
+    def get_impact_scope(self, obj):
+        return _simulation_result_details(obj).get('impact_scope')
+
+    def get_plan_fingerprint(self, obj):
+        return _simulation_result_details(obj).get('plan_fingerprint')
+
+    def get_before_coverage(self, obj):
+        return _simulation_result_details(obj).get('before_coverage') or {}
+
+    def get_after_coverage(self, obj):
+        return _simulation_result_details(obj).get('after_coverage') or {}
+
+    def get_affected_prefixes(self, obj):
+        return _simulation_result_details(obj).get('affected_prefixes') or []
+
+    def get_affected_origin_asns(self, obj):
+        return _simulation_result_details(obj).get('affected_origin_asns') or []
+
+    def get_collateral_impact_count(self, obj):
+        return _simulation_result_details(obj).get('collateral_impact_count', 0)
+
+    def get_transition_risk(self, obj):
+        return _simulation_result_details(obj).get('transition_risk')
+
+    def get_explanation(self, obj):
+        return _simulation_result_details(obj).get('explanation')
+
+    def get_normalized_details(self, obj):
+        return _simulation_result_details(obj)
+
+
+SERIALIZER_CLASS_MAP['roavalidationsimulationresult'] = ROAValidationSimulationResultSerializer
+globals()['ROAValidationSimulationResultSerializer'] = ROAValidationSimulationResultSerializer
 
 
 class ProviderSnapshotSerializer(SERIALIZER_CLASS_MAP['providersnapshot']):
@@ -569,6 +720,11 @@ class ROAChangePlanApproveActionSerializer(serializers.Serializer):
     maintenance_window_end = serializers.DateTimeField(required=False, allow_null=True)
     approval_notes = serializers.CharField(required=False, allow_blank=True)
     acknowledged_finding_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        required=False,
+        allow_empty=True,
+    )
+    acknowledged_simulation_result_ids = serializers.ListField(
         child=serializers.IntegerField(min_value=1),
         required=False,
         allow_empty=True,
