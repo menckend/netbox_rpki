@@ -1,4 +1,5 @@
 from datetime import timedelta
+from io import StringIO
 from unittest.mock import patch
 
 from django.core.management import call_command
@@ -1523,6 +1524,166 @@ class RoutingIntentServiceTestCase(TestCase):
                 comparison_scope=rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
             ).exists()
         )
+
+    def test_bulk_management_command_runs_pipeline_synchronously(self):
+        template = create_test_routing_intent_template(
+            name='CLI Bulk Template',
+            organization=self.organization,
+            status=rpki_models.RoutingIntentTemplateStatus.ACTIVE,
+        )
+        create_test_routing_intent_template_rule(
+            name='CLI Bulk Include',
+            template=template,
+            action=rpki_models.RoutingIntentRuleAction.INCLUDE,
+        )
+        binding = create_test_routing_intent_template_binding(
+            name='CLI Bulk Binding',
+            template=template,
+            intent_profile=self.profile,
+            origin_asn_override=self.origin_asn,
+            prefix_selector_query=f'id={self.primary_prefix.pk}',
+        )
+        stdout = StringIO()
+
+        call_command(
+            'run_bulk_routing_intent',
+            '--organization',
+            str(self.organization.pk),
+            '--profiles',
+            str(self.profile.pk),
+            '--bindings',
+            str(binding.pk),
+            '--create-change-plans',
+            '--run-name',
+            'CLI Bulk Run',
+            stdout=stdout,
+        )
+
+        bulk_run = rpki_models.BulkIntentRun.objects.get(name='CLI Bulk Run')
+        self.assertEqual(bulk_run.organization, self.organization)
+        self.assertEqual(bulk_run.status, rpki_models.ValidationRunStatus.COMPLETED)
+        self.assertEqual(bulk_run.summary_json['scope_result_count'], 2)
+        self.assertEqual(bulk_run.summary_json['change_plan_count'], 2)
+        self.assertTrue(
+            rpki_models.BulkIntentRunScopeResult.objects.filter(
+                bulk_run=bulk_run,
+                scope_key=f'profile:{self.profile.pk}',
+            ).exists()
+        )
+        self.assertTrue(
+            rpki_models.BulkIntentRunScopeResult.objects.filter(
+                bulk_run=bulk_run,
+                scope_key=f'binding:{binding.pk}',
+            ).exists()
+        )
+        self.assertIn(f'Completed bulk intent run {bulk_run.pk}', stdout.getvalue())
+
+    def test_bulk_management_command_supports_provider_imported_scope(self):
+        template = create_test_routing_intent_template(
+            name='Bulk Command Template',
+            organization=self.organization,
+            status=rpki_models.RoutingIntentTemplateStatus.ACTIVE,
+        )
+        create_test_routing_intent_template_rule(
+            name='Bulk Command Include',
+            template=template,
+            action=rpki_models.RoutingIntentRuleAction.INCLUDE,
+        )
+        binding = create_test_routing_intent_template_binding(
+            name='Bulk Command Binding',
+            template=template,
+            intent_profile=self.profile,
+            origin_asn_override=self.origin_asn,
+            prefix_selector_query=f'id={self.primary_prefix.pk}',
+        )
+        provider_snapshot = create_test_provider_snapshot(
+            name='Bulk Command Snapshot',
+            organization=self.organization,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        create_test_imported_roa_authorization(
+            name='Bulk Command Imported Authorization',
+            provider_snapshot=provider_snapshot,
+            organization=self.organization,
+            prefix=self.primary_prefix,
+            origin_asn=self.origin_asn,
+            max_length=24,
+        )
+
+        call_command(
+            'run_bulk_routing_intent',
+            '--organization',
+            str(self.organization.pk),
+            '--bindings',
+            str(binding.pk),
+            '--comparison-scope',
+            rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
+            '--provider-snapshot',
+            str(provider_snapshot.pk),
+        )
+
+        bulk_run = rpki_models.BulkIntentRun.objects.order_by('-pk').first()
+        self.assertEqual(
+            bulk_run.summary_json['provider_snapshot_id'],
+            provider_snapshot.pk,
+        )
+        self.assertTrue(
+            rpki_models.BulkIntentRunScopeResult.objects.filter(
+                bulk_run=bulk_run,
+                reconciliation_run__provider_snapshot=provider_snapshot,
+                summary_json__provider_snapshot_id=provider_snapshot.pk,
+            ).exists()
+        )
+
+    def test_bulk_management_command_can_enqueue_job(self):
+        template = create_test_routing_intent_template(
+            name='Queued CLI Bulk Template',
+            organization=self.organization,
+            status=rpki_models.RoutingIntentTemplateStatus.ACTIVE,
+        )
+        create_test_routing_intent_template_rule(
+            name='Queued CLI Bulk Include',
+            template=template,
+            action=rpki_models.RoutingIntentRuleAction.INCLUDE,
+        )
+        binding = create_test_routing_intent_template_binding(
+            name='Queued CLI Bulk Binding',
+            template=template,
+            intent_profile=self.profile,
+            origin_asn_override=self.origin_asn,
+            prefix_selector_query=f'id={self.primary_prefix.pk}',
+        )
+        stdout = StringIO()
+
+        class StubJob:
+            pk = 991
+
+        with patch(
+            'netbox_rpki.management.commands.run_bulk_routing_intent.RunBulkRoutingIntentJob.enqueue_for_organization',
+            return_value=(StubJob(), True),
+        ) as enqueue_mock:
+            call_command(
+                'run_bulk_routing_intent',
+                '--organization',
+                str(self.organization.pk),
+                '--bindings',
+                str(binding.pk),
+                '--enqueue',
+                '--run-name',
+                'Queued CLI Bulk Run',
+                stdout=stdout,
+            )
+
+        enqueue_mock.assert_called_once_with(
+            organization=self.organization,
+            profiles=(),
+            bindings=(binding,),
+            comparison_scope=rpki_models.ReconciliationComparisonScope.LOCAL_ROA_RECORDS,
+            provider_snapshot=None,
+            create_change_plans=False,
+            run_name='Queued CLI Bulk Run',
+        )
+        self.assertIn('Enqueued job 991', stdout.getvalue())
 
 
 class RoutingIntentProfileRunActionAPITestCase(PluginAPITestCase):

@@ -135,13 +135,11 @@ The closure order should stay dependency-driven rather than milestone-driven.
 
 ### Priority 6: Bulk Generation and Templating
 
-- [Bulk Generation and Templating Plan](netbox_rpki_bulk_generation_and_templating_plan.md)
-
-- **Status:** Partially complete
+- **Status:** Mostly complete
 - **End state:** large estates can generate and maintain ROA intent through reusable policy templates, regeneration logic, and bulk workflows
-- **Current state:** reusable `RoutingIntentTemplate`, `RoutingIntentTemplateRule`, `RoutingIntentTemplateBinding`, `RoutingIntentException`, `BulkIntentRun`, and `BulkIntentRunScopeResult` objects now exist with registry-driven CRUD surfaces. Template bindings compile into the existing derivation pipeline, binding preview and regeneration are reachable through API and web actions, profile-level queued run or regenerate workflow is reachable from `RoutingIntentProfile`, organization-scoped bulk runs execute through the NetBox job queue, typed exceptions require explicit approval before they participate in compilation, and stale-binding or bulk-health rollups appear on the operations dashboard.
-- **Remaining gap:** richer operator explanation of template conflicts, more explicit exception lifecycle reporting beyond the current approve or pending model, exports, and any deeper provider-backed authoring semantics that should sit on top of the current queue-backed orchestration contract
-- **Closure order:** continue only after preserving the current safety rails; the current slice is intentionally bounded to template compilation, typed exceptions, bulk orchestration, and reporting
+- **Current state:** reusable `RoutingIntentTemplate`, `RoutingIntentTemplateRule`, `RoutingIntentTemplateBinding`, `RoutingIntentException`, `BulkIntentRun`, and `BulkIntentRunScopeResult` objects now exist with registry-driven CRUD surfaces. Template bindings compile into the existing derivation pipeline, binding preview and regeneration are reachable through API and web actions, profile-level queued run or regenerate workflow is reachable from `RoutingIntentProfile`, organization-scoped bulk runs execute through the NetBox job queue, and a matching `run_bulk_routing_intent` management command now exists for synchronous or queued CLI execution. Typed exceptions require explicit approval before they participate in compilation, stale-binding or bulk-health rollups appear on the operations dashboard, and focused contract coverage now exists for the first-wave filter, table, API action, service-summary, and read-only workflow-record surfaces.
+- **Remaining gap:** richer operator explanation of template conflicts, deeper exception lifecycle reporting beyond the current approve or pending model, exports and broader reporting surfaces, and any deeper provider-backed authoring semantics that should sit on top of the current queue-backed orchestration contract
+- **Closure order:** the first implementation wave is materially landed; further work here should be hardening and refinement rather than another foundational rewrite
 
 ### Priority 7: Deeper NetBox Binding and Service Context
 
@@ -162,6 +160,8 @@ The closure order should stay dependency-driven rather than milestone-driven.
 - **Closure order:** after linting and simulation are available for the same plan objects
 
 ### Priority 9: Lifecycle, Expiry, and Publication Health Reporting
+
+- [Implementation Plan](netbox_rpki_priority9_lifecycle_publication_health_plan.md)
 
 - **Status:** Partially complete
 - **End state:** operators can see expiry risk, stale publication, sync age, provider health, and publication freshness from a single reporting layer
