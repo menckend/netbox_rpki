@@ -1,6 +1,6 @@
 from datetime import date, timedelta
 
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 from django.utils.formats import date_format
 from django.utils import timezone
@@ -87,7 +87,7 @@ def current_ack_required_finding_ids(plan):
     ]
 
 
-class ViewRegistrySmokeTestCase(TestCase):
+class ViewRegistrySmokeTestCase(SimpleTestCase):
     def test_all_objects_expose_view_specs(self):
         self.assertEqual(
             [spec.view.list_class_name for spec in VIEW_OBJECT_SPECS],

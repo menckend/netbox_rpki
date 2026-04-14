@@ -1,4 +1,4 @@
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 
 from netbox_rpki import filtersets
 from netbox_rpki.object_registry import FILTERSET_OBJECT_SPECS
@@ -47,7 +47,7 @@ PRIORITY6_EXPECTED_FILTERSET_CONTRACT = {
 }
 
 
-class FilterSetRegistrySmokeTestCase(TestCase):
+class FilterSetRegistrySmokeTestCase(SimpleTestCase):
     def test_all_objects_expose_filterset_specs(self):
         self.assertEqual(
             get_spec_values(FILTERSET_OBJECT_SPECS, 'filterset', 'class_name'),

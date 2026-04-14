@@ -1,4 +1,4 @@
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 
 from netbox_rpki import forms
 from netbox_rpki.object_registry import FILTER_FORM_OBJECT_SPECS, FORM_OBJECT_SPECS
@@ -12,7 +12,7 @@ from netbox_rpki.tests.registry_scenarios import (
 )
 
 
-class FormRegistrySmokeTestCase(TestCase):
+class FormStructureSmokeTestCase(SimpleTestCase):
     def test_all_objects_expose_form_specs(self):
         self.assertEqual(
             get_spec_values(FORM_OBJECT_SPECS, 'form', 'class_name'),
@@ -25,6 +25,8 @@ class FormRegistrySmokeTestCase(TestCase):
             EXPECTED_FILTER_FORM_CLASS_NAMES,
         )
 
+
+class FormRegistryBehaviorTestCase(TestCase):
     def test_generated_filter_forms_define_search_tenant_and_tag_fields(self):
         for spec in FILTER_FORM_OBJECT_SPECS:
             form_class = getattr(forms, spec.filter_form.class_name)

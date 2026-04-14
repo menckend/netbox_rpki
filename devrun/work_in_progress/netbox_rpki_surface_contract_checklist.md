@@ -90,21 +90,15 @@ If the change touched routing-intent templates, bindings, typed exceptions, bulk
 Targeted surface verification:
 
 ```bash
-cd /home/mencken/src/netbox-v4.5.7/netbox
-NETBOX_RPKI_ENABLE=1 /home/mencken/.virtualenvs/netbox-4.5.7/bin/python manage.py test --keepdb --noinput \
-  netbox_rpki.tests.test_views \
-  netbox_rpki.tests.test_api \
-  netbox_rpki.tests.test_jobs \
-  netbox_rpki.tests.test_routing_intent_services \
-  netbox_rpki.tests.test_graphql --verbosity 1
+cd /home/mencken/src/netbox_rpki/devrun
+./dev.sh test contract --verbosity 1
 ```
 
 Full plugin suite:
 
 ```bash
-cd /home/mencken/src/netbox-v4.5.7/netbox
-NETBOX_RPKI_ENABLE=1 /home/mencken/.virtualenvs/netbox-4.5.7/bin/python manage.py test --keepdb --noinput \
-  netbox_rpki.tests --verbosity 1
+cd /home/mencken/src/netbox_rpki/devrun
+./dev.sh test full --verbosity 1
 ```
 
 ---

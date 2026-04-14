@@ -1,7 +1,19 @@
 sources = NetBox RPKI Plugin
 
-.PHONY: test format lint unittest pre-commit clean
-test: format lint unittest
+.PHONY: test test-fast test-contract test-full unittest format lint pre-commit clean
+
+test: test-contract
+
+test-fast:
+	./devrun/test.sh fast
+
+test-contract:
+	./devrun/test.sh contract
+
+test-full:
+	./devrun/test.sh full
+
+unittest: test-full
 
 format:
 	isort $(sources) tests

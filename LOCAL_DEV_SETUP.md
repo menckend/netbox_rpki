@@ -1,89 +1,100 @@
 # Local Development Environment
 
-This document is the source of truth for the WSL-native development environment used for ongoing work on the `netbox_rpki` plugin.
+This document covers how to set up and use the local development environment for the `netbox_rpki` plugin. The environment runs Python natively on the host (Linux or WSL) and uses Docker containers for PostgreSQL, Redis, Routinator, and IRRd.
 
-It covers two things:
+The current default target is NetBox **4.5.7**.
 
-1. How to create the local environment that the `devrun/` scripts expect.
-2. How to use that environment during normal plugin development, testing, and browser-based verification.
+**Contents:**
+- [Quick Start](#quick-start)
+- [Prerequisites](#prerequisites)
+- [One-Time Setup](#one-time-setup)
+- [Daily Workflow](#daily-workflow)
+- [Running Tests](#running-tests)
+- [Browser E2E Tests](#browser-e2e-tests)
+- [Local IRRd Lab](#local-irrd-lab)
+- [Optional: Krill](#optional-krill)
+- [Environment Overrides](#environment-overrides)
+- [Script Reference](#script-reference)
+- [Generated State Reference](#generated-state-reference)
 
-The current default target is NetBox `4.5.7`.
+---
 
-## What The `devrun/` Scripts Assume
+## Quick Start
 
-By default, the scripts in [`devrun/`](/home/mencken/src/netbox_rpki/devrun) assume this layout:
+If you already have git, Python 3.12+, Docker, `pg_isready`, `redis-cli`, and `curl` installed:
 
-```text
-~/src/netbox_rpki
-~/src/netbox-v4.5.7
-~/src/netbox-v4.5.7/netbox
-~/.virtualenvs/netbox-4.5.7
-~/.config/netbox-rpki-dev
-~/src/krill_for_netbox_rpki            # optional
+```bash
+# 1. Create workspace directories
+mkdir -p ~/src ~/.virtualenvs
+
+# 2. Clone and pin NetBox
+git clone https://github.com/netbox-community/netbox.git ~/src/netbox-v4.5.7
+cd ~/src/netbox-v4.5.7 && git checkout v4.5.7
+
+# 3. Create a virtualenv and install NetBox dependencies
+python3.12 -m venv ~/.virtualenvs/netbox-4.5.7
+source ~/.virtualenvs/netbox-4.5.7/bin/activate
+pip install --upgrade pip setuptools wheel
+pip install -r requirements.txt
+
+# 4. Clone and install the plugin
+git clone <your-netbox_rpki-remote> ~/src/netbox_rpki
+cd ~/src/netbox_rpki
+pip install -e ".[test]"
+
+# 5. Start everything
+cd devrun && ./dev.sh start
 ```
 
-Important defaults from [`devrun/common.sh`](/home/mencken/src/netbox_rpki/devrun/common.sh):
+After step 5, NetBox is running at `http://127.0.0.1:8000` with the plugin enabled. The rest of this document explains each step and the ongoing workflow in detail.
 
-- `NETBOX_RELEASE=4.5.7`
-- `NETBOX_SRC=$HOME/src/netbox-v${NETBOX_RELEASE}`
-- `NETBOX_PROJECT_DIR=$NETBOX_SRC/netbox`
-- `VENV_DIR=$HOME/.virtualenvs/netbox-${NETBOX_RELEASE}`
-- `STATE_DIR=$HOME/.config/netbox-rpki-dev`
-- `KRILL_ROOT=$HOME/src/krill_for_netbox_rpki`
+---
 
-If you keep the same naming convention, the scripts work without extra environment variables.
+## Prerequisites
 
-## Host Prerequisites
+### Required
 
-The scripts run Python directly in WSL, and run PostgreSQL and Redis as Docker containers.
+| Package | Purpose |
+|---|---|
+| `git` | Source control |
+| `python3.12` and `python3.12-venv` | Plugin and NetBox runtime (3.12 is the minimum; 3.13+ also works) |
+| `docker` with `docker compose` | PostgreSQL, Redis, Routinator, and IRRd containers |
+| `pg_isready` (from `postgresql-client`) | Startup health checks |
+| `redis-cli` (from `redis-tools`) | Startup health checks |
+| `curl` | Service verification |
 
-Install these on the WSL host before using `devrun/`:
+### For browser E2E tests (optional)
 
-- `git`
-- `python3.12` and `python3.12-venv`
-- `docker` with `docker compose`
-- `pg_isready` from the PostgreSQL client packages
-- `redis-cli` from the Redis tools package
-- `curl`
+| Package | Purpose |
+|---|---|
+| `node`, `npm`, `npx` | Playwright test runner |
+| `apt`, `apt-cache`, `dpkg-deb` | Only needed if `e2e.sh` must unpack Chromium shared libraries on a minimal image |
 
-If you plan to run browser E2E tests, also install:
-
-- `node`, `npm`, and `npx`
-
-If you plan to let `devrun/e2e.sh` unpack local Chromium shared libraries on a minimal WSL image, it also expects:
-
-- `apt`
-- `apt-cache`
-- `dpkg-deb`
-
-On Ubuntu/WSL, a practical starting point is:
+### Ubuntu/WSL install example
 
 ```bash
 sudo apt update
 sudo apt install -y \
-    git \
-    curl \
-    python3.12 \
-    python3.12-venv \
-    docker.io \
-    docker-compose-plugin \
-    postgresql-client \
-    redis-tools
+    git curl python3.12 python3.12-venv \
+    docker.io docker-compose-plugin \
+    postgresql-client redis-tools
 ```
 
-If Docker is configured with the `docker` group, restart your shell after changing group membership.
+> If you add yourself to the `docker` group, restart your shell before continuing.
+
+---
 
 ## One-Time Setup
 
-### 1. Create the workspace roots
+### 1. Create the workspace directories
 
 ```bash
 mkdir -p ~/src ~/.virtualenvs
 ```
 
-### 2. Clone the NetBox source tree
+### 2. Clone and pin the NetBox source tree
 
-The scripts expect a release-pinned checkout whose directory name matches the release.
+The `devrun/` scripts expect a release-pinned checkout with a directory name that matches the release tag:
 
 ```bash
 git clone https://github.com/netbox-community/netbox.git ~/src/netbox-v4.5.7
@@ -91,449 +102,331 @@ cd ~/src/netbox-v4.5.7
 git checkout v4.5.7
 ```
 
-The important path is the inner project directory containing `manage.py`:
-
-```text
-~/src/netbox-v4.5.7/netbox
-```
-
-### 3. Create the matching virtualenv
+### 3. Create the virtualenv
 
 ```bash
 python3.12 -m venv ~/.virtualenvs/netbox-4.5.7
 source ~/.virtualenvs/netbox-4.5.7/bin/activate
-python -m pip install --upgrade pip setuptools wheel
+pip install --upgrade pip setuptools wheel
 ```
 
-### 4. Install NetBox requirements into that virtualenv
-
-Install the requirements from the NetBox checkout into the release-matched virtualenv.
+### 4. Install NetBox dependencies
 
 ```bash
 cd ~/src/netbox-v4.5.7
 source ~/.virtualenvs/netbox-4.5.7/bin/activate
-python -m pip install -r requirements.txt
+pip install -r requirements.txt
 ```
 
-The `devrun/bootstrap-netbox.sh` script later drops a `netbox.pth` file into this virtualenv so imports resolve to the local NetBox source tree under `~/src/netbox-v4.5.7/netbox`.
-
-### 5. Clone and install the plugin in editable mode
+### 5. Clone and install the plugin
 
 ```bash
 git clone <your-netbox_rpki-remote> ~/src/netbox_rpki
 cd ~/src/netbox_rpki
 source ~/.virtualenvs/netbox-4.5.7/bin/activate
-python -m pip install -e ".[test]"
+pip install -e ".[test]"
 ```
 
-`-e .` is enough for the plugin itself. `-e ".[test]"` is the more useful development setup because it also installs the repo's Python-side tooling extras such as `black`, `flake8`, `pre-commit`, and `pytest`.
+The `[test]` extra installs development tooling (`black`, `flake8`, `pre-commit`, `pytest`). Use `pip install -e .` if you only need the plugin itself.
 
-### 6. Start the local environment through `devrun`
-
-From the plugin repo:
+### 6. Start the local environment
 
 ```bash
 cd ~/src/netbox_rpki/devrun
 ./dev.sh start
 ```
 
-On first run this does all of the environment preparation that should be automated:
+On first run, this performs all remaining setup automatically:
 
-- starts the local PostgreSQL, Redis, and Routinator containers from [`docker-compose.yml`](/home/mencken/src/netbox_rpki/devrun/docker-compose.yml)
-- starts the local IRRd lab container from [`docker-compose.yml`](/home/mencken/src/netbox_rpki/devrun/docker-compose.yml)
-- creates or refreshes `devrun/.env`
-- creates `~/.config/netbox-rpki-dev/credentials.env`
-- writes NetBox `configuration.py` at `~/src/netbox-v4.5.7/netbox/netbox/configuration.py`
-- enables the plugin automatically when `NETBOX_RPKI_ENABLE=1`
-- runs `manage.py migrate`
-- runs `manage.py collectstatic`
-- runs `manage.py check`
-- creates or updates the local `admin` superuser
-- creates or updates a `ValidatorInstance` named `Local Routinator` pointing at the local validator endpoint
-- starts an RQ worker
-- starts the NetBox development server
-- starts Routinator with HTTP status available at `http://127.0.0.1:8323/api/v1/status` by default and ASPA support enabled
-- starts IRRd with HTTP status available at `http://127.0.0.1:6080/v1/status/` by default and whois available on `127.0.0.1:6043`
-- starts Krill too, if a compatible Krill workspace exists
+- Starts PostgreSQL, Redis, Routinator, and IRRd containers
+- Generates credentials in `~/.config/netbox-rpki-dev/credentials.env`
+- Generates `devrun/.env` for Docker Compose
+- Writes `configuration.py` into the NetBox checkout
+- Runs `manage.py migrate`, `collectstatic`, and `check`
+- Creates an `admin` superuser (password stored in `credentials.env`)
+- Creates a `ValidatorInstance` pointing at the local Routinator
+- Starts an RQ worker and the NetBox development server
+- Starts Krill if an [external Krill workspace](#optional-krill) is detected
 
-You do not need to hand-maintain `configuration.py`, database credentials, or the local admin user if you use `./dev.sh start`.
+You do not need to hand-maintain `configuration.py`, database credentials, or the admin user.
 
-### 7. Explicit local IRRd install and verification procedure
-
-This repo now installs the local IRRd lab as a Docker-built devrun service. There is no separate host-level IRRd package install step.
-
-The exact procedure used locally was:
+### 7. Verify
 
 ```bash
-cd ~/src/netbox_rpki/devrun
-./dev.sh start
-./dev.sh irrd status
-curl -sS http://127.0.0.1:6080/v1/status/ | head -n 20
-curl -sS 'http://127.0.0.1:6080/v1/whois/?q=!v'
+./dev.sh status            # process and service health summary
+curl -sS http://127.0.0.1:8000/api/ | head   # NetBox API
 ```
 
-What this does behind the scenes:
+---
 
-- builds the local Docker image from [`devrun/irrd/Dockerfile`](/home/mencken/src/netbox_rpki/devrun/irrd/Dockerfile)
-- runs the container entrypoint in [`devrun/irrd/entrypoint.sh`](/home/mencken/src/netbox_rpki/devrun/irrd/entrypoint.sh)
-- creates a dedicated PostgreSQL role and database for IRRd inside the existing local Postgres container
-- writes the IRRd YAML config inside the container at startup
-- runs `irrd_database_upgrade`
-- starts IRRd in the foreground with HTTP on port `6080` and whois on port `6043`
+## Daily Workflow
 
-Important practical notes from the actual bootstrap:
+The recommended development loop:
 
-- the first IRRd image build is materially slower than the other local services because it installs the Python package and its build dependencies inside the image
-- the service is considered ready when `./dev.sh irrd status` reports it ready and `http://127.0.0.1:6080/v1/status/` returns HTTP `200`
-- a useful end-to-end query check is `curl -sS 'http://127.0.0.1:6080/v1/whois/?q=!v'`, which should return `IRRd -- version 4.5.2`
+1. **Iterate on code** in `~/src/netbox_rpki/`.
+2. **Run tests** — most test runs need only PostgreSQL and Redis, not the full stack.
+3. **Start the full stack** only when you need the browser UI or manual verification.
+4. **Run E2E tests** when the change affects the UI.
+5. **Stop the stack** when finished.
 
-If you want to build or restart only IRRd without touching the full NetBox loop, use:
+All commands below assume you are in `~/src/netbox_rpki/devrun/`.
+
+### Start / stop / status
 
 ```bash
-cd ~/src/netbox_rpki/devrun
-./dev.sh irrd start
-./dev.sh irrd status
-./dev.sh irrd logs
+./dev.sh start     # full bootstrap + dev server
+./dev.sh status    # show running processes and service health
+./dev.sh stop      # stop everything (server, worker, Krill, containers)
 ```
 
-If you change [`devrun/irrd/Dockerfile`](/home/mencken/src/netbox_rpki/devrun/irrd/Dockerfile) or [`devrun/irrd/entrypoint.sh`](/home/mencken/src/netbox_rpki/devrun/irrd/entrypoint.sh), force a rebuild and recreate explicitly:
+### Seed sample data
 
 ```bash
-cd ~/src/netbox_rpki/devrun
-docker compose up -d --build --force-recreate irrd
+./dev.sh seed
 ```
 
-That is the exact rebuild path used while wiring IRRd into this local environment.
+Populates the database with a reusable RPKI object graph for manual browser work. Not required for the Playwright E2E suite.
 
-## Optional Krill Workspace
+---
 
-Krill is optional for general plugin work, but it is part of the local environment for hosted-provider sync and write flows.
+## Running Tests
 
-The `devrun` scripts do not install Krill for you. They only auto-detect and use an external workspace if these files exist:
+The test runner is **Django's `manage.py test`**, not `pytest`. Always use the `devrun` wrapper, which manages the test settings, database, and service containers for you.
 
-- `~/src/krill_for_netbox_rpki/scripts/start-krill.sh`
-- `~/src/krill_for_netbox_rpki/scripts/stop-krill.sh`
-- `~/src/krill_for_netbox_rpki/etc/krill.conf`
-- `~/src/krill_for_netbox_rpki/cargo-root/bin/krill`
-
-The current local Krill workspace on this machine follows this shape:
-
-```text
-~/src/krill_for_netbox_rpki/
-  cargo-root/bin/krill
-  cargo-root/bin/krillc
-  etc/krill.conf
-  scripts/env.sh
-  scripts/start-krill.sh
-  scripts/stop-krill.sh
-  var/data
-  var/log
-  var/run
-```
-
-The local `krill.conf` serves Krill on `https://localhost:3001/`, stores state under `~/src/krill_for_netbox_rpki/var/data`, and writes logs and the PID file under `var/log` and `var/run`.
-
-The installed local binary is currently `krill 0.16.0`, rooted under `~/src/krill_for_netbox_rpki/cargo-root`.
-
-Practical guidance:
-
-- If you are not working on provider sync or Krill-backed write flows, you can ignore Krill.
-- If the workspace exists, `./dev.sh start` will start it and `./dev.sh stop` will stop it.
-- If the workspace does not exist, `devrun` skips Krill and the rest of the NetBox environment still works.
-
-## Generated Local State
-
-After the first successful bootstrap, these generated files matter:
-
-- `devrun/.env`
-  Used by Docker Compose for the local PostgreSQL container credentials.
-- `~/.config/netbox-rpki-dev/credentials.env`
-  Stores generated values such as `NETBOX_DATABASE_PASSWORD`, `NETBOX_ADMIN_PASSWORD`, `NETBOX_SECRET_KEY`, and `NETBOX_API_TOKEN_PEPPER`.
-- `~/src/netbox-v4.5.7/netbox/netbox/configuration.py`
-  Generated NetBox config for the local dev instance.
-- `~/.config/netbox-rpki-dev/*.log`
-  Logs from migrations, checks, collectstatic, seeding, and superuser creation.
-
-The Docker-managed IRRd state is also retained in the `devrun_irrd_state` volume.
-
-## Normal Daily Workflow
-
-The common loop is:
-
-1. Start the stack.
-2. Develop in the plugin repo.
-3. Run focused Python tests while iterating.
-4. Run the full plugin suite before concluding the change.
-5. Run browser E2E when the change affects UI behavior.
-6. Stop the stack when finished.
-
-### Start the stack
+### Test lanes
 
 ```bash
-cd ~/src/netbox_rpki/devrun
-./dev.sh start
+./dev.sh test fast       # quick structural smoke checks (~seconds)
+./dev.sh test contract   # registry/UI/API/GraphQL surface contracts
+./dev.sh test full       # the complete netbox_rpki.tests suite
 ```
 
-This is the normal entry point. Use it instead of manually starting containers, writing config, or launching NetBox by hand.
+Running `./dev.sh test` with no argument defaults to `contract`.
 
-### Check status
+### Focused tests
+
+Pass explicit Django test labels after the lane keyword (or in place of it):
 
 ```bash
-cd ~/src/netbox_rpki/devrun
-./dev.sh status
+./dev.sh test netbox_rpki.tests.test_provider_sync --verbosity 2
+./dev.sh test contract --verbosity 2
 ```
 
-This reports:
+### What the test wrapper does
 
-- active release
-- NetBox project path
-- virtualenv path
-- generated config and credentials paths
-- whether `runserver`, the worker, Krill, Routinator, and IRRd are running or reachable
-- Docker container status
-- PostgreSQL and Redis reachability
+- Uses the dedicated test settings module `netbox_rpki.tests.netbox_configuration` (not the dev `configuration.py`)
+- Sets `NETBOX_RPKI_ENABLE=1` so the plugin loads
+- Starts only PostgreSQL and Redis via Docker Compose
+- Passes `--keepdb` and `--noinput` to `manage.py test` for speed
 
-`devrun/.env` now also carries the local Routinator port bindings used by Docker Compose:
+Most test runs do **not** require `./dev.sh start`.
 
-- `ROUTINATOR_RTR_PORT` default `3323`
-- `ROUTINATOR_HTTP_PORT` default `8323`
-- `ROUTINATOR_METRICS_PORT` default `9556`
+### Raw Django command (escape hatch)
 
-It also carries the local IRRd lab settings used by Docker Compose:
-
-- `IRRD_DATABASE_NAME` default `irrd`
-- `IRRD_DATABASE_USER` default `irrd`
-- `IRRD_HTTP_PORT` default `6080`
-- `IRRD_WHOIS_PORT` default `6043`
-- `IRRD_SOURCE` default `LOCAL-IRR`
-- `IRRD_OVERRIDE_PASSWORD` generated automatically for local dev-only seed and override use
-
-The generated credentials file also includes `IRRD_DATABASE_PASSWORD` for the local IRRd database user.
-
-### Manage the local IRRd lab directly
+If you need to run `manage.py test` directly for debugging:
 
 ```bash
-cd ~/src/netbox_rpki/devrun
-./dev.sh irrd start
-./dev.sh irrd status
-./dev.sh irrd seed
-./dev.sh irrd logs
-./dev.sh irrd stop
+cd ~/src/netbox-v4.5.7/netbox
+NETBOX_CONFIGURATION=netbox_rpki.tests.netbox_configuration \
+NETBOX_RPKI_ENABLE=1 \
+~/.virtualenvs/netbox-4.5.7/bin/python manage.py test \
+  --keepdb --noinput netbox_rpki.tests.test_provider_sync
 ```
 
-This is useful when you want to work on the IRR integration contract without restarting the full NetBox development loop.
+### Environment validation
 
-The expected ready-state output is:
-
-- IRRd reachable at `http://127.0.0.1:6080`
-- whois listening on local port `6043`
-- health visible through `http://127.0.0.1:6080/v1/status/`
-
-To load the deterministic first-wave `LOCAL-IRR` dataset into the local lab:
+Compare baseline NetBox startup with and without the plugin:
 
 ```bash
-cd ~/src/netbox_rpki/devrun
-./dev.sh irrd seed
+./check-netbox.sh
 ```
 
-The seed loader posts a fixed RPSL fixture set into the authoritative `LOCAL-IRR` source through IRRd's local HTTP submit API using the generated dev-only override password. The fixture currently includes:
+---
 
-- one maintainer object
-- one person object
-- one aut-num object
-- one as-set object
-- one route-set object
-- one IPv4 route object
-- one IPv6 route object
+## Browser E2E Tests
 
-The seed file template lives in [`devrun/irrd/fixtures/local-authoritative.rpsl`](/home/mencken/src/netbox_rpki/devrun/irrd/fixtures/local-authoritative.rpsl).
+The Playwright suite requires a running NetBox instance with the plugin enabled.
 
-To verify that the seed actually landed without requiring a local `whois` client, use the HTTP whois endpoint directly:
+### One-time setup
 
 ```bash
-cd ~/src/netbox_rpki/devrun
-for q in LOCAL-IRR-MNT LOCAL-IRR-PERSON AS64500 203.0.113.0/24 2001:db8:fbf4::/48 AS64500:RS-LOCAL-EDGE; do
+./e2e.sh install    # installs npm deps + Playwright Chromium
+```
+
+### Run the suite
+
+```bash
+./dev.sh start      # ensure the stack is up
+./dev.sh e2e        # run headless
+```
+
+### Other modes
+
+```bash
+./e2e.sh headed                                             # headed browser
+./e2e.sh ui                                                 # Playwright UI mode
+./e2e.sh tests/e2e/netbox-rpki/roas.spec.js --project=chromium   # single spec
+```
+
+The wrapper checks that NetBox is reachable at `http://127.0.0.1:8000` before running tests.
+
+---
+
+## Local IRRd Lab
+
+IRRd runs as a Docker container managed by `devrun/docker-compose.yml`. There is no host-level IRRd install step.
+
+### Manage IRRd independently
+
+```bash
+./dev.sh irrd start    # start only IRRd (without full NetBox bootstrap)
+./dev.sh irrd status   # check readiness
+./dev.sh irrd logs     # view container logs
+./dev.sh irrd seed     # load the deterministic LOCAL-IRR fixture dataset
+./dev.sh irrd stop     # stop the container
+```
+
+### Default endpoints
+
+| Service | URL |
+|---|---|
+| HTTP API | `http://127.0.0.1:6080` |
+| Status | `http://127.0.0.1:6080/v1/status/` |
+| Whois (HTTP) | `http://127.0.0.1:6080/v1/whois/` |
+| Whois (TCP) | `127.0.0.1:6043` |
+
+### Seed data
+
+`./dev.sh irrd seed` posts a fixed RPSL fixture into the authoritative `LOCAL-IRR` source. The fixture includes a maintainer, person, aut-num, as-set, route-set, and IPv4/IPv6 route objects. The template lives in `devrun/irrd/fixtures/local-authoritative.rpsl`.
+
+Verify with:
+
+```bash
+for q in LOCAL-IRR-MNT LOCAL-IRR-PERSON AS64500 203.0.113.0/24 \
+         2001:db8:fbf4::/48 AS64500:RS-LOCAL-EDGE; do
   echo "--- $q ---"
   curl -sS --get --data-urlencode "q=$q" http://127.0.0.1:6080/v1/whois/
   echo
 done
 ```
 
-Expected results after a successful seed:
+### Rebuilding after changes
 
-- `LOCAL-IRR-MNT` returns the maintainer object
-- `LOCAL-IRR-PERSON` returns the contact object
-- `AS64500` returns the local `aut-num`
-- `203.0.113.0/24` returns the IPv4 route object
-- `2001:db8:fbf4::/48` returns the IPv6 route object
-- `AS64500:RS-LOCAL-EDGE` returns the route-set object
-
-### Seed reusable sample data
+If you modify `devrun/irrd/Dockerfile` or `devrun/irrd/entrypoint.sh`:
 
 ```bash
-cd ~/src/netbox_rpki/devrun
-./dev.sh seed
+docker compose up -d --build --force-recreate irrd
 ```
 
-This populates the local database with a reusable sample RPKI object graph. It is useful for manual browser clickthrough and exploratory UI work. It is not required for the Playwright suite.
+> **Note:** The first IRRd image build is slower than other services because it installs Python build dependencies inside the image.
 
-### Stop the stack
+---
 
-```bash
-cd ~/src/netbox_rpki/devrun
-./dev.sh stop
+## Optional: Krill
+
+Krill is only needed for hosted-provider sync and write flows. If you are not working on those features, skip this section entirely.
+
+The `devrun` scripts do not install Krill. They auto-detect and use an external workspace at `~/src/krill_for_netbox_rpki/` if it contains:
+
+```text
+scripts/start-krill.sh
+scripts/stop-krill.sh
+etc/krill.conf
+cargo-root/bin/krill
 ```
 
-This stops:
+When detected:
 
-- the NetBox development server
-- the RQ worker
-- Krill, if the external Krill workspace is installed
-- the local PostgreSQL, Redis, Routinator, and IRRd containers
+- `./dev.sh start` starts Krill automatically.
+- `./dev.sh stop` stops it.
 
-## Running Tests During Development
+When absent, `devrun` skips Krill and the rest of the environment works normally.
 
-### Python test suite
+---
 
-The primary Python test runner for this plugin is NetBox's Django test command, not `pytest`.
+## Environment Overrides
 
-Run the full plugin suite from the NetBox project directory:
+The `devrun/` scripts use sensible defaults from `devrun/common.sh`. Override them with environment variables when needed.
 
-```bash
-cd ~/src/netbox-v4.5.7/netbox
-NETBOX_RPKI_ENABLE=1 ~/.virtualenvs/netbox-4.5.7/bin/python \
-    manage.py test --keepdb --noinput netbox_rpki.tests
-```
+### Default paths
 
-Run focused tests the same way:
+| Variable | Default |
+|---|---|
+| `NETBOX_RELEASE` | `4.5.7` |
+| `NETBOX_SRC` | `~/src/netbox-v${NETBOX_RELEASE}` |
+| `NETBOX_PROJECT_DIR` | `${NETBOX_SRC}/netbox` |
+| `VENV_DIR` | `~/.virtualenvs/netbox-${NETBOX_RELEASE}` |
+| `STATE_DIR` | `~/.config/netbox-rpki-dev` |
+| `KRILL_ROOT` | `~/src/krill_for_netbox_rpki` |
 
-```bash
-cd ~/src/netbox-v4.5.7/netbox
-NETBOX_RPKI_ENABLE=1 ~/.virtualenvs/netbox-4.5.7/bin/python \
-    manage.py test --keepdb --noinput netbox_rpki.tests.test_provider_sync
-```
-
-Useful points:
-
-- `--keepdb` makes repeated local runs much faster.
-- `--noinput` keeps the command non-interactive.
-- `NETBOX_RPKI_ENABLE=1` is required so the plugin is loaded during the test run.
-
-### Basic environment validation
-
-If you only want to compare baseline NetBox startup versus plugin-enabled startup:
+### Example: target a different NetBox release
 
 ```bash
-cd ~/src/netbox_rpki/devrun
-./check-netbox.sh
-```
-
-This writes baseline and plugin-enabled check logs under `~/.config/netbox-rpki-dev/`.
-
-### Browser E2E suite
-
-The Playwright suite expects a running local NetBox instance with the plugin enabled.
-
-One-time browser runtime prep:
-
-```bash
-cd ~/src/netbox_rpki/devrun
-./e2e.sh install
-```
-
-Run the browser suite:
-
-```bash
-cd ~/src/netbox_rpki/devrun
-./dev.sh e2e
-```
-
-Other useful forms:
-
-```bash
-cd ~/src/netbox_rpki/devrun
-./e2e.sh headed
-./e2e.sh tests/e2e/netbox-rpki/roas.spec.js --project=chromium
-```
-
-The wrapper installs npm dependencies and Playwright Chromium on demand, checks that NetBox is reachable at `http://127.0.0.1:8000`, and then runs the suite.
-
-## Script Reference
-
-Primary entry points in [`devrun/`](/home/mencken/src/netbox_rpki/devrun):
-
-- `./dev.sh start`
-  Full bootstrap plus local NetBox startup.
-- `./dev.sh status`
-  Show the current environment and process status.
-- `./dev.sh seed`
-  Seed reusable sample plugin data.
-- `./dev.sh e2e`
-  Run the Playwright suite.
-- `./dev.sh stop`
-  Stop NetBox, worker, Krill, and containers.
-
-Secondary scripts for debugging:
-
-- `./bootstrap-netbox.sh`
-  Regenerate credentials, config, migrations, collectstatic, and admin user setup without starting `runserver`.
-- `./runserver.sh`
-  Start just the NetBox dev server.
-- `./worker.sh`
-  Start just the RQ worker.
-- `./check-netbox.sh`
-  Compare baseline NetBox checks and plugin-enabled checks.
-- `./status.sh`
-  Lower-level status report used by `dev.sh status`.
-- `./stop.sh`
-  Lower-level stop script used by `dev.sh stop`.
-
-## Useful Overrides
-
-If you want to target a different NetBox checkout or virtualenv, override the defaults explicitly.
-
-Example for NetBox `4.5.0`:
-
-```bash
-cd ~/src/netbox_rpki/devrun
 NETBOX_RELEASE=4.5.0 ./dev.sh start
 ```
 
-Or set paths directly:
+### Other general overrides
 
-```bash
-cd ~/src/netbox_rpki/devrun
-NETBOX_PROJECT_DIR=~/src/netbox-v4.5.7/netbox \
-VENV_DIR=~/.virtualenvs/netbox-4.5.7 \
-./dev.sh start
-```
+`NETBOX_RUN_HOST`, `NETBOX_RUN_PORT`, `NETBOX_E2E_BASE_URL`, `NODE_LTS_BIN`
 
-Common overrides:
+### Test-specific overrides
 
-- `NETBOX_RELEASE`
-- `NETBOX_SRC`
-- `NETBOX_PROJECT_DIR`
-- `VENV_DIR`
-- `KRILL_ROOT`
-- `NETBOX_RUN_HOST`
-- `NETBOX_RUN_PORT`
-- `NETBOX_E2E_BASE_URL`
-- `NODE_LTS_BIN`
+These let you point tests at a different database or Redis without changing the dev config:
 
-## Recommended Development Habit
+`NETBOX_CONFIGURATION`, `NETBOX_TEST_DB_NAME`, `NETBOX_TEST_DB_USER`, `NETBOX_TEST_DB_PASSWORD`, `NETBOX_TEST_DB_HOST`, `NETBOX_TEST_DB_PORT`, `NETBOX_TEST_DB_TEST_NAME`, `NETBOX_TEST_REDIS_HOST`, `NETBOX_TEST_REDIS_PORT`, `NETBOX_TEST_REDIS_PASSWORD`
 
-Use the script-driven workflow consistently:
+### Docker Compose port overrides (via `devrun/.env`)
 
-```bash
-cd ~/src/netbox_rpki/devrun
-./dev.sh start
-```
+| Variable | Default |
+|---|---|
+| `ROUTINATOR_RTR_PORT` | `3323` |
+| `ROUTINATOR_HTTP_PORT` | `8323` |
+| `ROUTINATOR_METRICS_PORT` | `9556` |
+| `IRRD_HTTP_PORT` | `6080` |
+| `IRRD_WHOIS_PORT` | `6043` |
+| `IRRD_SOURCE` | `LOCAL-IRR` |
 
-Then iterate with direct Django test commands from the NetBox checkout, and use:
+---
 
-```bash
-./dev.sh e2e
-./dev.sh stop
-```
+## Script Reference
 
-That keeps the local environment reproducible and aligned with the paths and assumptions already encoded in this repo.
+### Primary (`./dev.sh` subcommands)
+
+| Command | Purpose |
+|---|---|
+| `./dev.sh start` | Full bootstrap + start the dev server |
+| `./dev.sh stop` | Stop server, worker, Krill, and containers |
+| `./dev.sh status` | Show environment and process health |
+| `./dev.sh test [lane]` | Run Python tests (`fast`, `contract` (default), `full`, or explicit labels) |
+| `./dev.sh e2e` | Run the Playwright browser suite |
+| `./dev.sh seed` | Seed reusable sample RPKI data |
+| `./dev.sh validator` | Create/update the local Routinator `ValidatorInstance` in NetBox |
+| `./dev.sh irrd <cmd>` | Manage the local IRRd lab (`start`, `stop`, `status`, `logs`, `seed`) |
+
+### Secondary (standalone scripts in `devrun/`)
+
+| Script | Purpose |
+|---|---|
+| `bootstrap-netbox.sh` | Regenerate credentials, config, migrations, collectstatic, and admin user (no server start) |
+| `runserver.sh` | Start just the NetBox dev server |
+| `worker.sh` | Start just the RQ worker |
+| `check-netbox.sh` | Compare baseline vs. plugin-enabled `manage.py check` |
+| `status.sh` | Lower-level status report (used by `dev.sh status`) |
+| `stop.sh` | Lower-level stop (used by `dev.sh stop`) |
+
+---
+
+## Generated State Reference
+
+After the first successful bootstrap, these generated files are relevant:
+
+| Path | Contents |
+|---|---|
+| `devrun/.env` | Docker Compose variables (database credentials, port bindings) |
+| `~/.config/netbox-rpki-dev/credentials.env` | `NETBOX_DATABASE_PASSWORD`, `NETBOX_ADMIN_PASSWORD`, `NETBOX_SECRET_KEY`, `NETBOX_API_TOKEN_PEPPER`, `IRRD_DATABASE_PASSWORD`, `IRRD_OVERRIDE_PASSWORD` |
+| `~/src/netbox-v4.5.7/netbox/netbox/configuration.py` | Generated NetBox config for the local dev instance |
+| `~/.config/netbox-rpki-dev/*.log` | Logs from migrations, checks, collectstatic, seeding, and superuser creation |
+
+IRRd state is retained in the `devrun_irrd_state` Docker volume.
+
+None of these files should be committed to version control.

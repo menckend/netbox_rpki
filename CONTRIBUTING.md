@@ -60,46 +60,7 @@ If you are proposing a feature:
 
 ## Get Started!
 
-Ready to contribute? Here's how to set up `netbox_rpki` for local development.
-
-1. Fork the `netbox_rpki` repo on GitHub.
-2. Clone your fork locally
-
-    ```
-    $ git clone git@github.com:your_name_here/netbox_rpki.git
-    ```
-
-3. Activate the NetBox virtual environment (see the NetBox documentation under [Setting up a Development Environment](https://docs.netbox.dev/en/stable/development/getting-started/)):
-
-    ```
-    $ source ~/.venv/netbox/bin/activate
-    ```
-
-4. Add the plugin to NetBox virtual environment in Develop mode (see [Plugins Development](https://docs.netbox.dev/en/stable/plugins/development/)):
-
-    To ease development, install the plugin in editable mode from the plugin root directory:
-
-    ```
-    $ python -m pip install -e .
-    ```
-
-5. Create a branch for local development:
-
-    ```
-    $ git checkout -b name-of-your-bugfix-or-feature
-    ```
-
-    Now you can make your changes locally.
-
-6. Commit your changes and push your branch to GitHub:
-
-    ```
-    $ git add .
-    $ git commit -m "Your detailed description of your changes."
-    $ git push origin name-of-your-bugfix-or-feature
-    ```
-
-7. Submit a pull request through the GitHub website.
+For local development setup instructions, see [LOCAL_DEV_SETUP.md](LOCAL_DEV_SETUP.md).
 
 ## Pull Request Guidelines
 
@@ -619,26 +580,37 @@ Treat populated relation rendering as part of the surface contract. When a detai
 Known-good full-suite command:
 
 ```bash
-cd /home/mencken/src/netbox-v4.5.7/netbox
-NETBOX_RPKI_ENABLE=1 /home/mencken/.virtualenvs/netbox-4.5.7/bin/python manage.py test --keepdb --noinput netbox_rpki.tests
+cd /home/mencken/src/netbox_rpki/devrun
+./dev.sh test full
 ```
 
 Focused contract command used during this refactor:
 
 ```bash
-cd /home/mencken/src/netbox-v4.5.7/netbox
-NETBOX_RPKI_ENABLE=1 /home/mencken/.virtualenvs/netbox-4.5.7/bin/python manage.py test --keepdb --noinput \
-    netbox_rpki.tests.test_forms \
-    netbox_rpki.tests.test_filtersets \
-    netbox_rpki.tests.test_tables \
-    netbox_rpki.tests.test_urls \
-    netbox_rpki.tests.test_navigation \
-    netbox_rpki.tests.test_graphql
+cd /home/mencken/src/netbox_rpki/devrun
+./dev.sh test contract
+```
+
+Fast structural smoke lane:
+
+```bash
+cd /home/mencken/src/netbox_rpki/devrun
+./dev.sh test fast
+```
+
+Use explicit test labels through the same wrapper when you want a targeted run without the normal dev bootstrap path:
+
+```bash
+cd /home/mencken/src/netbox_rpki/devrun
+./dev.sh test netbox_rpki.tests.test_provider_sync --verbosity 2
 ```
 
 For local development and browser testing, prefer the wrappers in `devrun/`:
 
-- `./dev.sh start`
+- `./dev.sh test fast`
+- `./dev.sh test contract`
+- `./dev.sh test full`
+- `./dev.sh start` when you actually need the full NetBox stack
 - `./dev.sh status`
 - `./dev.sh validator`
 - `./dev.sh seed`

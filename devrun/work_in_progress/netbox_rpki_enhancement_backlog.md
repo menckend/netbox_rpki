@@ -23,7 +23,7 @@ Exact test counts are intentionally not repeated throughout this file. They drif
 
 | Area | Status | Current state | Main remaining gap |
 | --- | --- | --- | --- |
-| Intent and ROA reconciliation | Functionally complete | Real operator workflow exists for intent derivation, reconciliation, replacement-aware drift classification, draft change-plan generation, and drill-down UX across service, job, command, API, and web surfaces. | Workflow-surface parity, richer operator explanations, and exception handling around lint and simulation results. |
+| Intent and ROA reconciliation | Functionally complete | Real operator workflow exists for intent derivation, reconciliation, replacement-aware drift classification, draft change-plan generation, lint and simulation-aware approval gating, simulation audit persistence, aggregate reporting, and drill-down UX across service, job, command, API, and web surfaces. | Follow-on refinement rather than missing baseline capability. |
 | Provider sync and write-through | Mostly complete | Live ARIN ROA import remains available, and the Krill slice now supports retained snapshots, durable external identity, imported object families, diff persistence, sync-health metadata, and ROA preview, approve, and apply flows. | Broader provider coverage, deeper family-specific diff reporting, better freshness and churn visibility, and richer publication-observation fidelity. |
 | ASPA operations | Partially complete | ASPA inventory, provider import, intent, reconciliation, and operator drill-down surfaces now exist and share the core workflow shape used for ROAs. | Provider-backed ASPA write-back, broader provider support, richer reporting, and future lint or simulation support. |
 | Governance and reporting | Partially complete | ROA change plans support preview, approval, apply, ticket or change metadata, maintenance windows, approval history, and provider execution audit rows. Routing-intent exceptions now also have explicit approval workflow surfaces, and the operations dashboard surfaces stale template bindings, expiring routing-intent exceptions, recent bulk intent-run health, stale or failed sync state, and expiry visibility. | Rollback bundles, multi-stage approvals, richer publication-state semantics, exports, alerting hooks, and broader governance beyond the current Krill-backed ROA slice. |
@@ -146,11 +146,11 @@ Close this refinement slice when:
 
 - [ROV Impact Simulation Plan](netbox_rpki_rov_impact_simulation_plan.md)
 
-- **Status:** Partially complete
+- **Status:** Functionally complete
 - **End state:** before approval or apply, operators can see predicted validation outcomes and blast radius for proposed changes
-- **Current state:** change-plan creation can persist `ROAValidationSimulationRun` and `ROAValidationSimulationResult` records, API surfaces expose the latest simulation summary, and operators can review predicted valid, invalid, and not-found counts from plan detail and aggregate surfaces
-- **Remaining gap:** improve simulation fidelity and explanation quality, add richer scenario coverage and blast-radius reasoning, and decide whether simulation becomes a gated approval input rather than an informational artifact
-- **Closure order:** continue iterating after linting, keeping the work attached to the same reconciliation and plan contracts
+- **Current state:** deterministic ROA simulation now emits normalized result and run contracts, persists first-class posture fields, gates approval on current simulation posture, supports acknowledgement-required simulation review during approval, records structured simulation audit data on approval records, exposes posture and explanation through API and detail surfaces, and rolls posture up into aggregate API and operations-dashboard views
+- **Remaining gap:** follow-on refinement only, such as deeper scenario catalogs, future ASPA simulation, or broader reporting polish
+- **Closure order:** complete for the first implementation wave; further work should be incremental rather than another foundational rewrite
 
 ### Priority 6: Bulk Generation and Templating
 

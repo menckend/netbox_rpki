@@ -3,22 +3,22 @@
 Prepared: April 13, 2026
 Updated: April 14, 2026
 Audience: plugin developers, especially junior developers implementing Priority 5
-Status: design and implementation guide; not yet fully implemented in the repository
+Status: implementation record and maintenance guide; Slices 0 through 6 are implemented in the repository
 
 ## How To Use This Document
 
-This is no longer just a design note. It is the working implementation guide for Priority 5.
+This is no longer just a design note. It is the implementation guide and completion record for Priority 5.
 
-If you are implementing this feature, use the document in this order:
+If you are maintaining or extending this feature, use the document in this order:
 
 1. read `Current Repository State` to understand what already exists
 2. read `Non-Goals And Fixed Decisions` to understand what you must not change
-3. read `Target Behavior` and `Data Contracts` to understand what the code must do
-4. implement `Slice 1` first unless a maintainer explicitly assigns a later slice
-5. use `Implementation Checklist For Slice 1` as the step-by-step build order
-6. do not mark the work complete until `Definition Of Done` is satisfied
+3. read `Target Behavior` and `Data Contracts` to understand the contract the code now enforces
+4. read `Implementation Status` to understand what landed in each slice
+5. use `Implementation Checklist For Slice 1` only as historical build order when reviewing how the feature was introduced
+6. use `Definition Of Done` as the maintained completion bar for future refactors or extensions
 
-This guide is intentionally explicit. It should be possible to work from it without inventing missing behavior.
+This guide is intentionally explicit. It should be possible to maintain or extend the feature from it without inventing missing behavior.
 
 ## Objective
 
@@ -636,6 +636,10 @@ The work is divided into slices so it can land incrementally without losing corr
 
 ### Slice 0: Freeze The Contract
 
+Status:
+
+- implemented
+
 Objective:
 
 - treat this guide as the fixed first-wave contract for implementation
@@ -655,7 +659,25 @@ Verification:
 
 - consistency review only
 
+## Implementation Status
+
+The first implementation wave described by this guide is complete.
+
+- `Slice 0` landed as the fixed contract in this document and the aligned backlog wording.
+- `Slice 1` landed as deterministic simulation classification, normalized summary and detail contracts, and simulation-aware approval enforcement.
+- `Slice 2` landed as first-class model fields for run posture and result classification plus migration and backfill.
+- `Slice 3` landed as richer API and detail surfaces for change plans, simulation runs, and simulation results.
+- `Slice 4` landed as aggregate simulation posture rollups in summary and dashboard surfaces.
+- `Slice 5` landed as structured simulation acknowledgement and approval audit persistence on approval records.
+- `Slice 6` landed as cross-surface contract-alignment tests covering services, approval, API, UI, and reporting.
+
+Repository readers should treat the remaining sections of this guide as the maintained contract for the implemented feature, not as an unstarted proposal.
+
 ### Slice 1: Deepen Simulation Service And Enforce Approval Posture
+
+Status:
+
+- implemented
 
 Objective:
 
@@ -695,6 +717,10 @@ Dependency rule:
 
 ### Slice 2: Add First-Class Model Fields Only If Needed
 
+Status:
+
+- implemented
+
 Objective:
 
 - add additive fields on simulation run or result models only if JSON-only storage proves too awkward for filtering, reporting, or audit
@@ -712,6 +738,10 @@ Verification:
 - focused model and factory tests
 
 ### Slice 3: Expose Richer API And Detail Surfaces
+
+Status:
+
+- implemented
 
 Objective:
 
@@ -733,6 +763,10 @@ Verification:
 
 ### Slice 4: Add Aggregate Rollups
 
+Status:
+
+- implemented
+
 Objective:
 
 - make simulation posture visible above the individual plan level
@@ -749,6 +783,10 @@ Verification:
 - plans awaiting review because of simulation posture are visible
 
 ### Slice 5: Harden Acknowledgement And Audit Treatment
+
+Status:
+
+- implemented
 
 Objective:
 
@@ -768,6 +806,10 @@ Verification:
 - audit metadata is preserved and visible enough for operations review
 
 ### Slice 6: Release-Gate Hardening
+
+Status:
+
+- implemented
 
 Objective:
 

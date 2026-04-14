@@ -1,4 +1,4 @@
-from django.test import RequestFactory, TestCase
+from django.test import RequestFactory, SimpleTestCase, TestCase
 
 from netbox_rpki import tables
 from netbox_rpki.object_registry import TABLE_OBJECT_SPECS
@@ -20,7 +20,7 @@ PRIORITY6_EXPECTED_DEFAULT_COLUMNS = {
 }
 
 
-class TableRegistrySmokeTestCase(TestCase):
+class TableRegistrySmokeTestCase(SimpleTestCase):
     def test_all_objects_expose_table_specs(self):
         self.assertEqual(
             get_spec_values(TABLE_OBJECT_SPECS, 'table', 'class_name'),
@@ -52,7 +52,7 @@ class GeneratedTableRenderingTestCase(TestCase):
                         table.as_html(fake_request)
 
 
-class Priority6TableContractTestCase(TestCase):
+class Priority6TableContractTestCase(SimpleTestCase):
     def test_priority6_generated_table_fields_and_defaults_remain_stable(self):
         for registry_key, expected_default_columns in PRIORITY6_EXPECTED_DEFAULT_COLUMNS.items():
             object_spec = get_object_spec(registry_key)
