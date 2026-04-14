@@ -28,13 +28,18 @@ from netbox_rpki.object_specs import ObjectSpec
 from netbox_rpki.services import (
     ProviderWriteError,
     acknowledge_roa_lint_findings,
+    apply_aspa_rollback_bundle,
     apply_aspa_change_plan_provider_write,
+    apply_roa_rollback_bundle,
     apply_roa_change_plan_provider_write,
+    approve_rollback_bundle,
     approve_aspa_change_plan,
+    approve_aspa_change_plan_secondary,
     build_aspa_change_plan_delta,
     build_roa_change_plan_lint_posture,
     build_roa_change_plan_simulation_posture,
     approve_roa_change_plan,
+    approve_roa_change_plan_secondary,
     build_roa_change_plan_delta,
     create_aspa_change_plan,
     create_roa_change_plan,
@@ -293,6 +298,32 @@ class ASPAChangePlanActionView(generic.ObjectEditView):
         return 'netbox_rpki.change_aspachangeplan'
 
     def get_plan(self, pk):
+        return get_object_or_404(self.queryset, pk=pk)
+
+    def get_requested_by(self, request) -> str:
+        return getattr(request.user, 'username', '') if getattr(request.user, 'is_authenticated', False) else ''
+
+
+class ROARollbackBundleActionView(generic.ObjectEditView):
+    queryset = models.ROAChangePlanRollbackBundle.objects.all()
+
+    def get_required_permission(self):
+        return 'netbox_rpki.change_roachangeplanrollbackbundle'
+
+    def get_bundle(self, pk):
+        return get_object_or_404(self.queryset, pk=pk)
+
+    def get_requested_by(self, request) -> str:
+        return getattr(request.user, 'username', '') if getattr(request.user, 'is_authenticated', False) else ''
+
+
+class ASPARollbackBundleActionView(generic.ObjectEditView):
+    queryset = models.ASPAChangePlanRollbackBundle.objects.all()
+
+    def get_required_permission(self):
+        return 'netbox_rpki.change_aspachangeplanrollbackbundle'
+
+    def get_bundle(self, pk):
         return get_object_or_404(self.queryset, pk=pk)
 
     def get_requested_by(self, request) -> str:
@@ -1302,6 +1333,7 @@ class ROAChangePlanApproveView(ROAChangePlanActionView):
 
     def get_form(self, data=None, *, plan):
         initial = {
+            'requires_secondary_approval': plan.requires_secondary_approval,
             'ticket_reference': plan.ticket_reference,
             'change_reference': plan.change_reference,
             'maintenance_window_start': plan.maintenance_window_start,
@@ -1334,6 +1366,7 @@ class ROAChangePlanApproveView(ROAChangePlanActionView):
             approve_roa_change_plan(
                 plan,
                 approved_by=self.get_requested_by(request),
+                requires_secondary_approval=form.cleaned_data['requires_secondary_approval'],
                 ticket_reference=form.cleaned_data['ticket_reference'],
                 change_reference=form.cleaned_data['change_reference'],
                 maintenance_window_start=form.cleaned_data['maintenance_window_start'],
@@ -1353,6 +1386,48 @@ class ROAChangePlanApproveView(ROAChangePlanActionView):
             return redirect(plan.get_absolute_url())
 
         messages.success(request, f'Approved ROA change plan {plan.name}.')
+        return redirect(plan.get_absolute_url())
+
+
+class ROAChangePlanApproveSecondaryView(ROAChangePlanActionView):
+    template_name = 'netbox_rpki/changeplan_secondary_confirm.html'
+    action_label = 'Secondary Approval'
+    button_class = 'success'
+
+    def get_form(self, data=None):
+        return forms.ChangePlanSecondaryApprovalForm(data=data)
+
+    def _render(self, request, plan, *, form=None, status=200):
+        return render(request, self.template_name, {
+            'object': plan,
+            'change_plan': plan,
+            'form': form or self.get_form(),
+            'return_url': self.get_return_url(request, plan),
+            'action_label': self.action_label,
+            'button_class': self.button_class,
+        }, status=status)
+
+    def get(self, request, pk):
+        plan = self.get_plan(pk)
+        return self._render(request, plan)
+
+    def post(self, request, pk):
+        plan = self.get_plan(pk)
+        form = self.get_form(request.POST)
+        if not form.is_valid():
+            return self._render(request, plan, form=form, status=400)
+
+        try:
+            approve_roa_change_plan_secondary(
+                plan,
+                secondary_approved_by=self.get_requested_by(request),
+                approval_notes=form.cleaned_data['approval_notes'],
+            )
+        except ProviderWriteError as exc:
+            messages.error(request, str(exc))
+            return redirect(plan.get_absolute_url())
+
+        messages.success(request, f'Completed secondary approval for ROA change plan {plan.name}.')
         return redirect(plan.get_absolute_url())
 
 
@@ -1628,6 +1703,7 @@ class ASPAChangePlanApproveView(ASPAChangePlanActionView):
 
     def get_form(self, data=None, *, plan):
         initial = {
+            'requires_secondary_approval': plan.requires_secondary_approval,
             'ticket_reference': plan.ticket_reference,
             'change_reference': plan.change_reference,
             'maintenance_window_start': plan.maintenance_window_start,
@@ -1660,6 +1736,7 @@ class ASPAChangePlanApproveView(ASPAChangePlanActionView):
             approve_aspa_change_plan(
                 plan,
                 approved_by=self.get_requested_by(request),
+                requires_secondary_approval=form.cleaned_data['requires_secondary_approval'],
                 ticket_reference=form.cleaned_data['ticket_reference'],
                 change_reference=form.cleaned_data['change_reference'],
                 maintenance_window_start=form.cleaned_data['maintenance_window_start'],
@@ -1671,6 +1748,48 @@ class ASPAChangePlanApproveView(ASPAChangePlanActionView):
             return redirect(plan.get_absolute_url())
 
         messages.success(request, f'Approved ASPA change plan {plan.name}.')
+        return redirect(plan.get_absolute_url())
+
+
+class ASPAChangePlanApproveSecondaryView(ASPAChangePlanActionView):
+    template_name = 'netbox_rpki/changeplan_secondary_confirm.html'
+    action_label = 'Secondary Approval'
+    button_class = 'success'
+
+    def get_form(self, data=None):
+        return forms.ChangePlanSecondaryApprovalForm(data=data)
+
+    def _render(self, request, plan, *, form=None, status=200):
+        return render(request, self.template_name, {
+            'object': plan,
+            'change_plan': plan,
+            'form': form or self.get_form(),
+            'return_url': self.get_return_url(request, plan),
+            'action_label': self.action_label,
+            'button_class': self.button_class,
+        }, status=status)
+
+    def get(self, request, pk):
+        plan = self.get_plan(pk)
+        return self._render(request, plan)
+
+    def post(self, request, pk):
+        plan = self.get_plan(pk)
+        form = self.get_form(request.POST)
+        if not form.is_valid():
+            return self._render(request, plan, form=form, status=400)
+
+        try:
+            approve_aspa_change_plan_secondary(
+                plan,
+                secondary_approved_by=self.get_requested_by(request),
+                approval_notes=form.cleaned_data['approval_notes'],
+            )
+        except ProviderWriteError as exc:
+            messages.error(request, str(exc))
+            return redirect(plan.get_absolute_url())
+
+        messages.success(request, f'Completed secondary approval for ASPA change plan {plan.name}.')
         return redirect(plan.get_absolute_url())
 
 
@@ -1727,3 +1846,211 @@ class ASPAChangePlanApplyView(ASPAChangePlanActionView):
                 f'Applied ASPA change plan {plan.name}, but the follow-up provider sync did not complete successfully.',
             )
         return redirect(plan.get_absolute_url())
+
+
+class ROAChangePlanRollbackBundleApproveView(ROARollbackBundleActionView):
+    template_name = 'netbox_rpki/rollbackbundle_confirm.html'
+    action_label = 'Approve'
+    button_class = 'warning'
+
+    def get_form(self, data=None, *, bundle):
+        initial = {
+            'ticket_reference': bundle.ticket_reference,
+            'change_reference': bundle.change_reference,
+            'maintenance_window_start': bundle.maintenance_window_start,
+            'maintenance_window_end': bundle.maintenance_window_end,
+            'notes': bundle.notes,
+        }
+        return forms.RollbackBundleApprovalForm(data=data, initial=initial)
+
+    def _render(self, request, bundle, *, form=None, status=200):
+        return render(request, self.template_name, {
+            'object': bundle,
+            'rollback_bundle': bundle,
+            'form': form or self.get_form(bundle=bundle),
+            'return_url': self.get_return_url(request, bundle),
+            'action_label': self.action_label,
+            'button_class': self.button_class,
+            'show_governance_inputs': True,
+        }, status=status)
+
+    def get(self, request, pk):
+        bundle = self.get_bundle(pk)
+        return self._render(request, bundle)
+
+    def post(self, request, pk):
+        bundle = self.get_bundle(pk)
+        form = self.get_form(request.POST, bundle=bundle)
+        if not form.is_valid():
+            return self._render(request, bundle, form=form, status=400)
+
+        try:
+            approve_rollback_bundle(
+                bundle,
+                approved_by=self.get_requested_by(request),
+                ticket_reference=form.cleaned_data['ticket_reference'],
+                change_reference=form.cleaned_data['change_reference'],
+                maintenance_window_start=form.cleaned_data['maintenance_window_start'],
+                maintenance_window_end=form.cleaned_data['maintenance_window_end'],
+                notes=form.cleaned_data['notes'],
+            )
+        except ProviderWriteError as exc:
+            messages.error(request, str(exc))
+            return redirect(bundle.get_absolute_url())
+
+        messages.success(request, f'Approved rollback bundle {bundle.name}.')
+        return redirect(bundle.get_absolute_url())
+
+
+class ROAChangePlanRollbackBundleApplyView(ROARollbackBundleActionView):
+    template_name = 'netbox_rpki/rollbackbundle_confirm.html'
+    action_label = 'Apply'
+    button_class = 'danger'
+
+    def get(self, request, pk):
+        bundle = self.get_bundle(pk)
+        return render(request, self.template_name, {
+            'object': bundle,
+            'rollback_bundle': bundle,
+            'delta': bundle.rollback_delta_json,
+            'form': ConfirmationForm(),
+            'return_url': self.get_return_url(request, bundle),
+            'action_label': self.action_label,
+            'button_class': self.button_class,
+            'show_governance_inputs': False,
+        })
+
+    def post(self, request, pk):
+        bundle = self.get_bundle(pk)
+        form = ConfirmationForm(request.POST)
+        if not form.is_valid():
+            return render(request, self.template_name, {
+                'object': bundle,
+                'rollback_bundle': bundle,
+                'delta': bundle.rollback_delta_json,
+                'form': form,
+                'return_url': self.get_return_url(request, bundle),
+                'action_label': self.action_label,
+                'button_class': self.button_class,
+                'show_governance_inputs': False,
+            }, status=400)
+
+        try:
+            bundle = apply_roa_rollback_bundle(
+                bundle,
+                requested_by=self.get_requested_by(request),
+            )
+        except ProviderWriteError as exc:
+            messages.error(request, str(exc))
+            return redirect(bundle.get_absolute_url())
+
+        followup_status = (bundle.apply_response_json or {}).get('followup_sync', {}).get('status')
+        if followup_status == models.ValidationRunStatus.FAILED:
+            messages.warning(request, f'Applied rollback bundle {bundle.name}, but the follow-up provider sync did not complete successfully.')
+        else:
+            messages.success(request, f'Applied rollback bundle {bundle.name}.')
+        return redirect(bundle.get_absolute_url())
+
+
+class ASPAChangePlanRollbackBundleApproveView(ASPARollbackBundleActionView):
+    template_name = 'netbox_rpki/rollbackbundle_confirm.html'
+    action_label = 'Approve'
+    button_class = 'warning'
+
+    def get_form(self, data=None, *, bundle):
+        initial = {
+            'ticket_reference': bundle.ticket_reference,
+            'change_reference': bundle.change_reference,
+            'maintenance_window_start': bundle.maintenance_window_start,
+            'maintenance_window_end': bundle.maintenance_window_end,
+            'notes': bundle.notes,
+        }
+        return forms.RollbackBundleApprovalForm(data=data, initial=initial)
+
+    def _render(self, request, bundle, *, form=None, status=200):
+        return render(request, self.template_name, {
+            'object': bundle,
+            'rollback_bundle': bundle,
+            'form': form or self.get_form(bundle=bundle),
+            'return_url': self.get_return_url(request, bundle),
+            'action_label': self.action_label,
+            'button_class': self.button_class,
+            'show_governance_inputs': True,
+        }, status=status)
+
+    def get(self, request, pk):
+        bundle = self.get_bundle(pk)
+        return self._render(request, bundle)
+
+    def post(self, request, pk):
+        bundle = self.get_bundle(pk)
+        form = self.get_form(request.POST, bundle=bundle)
+        if not form.is_valid():
+            return self._render(request, bundle, form=form, status=400)
+
+        try:
+            approve_rollback_bundle(
+                bundle,
+                approved_by=self.get_requested_by(request),
+                ticket_reference=form.cleaned_data['ticket_reference'],
+                change_reference=form.cleaned_data['change_reference'],
+                maintenance_window_start=form.cleaned_data['maintenance_window_start'],
+                maintenance_window_end=form.cleaned_data['maintenance_window_end'],
+                notes=form.cleaned_data['notes'],
+            )
+        except ProviderWriteError as exc:
+            messages.error(request, str(exc))
+            return redirect(bundle.get_absolute_url())
+
+        messages.success(request, f'Approved rollback bundle {bundle.name}.')
+        return redirect(bundle.get_absolute_url())
+
+
+class ASPAChangePlanRollbackBundleApplyView(ASPARollbackBundleActionView):
+    template_name = 'netbox_rpki/rollbackbundle_confirm.html'
+    action_label = 'Apply'
+    button_class = 'danger'
+
+    def get(self, request, pk):
+        bundle = self.get_bundle(pk)
+        return render(request, self.template_name, {
+            'object': bundle,
+            'rollback_bundle': bundle,
+            'delta': bundle.rollback_delta_json,
+            'form': ConfirmationForm(),
+            'return_url': self.get_return_url(request, bundle),
+            'action_label': self.action_label,
+            'button_class': self.button_class,
+            'show_governance_inputs': False,
+        })
+
+    def post(self, request, pk):
+        bundle = self.get_bundle(pk)
+        form = ConfirmationForm(request.POST)
+        if not form.is_valid():
+            return render(request, self.template_name, {
+                'object': bundle,
+                'rollback_bundle': bundle,
+                'delta': bundle.rollback_delta_json,
+                'form': form,
+                'return_url': self.get_return_url(request, bundle),
+                'action_label': self.action_label,
+                'button_class': self.button_class,
+                'show_governance_inputs': False,
+            }, status=400)
+
+        try:
+            bundle = apply_aspa_rollback_bundle(
+                bundle,
+                requested_by=self.get_requested_by(request),
+            )
+        except ProviderWriteError as exc:
+            messages.error(request, str(exc))
+            return redirect(bundle.get_absolute_url())
+
+        followup_status = (bundle.apply_response_json or {}).get('followup_sync', {}).get('status')
+        if followup_status == models.ValidationRunStatus.FAILED:
+            messages.warning(request, f'Applied rollback bundle {bundle.name}, but the follow-up provider sync did not complete successfully.')
+        else:
+            messages.success(request, f'Applied rollback bundle {bundle.name}.')
+        return redirect(bundle.get_absolute_url())

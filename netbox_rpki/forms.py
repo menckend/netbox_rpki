@@ -127,6 +127,11 @@ def _build_plan_lint_ack_querysets(plan):
 
 
 class ROAChangePlanApprovalForm(ConfirmationForm):
+    requires_secondary_approval = forms.BooleanField(
+        required=False,
+        label='Require a second independent approval before this plan can be applied',
+        initial=False,
+    )
     ticket_reference = forms.CharField(required=False, max_length=200, label='Ticket Reference')
     change_reference = forms.CharField(required=False, max_length=200, label='Change Reference')
     maintenance_window_start = forms.DateTimeField(
@@ -193,6 +198,7 @@ class ROAChangePlanApprovalForm(ConfirmationForm):
 
     fieldsets = (
         FieldSet(
+            'requires_secondary_approval',
             'ticket_reference',
             'change_reference',
             'maintenance_window_start',
@@ -285,6 +291,7 @@ class ROAChangePlanApprovalForm(ConfirmationForm):
 class ASPAChangePlanApprovalForm(ROAChangePlanApprovalForm):
     fieldsets = (
         FieldSet(
+            'requires_secondary_approval',
             'ticket_reference',
             'change_reference',
             'maintenance_window_start',
@@ -311,6 +318,76 @@ class ASPAChangePlanApprovalForm(ROAChangePlanApprovalForm):
             end_at=cleaned_data.get('maintenance_window_end'),
         )
         return cleaned_data
+
+
+class RollbackBundleApprovalForm(ConfirmationForm):
+    ticket_reference = forms.CharField(required=False, max_length=200, label='Ticket Reference')
+    change_reference = forms.CharField(required=False, max_length=200, label='Change Reference')
+    maintenance_window_start = forms.DateTimeField(
+        required=False,
+        label='Maintenance Window Start',
+        input_formats=(
+            '%Y-%m-%dT%H:%M',
+            '%Y-%m-%d %H:%M',
+            '%Y-%m-%d %H:%M:%S',
+        ),
+        widget=forms.DateTimeInput(
+            attrs={'type': 'datetime-local'},
+            format='%Y-%m-%dT%H:%M',
+        ),
+    )
+    maintenance_window_end = forms.DateTimeField(
+        required=False,
+        label='Maintenance Window End',
+        input_formats=(
+            '%Y-%m-%dT%H:%M',
+            '%Y-%m-%d %H:%M',
+            '%Y-%m-%d %H:%M:%S',
+        ),
+        widget=forms.DateTimeInput(
+            attrs={'type': 'datetime-local'},
+            format='%Y-%m-%dT%H:%M',
+        ),
+    )
+    notes = forms.CharField(
+        required=False,
+        label='Approval Notes',
+        widget=forms.Textarea(attrs={'rows': 3}),
+    )
+
+    fieldsets = (
+        FieldSet(
+            'ticket_reference',
+            'change_reference',
+            'maintenance_window_start',
+            'maintenance_window_end',
+            'notes',
+            name='Governance',
+        ),
+    )
+
+    def clean(self):
+        cleaned_data = super().clean()
+        validate_maintenance_window_bounds(
+            start_at=cleaned_data.get('maintenance_window_start'),
+            end_at=cleaned_data.get('maintenance_window_end'),
+        )
+        return cleaned_data
+
+
+class ChangePlanSecondaryApprovalForm(ConfirmationForm):
+    approval_notes = forms.CharField(
+        required=False,
+        label='Approval Notes',
+        widget=forms.Textarea(attrs={'rows': 3}),
+    )
+
+    fieldsets = (
+        FieldSet(
+            'approval_notes',
+            name='Secondary Approval',
+        ),
+    )
 
 
 class RoutingIntentProfileRunActionForm(ConfirmationForm):

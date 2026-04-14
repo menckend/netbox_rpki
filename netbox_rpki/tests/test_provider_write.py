@@ -587,6 +587,16 @@ class ProviderWriteServiceTestCase(TestCase):
                 'maintenance_window_end': window_end.isoformat(),
             },
         )
+        rollback_bundle = plan.rollback_bundle
+        self.assertEqual(rollback_bundle.status, rpki_models.RollbackBundleStatus.AVAILABLE)
+        self.assertEqual(
+            rollback_bundle.rollback_delta_json,
+            {
+                'added': delta['removed'],
+                'removed': delta['added'],
+            },
+        )
+        self.assertEqual(rollback_bundle.item_count, len(delta['added']) + len(delta['removed']))
         submit_mock.assert_called_once_with(self.provider_account, delta)
         sync_mock.assert_called_once_with(
             self.provider_account,
@@ -654,6 +664,7 @@ class ProviderWriteServiceTestCase(TestCase):
         execution = plan.provider_write_executions.get(execution_mode=rpki_models.ProviderWriteExecutionMode.APPLY)
         self.assertEqual(execution.status, rpki_models.ValidationRunStatus.FAILED)
         self.assertEqual(execution.error, 'krill rejected delta')
+        self.assertFalse(rpki_models.ROAChangePlanRollbackBundle.objects.filter(source_plan=plan).exists())
 
     def test_capability_gating_rejects_unsupported_provider(self):
         unsupported_account = create_test_provider_account(
@@ -1525,6 +1536,7 @@ class ASPAChangePlanActionAPITestCase(PluginAPITestCase):
         self.assertEqual(
             list(serializer.fields.keys()),
             [
+                'requires_secondary_approval',
                 'ticket_reference',
                 'change_reference',
                 'maintenance_window_start',
@@ -1544,7 +1556,13 @@ class ASPAChangePlanActionAPITestCase(PluginAPITestCase):
         )
 
         self.assertTrue(serializer.is_valid(), serializer.errors)
-        self.assertEqual(serializer.validated_data, {'ticket_reference': 'ASPA-CHG-102'})
+        self.assertEqual(
+            serializer.validated_data,
+            {
+                'requires_secondary_approval': False,
+                'ticket_reference': 'ASPA-CHG-102',
+            },
+        )
 
     def test_apply_action_runs_provider_write_flow(self):
         self.add_permissions('netbox_rpki.view_aspachangeplan', 'netbox_rpki.change_aspachangeplan')
@@ -1712,6 +1730,7 @@ class ASPAChangePlanActionViewTestCase(PluginViewTestCase):
             [
                 'return_url',
                 'confirm',
+                'requires_secondary_approval',
                 'ticket_reference',
                 'change_reference',
                 'maintenance_window_start',

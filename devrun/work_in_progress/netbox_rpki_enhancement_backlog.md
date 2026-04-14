@@ -157,8 +157,8 @@ The closure order should stay dependency-driven rather than milestone-driven.
 
 - **Status:** Partially complete
 - **End state:** publication workflows are policy-aware, multi-stage, rollback-capable, and fully auditable across providers
-- **Current state:** ROA change plans support preview, approval, apply, actor attribution, maintenance-window metadata, ticket and change references, approval history, and provider execution audit rows. The newer routing-intent template workflow now also has explicit approval metadata and operator actions for typed exceptions before they affect derived policy.
-- **Remaining gap:** rollback bundles, multi-stage approvals, richer publication-state semantics, and broader extension of the governance contract beyond the current ROA plan plus typed-exception slice
+- **Current state:** ROA and ASPA change plans now support preview, approval, apply, actor attribution, maintenance-window metadata, ticket and change references, approval history, provider execution audit rows, optional dual-approval workflow with distinct secondary approvers, and provider-backed rollback bundles captured automatically on successful apply with approve and apply operator actions through service, API, and web surfaces. The newer routing-intent template workflow now also has explicit approval metadata and operator actions for typed exceptions before they affect derived policy.
+- **Remaining gap:** richer publication-state semantics, and broader extension of the governance contract beyond the current ROA and ASPA plan plus typed-exception slice
 - **Closure order:** after linting and simulation are available for the same plan objects
 
 ### Priority 9: Lifecycle, Expiry, and Publication Health Reporting

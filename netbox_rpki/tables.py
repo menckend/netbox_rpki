@@ -104,3 +104,29 @@ class ImportedAspaProviderTable(NetBoxTable):
         model = models.ImportedAspaProvider
         fields = ('provider_as', 'provider_as_value', 'address_family', 'raw_provider_text', 'comments', 'tenant', 'tags', 'actions')
         default_columns = ('provider_as', 'provider_as_value', 'address_family', 'raw_provider_text', 'tenant')
+
+
+_BaseProviderSnapshotDiffTable = ProviderSnapshotDiffTable
+
+
+class ProviderSnapshotDiffTable(_BaseProviderSnapshotDiffTable):
+    records_added = tables.Column(empty_values=(), verbose_name='Added', orderable=False)
+    records_removed = tables.Column(empty_values=(), verbose_name='Removed', orderable=False)
+    records_changed = tables.Column(empty_values=(), verbose_name='Changed', orderable=False)
+
+    def value_records_added(self, record):
+        return ((record.summary_json or {}).get('totals') or {}).get('records_added', 0)
+
+    def value_records_removed(self, record):
+        return ((record.summary_json or {}).get('totals') or {}).get('records_removed', 0)
+
+    def value_records_changed(self, record):
+        return ((record.summary_json or {}).get('totals') or {}).get('records_changed', 0)
+
+    class Meta(_BaseProviderSnapshotDiffTable.Meta):
+        fields = _BaseProviderSnapshotDiffTable.Meta.fields + ('records_added', 'records_removed', 'records_changed')
+        default_columns = _BaseProviderSnapshotDiffTable.Meta.default_columns + (
+            'records_added',
+            'records_removed',
+            'records_changed',
+        )

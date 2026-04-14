@@ -294,6 +294,16 @@ class AspaProviderWriteServiceTestCase(TestCase):
         self.assertEqual(execution.response_payload_json['provider_response'], {'message': 'accepted'})
         self.assertEqual(execution.followup_sync_run, followup_sync_run)
         self.assertEqual(execution.followup_provider_snapshot, followup_snapshot)
+        rollback_bundle = plan.rollback_bundle
+        self.assertEqual(rollback_bundle.status, rpki_models.RollbackBundleStatus.AVAILABLE)
+        self.assertEqual(
+            rollback_bundle.rollback_delta_json,
+            {
+                'added': delta['removed'],
+                'removed': delta['added'],
+            },
+        )
+        self.assertEqual(rollback_bundle.item_count, len(delta['added']) + len(delta['removed']))
         submit_mock.assert_called_once_with(self.provider_account, delta)
         sync_mock.assert_called_once()
 
@@ -326,6 +336,7 @@ class AspaProviderWriteServiceTestCase(TestCase):
         execution = plan.provider_write_executions.get(execution_mode=rpki_models.ProviderWriteExecutionMode.APPLY)
         self.assertEqual(execution.status, rpki_models.ValidationRunStatus.FAILED)
         self.assertEqual(execution.error, 'krill rejected aspa delta')
+        self.assertFalse(rpki_models.ASPAChangePlanRollbackBundle.objects.filter(source_plan=plan).exists())
 
     def test_apply_records_partial_failure_on_followup_sync_failure(self):
         customer = create_test_asn(64770)

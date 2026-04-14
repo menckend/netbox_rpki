@@ -26,6 +26,7 @@ from netbox_rpki.tests.utils import (
     create_test_asn,
     create_test_aspa,
     create_test_aspa_change_plan,
+    create_test_aspa_change_plan_rollback_bundle,
     create_test_aspa_change_plan_item,
     create_test_aspa_provider,
     create_test_aspa_intent,
@@ -72,6 +73,7 @@ from netbox_rpki.tests.utils import (
     create_test_rir,
     create_test_revoked_certificate,
     create_test_roa_change_plan,
+    create_test_roa_change_plan_rollback_bundle,
     create_test_roa_change_plan_item,
     create_test_roa_change_plan_matrix,
     create_test_imported_roa_authorization,
@@ -630,6 +632,12 @@ def _register_scenario_builders() -> None:
             "providersyncrun": lambda: create_test_provider_sync_run(name=f"Provider Sync Run {unique_token('provider-sync-run')}"),
             "providerwriteexecution": lambda: create_test_provider_write_execution(
                 name=f"Provider Write Execution {unique_token('provider-write-execution')}"
+            ),
+            "roachangeplanrollbackbundle": lambda: create_test_roa_change_plan_rollback_bundle(
+                name=f"ROA Rollback Bundle {unique_token('roa-rollback-bundle')}"
+            ),
+            "aspachangeplanrollbackbundle": lambda: create_test_aspa_change_plan_rollback_bundle(
+                name=f"ASPA Rollback Bundle {unique_token('aspa-rollback-bundle')}"
             ),
             "approvalrecord": lambda: create_test_approval_record(
                 name=f"Approval Record {unique_token('approval-record')}"

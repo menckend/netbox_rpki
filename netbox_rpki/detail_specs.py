@@ -462,6 +462,20 @@ def get_provider_last_sync_summary(account: models.RpkiProviderAccount) -> str |
     return get_pretty_json(account.last_sync_summary_json)
 
 
+def get_provider_account_family_rollups(account: models.RpkiProviderAccount) -> str | None:
+    from netbox_rpki.services.provider_sync_contract import build_provider_account_rollup
+
+    if not account.last_sync_summary_json:
+        return None
+    return get_pretty_json(build_provider_account_rollup(account).get('family_rollups'))
+
+
+def get_provider_account_pub_obs_rollup(account: models.RpkiProviderAccount) -> str | None:
+    from netbox_rpki.services.provider_sync_contract import build_provider_account_pub_obs_rollup
+
+    return get_pretty_json(build_provider_account_pub_obs_rollup(account))
+
+
 def get_provider_sync_run_summary(run: models.ProviderSyncRun) -> str | None:
     return get_pretty_json(run.summary_json)
 
@@ -474,6 +488,13 @@ def get_provider_snapshot_family_rollups(snapshot: models.ProviderSnapshot) -> s
     from netbox_rpki.services.provider_sync_contract import build_provider_snapshot_rollup
 
     return get_pretty_json(build_provider_snapshot_rollup(snapshot)['family_rollups'])
+
+
+def get_provider_snapshot_signed_object_type_breakdown(snapshot: models.ProviderSnapshot) -> str | None:
+    from netbox_rpki.services.provider_sync_contract import build_snapshot_signed_object_type_breakdown
+
+    breakdown = build_snapshot_signed_object_type_breakdown(snapshot)
+    return get_pretty_json(breakdown)
 
 
 def get_provider_snapshot_latest_diff_summary(snapshot: models.ProviderSnapshot) -> str | None:
@@ -880,12 +901,15 @@ ROA_CHANGE_PLAN_DETAIL_SPEC = DetailSpec(
             empty_text='None',
         ),
         DetailFieldSpec(label='Status', value=lambda obj: obj.status),
+        DetailFieldSpec(label='Requires Secondary Approval', value=lambda obj: obj.requires_secondary_approval),
         DetailFieldSpec(label='Ticket Reference', value=lambda obj: obj.ticket_reference, empty_text='None'),
         DetailFieldSpec(label='Change Reference', value=lambda obj: obj.change_reference, empty_text='None'),
         DetailFieldSpec(label='Maintenance Window Start', value=lambda obj: obj.maintenance_window_start, empty_text='None'),
         DetailFieldSpec(label='Maintenance Window End', value=lambda obj: obj.maintenance_window_end, empty_text='None'),
         DetailFieldSpec(label='Approved At', value=lambda obj: obj.approved_at, empty_text='None'),
         DetailFieldSpec(label='Approved By', value=lambda obj: obj.approved_by, empty_text='None'),
+        DetailFieldSpec(label='Secondary Approved At', value=lambda obj: obj.secondary_approved_at, empty_text='None'),
+        DetailFieldSpec(label='Secondary Approved By', value=lambda obj: obj.secondary_approved_by, empty_text='None'),
         DetailFieldSpec(label='Apply Started At', value=lambda obj: obj.apply_started_at, empty_text='None'),
         DetailFieldSpec(label='Apply Requested By', value=lambda obj: obj.apply_requested_by, empty_text='None'),
         DetailFieldSpec(label='Applied At', value=lambda obj: obj.applied_at, empty_text='None'),
@@ -956,6 +980,12 @@ ROA_CHANGE_PLAN_DETAIL_SPEC = DetailSpec(
         ),
         DetailActionSpec(
             permission='netbox_rpki.change_roachangeplan',
+            label='Secondary Approval',
+            direct_url=lambda obj: reverse('plugins:netbox_rpki:roachangeplan_approve_secondary', kwargs={'pk': obj.pk}),
+            visible=lambda obj: obj.can_approve_secondary,
+        ),
+        DetailActionSpec(
+            permission='netbox_rpki.change_roachangeplan',
             label='Apply',
             direct_url=lambda obj: reverse('plugins:netbox_rpki:roachangeplan_apply', kwargs={'pk': obj.pk}),
             visible=lambda obj: obj.can_apply,
@@ -981,6 +1011,11 @@ ROA_CHANGE_PLAN_DETAIL_SPEC = DetailSpec(
             title='Provider Write Executions',
             table_class_name='ProviderWriteExecutionTable',
             queryset=lambda obj: obj.provider_write_executions.all(),
+        ),
+        DetailTableSpec(
+            title='Rollback Bundles',
+            table_class_name='ROAChangePlanRollbackBundleTable',
+            queryset=lambda obj: models.ROAChangePlanRollbackBundle.objects.filter(source_plan=obj),
         ),
         DetailTableSpec(
             title='ROA Lint Runs',
@@ -1043,6 +1078,92 @@ PROVIDER_WRITE_EXECUTION_DETAIL_SPEC = DetailSpec(
             value=get_write_execution_response_payload,
             kind='code',
             empty_text='None',
+        ),
+    ),
+)
+
+
+ROA_CHANGE_PLAN_ROLLBACK_BUNDLE_DETAIL_SPEC = DetailSpec(
+    model=models.ROAChangePlanRollbackBundle,
+    list_url_name='plugins:netbox_rpki:roachangeplanrollbackbundle_list',
+    breadcrumb_label='ROA Change Plan Rollback Bundles',
+    card_title='ROA Rollback Bundle',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Organization', value=lambda obj: obj.organization, kind='link'),
+        DetailFieldSpec(label='Source Plan', value=lambda obj: obj.source_plan, kind='link'),
+        DetailFieldSpec(label='Status', value=lambda obj: obj.status),
+        DetailFieldSpec(label='Item Count', value=lambda obj: obj.item_count),
+        DetailFieldSpec(label='Ticket Reference', value=lambda obj: obj.ticket_reference, empty_text='None'),
+        DetailFieldSpec(label='Change Reference', value=lambda obj: obj.change_reference, empty_text='None'),
+        DetailFieldSpec(label='Maintenance Window Start', value=lambda obj: obj.maintenance_window_start, empty_text='None'),
+        DetailFieldSpec(label='Maintenance Window End', value=lambda obj: obj.maintenance_window_end, empty_text='None'),
+        DetailFieldSpec(label='Approved By', value=lambda obj: obj.approved_by, empty_text='None'),
+        DetailFieldSpec(label='Approved At', value=lambda obj: obj.approved_at, empty_text='None'),
+        DetailFieldSpec(label='Apply Requested By', value=lambda obj: obj.apply_requested_by, empty_text='None'),
+        DetailFieldSpec(label='Apply Started At', value=lambda obj: obj.apply_started_at, empty_text='None'),
+        DetailFieldSpec(label='Applied At', value=lambda obj: obj.applied_at, empty_text='None'),
+        DetailFieldSpec(label='Failed At', value=lambda obj: obj.failed_at, empty_text='None'),
+        DetailFieldSpec(label='Notes', value=lambda obj: obj.notes, empty_text='None'),
+        DetailFieldSpec(label='Apply Error', value=lambda obj: obj.apply_error, empty_text='None'),
+        DetailFieldSpec(label='Rollback Delta', value=lambda obj: obj.rollback_delta_json, kind='code', empty_text='None'),
+        DetailFieldSpec(label='Apply Response', value=lambda obj: obj.apply_response_json, kind='code', empty_text='None'),
+    ),
+    actions=(
+        DetailActionSpec(
+            permission='netbox_rpki.change_roachangeplanrollbackbundle',
+            label='Approve Rollback',
+            direct_url=lambda obj: reverse('plugins:netbox_rpki:roachangeplanrollbackbundle_approve', kwargs={'pk': obj.pk}),
+            visible=lambda obj: obj.can_approve,
+        ),
+        DetailActionSpec(
+            permission='netbox_rpki.change_roachangeplanrollbackbundle',
+            label='Apply Rollback',
+            direct_url=lambda obj: reverse('plugins:netbox_rpki:roachangeplanrollbackbundle_apply', kwargs={'pk': obj.pk}),
+            visible=lambda obj: obj.can_apply,
+        ),
+    ),
+)
+
+
+ASPA_CHANGE_PLAN_ROLLBACK_BUNDLE_DETAIL_SPEC = DetailSpec(
+    model=models.ASPAChangePlanRollbackBundle,
+    list_url_name='plugins:netbox_rpki:aspachangeplanrollbackbundle_list',
+    breadcrumb_label='ASPA Change Plan Rollback Bundles',
+    card_title='ASPA Rollback Bundle',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Organization', value=lambda obj: obj.organization, kind='link'),
+        DetailFieldSpec(label='Source Plan', value=lambda obj: obj.source_plan, kind='link'),
+        DetailFieldSpec(label='Status', value=lambda obj: obj.status),
+        DetailFieldSpec(label='Item Count', value=lambda obj: obj.item_count),
+        DetailFieldSpec(label='Ticket Reference', value=lambda obj: obj.ticket_reference, empty_text='None'),
+        DetailFieldSpec(label='Change Reference', value=lambda obj: obj.change_reference, empty_text='None'),
+        DetailFieldSpec(label='Maintenance Window Start', value=lambda obj: obj.maintenance_window_start, empty_text='None'),
+        DetailFieldSpec(label='Maintenance Window End', value=lambda obj: obj.maintenance_window_end, empty_text='None'),
+        DetailFieldSpec(label='Approved By', value=lambda obj: obj.approved_by, empty_text='None'),
+        DetailFieldSpec(label='Approved At', value=lambda obj: obj.approved_at, empty_text='None'),
+        DetailFieldSpec(label='Apply Requested By', value=lambda obj: obj.apply_requested_by, empty_text='None'),
+        DetailFieldSpec(label='Apply Started At', value=lambda obj: obj.apply_started_at, empty_text='None'),
+        DetailFieldSpec(label='Applied At', value=lambda obj: obj.applied_at, empty_text='None'),
+        DetailFieldSpec(label='Failed At', value=lambda obj: obj.failed_at, empty_text='None'),
+        DetailFieldSpec(label='Notes', value=lambda obj: obj.notes, empty_text='None'),
+        DetailFieldSpec(label='Apply Error', value=lambda obj: obj.apply_error, empty_text='None'),
+        DetailFieldSpec(label='Rollback Delta', value=lambda obj: obj.rollback_delta_json, kind='code', empty_text='None'),
+        DetailFieldSpec(label='Apply Response', value=lambda obj: obj.apply_response_json, kind='code', empty_text='None'),
+    ),
+    actions=(
+        DetailActionSpec(
+            permission='netbox_rpki.change_aspachangeplanrollbackbundle',
+            label='Approve Rollback',
+            direct_url=lambda obj: reverse('plugins:netbox_rpki:aspachangeplanrollbackbundle_approve', kwargs={'pk': obj.pk}),
+            visible=lambda obj: obj.can_approve,
+        ),
+        DetailActionSpec(
+            permission='netbox_rpki.change_aspachangeplanrollbackbundle',
+            label='Apply Rollback',
+            direct_url=lambda obj: reverse('plugins:netbox_rpki:aspachangeplanrollbackbundle_apply', kwargs={'pk': obj.pk}),
+            visible=lambda obj: obj.can_apply,
         ),
     ),
 )
@@ -1531,12 +1652,15 @@ ASPA_CHANGE_PLAN_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(label='Provider Account', value=lambda obj: obj.provider_account, kind='link', empty_text='None'),
         DetailFieldSpec(label='Provider Snapshot', value=lambda obj: obj.provider_snapshot, kind='link', empty_text='None'),
         DetailFieldSpec(label='Status', value=lambda obj: obj.status),
+        DetailFieldSpec(label='Requires Secondary Approval', value=lambda obj: obj.requires_secondary_approval),
         DetailFieldSpec(label='Ticket Reference', value=lambda obj: obj.ticket_reference, empty_text='None'),
         DetailFieldSpec(label='Change Reference', value=lambda obj: obj.change_reference, empty_text='None'),
         DetailFieldSpec(label='Maintenance Window Start', value=lambda obj: obj.maintenance_window_start, empty_text='None'),
         DetailFieldSpec(label='Maintenance Window End', value=lambda obj: obj.maintenance_window_end, empty_text='None'),
         DetailFieldSpec(label='Approved At', value=lambda obj: obj.approved_at, empty_text='None'),
         DetailFieldSpec(label='Approved By', value=lambda obj: obj.approved_by, empty_text='None'),
+        DetailFieldSpec(label='Secondary Approved At', value=lambda obj: obj.secondary_approved_at, empty_text='None'),
+        DetailFieldSpec(label='Secondary Approved By', value=lambda obj: obj.secondary_approved_by, empty_text='None'),
         DetailFieldSpec(label='Apply Started At', value=lambda obj: obj.apply_started_at, empty_text='None'),
         DetailFieldSpec(label='Apply Requested By', value=lambda obj: obj.apply_requested_by, empty_text='None'),
         DetailFieldSpec(label='Applied At', value=lambda obj: obj.applied_at, empty_text='None'),
@@ -1564,6 +1688,12 @@ ASPA_CHANGE_PLAN_DETAIL_SPEC = DetailSpec(
         ),
         DetailActionSpec(
             permission='netbox_rpki.change_aspachangeplan',
+            label='Secondary Approval',
+            direct_url=lambda obj: reverse('plugins:netbox_rpki:aspachangeplan_approve_secondary', kwargs={'pk': obj.pk}),
+            visible=lambda obj: obj.can_approve_secondary,
+        ),
+        DetailActionSpec(
+            permission='netbox_rpki.change_aspachangeplan',
             label='Apply',
             direct_url=lambda obj: reverse('plugins:netbox_rpki:aspachangeplan_apply', kwargs={'pk': obj.pk}),
             visible=lambda obj: obj.can_apply,
@@ -1584,6 +1714,11 @@ ASPA_CHANGE_PLAN_DETAIL_SPEC = DetailSpec(
             title='Provider Write Executions',
             table_class_name='ProviderWriteExecutionTable',
             queryset=lambda obj: obj.provider_write_executions.all(),
+        ),
+        DetailTableSpec(
+            title='Rollback Bundles',
+            table_class_name='ASPAChangePlanRollbackBundleTable',
+            queryset=lambda obj: models.ASPAChangePlanRollbackBundle.objects.filter(source_plan=obj),
         ),
     ),
 )
@@ -2260,6 +2395,18 @@ PROVIDER_ACCOUNT_DETAIL_SPEC = DetailSpec(
             kind='code',
             empty_text='None',
         ),
+        DetailFieldSpec(
+            label='Family Rollups',
+            value=get_provider_account_family_rollups,
+            kind='code',
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='Publication Observation Health',
+            value=get_provider_account_pub_obs_rollup,
+            kind='code',
+            empty_text='None',
+        ),
     ),
     actions=(
         DetailActionSpec(
@@ -2332,6 +2479,12 @@ PROVIDER_SNAPSHOT_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(label='Latest Diff', value=get_latest_provider_snapshot_diff, kind='link', empty_text='None'),
         DetailFieldSpec(label='Latest Diff Summary', value=get_provider_snapshot_latest_diff_summary, kind='code', empty_text='None'),
         DetailFieldSpec(label='Family Rollups', value=get_provider_snapshot_family_rollups, kind='code', empty_text='None'),
+        DetailFieldSpec(
+            label='Signed Object Type Breakdown',
+            value=get_provider_snapshot_signed_object_type_breakdown,
+            kind='code',
+            empty_text='None',
+        ),
         DetailFieldSpec(label='Summary', value=get_provider_snapshot_summary, kind='code', empty_text='None'),
     ),
     bottom_tables=(
@@ -2488,6 +2641,8 @@ DETAIL_SPEC_BY_MODEL = {
     models.ROALintRun: ROA_LINT_RUN_DETAIL_SPEC,
     models.ROAChangePlan: ROA_CHANGE_PLAN_DETAIL_SPEC,
     models.ASPAChangePlan: ASPA_CHANGE_PLAN_DETAIL_SPEC,
+    models.ROAChangePlanRollbackBundle: ROA_CHANGE_PLAN_ROLLBACK_BUNDLE_DETAIL_SPEC,
+    models.ASPAChangePlanRollbackBundle: ASPA_CHANGE_PLAN_ROLLBACK_BUNDLE_DETAIL_SPEC,
     models.ROALintFinding: ROA_LINT_FINDING_DETAIL_SPEC,
     models.ROALintAcknowledgement: ROA_LINT_ACKNOWLEDGEMENT_DETAIL_SPEC,
     models.ROALintSuppression: ROA_LINT_SUPPRESSION_DETAIL_SPEC,

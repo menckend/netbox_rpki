@@ -13,8 +13,10 @@ from netbox_rpki.services.provider_sync_contract import (
     PROVIDER_SYNC_FAMILY_ORDER,
     PROVIDER_SYNC_SUMMARY_SCHEMA_VERSION,
     build_provider_account_rollup,
+    build_provider_account_pub_obs_rollup,
     build_provider_snapshot_diff_rollup,
     build_provider_snapshot_rollup,
+    build_snapshot_signed_object_type_breakdown,
 )
 from netbox_rpki.services.provider_sync_evidence import build_certificate_observation_payload
 from netbox_rpki.services.provider_sync_krill import (
@@ -858,6 +860,152 @@ class ProviderSyncServiceTestCase(TestCase):
         )
         self.assertEqual(observation_item.publication_uri, comparison_publication_point.publication_uri)
         self.assertEqual(observation_item.signed_object_uri, comparison_signed_object.signed_object_uri)
+
+    def test_build_provider_account_pub_obs_rollup_uses_latest_completed_snapshot(self):
+        now = timezone.now()
+        provider_account = create_test_provider_account(
+            name='Krill Provider Account',
+            organization=self.organization,
+            provider_type=rpki_models.ProviderType.KRILL,
+            ca_handle='netbox-rpki-dev',
+            api_base_url='https://localhost:3001',
+            org_handle='ORG-KRILL-ROLLUP',
+        )
+        stale_snapshot = create_test_provider_snapshot(
+            name='Older Snapshot',
+            organization=self.organization,
+            provider_account=provider_account,
+            fetched_at=now - timedelta(days=5),
+        )
+        latest_snapshot = create_test_provider_snapshot(
+            name='Latest Snapshot',
+            organization=self.organization,
+            provider_account=provider_account,
+            fetched_at=now,
+        )
+        create_test_imported_certificate_observation(
+            provider_snapshot=stale_snapshot,
+            organization=self.organization,
+            certificate_key='older-cert',
+            not_after=now + timedelta(days=2),
+        )
+        create_test_imported_certificate_observation(
+            provider_snapshot=latest_snapshot,
+            organization=self.organization,
+            certificate_key='expiring-cert',
+            not_after=now + timedelta(days=10),
+        )
+        create_test_imported_certificate_observation(
+            provider_snapshot=latest_snapshot,
+            organization=self.organization,
+            certificate_key='stale-cert',
+            is_stale=True,
+            not_after=now + timedelta(days=10),
+        )
+        create_test_imported_certificate_observation(
+            provider_snapshot=latest_snapshot,
+            organization=self.organization,
+            certificate_key='far-cert',
+            not_after=now + timedelta(days=90),
+        )
+        create_test_imported_publication_point(
+            provider_snapshot=latest_snapshot,
+            organization=self.organization,
+            publication_uri='rsync://example.invalid/repo/success/',
+            last_exchange_result='Success',
+        )
+        create_test_imported_publication_point(
+            provider_snapshot=latest_snapshot,
+            organization=self.organization,
+            publication_uri='rsync://example.invalid/repo/failure/',
+            last_exchange_result='failed',
+        )
+        create_test_imported_publication_point(
+            provider_snapshot=latest_snapshot,
+            organization=self.organization,
+            publication_uri='rsync://example.invalid/repo/blank/',
+            last_exchange_result='',
+        )
+
+        rollup = build_provider_account_pub_obs_rollup(provider_account)
+
+        self.assertIsNotNone(rollup)
+        assert rollup is not None
+        self.assertEqual(rollup['snapshot_id'], latest_snapshot.pk)
+        self.assertEqual(rollup['snapshot_name'], latest_snapshot.name)
+        self.assertEqual(rollup['certificate_observations']['total'], 3)
+        self.assertEqual(rollup['certificate_observations']['stale'], 1)
+        self.assertEqual(rollup['certificate_observations']['expiring_soon'], 1)
+        self.assertEqual(rollup['publication_points']['total'], 3)
+        self.assertEqual(rollup['publication_points']['exchange_not_ok'], 1)
+
+    def test_build_provider_account_pub_obs_rollup_returns_none_without_completed_snapshot(self):
+        provider_account = create_test_provider_account(
+            organization=self.organization,
+            provider_type=rpki_models.ProviderType.KRILL,
+            ca_handle='netbox-rpki-dev',
+            org_handle='ORG-NO-SNAPSHOT',
+        )
+        create_test_provider_snapshot(
+            organization=self.organization,
+            provider_account=provider_account,
+            status=rpki_models.ValidationRunStatus.FAILED,
+        )
+
+        self.assertIsNone(build_provider_account_pub_obs_rollup(provider_account))
+
+    def test_build_snapshot_signed_object_type_breakdown_counts_each_type(self):
+        snapshot = create_test_provider_snapshot(
+            organization=self.organization,
+            provider_account=create_test_provider_account(
+                organization=self.organization,
+                provider_type=rpki_models.ProviderType.KRILL,
+                ca_handle='netbox-rpki-dev',
+                org_handle='ORG-SIGNED-OBJECTS',
+            ),
+        )
+        manifest_publication_point = create_test_imported_publication_point(
+            provider_snapshot=snapshot,
+            organization=self.organization,
+            publication_uri='rsync://example.invalid/repo/manifest/',
+        )
+        crl_publication_point = create_test_imported_publication_point(
+            provider_snapshot=snapshot,
+            organization=self.organization,
+            publication_uri='rsync://example.invalid/repo/crl/',
+        )
+        create_test_imported_signed_object(
+            provider_snapshot=snapshot,
+            organization=self.organization,
+            publication_point=manifest_publication_point,
+            publication_uri='rsync://example.invalid/repo/manifest/',
+            signed_object_uri='rsync://example.invalid/repo/manifest/object-1.mft',
+            signed_object_type=rpki_models.SignedObjectType.MANIFEST,
+        )
+        create_test_imported_signed_object(
+            provider_snapshot=snapshot,
+            organization=self.organization,
+            publication_point=manifest_publication_point,
+            publication_uri='rsync://example.invalid/repo/manifest/',
+            signed_object_uri='rsync://example.invalid/repo/manifest/object-2.mft',
+            signed_object_type=rpki_models.SignedObjectType.MANIFEST,
+        )
+        create_test_imported_signed_object(
+            provider_snapshot=snapshot,
+            organization=self.organization,
+            publication_point=crl_publication_point,
+            publication_uri='rsync://example.invalid/repo/crl/',
+            signed_object_uri='rsync://example.invalid/repo/crl/object-1.crl',
+            signed_object_type=rpki_models.SignedObjectType.CRL,
+        )
+
+        self.assertEqual(
+            build_snapshot_signed_object_type_breakdown(snapshot),
+            {
+                rpki_models.SignedObjectType.CRL: 1,
+                rpki_models.SignedObjectType.MANIFEST: 2,
+            },
+        )
 
     def test_sync_provider_account_requires_krill_ca_handle(self):
         provider_account = create_test_provider_account(

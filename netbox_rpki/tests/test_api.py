@@ -266,6 +266,8 @@ class ViewSetSmokeTestCase(SimpleTestCase):
             'aspareconciliationrun',
             'roachangeplan',
             'aspachangeplan',
+            'roachangeplanrollbackbundle',
+            'aspachangeplanrollbackbundle',
             'roalintfinding',
             'roalintsuppression',
         }
@@ -322,7 +324,8 @@ def _get_custom_action_route_names(contract):
 EXTRA_ACTION_NAME_CONTRACTS = {
     'organization': ('create_bulk_intent_run', 'run_aspa_reconciliation'),
     'aspareconciliationrun': ('create_plan', 'summary'),
-    'aspachangeplan': ('apply', 'approve', 'preview', 'summary'),
+    'aspachangeplan': ('apply', 'approve', 'approve_secondary', 'preview', 'summary'),
+    'aspachangeplanrollbackbundle': ('apply', 'approve'),
     'providersnapshot': ('compare', 'summary'),
     'routingintentprofile': ('run',),
     'routingintentexception': ('approve',),
@@ -331,7 +334,8 @@ EXTRA_ACTION_NAME_CONTRACTS = {
     'roareconciliationrun': ('create_plan', 'summary'),
     'roalintfinding': ('suppress',),
     'roalintsuppression': ('lift',),
-    'roachangeplan': ('acknowledge_findings', 'apply', 'approve', 'preview', 'simulate', 'summary'),
+    'roachangeplan': ('acknowledge_findings', 'apply', 'approve', 'approve_secondary', 'preview', 'simulate', 'summary'),
+    'roachangeplanrollbackbundle': ('apply', 'approve'),
 }
 
 CUSTOM_ACTION_CONTRACTS = {
@@ -355,10 +359,11 @@ CUSTOM_ACTION_CONTRACTS = {
         'instance_attr': 'aspa_reconciliation_run',
     },
     'aspachangeplan': {
-        'actions': ('apply', 'approve', 'preview'),
+        'actions': ('apply', 'approve', 'approve_secondary', 'preview'),
         'route_names': (
             'plugins-api:netbox_rpki-api:aspachangeplan-preview',
             'plugins-api:netbox_rpki-api:aspachangeplan-approve',
+            'plugins-api:netbox_rpki-api:aspachangeplan-approve-secondary',
             'plugins-api:netbox_rpki-api:aspachangeplan-apply',
         ),
         'denied_status': 404,
@@ -413,11 +418,12 @@ CUSTOM_ACTION_CONTRACTS = {
         'instance_attr': 'reconciliation_run',
     },
     'roachangeplan': {
-        'actions': ('acknowledge_findings', 'apply', 'approve', 'preview', 'simulate'),
+        'actions': ('acknowledge_findings', 'apply', 'approve', 'approve_secondary', 'preview', 'simulate'),
         'route_names': (
             'plugins-api:netbox_rpki-api:roachangeplan-acknowledge-findings',
             'plugins-api:netbox_rpki-api:roachangeplan-preview',
             'plugins-api:netbox_rpki-api:roachangeplan-approve',
+            'plugins-api:netbox_rpki-api:roachangeplan-approve-secondary',
             'plugins-api:netbox_rpki-api:roachangeplan-apply',
             'plugins-api:netbox_rpki-api:roachangeplan-simulate',
         ),
@@ -1024,6 +1030,58 @@ class OrganizationBulkIntentRunActionAPITestCase(PluginAPITestCase):
             user=self.user,
         )
 
+    def test_create_bulk_intent_run_action_response_contract_is_stable(self):
+        self.add_permissions(
+            'netbox_rpki.view_organization',
+            'netbox_rpki.change_organization',
+        )
+        url = reverse(
+            'plugins-api:netbox_rpki-api:organization-create-bulk-intent-run',
+            kwargs={'pk': self.organization.pk},
+        )
+
+        class StubJob:
+            pk = 884
+            status = 'queued'
+
+            @staticmethod
+            def get_absolute_url():
+                return '/core/jobs/884/'
+
+        with patch(
+            'netbox_rpki.api.views.RunBulkRoutingIntentJob.enqueue_for_organization',
+            return_value=(StubJob(), True),
+        ):
+            response = self.client.post(
+                url,
+                {
+                    'run_name': 'Stable Contract Run',
+                    'profiles': [self.profile.pk],
+                    'bindings': [self.binding.pk],
+                    'create_change_plans': True,
+                },
+                format='json',
+                **self.header,
+            )
+
+        self.assertHttpStatus(response, 200)
+        self.assertEqual(
+            set(response.data),
+            {
+                'comparison_scope',
+                'provider_snapshot',
+                'create_change_plans',
+                'profile_pks',
+                'binding_pks',
+                'job',
+                'bulk_run_in_progress',
+            },
+        )
+        self.assertEqual(
+            set(response.data['job']),
+            {'id', 'status', 'url', 'existing'},
+        )
+
 
 class RoutingIntentProfileActionAPITestCase(PluginAPITestCase):
     @classmethod
@@ -1119,6 +1177,25 @@ class RoutingIntentExceptionActionAPITestCase(PluginAPITestCase):
         self.assertEqual(self.exception.approved_by, self.user.username)
         self.assertIsNotNone(self.exception.approved_at)
 
+    def test_approve_action_response_matches_exception_serializer_contract(self):
+        self.add_permissions(
+            'netbox_rpki.view_routingintentexception',
+            'netbox_rpki.change_routingintentexception',
+        )
+        url = reverse(
+            'plugins-api:netbox_rpki-api:routingintentexception-approve',
+            kwargs={'pk': self.exception.pk},
+        )
+
+        response = self.client.post(url, {}, format='json', **self.header)
+
+        self.assertHttpStatus(response, 200)
+        serializer = api_serializers.RoutingIntentExceptionSerializer(
+            self.exception.__class__.objects.get(pk=self.exception.pk),
+            context={'request': response.wsgi_request},
+        )
+        self.assertEqual(set(response.data), set(serializer.data))
+
 
 class RoutingIntentTemplateBindingActionAPITestCase(PluginAPITestCase):
     @classmethod
@@ -1182,6 +1259,28 @@ class RoutingIntentTemplateBindingActionAPITestCase(PluginAPITestCase):
         self.assertEqual(response.data['preview_results'][0]['origin_asn_value'], self.origin_asn.asn)
         self.assertIn('compiled_policy', response.data)
 
+    def test_preview_action_response_contract_is_stable(self):
+        self.add_permissions(
+            'netbox_rpki.view_routingintenttemplatebinding',
+            'netbox_rpki.change_routingintenttemplatebinding',
+        )
+        url = reverse(
+            'plugins-api:netbox_rpki-api:routingintenttemplatebinding-preview',
+            kwargs={'pk': self.binding.pk},
+        )
+
+        response = self.client.post(url, {}, format='json', **self.header)
+
+        self.assertHttpStatus(response, 200)
+        serializer = api_serializers.RoutingIntentTemplateBindingSerializer(
+            self.binding,
+            context={'request': response.wsgi_request},
+        )
+        self.assertTrue(set(serializer.data).issubset(response.data))
+        self.assertIn('compiled_policy', response.data)
+        self.assertIn('preview_result_count', response.data)
+        self.assertIn('preview_results', response.data)
+
     def test_regenerate_action_returns_derivation_and_reconciliation_runs(self):
         self.add_permissions(
             'netbox_rpki.view_routingintenttemplatebinding',
@@ -1203,6 +1302,33 @@ class RoutingIntentTemplateBindingActionAPITestCase(PluginAPITestCase):
         self.assertEqual(response.data['reconciliation_run']['intent_profile'], self.profile.pk)
         self.assertEqual(self.binding.state, rpki_models.RoutingIntentTemplateBindingState.CURRENT)
         self.assertTrue(self.binding.last_compiled_fingerprint)
+
+    def test_regenerate_action_response_contract_is_stable(self):
+        self.add_permissions(
+            'netbox_rpki.view_routingintenttemplatebinding',
+            'netbox_rpki.change_routingintenttemplatebinding',
+            'netbox_rpki.view_intentderivationrun',
+            'netbox_rpki.view_roareconciliationrun',
+            'netbox_rpki.view_roalintrun',
+        )
+        url = reverse(
+            'plugins-api:netbox_rpki-api:routingintenttemplatebinding-regenerate',
+            kwargs={'pk': self.binding.pk},
+        )
+
+        response = self.client.post(url, {}, format='json', **self.header)
+
+        self.assertHttpStatus(response, 200)
+        self.binding.refresh_from_db()
+        serializer = api_serializers.RoutingIntentTemplateBindingSerializer(
+            self.binding,
+            context={'request': response.wsgi_request},
+        )
+        self.assertTrue(set(serializer.data).issubset(response.data))
+        self.assertEqual(
+            set(response.data) - set(serializer.data),
+            {'comparison_scope', 'provider_snapshot', 'derivation_run', 'reconciliation_run'},
+        )
 
     def test_regenerate_action_accepts_provider_snapshot_for_provider_imported_scope(self):
         self.add_permissions(

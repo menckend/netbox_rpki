@@ -8,6 +8,7 @@ from netbox_rpki.tests.registry_scenarios import (
     TABLE_SCENARIOS,
     get_spec_values,
 )
+from netbox_rpki.tests.utils import create_test_provider_snapshot_diff
 
 
 PRIORITY6_EXPECTED_DEFAULT_COLUMNS = {
@@ -64,3 +65,31 @@ class Priority6TableContractTestCase(SimpleTestCase):
                 self.assertEqual(object_spec.table.default_columns, expected_default_columns)
                 self.assertEqual(table_class.Meta.fields, expected_fields)
                 self.assertEqual(table_class.Meta.default_columns, expected_default_columns)
+
+
+class ProviderSnapshotDiffTableTestCase(TestCase):
+    def test_churn_value_helpers_read_summary_totals(self):
+        snapshot_diff = create_test_provider_snapshot_diff(
+            summary_json={
+                'totals': {
+                    'records_added': 7,
+                    'records_removed': 3,
+                    'records_changed': 5,
+                },
+            },
+        )
+        table = tables.ProviderSnapshotDiffTable(type(snapshot_diff).objects.filter(pk=snapshot_diff.pk))
+
+        self.assertEqual(table.value_records_added(snapshot_diff), 7)
+        self.assertEqual(table.value_records_removed(snapshot_diff), 3)
+        self.assertEqual(table.value_records_changed(snapshot_diff), 5)
+        self.assertIn('records_added', table.columns.columns)
+        self.assertIn('records_removed', table.columns.columns)
+        self.assertIn('records_changed', table.columns.columns)
+
+    def test_publication_observation_default_columns_include_matured_fields(self):
+        publication_table = tables.ImportedPublicationPointTable([])
+        certificate_table = tables.ImportedCertificateObservationTable([])
+
+        self.assertIn('last_exchange_result', publication_table.Meta.default_columns)
+        self.assertIn('not_after', certificate_table.Meta.default_columns)

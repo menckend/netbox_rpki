@@ -265,6 +265,158 @@ def _create_aspa_rollback_bundle(
     return bundle
 
 
+def approve_rollback_bundle(
+    bundle,
+    *,
+    approved_by: str = '',
+    ticket_reference: str = '',
+    change_reference: str = '',
+    maintenance_window_start=None,
+    maintenance_window_end=None,
+    notes: str = '',
+):
+    if not bundle.can_approve:
+        raise ProviderWriteError(f'Rollback bundle cannot be approved in status "{bundle.status}".')
+
+    approved_at = timezone.now()
+    bundle.status = rpki_models.RollbackBundleStatus.APPROVED
+    bundle.approved_by = approved_by
+    bundle.approved_at = approved_at
+    bundle.ticket_reference = ticket_reference
+    bundle.change_reference = change_reference
+    bundle.maintenance_window_start = maintenance_window_start
+    bundle.maintenance_window_end = maintenance_window_end
+    bundle.notes = notes
+    bundle.full_clean(validate_unique=False)
+    bundle.save(update_fields=(
+        'status',
+        'approved_by',
+        'approved_at',
+        'ticket_reference',
+        'change_reference',
+        'maintenance_window_start',
+        'maintenance_window_end',
+        'notes',
+    ))
+    return bundle
+
+
+def apply_roa_rollback_bundle(
+    bundle: rpki_models.ROAChangePlanRollbackBundle,
+    *,
+    requested_by: str = '',
+) -> rpki_models.ROAChangePlanRollbackBundle:
+    if not bundle.can_apply:
+        raise ProviderWriteError(f'Rollback bundle cannot be applied in status "{bundle.status}".')
+
+    provider_account = bundle.source_plan.provider_account
+    if provider_account is None or not provider_account.supports_roa_write:
+        raise ProviderWriteError('Source plan has no provider account capable of ROA writes.')
+
+    started_at = timezone.now()
+    bundle.status = rpki_models.RollbackBundleStatus.APPLYING
+    bundle.apply_started_at = started_at
+    bundle.apply_requested_by = requested_by
+    bundle.failed_at = None
+    bundle.save(update_fields=('status', 'apply_started_at', 'apply_requested_by', 'failed_at'))
+
+    try:
+        provider_response = _submit_krill_route_delta(provider_account, bundle.rollback_delta_json)
+        applied_at = timezone.now()
+        bundle.status = rpki_models.RollbackBundleStatus.APPLIED
+        bundle.applied_at = applied_at
+        bundle.apply_response_json = {
+            'provider_response': provider_response,
+            'roa_write_mode': provider_account.roa_write_mode,
+            'source_plan_id': bundle.source_plan_id,
+        }
+        bundle.apply_error = ''
+        try:
+            followup_sync_run, followup_snapshot = sync_provider_account(
+                provider_account,
+                snapshot_name=f'{provider_account.name} Post-Rollback Snapshot {applied_at:%Y-%m-%d %H:%M:%S}',
+            )
+            bundle.apply_response_json['followup_sync'] = {
+                'provider_sync_run_id': followup_sync_run.pk,
+                'provider_snapshot_id': followup_snapshot.pk,
+                'status': followup_sync_run.status,
+            }
+        except Exception as exc:
+            bundle.apply_response_json['followup_sync'] = {
+                'status': rpki_models.ValidationRunStatus.FAILED,
+                'error': str(exc),
+            }
+        bundle.save(update_fields=('status', 'applied_at', 'apply_response_json', 'apply_error'))
+    except Exception as exc:
+        completed_at = timezone.now()
+        bundle.status = rpki_models.RollbackBundleStatus.FAILED
+        bundle.failed_at = completed_at
+        bundle.apply_error = str(exc)
+        bundle.apply_response_json = {'error': str(exc)}
+        bundle.save(update_fields=('status', 'failed_at', 'apply_error', 'apply_response_json'))
+        raise ProviderWriteError(str(exc)) from exc
+
+    return bundle
+
+
+def apply_aspa_rollback_bundle(
+    bundle: rpki_models.ASPAChangePlanRollbackBundle,
+    *,
+    requested_by: str = '',
+) -> rpki_models.ASPAChangePlanRollbackBundle:
+    if not bundle.can_apply:
+        raise ProviderWriteError(f'Rollback bundle cannot be applied in status "{bundle.status}".')
+
+    provider_account = bundle.source_plan.provider_account
+    if provider_account is None or not provider_account.supports_aspa_write:
+        raise ProviderWriteError('Source plan has no provider account capable of ASPA writes.')
+
+    started_at = timezone.now()
+    bundle.status = rpki_models.RollbackBundleStatus.APPLYING
+    bundle.apply_started_at = started_at
+    bundle.apply_requested_by = requested_by
+    bundle.failed_at = None
+    bundle.save(update_fields=('status', 'apply_started_at', 'apply_requested_by', 'failed_at'))
+
+    try:
+        provider_response = _submit_krill_aspa_delta(provider_account, bundle.rollback_delta_json)
+        applied_at = timezone.now()
+        bundle.status = rpki_models.RollbackBundleStatus.APPLIED
+        bundle.applied_at = applied_at
+        bundle.apply_response_json = {
+            'provider_response': provider_response,
+            'aspa_write_mode': provider_account.aspa_write_mode,
+            'source_plan_id': bundle.source_plan_id,
+        }
+        bundle.apply_error = ''
+        try:
+            followup_sync_run, followup_snapshot = sync_provider_account(
+                provider_account,
+                snapshot_name=f'{provider_account.name} Post-Rollback Snapshot {applied_at:%Y-%m-%d %H:%M:%S}',
+            )
+            bundle.apply_response_json['followup_sync'] = {
+                'provider_sync_run_id': followup_sync_run.pk,
+                'provider_snapshot_id': followup_snapshot.pk,
+                'status': followup_sync_run.status,
+            }
+        except Exception as exc:
+            bundle.apply_response_json['followup_sync'] = {
+                'status': rpki_models.ValidationRunStatus.FAILED,
+                'error': str(exc),
+            }
+        bundle.save(update_fields=('status', 'applied_at', 'apply_response_json', 'apply_error'))
+    except Exception as exc:
+        completed_at = timezone.now()
+        bundle.status = rpki_models.RollbackBundleStatus.FAILED
+        bundle.failed_at = completed_at
+        bundle.apply_error = str(exc)
+        bundle.apply_response_json = {'error': str(exc)}
+        bundle.save(update_fields=('status', 'failed_at', 'apply_error', 'apply_response_json'))
+        raise ProviderWriteError(str(exc)) from exc
+
+    return bundle
+
+
 def _get_plan_governance_metadata(plan) -> dict[str, str]:
     return plan.get_governance_metadata()
 
@@ -435,6 +587,7 @@ def approve_roa_change_plan(
     plan: rpki_models.ROAChangePlan | int,
     *,
     approved_by: str = '',
+    requires_secondary_approval: bool | None = None,
     ticket_reference: str = '',
     change_reference: str = '',
     maintenance_window_start=None,
@@ -478,11 +631,17 @@ def approve_roa_change_plan(
 
     approved_at = timezone.now()
     with transaction.atomic():
+        if requires_secondary_approval is not None:
+            plan.requires_secondary_approval = requires_secondary_approval
         simulation_review_json = _build_simulation_review_audit(
             simulation_run=simulation_run,
             acknowledged_simulation_result_ids=acknowledged_simulation_result_ids,
         )
-        plan.status = rpki_models.ROAChangePlanStatus.APPROVED
+        plan.status = (
+            rpki_models.ROAChangePlanStatus.AWAITING_2ND
+            if plan.requires_secondary_approval
+            else rpki_models.ROAChangePlanStatus.APPROVED
+        )
         plan.ticket_reference = ticket_reference
         plan.change_reference = change_reference
         plan.maintenance_window_start = maintenance_window_start
@@ -501,6 +660,7 @@ def approve_roa_change_plan(
         plan.full_clean(validate_unique=False)
         plan.save(update_fields=(
             'status',
+            'requires_secondary_approval',
             'ticket_reference',
             'change_reference',
             'maintenance_window_start',
@@ -537,6 +697,7 @@ def approve_aspa_change_plan(
     plan: rpki_models.ASPAChangePlan | int,
     *,
     approved_by: str = '',
+    requires_secondary_approval: bool | None = None,
     ticket_reference: str = '',
     change_reference: str = '',
     maintenance_window_start=None,
@@ -548,7 +709,13 @@ def approve_aspa_change_plan(
 
     approved_at = timezone.now()
     with transaction.atomic():
-        plan.status = rpki_models.ASPAChangePlanStatus.APPROVED
+        if requires_secondary_approval is not None:
+            plan.requires_secondary_approval = requires_secondary_approval
+        plan.status = (
+            rpki_models.ASPAChangePlanStatus.AWAITING_2ND
+            if plan.requires_secondary_approval
+            else rpki_models.ASPAChangePlanStatus.APPROVED
+        )
         plan.ticket_reference = ticket_reference
         plan.change_reference = change_reference
         plan.maintenance_window_start = maintenance_window_start
@@ -558,6 +725,7 @@ def approve_aspa_change_plan(
         plan.full_clean(validate_unique=False)
         plan.save(update_fields=(
             'status',
+            'requires_secondary_approval',
             'ticket_reference',
             'change_reference',
             'maintenance_window_start',
@@ -574,6 +742,86 @@ def approve_aspa_change_plan(
             maintenance_window_start=maintenance_window_start,
             maintenance_window_end=maintenance_window_end,
             approval_notes=approval_notes,
+        )
+    return plan
+
+
+def approve_roa_change_plan_secondary(
+    plan: rpki_models.ROAChangePlan | int,
+    *,
+    secondary_approved_by: str = '',
+    approval_notes: str = '',
+) -> rpki_models.ROAChangePlan:
+    plan = _normalize_plan(plan)
+    if plan.status != rpki_models.ROAChangePlanStatus.AWAITING_2ND:
+        raise ProviderWriteError(
+            f'Plan is not awaiting secondary approval (current status: {plan.status}).'
+        )
+    if (
+        secondary_approved_by
+        and plan.approved_by
+        and secondary_approved_by.strip().lower() == plan.approved_by.strip().lower()
+    ):
+        raise ProviderWriteError(
+            'The secondary approver must be a different person than the primary approver '
+            f'("{plan.approved_by}").'
+        )
+
+    secondary_approved_at = timezone.now()
+    with transaction.atomic():
+        plan.status = rpki_models.ROAChangePlanStatus.APPROVED
+        plan.secondary_approved_by = secondary_approved_by
+        plan.secondary_approved_at = secondary_approved_at
+        plan.save(update_fields=('status', 'secondary_approved_by', 'secondary_approved_at'))
+        _create_approval_record_for_plan(
+            plan=plan,
+            approved_by=secondary_approved_by,
+            approved_at=secondary_approved_at,
+            ticket_reference=plan.ticket_reference,
+            change_reference=plan.change_reference,
+            maintenance_window_start=plan.maintenance_window_start,
+            maintenance_window_end=plan.maintenance_window_end,
+            approval_notes=f'[Secondary approval] {approval_notes}'.strip(),
+        )
+    return plan
+
+
+def approve_aspa_change_plan_secondary(
+    plan: rpki_models.ASPAChangePlan | int,
+    *,
+    secondary_approved_by: str = '',
+    approval_notes: str = '',
+) -> rpki_models.ASPAChangePlan:
+    plan = _normalize_aspa_plan(plan)
+    if plan.status != rpki_models.ASPAChangePlanStatus.AWAITING_2ND:
+        raise ProviderWriteError(
+            f'Plan is not awaiting secondary approval (current status: {plan.status}).'
+        )
+    if (
+        secondary_approved_by
+        and plan.approved_by
+        and secondary_approved_by.strip().lower() == plan.approved_by.strip().lower()
+    ):
+        raise ProviderWriteError(
+            'The secondary approver must be a different person than the primary approver '
+            f'("{plan.approved_by}").'
+        )
+
+    secondary_approved_at = timezone.now()
+    with transaction.atomic():
+        plan.status = rpki_models.ASPAChangePlanStatus.APPROVED
+        plan.secondary_approved_by = secondary_approved_by
+        plan.secondary_approved_at = secondary_approved_at
+        plan.save(update_fields=('status', 'secondary_approved_by', 'secondary_approved_at'))
+        _create_approval_record_for_plan(
+            plan=plan,
+            approved_by=secondary_approved_by,
+            approved_at=secondary_approved_at,
+            ticket_reference=plan.ticket_reference,
+            change_reference=plan.change_reference,
+            maintenance_window_start=plan.maintenance_window_start,
+            maintenance_window_end=plan.maintenance_window_end,
+            approval_notes=f'[Secondary approval] {approval_notes}'.strip(),
         )
     return plan
 

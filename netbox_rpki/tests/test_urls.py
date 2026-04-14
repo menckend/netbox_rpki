@@ -63,8 +63,22 @@ class UrlRegistrationTestCase(SimpleTestCase):
         expected_routes = {
             'plugins:netbox_rpki:roachangeplan_preview': '/plugins/netbox_rpki/roachangeplans/1/preview/',
             'plugins:netbox_rpki:roachangeplan_approve': '/plugins/netbox_rpki/roachangeplans/1/approve/',
+            'plugins:netbox_rpki:roachangeplan_approve_secondary': '/plugins/netbox_rpki/roachangeplans/1/approve-secondary/',
             'plugins:netbox_rpki:roachangeplan_apply': '/plugins/netbox_rpki/roachangeplans/1/apply/',
             'plugins:netbox_rpki:roachangeplan_simulate': '/plugins/netbox_rpki/roachangeplans/1/simulate/',
+        }
+
+        for view_name, path in expected_routes.items():
+            with self.subTest(view_name=view_name):
+                self.assertEqual(reverse(view_name, kwargs={'pk': 1}), path)
+                self.assertEqual(resolve(path).view_name, view_name)
+
+    def test_rollback_bundle_custom_action_routes_reverse_and_resolve(self):
+        expected_routes = {
+            'plugins:netbox_rpki:roachangeplanrollbackbundle_approve': '/plugins/netbox_rpki/roachangeplanrollbackbundles/1/approve/',
+            'plugins:netbox_rpki:roachangeplanrollbackbundle_apply': '/plugins/netbox_rpki/roachangeplanrollbackbundles/1/apply/',
+            'plugins:netbox_rpki:aspachangeplanrollbackbundle_approve': '/plugins/netbox_rpki/aspachangeplanrollbackbundles/1/approve/',
+            'plugins:netbox_rpki:aspachangeplanrollbackbundle_apply': '/plugins/netbox_rpki/aspachangeplanrollbackbundles/1/apply/',
         }
 
         for view_name, path in expected_routes.items():
@@ -88,6 +102,7 @@ class UrlRegistrationTestCase(SimpleTestCase):
             'plugins:netbox_rpki:routingintentprofile_run': '/plugins/netbox_rpki/routingintentprofiles/1/run/',
             'plugins:netbox_rpki:routingintentexception_approve': '/plugins/netbox_rpki/routingintentexceptions/1/approve/',
             'plugins:netbox_rpki:roareconciliationrun_create_plan': '/plugins/netbox_rpki/roareconciliationruns/1/create-plan/',
+            'plugins:netbox_rpki:aspachangeplan_approve_secondary': '/plugins/netbox_rpki/aspachangeplans/1/approve-secondary/',
         }
 
         for view_name, path in expected_routes.items():

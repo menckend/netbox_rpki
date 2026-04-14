@@ -745,6 +745,7 @@ class ROAChangePlanApproveActionSerializer(serializers.Serializer):
 
 
 class ASPAChangePlanApproveActionSerializer(serializers.Serializer):
+    requires_secondary_approval = serializers.BooleanField(required=False, default=False)
     ticket_reference = serializers.CharField(required=False, allow_blank=True, max_length=200)
     change_reference = serializers.CharField(required=False, allow_blank=True, max_length=200)
     maintenance_window_start = serializers.DateTimeField(required=False, allow_null=True)
@@ -757,6 +758,33 @@ class ASPAChangePlanApproveActionSerializer(serializers.Serializer):
             end_at=attrs.get('maintenance_window_end'),
         )
         return attrs
+
+
+class ROAChangePlanApproveSecondaryActionSerializer(serializers.Serializer):
+    approval_notes = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class ASPAChangePlanApproveSecondaryActionSerializer(serializers.Serializer):
+    approval_notes = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class RollbackBundleApproveActionSerializer(serializers.Serializer):
+    ticket_reference = serializers.CharField(required=False, allow_blank=True, max_length=200)
+    change_reference = serializers.CharField(required=False, allow_blank=True, max_length=200)
+    maintenance_window_start = serializers.DateTimeField(required=False, allow_null=True)
+    maintenance_window_end = serializers.DateTimeField(required=False, allow_null=True)
+    notes = serializers.CharField(required=False, allow_blank=True)
+
+    def validate(self, attrs):
+        models.validate_maintenance_window_bounds(
+            start_at=attrs.get('maintenance_window_start'),
+            end_at=attrs.get('maintenance_window_end'),
+        )
+        return attrs
+
+
+class RollbackBundleApplyActionSerializer(serializers.Serializer):
+    requested_by = serializers.CharField(required=False, allow_blank=True, default='')
 
 
 class ROAChangePlanAcknowledgeActionSerializer(serializers.Serializer):

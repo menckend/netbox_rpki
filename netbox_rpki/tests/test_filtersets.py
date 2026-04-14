@@ -1,6 +1,7 @@
 from django.test import SimpleTestCase, TestCase
 
 from netbox_rpki import filtersets
+from netbox_rpki import models as rpki_models
 from netbox_rpki.object_registry import FILTERSET_OBJECT_SPECS
 from netbox_rpki.object_registry import get_object_spec
 from netbox_rpki.tests.registry_scenarios import (
@@ -8,6 +9,7 @@ from netbox_rpki.tests.registry_scenarios import (
     FILTERSET_SCENARIOS,
     get_spec_values,
 )
+from netbox_rpki.tests.utils import create_test_provider_snapshot_diff_item
 
 
 PRIORITY6_EXPECTED_FILTERSET_CONTRACT = {
@@ -80,3 +82,25 @@ class Priority6FilterSetContractTestCase(TestCase):
                 self.assertEqual(object_spec.filterset.fields, expected['fields'])
                 self.assertEqual(object_spec.filterset.search_fields, expected['search_fields'])
                 self.assertEqual(filterset_class.Meta.fields, expected['fields'])
+
+
+class ProviderSnapshotDiffItemFilterSetTestCase(TestCase):
+    def test_family_kind_filter_maps_to_provider_sync_family_metadata(self):
+        control_plane_item = create_test_provider_snapshot_diff_item(
+            name='Control Plane Diff Item',
+            object_family=rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS,
+        )
+        publication_item = create_test_provider_snapshot_diff_item(
+            name='Publication Diff Item',
+            object_family=rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY,
+        )
+        queryset = rpki_models.ProviderSnapshotDiffItem.objects.order_by('pk')
+
+        self.assertEqual(
+            list(filtersets.ProviderSnapshotDiffItemFilterSet({'family_kind': 'control_plane'}, queryset).qs),
+            [control_plane_item],
+        )
+        self.assertEqual(
+            list(filtersets.ProviderSnapshotDiffItemFilterSet({'family_kind': 'publication_observation'}, queryset).qs),
+            [publication_item],
+        )

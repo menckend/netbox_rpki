@@ -89,6 +89,11 @@ def build_object_urlpatterns(spec):
                     name='roachangeplan_approve',
                 ),
                 path(
+                    f'{path_prefix}/<int:pk>/approve-secondary/',
+                    views.ROAChangePlanApproveSecondaryView.as_view(),
+                    name='roachangeplan_approve_secondary',
+                ),
+                path(
                     f'{path_prefix}/<int:pk>/apply/',
                     views.ROAChangePlanApplyView.as_view(),
                     name='roachangeplan_apply',
@@ -146,9 +151,44 @@ def build_object_urlpatterns(spec):
                     name='aspachangeplan_approve',
                 ),
                 path(
+                    f'{path_prefix}/<int:pk>/approve-secondary/',
+                    views.ASPAChangePlanApproveSecondaryView.as_view(),
+                    name='aspachangeplan_approve_secondary',
+                ),
+                path(
                     f'{path_prefix}/<int:pk>/apply/',
                     views.ASPAChangePlanApplyView.as_view(),
                     name='aspachangeplan_apply',
+                ),
+            )
+        )
+    if spec.registry_key == 'roachangeplanrollbackbundle':
+        urlpatterns.extend(
+            (
+                path(
+                    f'{path_prefix}/<int:pk>/approve/',
+                    views.ROAChangePlanRollbackBundleApproveView.as_view(),
+                    name='roachangeplanrollbackbundle_approve',
+                ),
+                path(
+                    f'{path_prefix}/<int:pk>/apply/',
+                    views.ROAChangePlanRollbackBundleApplyView.as_view(),
+                    name='roachangeplanrollbackbundle_apply',
+                ),
+            )
+        )
+    if spec.registry_key == 'aspachangeplanrollbackbundle':
+        urlpatterns.extend(
+            (
+                path(
+                    f'{path_prefix}/<int:pk>/approve/',
+                    views.ASPAChangePlanRollbackBundleApproveView.as_view(),
+                    name='aspachangeplanrollbackbundle_approve',
+                ),
+                path(
+                    f'{path_prefix}/<int:pk>/apply/',
+                    views.ASPAChangePlanRollbackBundleApplyView.as_view(),
+                    name='aspachangeplanrollbackbundle_apply',
                 ),
             )
         )

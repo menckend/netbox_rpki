@@ -357,6 +357,7 @@ class PublishedASPAResultType(models.TextChoices):
 
 class ROAChangePlanStatus(models.TextChoices):
     DRAFT = "draft", "Draft"
+    AWAITING_2ND = "awaiting_2nd", "Awaiting Secondary Approval"
     APPROVED = "approved", "Approved"
     APPLYING = "applying", "Applying"
     APPLIED = "applied", "Applied"
@@ -409,6 +410,7 @@ class ProviderAspaWriteMode(models.TextChoices):
 
 class ASPAChangePlanStatus(models.TextChoices):
     DRAFT = "draft", "Draft"
+    AWAITING_2ND = "awaiting_2nd", "Awaiting Secondary Approval"
     APPROVED = "approved", "Approved"
     APPLYING = "applying", "Applying"
     APPLIED = "applied", "Applied"
@@ -4386,12 +4388,15 @@ class ROAChangePlan(NamedRpkiStandardModel):
         choices=ROAChangePlanStatus.choices,
         default=ROAChangePlanStatus.DRAFT,
     )
+    requires_secondary_approval = models.BooleanField(default=False)
     ticket_reference = models.CharField(max_length=200, blank=True)
     change_reference = models.CharField(max_length=200, blank=True)
     maintenance_window_start = models.DateTimeField(blank=True, null=True)
     maintenance_window_end = models.DateTimeField(blank=True, null=True)
     approved_at = models.DateTimeField(blank=True, null=True)
     approved_by = models.CharField(max_length=150, blank=True)
+    secondary_approved_at = models.DateTimeField(blank=True, null=True)
+    secondary_approved_by = models.CharField(max_length=150, blank=True)
     apply_started_at = models.DateTimeField(blank=True, null=True)
     apply_requested_by = models.CharField(max_length=150, blank=True)
     applied_at = models.DateTimeField(blank=True, null=True)
@@ -4423,6 +4428,21 @@ class ROAChangePlan(NamedRpkiStandardModel):
             start_at=self.maintenance_window_start,
             end_at=self.maintenance_window_end,
         )
+        if self.pk:
+            try:
+                original = type(self).objects.get(pk=self.pk)
+            except type(self).DoesNotExist:
+                original = None
+            if (
+                original is not None
+                and original.status != ROAChangePlanStatus.DRAFT
+                and original.requires_secondary_approval != self.requires_secondary_approval
+            ):
+                raise ValidationError({
+                    'requires_secondary_approval': (
+                        'Cannot change dual-approval requirement after the plan has left DRAFT status.'
+                    )
+                })
 
     @property
     def has_governance_metadata(self) -> bool:
@@ -4459,6 +4479,7 @@ class ROAChangePlan(NamedRpkiStandardModel):
     def can_preview(self) -> bool:
         return self.supports_provider_write and self.status in {
             ROAChangePlanStatus.DRAFT,
+            ROAChangePlanStatus.AWAITING_2ND,
             ROAChangePlanStatus.APPROVED,
             ROAChangePlanStatus.FAILED,
         }
@@ -4470,6 +4491,10 @@ class ROAChangePlan(NamedRpkiStandardModel):
     @property
     def can_acknowledge_lint(self) -> bool:
         return self.supports_provider_write
+
+    @property
+    def can_approve_secondary(self) -> bool:
+        return self.supports_provider_write and self.status == ROAChangePlanStatus.AWAITING_2ND
 
     @property
     def can_apply(self) -> bool:
@@ -4743,12 +4768,15 @@ class ASPAChangePlan(NamedRpkiStandardModel):
         choices=ASPAChangePlanStatus.choices,
         default=ASPAChangePlanStatus.DRAFT,
     )
+    requires_secondary_approval = models.BooleanField(default=False)
     ticket_reference = models.CharField(max_length=200, blank=True)
     change_reference = models.CharField(max_length=200, blank=True)
     maintenance_window_start = models.DateTimeField(blank=True, null=True)
     maintenance_window_end = models.DateTimeField(blank=True, null=True)
     approved_at = models.DateTimeField(blank=True, null=True)
     approved_by = models.CharField(max_length=150, blank=True)
+    secondary_approved_at = models.DateTimeField(blank=True, null=True)
+    secondary_approved_by = models.CharField(max_length=150, blank=True)
     apply_started_at = models.DateTimeField(blank=True, null=True)
     apply_requested_by = models.CharField(max_length=150, blank=True)
     applied_at = models.DateTimeField(blank=True, null=True)
@@ -4784,6 +4812,21 @@ class ASPAChangePlan(NamedRpkiStandardModel):
             start_at=self.maintenance_window_start,
             end_at=self.maintenance_window_end,
         )
+        if self.pk:
+            try:
+                original = type(self).objects.get(pk=self.pk)
+            except type(self).DoesNotExist:
+                original = None
+            if (
+                original is not None
+                and original.status != ASPAChangePlanStatus.DRAFT
+                and original.requires_secondary_approval != self.requires_secondary_approval
+            ):
+                raise ValidationError({
+                    'requires_secondary_approval': (
+                        'Cannot change dual-approval requirement after the plan has left DRAFT status.'
+                    )
+                })
         if self.provider_snapshot_id is not None and self.provider_account_id is None:
             raise ValidationError({'provider_account': 'Provider account is required when provider snapshot is set.'})
         if (
@@ -4828,6 +4871,7 @@ class ASPAChangePlan(NamedRpkiStandardModel):
     def can_preview(self) -> bool:
         return self.supports_provider_write and self.status in {
             ASPAChangePlanStatus.DRAFT,
+            ASPAChangePlanStatus.AWAITING_2ND,
             ASPAChangePlanStatus.APPROVED,
             ASPAChangePlanStatus.FAILED,
         }
@@ -4835,6 +4879,10 @@ class ASPAChangePlan(NamedRpkiStandardModel):
     @property
     def can_approve(self) -> bool:
         return self.supports_provider_write and self.status == ASPAChangePlanStatus.DRAFT
+
+    @property
+    def can_approve_secondary(self) -> bool:
+        return self.supports_provider_write and self.status == ASPAChangePlanStatus.AWAITING_2ND
 
     @property
     def can_apply(self) -> bool:

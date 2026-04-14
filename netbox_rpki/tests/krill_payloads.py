@@ -2,8 +2,118 @@
 
 from __future__ import annotations
 
+import base64
 import json
+from datetime import datetime, timezone
 from pathlib import Path
+
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.serialization import pkcs7
+from cryptography.x509.oid import NameOID
+
+
+def _fixture_name(common_name: str) -> x509.Name:
+    return x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
+
+
+def _build_ca_certificate(common_name: str) -> tuple[rsa.RSAPrivateKey, x509.Certificate]:
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    subject = issuer = _fixture_name(common_name)
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(issuer)
+        .public_key(private_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(datetime(2025, 1, 1, 0, 0, 0, tzinfo=timezone.utc))
+        .not_valid_after(datetime(2030, 1, 1, 0, 0, 0, tzinfo=timezone.utc))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+        .sign(private_key=private_key, algorithm=hashes.SHA256())
+    )
+    return private_key, certificate
+
+
+def _build_leaf_certificate(
+    common_name: str,
+    *,
+    issuer_private_key: rsa.RSAPrivateKey,
+    issuer_certificate: x509.Certificate,
+) -> tuple[rsa.RSAPrivateKey, x509.Certificate]:
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(_fixture_name(common_name))
+        .issuer_name(issuer_certificate.subject)
+        .public_key(private_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(datetime(2025, 1, 1, 0, 0, 0, tzinfo=timezone.utc))
+        .not_valid_after(datetime(2030, 1, 1, 0, 0, 0, tzinfo=timezone.utc))
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .sign(private_key=issuer_private_key, algorithm=hashes.SHA256())
+    )
+    return private_key, certificate
+
+
+def _der_base64(certificate: x509.Certificate) -> str:
+    return base64.b64encode(certificate.public_bytes(serialization.Encoding.DER)).decode('ascii')
+
+
+def _pkcs7_base64(*, signer_key: rsa.RSAPrivateKey, signer_cert: x509.Certificate, payload: bytes) -> str:
+    return base64.b64encode(
+        pkcs7.PKCS7SignatureBuilder()
+        .set_data(payload)
+        .add_signer(signer_cert, signer_key, hashes.SHA256())
+        .sign(serialization.Encoding.DER, [pkcs7.PKCS7Options.Binary])
+    ).decode('ascii')
+
+
+def _crl_base64(*, issuer_key: rsa.RSAPrivateKey, issuer_cert: x509.Certificate) -> str:
+    crl = (
+        x509.CertificateRevocationListBuilder()
+        .issuer_name(issuer_cert.subject)
+        .last_update(datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc))
+        .next_update(datetime(2024, 1, 2, 0, 0, 0, tzinfo=timezone.utc))
+        .sign(private_key=issuer_key, algorithm=hashes.SHA256())
+    )
+    return base64.b64encode(crl.public_bytes(serialization.Encoding.DER)).decode('ascii')
+
+
+_ROOT_KEY, _ROOT_CERT = _build_ca_certificate('NetBox RPKI Fixture Root')
+_ROUTE_EE_KEY, _ROUTE_EE_CERT = _build_leaf_certificate(
+    'NetBox RPKI Fixture Route EE',
+    issuer_private_key=_ROOT_KEY,
+    issuer_certificate=_ROOT_CERT,
+)
+_MANIFEST_EE_KEY, _MANIFEST_EE_CERT = _build_leaf_certificate(
+    'NetBox RPKI Fixture Manifest EE',
+    issuer_private_key=_ROOT_KEY,
+    issuer_certificate=_ROOT_CERT,
+)
+_INCOMING_KEY, _INCOMING_CERT = _build_leaf_certificate(
+    'NetBox RPKI Fixture Incoming',
+    issuer_private_key=_ROOT_KEY,
+    issuer_certificate=_ROOT_CERT,
+)
+_PARENT_SIGNING_KEY, _PARENT_SIGNING_CERT = _build_leaf_certificate(
+    'NetBox RPKI Fixture Parent Signing',
+    issuer_private_key=_ROOT_KEY,
+    issuer_certificate=_ROOT_CERT,
+)
+_ROUTE_CMS_BASE64 = _pkcs7_base64(
+    signer_key=_ROUTE_EE_KEY,
+    signer_cert=_ROUTE_EE_CERT,
+    payload=b'netbox-rpki-route-fixture',
+)
+_MANIFEST_CMS_BASE64 = _pkcs7_base64(
+    signer_key=_MANIFEST_EE_KEY,
+    signer_cert=_MANIFEST_EE_CERT,
+    payload=b'netbox-rpki-manifest-fixture',
+)
+_INCOMING_CERT_BASE64 = _der_base64(_INCOMING_CERT)
+_PARENT_SIGNING_CERT_BASE64 = _der_base64(_PARENT_SIGNING_CERT)
+_CRL_BASE64 = _crl_base64(issuer_key=_ROOT_KEY, issuer_cert=_ROOT_CERT)
 
 
 def _load_live_json(path: str) -> dict[str, object]:
@@ -54,7 +164,7 @@ KRILL_ROUTES_JSON = [
                 },
                 'serial': '111',
                 'uri': 'rsync://testbed.krill.cloud/repo/netbox-rpki-dev/0/v4.roa',
-                'base64': _live_published_roa_objects()[0]['base64'] if _live_published_roa_objects() else 'AAA',
+                'base64': _live_published_roa_objects()[0]['base64'] if _live_published_roa_objects() else _ROUTE_CMS_BASE64,
                 'hash': 'hash-v4',
             }
         ],
@@ -73,7 +183,7 @@ KRILL_ROUTES_JSON = [
                 },
                 'serial': '222',
                 'uri': 'rsync://testbed.krill.cloud/repo/netbox-rpki-dev/0/v6.roa',
-                'base64': _live_published_roa_objects()[1]['base64'] if len(_live_published_roa_objects()) > 1 else 'BBB',
+                'base64': _live_published_roa_objects()[1]['base64'] if len(_live_published_roa_objects()) > 1 else _ROUTE_CMS_BASE64,
                 'hash': 'hash-v6',
             }
         ],
@@ -121,14 +231,14 @@ KRILL_CA_METADATA_JSON = {
             'parent_handle': 'testbed',
             'keys': {
                 'active': {
-                    'active_key': {
-                        'key_id': 'NETBOXRPKIACTIVEKEY0001',
-                        'incoming_cert': {
-                            'uri': 'rsync://testbed.krill.cloud/repo/testbed/0/netbox-rpki-dev.cer',
-                            'base64': _live_sample_value('incoming_cert', 'base64') or 'MIIFlDCCBHygAwIBAgIUFmJq/upclIPirQ6V3WEoGGLK1OEwDQYJKoZIhvcNAQELBQAwMzExMC8GA1UEAxMoNzRDRDdFRkM1QUU4MTZCQ0VGMzkwRTVBNkJENjFENjJCRkQzRTBEQTAeFw0yNjA0MTIxMzU3MDVaFw0yNzA0MTExNDAyMDVaMDMxMTAvBgNVBAMTKEUxQzQ0REQ4MzY4MDM2OEFBQTAwNUI0RjI0RDY1NjgxM0E3M0JFRDQwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQCprjxqHqBjId2L7Mx5VjmmGvuhtVWJP1VSgcBGIonAj0RRYwg8eTr06u9TYwdVhz/+Ix2qSxfwVPyTqjBmwgRd787s3ssSpjkoLkOW9hW7Ss5kimqAFsH3Hrmr1Mk58Jxu6dNHI8EkY6Bg3kw04TNBmsqD+8OHjgPYbm7PP2YfEURMShv186ApEyNTnYXFvsAQxasbXTwSAZTw7RwaIAjy+40kpx/SAVqi2CZCNKF2TOTep0cYYrvpuKew17MGm2tDzAVG2h2a/XT9XasT8+UoMs5ujpwYeeINLOQ4N9B88qnqDQKkKN72QAVNtEeYp7NNb4U6S+mVL5D7Q46KXzILAgMBAAGjggKeMIICmjAPBgNVHRMBAf8EBTADAQH/MB0GA1UdDgQWBBThxE3YNoA2iqoAW08k1laBOnO+1DAfBgNVHSMEGDAWgBR0zX78WugWvO85Dlpr1h1iv9Pg2jAOBgNVHQ8BAf8EBAMCAQYwaAYDVR0fBGEwXzBdoFugWYZXcnN5bmM6Ly90ZXN0YmVkLmtyaWxsLmNsb3VkL3JlcG8vdGVzdGJlZC8wLzc0Q0Q3RUZDNUFFODE2QkNFRjM5MEU1QTZCRDYxRDYyQkZEM0UwREEuY3JsMGkGCCsGAQUFBwEBBF0wWzBZBggrBgEFBQcwAoZNcnN5bmM6Ly90ZXN0YmVkLmtyaWxsLmNsb3VkL3JlcG8vNzRDRDdFRkM1QUU4MTZCQ0VGMzkwRTVBNkJENjFENjJCRkQzRTBEQS5jZXIwgf0GCCsGAQUFBwELBIHwMIHtMD8GCCsGAQUFBzAFhjNyc3luYzovL3Rlc3RiZWQua3JpbGwuY2xvdWQvcmVwby9uZXRib3gtcnBraS1kZXYvMC8wawYIKwYBBQUHMAqGX3JzeW5jOi8vdGVzdGJlZC5rcmlsbC5jbG91ZC9yZXBvL25ldGJveC1ycGtpLWRldi8wL0UxQzQ0REQ4MzY4MDM2OEFBQTAwNUI0RjI0RDY1NjgxM0E3M0JFRDQubWZ0MD0GCCsGAQUFBzANhjFodHRwczovL3Rlc3RiZWQua3JpbGwuY2xvdWQvcnJkcC9ub3RpZmljYXRpb24ueG1sMBgGA1UdIAEB/wQOMAwwCgYIKwYBBQUHDgIwLAYIKwYBBQUHAQcBAf8EHTAbMAoEAgABMAQDAgAKMA0EAgACMAcDBQAgAQ24MBoGCCsGAQUFBwEIAQH/BAswCaAHMAUCAwD96DANBgkqhkiG9w0BAQsFAAOCAQEAlwaJXkQQuUCn4j9MaEA5scIXGzVx8mkzzWbG/d0rbqNjz73J8kymS7NcDfjdzkw6CFiz7N18wfNM9Mm8lGzGufSdaubdKH7Oii0WmGGQvGutK48sZ583gDFIIQ4FZwNgbBILbQfbncWLVSs2Lvv01w4vzUCHPl/+ytdbaB6+Wj5srSYyKEjBTQShqB4bYd784K/jswsipqY0kYRI4Ev9Gqkpvkt0Htg8FNdjs5fEqkLQaGmgzp4uZCfm0Gy17ErzK3yRWx2xgIPrv7Ct9FXMR0ux+VjpqjHb8R+yCFGSz1lb517RgsOX2pQjXXBhZdGKHTs9K0A0r9/fO0AMxAzqaQ==',
-                            'resources': {
-                                'asn': 'AS65000-AS65010',
-                                'ipv4': '10.10.0.0/24, 10.20.0.0/24',
+                        'active_key': {
+                            'key_id': 'NETBOXRPKIACTIVEKEY0001',
+                            'incoming_cert': {
+                                'uri': 'rsync://testbed.krill.cloud/repo/testbed/0/netbox-rpki-dev.cer',
+                                'base64': _live_sample_value('incoming_cert', 'base64') or _INCOMING_CERT_BASE64,
+                                'resources': {
+                                    'asn': 'AS65000-AS65010',
+                                    'ipv4': '10.10.0.0/24, 10.20.0.0/24',
                                 'ipv6': '2001:db8:100::/48',
                             },
                         },
@@ -168,12 +278,12 @@ KRILL_PARENT_STATUSES_JSON = {
                 'not_after': '2027-04-12T10:00:00Z',
                 'signing_cert': {
                     'url': 'rsync://testbed.krill.cloud/repo/testbed/0/testbed.cer',
-                    'cert': _live_sample_value('parent_signing_cert', 'cert') or 'MIIKRILLSIGNINGCERT==',
+                    'cert': _live_sample_value('parent_signing_cert', 'cert') or _PARENT_SIGNING_CERT_BASE64,
                 },
                 'issued_certs': [
                     {
                         'uri': 'rsync://testbed.krill.cloud/repo/netbox-rpki-dev/0/netbox-rpki-dev.cer',
-                        'cert': _live_sample_value('incoming_cert', 'base64') or 'MIIKRILLISSUEDCERT==',
+                        'cert': _live_sample_value('incoming_cert', 'base64') or _INCOMING_CERT_BASE64,
                     }
                 ],
             }
@@ -249,11 +359,11 @@ KRILL_REPO_STATUS_JSON = {
     'next_exchange_before': 1776024000,
     'published': [
         {
-            'base64': _live_sample_value('manifest', 'base64') or 'MIIKRILLMFT==',
+            'base64': _live_sample_value('manifest', 'base64') or _MANIFEST_CMS_BASE64,
             'uri': 'rsync://testbed.krill.cloud/repo/netbox-rpki-dev/0/netbox-rpki-dev.mft',
         },
         {
-            'base64': _live_sample_value('crl', 'base64') or 'MIIKRILLCRL==',
+            'base64': _live_sample_value('crl', 'base64') or _CRL_BASE64,
             'uri': 'rsync://testbed.krill.cloud/repo/netbox-rpki-dev/0/netbox-rpki-dev.crl',
         },
     ],

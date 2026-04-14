@@ -1,0 +1,62 @@
+{% extends 'generic/_base.html' %}
+
+{% block title %}{{ action_label }} {{ rollback_bundle }}{% endblock %}
+
+{% block content %}
+  <div class="row mt-5">
+    <div class="col col-md-8 offset-md-2">
+      <form action="" method="post" class="form">
+        {% csrf_token %}
+        {% for field in form.hidden_fields %}
+          {{ field }}
+        {% endfor %}
+        <div class="card border-warning">
+          <h2 class="card-header">{{ action_label }} Rollback Bundle</h2>
+          <div class="card-body">
+            <p>
+              {% if action_label == 'Approve' %}
+                Approve <strong>{{ rollback_bundle }}</strong> for rollback execution.
+              {% else %}
+                Apply <strong>{{ rollback_bundle }}</strong> to the configured provider and trigger a follow-up provider sync.
+              {% endif %}
+            </p>
+            {% if show_governance_inputs %}
+              {% for field in form.visible_fields %}
+                <div class="mb-3">
+                  <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                  {{ field }}
+                  {% if field.help_text %}
+                    <div class="form-text">{{ field.help_text }}</div>
+                  {% endif %}
+                  {% for error in field.errors %}
+                    <div class="text-danger">{{ error }}</div>
+                  {% endfor %}
+                </div>
+              {% endfor %}
+            {% elif rollback_bundle.ticket_reference or rollback_bundle.change_reference or rollback_bundle.maintenance_window_start or rollback_bundle.maintenance_window_end %}
+              <h5>Governance Metadata</h5>
+              <dl class="row">
+                <dt class="col-sm-4">Ticket Reference</dt>
+                <dd class="col-sm-8">{{ rollback_bundle.ticket_reference|default:'None' }}</dd>
+                <dt class="col-sm-4">Change Reference</dt>
+                <dd class="col-sm-8">{{ rollback_bundle.change_reference|default:'None' }}</dd>
+                <dt class="col-sm-4">Maintenance Window Start</dt>
+                <dd class="col-sm-8">{{ rollback_bundle.maintenance_window_start|default:'None' }}</dd>
+                <dt class="col-sm-4">Maintenance Window End</dt>
+                <dd class="col-sm-8">{{ rollback_bundle.maintenance_window_end|default:'None' }}</dd>
+              </dl>
+            {% endif %}
+            {% if delta %}
+              <h5>Rollback Delta</h5>
+              <pre class="mb-0"><code>{{ delta }}</code></pre>
+            {% endif %}
+          </div>
+          <div class="card-footer text-end">
+            <a href="{{ return_url }}" class="btn btn-outline-secondary">Cancel</a>
+            <button type="submit" name="_confirm" class="btn btn-{{ button_class|default:'primary' }}">{{ action_label }}</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endblock %}

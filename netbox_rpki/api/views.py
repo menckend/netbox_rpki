@@ -12,8 +12,12 @@ from netbox_rpki import filtersets as filterset_module
 from netbox_rpki.api.serializers import (
     ASPAReconciliationRunActionSerializer,
     ASPAChangePlanApproveActionSerializer,
+    ASPAChangePlanApproveSecondaryActionSerializer,
     BulkIntentRunActionSerializer,
     ProviderSnapshotCompareActionSerializer,
+    ROAChangePlanApproveSecondaryActionSerializer,
+    RollbackBundleApplyActionSerializer,
+    RollbackBundleApproveActionSerializer,
     RoutingIntentProfileRunActionSerializer,
     RoutingIntentTemplateBindingRunActionSerializer,
     ROAChangePlanAcknowledgeActionSerializer,
@@ -38,10 +42,15 @@ from netbox_rpki.services.provider_sync_diff import (
 from netbox_rpki.services import (
     ProviderWriteError,
     acknowledge_roa_lint_findings,
+    apply_aspa_rollback_bundle,
     apply_aspa_change_plan_provider_write,
+    apply_roa_rollback_bundle,
     apply_roa_change_plan_provider_write,
+    approve_rollback_bundle,
     approve_aspa_change_plan,
+    approve_aspa_change_plan_secondary,
     approve_roa_change_plan,
+    approve_roa_change_plan_secondary,
     build_roa_change_plan_lint_posture,
     build_roa_change_plan_simulation_posture,
     create_aspa_change_plan,
@@ -567,10 +576,15 @@ class ROAChangePlanViewSet(VIEWSET_CLASS_MAP['roachangeplan']):
 
     def get_queryset(self):
         queryset = super().get_queryset()
-
-        if getattr(self, 'action', None) in {'preview', 'acknowledge_findings', 'approve', 'apply', 'simulate'} and self.request.user.is_authenticated:
+        if getattr(self, 'action', None) in {
+            'preview',
+            'acknowledge_findings',
+            'approve',
+            'approve_secondary',
+            'apply',
+            'simulate',
+        } and self.request.user.is_authenticated:
             return self.queryset.model.objects.restrict(self.request.user, 'change')
-
         return queryset
 
     def _require_change_permission(self, plan):
@@ -587,7 +601,6 @@ class ROAChangePlanViewSet(VIEWSET_CLASS_MAP['roachangeplan']):
     def preview(self, request, pk=None):
         plan = self.get_object()
         self._require_change_permission(plan)
-
         try:
             execution, delta = preview_roa_change_plan_provider_write(
                 plan,
@@ -661,10 +674,34 @@ class ROAChangePlanViewSet(VIEWSET_CLASS_MAP['roachangeplan']):
         return Response(payload)
 
     @action(detail=True, methods=['post'], permission_classes=[TokenWritePermission])
+    def approve_secondary(self, request, pk=None):
+        plan = self.get_object()
+        self._require_change_permission(plan)
+        input_serializer = ROAChangePlanApproveSecondaryActionSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+
+        try:
+            plan = approve_roa_change_plan_secondary(
+                plan,
+                secondary_approved_by=getattr(request.user, 'username', ''),
+                approval_notes=input_serializer.validated_data.get('approval_notes', ''),
+            )
+        except ProviderWriteError as exc:
+            raise ValidationError(str(exc)) from exc
+
+        payload = self._serialize_plan_payload(request, plan)
+        latest_record = plan.approval_records.order_by('-recorded_at', '-created').first()
+        if latest_record is not None:
+            payload['approval_record'] = SERIALIZER_CLASS_MAP['approvalrecord'](
+                latest_record,
+                context={'request': request},
+            ).data
+        return Response(payload)
+
+    @action(detail=True, methods=['post'], permission_classes=[TokenWritePermission])
     def apply(self, request, pk=None):
         plan = self.get_object()
         self._require_change_permission(plan)
-
         try:
             execution, delta = apply_roa_change_plan_provider_write(
                 plan,
@@ -861,10 +898,8 @@ class ASPAChangePlanViewSet(VIEWSET_CLASS_MAP['aspachangeplan']):
 
     def get_queryset(self):
         queryset = super().get_queryset()
-
-        if getattr(self, 'action', None) in {'preview', 'approve', 'apply'} and self.request.user.is_authenticated:
+        if getattr(self, 'action', None) in {'preview', 'approve', 'approve_secondary', 'apply'} and self.request.user.is_authenticated:
             return self.queryset.model.objects.restrict(self.request.user, 'change')
-
         return queryset
 
     def _require_change_permission(self, plan):
@@ -881,7 +916,6 @@ class ASPAChangePlanViewSet(VIEWSET_CLASS_MAP['aspachangeplan']):
     def preview(self, request, pk=None):
         plan = self.get_object()
         self._require_change_permission(plan)
-
         try:
             execution, delta = preview_aspa_change_plan_provider_write(
                 plan,
@@ -924,10 +958,34 @@ class ASPAChangePlanViewSet(VIEWSET_CLASS_MAP['aspachangeplan']):
         return Response(payload)
 
     @action(detail=True, methods=['post'], permission_classes=[TokenWritePermission])
+    def approve_secondary(self, request, pk=None):
+        plan = self.get_object()
+        self._require_change_permission(plan)
+        input_serializer = ASPAChangePlanApproveSecondaryActionSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+
+        try:
+            plan = approve_aspa_change_plan_secondary(
+                plan,
+                secondary_approved_by=getattr(request.user, 'username', ''),
+                approval_notes=input_serializer.validated_data.get('approval_notes', ''),
+            )
+        except ProviderWriteError as exc:
+            raise ValidationError(str(exc)) from exc
+
+        payload = self._serialize_plan_payload(request, plan)
+        latest_record = plan.approval_records.order_by('-recorded_at', '-created').first()
+        if latest_record is not None:
+            payload['approval_record'] = SERIALIZER_CLASS_MAP['approvalrecord'](
+                latest_record,
+                context={'request': request},
+            ).data
+        return Response(payload)
+
+    @action(detail=True, methods=['post'], permission_classes=[TokenWritePermission])
     def apply(self, request, pk=None):
         plan = self.get_object()
         self._require_change_permission(plan)
-
         try:
             execution, delta = apply_aspa_change_plan_provider_write(
                 plan,
@@ -971,6 +1029,108 @@ class ASPAChangePlanViewSet(VIEWSET_CLASS_MAP['aspachangeplan']):
         })
 
 
+class ROAChangePlanRollbackBundleViewSet(VIEWSET_CLASS_MAP['roachangeplanrollbackbundle']):
+    http_method_names = ['get', 'head', 'options', 'post']
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        if getattr(self, 'action', None) in {'approve', 'apply'} and self.request.user.is_authenticated:
+            return self.queryset.model.objects.restrict(self.request.user, 'change')
+        return queryset
+
+    def _require_change_permission(self, bundle):
+        if not self.request.user.has_perm('netbox_rpki.change_roachangeplanrollbackbundle', bundle):
+            raise PermissionDenied('This user does not have permission to execute actions on this ROA rollback bundle.')
+
+    def _serialize_bundle_payload(self, request, bundle):
+        serializer = SERIALIZER_CLASS_MAP['roachangeplanrollbackbundle'](bundle, context={'request': request})
+        return dict(serializer.data)
+
+    @action(detail=True, methods=['post'], permission_classes=[TokenWritePermission])
+    def approve(self, request, pk=None):
+        bundle = self.get_object()
+        self._require_change_permission(bundle)
+        input_serializer = RollbackBundleApproveActionSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+
+        try:
+            bundle = approve_rollback_bundle(
+                bundle,
+                approved_by=getattr(request.user, 'username', ''),
+                **input_serializer.validated_data,
+            )
+        except ProviderWriteError as exc:
+            raise ValidationError(str(exc)) from exc
+
+        return Response(self._serialize_bundle_payload(request, bundle))
+
+    @action(detail=True, methods=['post'], permission_classes=[TokenWritePermission])
+    def apply(self, request, pk=None):
+        bundle = self.get_object()
+        self._require_change_permission(bundle)
+        input_serializer = RollbackBundleApplyActionSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+
+        requested_by = input_serializer.validated_data.get('requested_by') or getattr(request.user, 'username', '')
+        try:
+            bundle = apply_roa_rollback_bundle(bundle, requested_by=requested_by)
+        except ProviderWriteError as exc:
+            raise ValidationError(str(exc)) from exc
+
+        return Response(self._serialize_bundle_payload(request, bundle))
+
+
+class ASPAChangePlanRollbackBundleViewSet(VIEWSET_CLASS_MAP['aspachangeplanrollbackbundle']):
+    http_method_names = ['get', 'head', 'options', 'post']
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        if getattr(self, 'action', None) in {'approve', 'apply'} and self.request.user.is_authenticated:
+            return self.queryset.model.objects.restrict(self.request.user, 'change')
+        return queryset
+
+    def _require_change_permission(self, bundle):
+        if not self.request.user.has_perm('netbox_rpki.change_aspachangeplanrollbackbundle', bundle):
+            raise PermissionDenied('This user does not have permission to execute actions on this ASPA rollback bundle.')
+
+    def _serialize_bundle_payload(self, request, bundle):
+        serializer = SERIALIZER_CLASS_MAP['aspachangeplanrollbackbundle'](bundle, context={'request': request})
+        return dict(serializer.data)
+
+    @action(detail=True, methods=['post'], permission_classes=[TokenWritePermission])
+    def approve(self, request, pk=None):
+        bundle = self.get_object()
+        self._require_change_permission(bundle)
+        input_serializer = RollbackBundleApproveActionSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+
+        try:
+            bundle = approve_rollback_bundle(
+                bundle,
+                approved_by=getattr(request.user, 'username', ''),
+                **input_serializer.validated_data,
+            )
+        except ProviderWriteError as exc:
+            raise ValidationError(str(exc)) from exc
+
+        return Response(self._serialize_bundle_payload(request, bundle))
+
+    @action(detail=True, methods=['post'], permission_classes=[TokenWritePermission])
+    def apply(self, request, pk=None):
+        bundle = self.get_object()
+        self._require_change_permission(bundle)
+        input_serializer = RollbackBundleApplyActionSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+
+        requested_by = input_serializer.validated_data.get('requested_by') or getattr(request.user, 'username', '')
+        try:
+            bundle = apply_aspa_rollback_bundle(bundle, requested_by=requested_by)
+        except ProviderWriteError as exc:
+            raise ValidationError(str(exc)) from exc
+
+        return Response(self._serialize_bundle_payload(request, bundle))
+
+
 VIEWSET_CLASS_MAP['routingintentprofile'] = RoutingIntentProfileViewSet
 globals()['RoutingIntentProfileViewSet'] = RoutingIntentProfileViewSet
 VIEWSET_CLASS_MAP['routingintentexception'] = RoutingIntentExceptionViewSet
@@ -991,6 +1151,10 @@ VIEWSET_CLASS_MAP['roachangeplan'] = ROAChangePlanViewSet
 globals()['ROAChangePlanViewSet'] = ROAChangePlanViewSet
 VIEWSET_CLASS_MAP['aspachangeplan'] = ASPAChangePlanViewSet
 globals()['ASPAChangePlanViewSet'] = ASPAChangePlanViewSet
+VIEWSET_CLASS_MAP['roachangeplanrollbackbundle'] = ROAChangePlanRollbackBundleViewSet
+globals()['ROAChangePlanRollbackBundleViewSet'] = ROAChangePlanRollbackBundleViewSet
+VIEWSET_CLASS_MAP['aspachangeplanrollbackbundle'] = ASPAChangePlanRollbackBundleViewSet
+globals()['ASPAChangePlanRollbackBundleViewSet'] = ASPAChangePlanRollbackBundleViewSet
 
 
 __all__ = ("RootView",) + tuple(spec.api.viewset_name for spec in API_OBJECT_SPECS)
