@@ -1,0 +1,36 @@
+{% extends 'generic/_base.html' %}
+
+{% block title %}Simulate {{ change_plan }}{% endblock %}
+
+{% block content %}
+  <div class="row mt-5">
+    <div class="col col-md-8 offset-md-2">
+      <form action="" method="post" class="form">
+        {% csrf_token %}
+        {% for field in form.hidden_fields %}
+          {{ field }}
+        {% endfor %}
+        <div class="card border-info">
+          <h2 class="card-header">Run ROA Validation Simulation</h2>
+          <div class="card-body">
+            <p>
+              Run the current ROA validation simulation workflow for <strong>{{ change_plan }}</strong>.
+            </p>
+            <dl class="row">
+              <dt class="col-sm-4">Status</dt>
+              <dd class="col-sm-8">{{ change_plan.status }}</dd>
+              <dt class="col-sm-4">Source Reconciliation Run</dt>
+              <dd class="col-sm-8">{{ change_plan.source_reconciliation_run }}</dd>
+              <dt class="col-sm-4">Provider Account</dt>
+              <dd class="col-sm-8">{{ change_plan.provider_account|default:'None' }}</dd>
+            </dl>
+          </div>
+          <div class="card-footer text-end">
+            <a href="{{ return_url }}" class="btn btn-outline-secondary">Cancel</a>
+            <button type="submit" name="_confirm" class="btn btn-info">Run Simulation</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endblock %}

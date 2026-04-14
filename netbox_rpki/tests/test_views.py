@@ -930,6 +930,17 @@ class RoutingIntentProfileActionViewTestCase(PluginViewTestCase):
             provider_snapshot_pk=self.provider_snapshot.pk,
         )
 
+    def test_profile_detail_hides_run_button_without_change_permission(self):
+        self.add_permissions('netbox_rpki.view_routingintentprofile')
+
+        response = self.client.get(self.profile.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertNotContains(
+            response,
+            reverse('plugins:netbox_rpki:routingintentprofile_run', kwargs={'pk': self.profile.pk}),
+        )
+
 
 class RoutingIntentExceptionActionViewTestCase(PluginViewTestCase):
     @classmethod
@@ -1706,6 +1717,9 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
         self.assertContains(response, 'Expires in 14 day(s)')
         self.assertContains(response, 'Reconciliation Runs Requiring Attention')
         self.assertContains(response, 'Open ROA Change Plans Requiring Attention')
+        self.assertContains(response, 'replacement-required intents')
+        self.assertContains(response, 'without simulation')
+        self.assertContains(response, 'simulation blocking')
         self.assertContains(response, 'Blocking')
         self.assertContains(response, 'Ack Required')
         self.assertContains(response, 'Acknowledged')
@@ -1917,6 +1931,7 @@ class ReconciliationDetailViewTestCase(PluginViewTestCase):
             organization=cls.organization,
             intent_profile=cls.profile,
             basis_derivation_run=cls.derivation_run,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
             published_roa_count=1,
             intent_count=1,
             result_summary_json={
@@ -2002,6 +2017,58 @@ class ReconciliationDetailViewTestCase(PluginViewTestCase):
         self.assertContains(response, 'Published ROA Results')
         self.assertContains(response, 'Dashboard Intent Result')
         self.assertContains(response, 'Dashboard Published Result')
+
+    def test_reconciliation_run_detail_shows_create_plan_button(self):
+        self.add_permissions('netbox_rpki.view_roareconciliationrun', 'netbox_rpki.change_routingintentprofile')
+
+        response = self.client.get(self.reconciliation_run.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(
+            response,
+            reverse('plugins:netbox_rpki:roareconciliationrun_create_plan', kwargs={'pk': self.reconciliation_run.pk}),
+        )
+
+    def test_reconciliation_run_detail_hides_create_plan_button_without_profile_change_permission(self):
+        self.add_permissions('netbox_rpki.view_roareconciliationrun')
+
+        response = self.client.get(self.reconciliation_run.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertNotContains(
+            response,
+            reverse('plugins:netbox_rpki:roareconciliationrun_create_plan', kwargs={'pk': self.reconciliation_run.pk}),
+        )
+
+    def test_reconciliation_run_create_plan_view_creates_plan(self):
+        self.add_permissions(
+            'netbox_rpki.view_roareconciliationrun',
+            'netbox_rpki.change_routingintentprofile',
+            'netbox_rpki.view_roachangeplan',
+        )
+        plan = create_test_roa_change_plan(
+            name='Reconciliation View Created Plan',
+            organization=self.organization,
+            source_reconciliation_run=self.reconciliation_run,
+        )
+
+        with patch('netbox_rpki.views.create_roa_change_plan', return_value=plan) as create_plan_mock:
+            response = self.client.post(
+                reverse('plugins:netbox_rpki:roareconciliationrun_create_plan', kwargs={'pk': self.reconciliation_run.pk}),
+                {'confirm': True},
+            )
+
+        self.assertRedirects(response, plan.get_absolute_url())
+        create_plan_mock.assert_called_once_with(self.reconciliation_run)
+
+    def test_reconciliation_run_create_plan_view_requires_profile_change_permission(self):
+        self.add_permissions('netbox_rpki.view_roareconciliationrun')
+
+        response = self.client.get(
+            reverse('plugins:netbox_rpki:roareconciliationrun_create_plan', kwargs={'pk': self.reconciliation_run.pk})
+        )
+
+        self.assertHttpStatus(response, 403)
 
     def test_roa_intent_result_detail_renders_diff_context_and_candidate_matches(self):
         self.add_permissions('netbox_rpki.view_roaintentresult')

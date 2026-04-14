@@ -37,11 +37,13 @@ from netbox_rpki.services import (
     approve_roa_change_plan,
     build_roa_change_plan_delta,
     create_aspa_change_plan,
+    create_roa_change_plan,
     lift_roa_lint_suppression,
     preview_routing_intent_template_binding,
     preview_aspa_change_plan_provider_write,
     preview_roa_change_plan_provider_write,
     run_routing_intent_template_binding_pipeline,
+    simulate_roa_change_plan,
     suppress_roa_lint_finding,
 )
 from netbox_rpki.services.provider_sync_contract import build_provider_account_rollup
@@ -486,6 +488,50 @@ class RoutingIntentExceptionApproveView(generic.ObjectEditView):
         return redirect(exception.get_absolute_url())
 
 
+class ROAReconciliationRunCreatePlanView(generic.ObjectEditView):
+    queryset = models.ROAReconciliationRun.objects.all()
+    template_name = 'netbox_rpki/roareconciliationrun_create_plan.html'
+
+    def get_required_permission(self):
+        return 'netbox_rpki.view_roareconciliationrun'
+
+    def get_run(self, pk):
+        return get_object_or_404(self.queryset, pk=pk)
+
+    def _require_profile_change_permission(self, request, reconciliation_run):
+        if not request.user.has_perm('netbox_rpki.change_routingintentprofile', reconciliation_run.intent_profile):
+            raise PermissionDenied('This user does not have permission to create a change plan from this reconciliation run.')
+
+    def _render(self, request, reconciliation_run, *, form=None, status=200):
+        self._require_profile_change_permission(request, reconciliation_run)
+        return render(request, self.template_name, {
+            'object': reconciliation_run,
+            'reconciliation_run': reconciliation_run,
+            'form': form or ConfirmationForm(),
+            'return_url': self.get_return_url(request, reconciliation_run),
+        }, status=status)
+
+    def get(self, request, pk):
+        reconciliation_run = self.get_run(pk)
+        return self._render(request, reconciliation_run)
+
+    def post(self, request, pk):
+        reconciliation_run = self.get_run(pk)
+        self._require_profile_change_permission(request, reconciliation_run)
+        form = ConfirmationForm(request.POST)
+        if not form.is_valid():
+            return self._render(request, reconciliation_run, form=form, status=400)
+
+        try:
+            plan = create_roa_change_plan(reconciliation_run)
+        except ValueError as exc:
+            messages.error(request, str(exc))
+            return redirect(reconciliation_run.get_absolute_url())
+
+        messages.success(request, f'Created ROA change plan {plan.name}.')
+        return redirect(plan.get_absolute_url())
+
+
 class OrganizationRunAspaReconciliationView(generic.ObjectEditView):
     queryset = models.Organization.objects.all()
     template_name = 'netbox_rpki/organization_aspa_reconcile.html'
@@ -665,6 +711,8 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
             expiry_threshold=expiry_threshold,
         )
         bulk_run_rollup = self.get_bulk_run_rollup(request)
+        roa_reconciliation_summary = self.get_roa_reconciliation_summary(request)
+        roa_change_plan_summary = self.get_roa_change_plan_summary(request)
         reconciliation_attention_runs = self.get_reconciliation_attention_runs(request)
         change_plans_requiring_attention = self.get_change_plans_requiring_attention(request)
         aspa_reconciliation_attention_runs = self.get_aspa_reconciliation_attention_runs(request)
@@ -677,6 +725,8 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
             'stale_bindings': stale_bindings,
             'expiring_exceptions': expiring_exceptions,
             'bulk_run_rollup': bulk_run_rollup,
+            'roa_reconciliation_summary': roa_reconciliation_summary,
+            'roa_change_plan_summary': roa_change_plan_summary,
             'reconciliation_attention_runs': reconciliation_attention_runs,
             'change_plans_requiring_attention': change_plans_requiring_attention,
             'aspa_reconciliation_attention_runs': aspa_reconciliation_attention_runs,
@@ -904,6 +954,74 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
             'completed_count': completed_count,
             'attention_count': attention_count,
         }
+
+    def get_roa_reconciliation_summary(self, request):
+        queryset = (
+            models.ROAReconciliationRun.objects.restrict(request.user, 'view')
+            .prefetch_related('lint_runs')
+        )
+        payload = {
+            'total_runs': queryset.count(),
+            'completed_runs': 0,
+            'replacement_required_intent_total': 0,
+            'replacement_required_published_total': 0,
+            'lint_warning_total': 0,
+            'lint_error_total': 0,
+        }
+        for run in queryset:
+            if run.status == models.ValidationRunStatus.COMPLETED:
+                payload['completed_runs'] += 1
+            summary = dict(run.result_summary_json or {})
+            payload['replacement_required_intent_total'] += summary.get('replacement_required_intent_count', 0)
+            payload['replacement_required_published_total'] += summary.get('replacement_required_published_count', 0)
+            lint_run = run.lint_runs.order_by('-started_at', '-created').first()
+            if lint_run is not None:
+                payload['lint_warning_total'] += lint_run.warning_count
+                payload['lint_error_total'] += lint_run.error_count + lint_run.critical_count
+        return payload
+
+    def get_roa_change_plan_summary(self, request):
+        queryset = (
+            models.ROAChangePlan.objects.restrict(request.user, 'view')
+            .prefetch_related('simulation_runs', 'lint_runs')
+        )
+        by_status: dict[str, int] = {}
+        payload = {
+            'total_plans': queryset.count(),
+            'by_status': by_status,
+            'simulated_plan_count': 0,
+            'simulation_missing_count': 0,
+            'simulation_pending_count': 0,
+            'simulation_stale_count': 0,
+            'simulation_blocking_plan_count': 0,
+            'simulation_ack_required_plan_count': 0,
+            'lint_blocking_total': 0,
+            'lint_ack_required_total': 0,
+            'lint_acknowledged_total': 0,
+            'replacement_count_total': 0,
+        }
+        for plan in queryset:
+            by_status[plan.status] = by_status.get(plan.status, 0) + 1
+            payload['replacement_count_total'] += (plan.summary_json or {}).get('replacement_count', 0)
+            simulation_posture = build_roa_change_plan_simulation_posture(plan)
+            if simulation_posture['has_simulation']:
+                payload['simulated_plan_count'] += 1
+            simulation_status = simulation_posture['status']
+            if simulation_status == 'missing':
+                payload['simulation_missing_count'] += 1
+            elif simulation_status == 'pending':
+                payload['simulation_pending_count'] += 1
+            elif simulation_status == 'stale':
+                payload['simulation_stale_count'] += 1
+            elif simulation_status == models.ROAValidationSimulationApprovalImpact.BLOCKING:
+                payload['simulation_blocking_plan_count'] += 1
+            elif simulation_status == models.ROAValidationSimulationApprovalImpact.ACKNOWLEDGEMENT_REQUIRED:
+                payload['simulation_ack_required_plan_count'] += 1
+            lint_posture = build_roa_change_plan_lint_posture(plan)
+            payload['lint_blocking_total'] += lint_posture['unresolved_blocking_finding_count']
+            payload['lint_ack_required_total'] += lint_posture['unresolved_acknowledgement_required_finding_count']
+            payload['lint_acknowledged_total'] += lint_posture['acknowledged_finding_count']
+        return payload
 
     def get_reconciliation_attention_runs(self, request):
         queryset = (
@@ -1333,6 +1451,32 @@ class ROAChangePlanApplyView(ROAChangePlanActionView):
                 f'Applied ROA change plan {plan.name}, but the follow-up provider sync did not complete successfully.',
             )
         return redirect(plan.get_absolute_url())
+
+
+class ROAChangePlanSimulateView(ROAChangePlanActionView):
+    template_name = 'netbox_rpki/roachangeplan_simulate.html'
+
+    def _render(self, request, plan, *, form=None, status=200):
+        return render(request, self.template_name, {
+            'object': plan,
+            'change_plan': plan,
+            'form': form or ConfirmationForm(),
+            'return_url': self.get_return_url(request, plan),
+        }, status=status)
+
+    def get(self, request, pk):
+        plan = self.get_plan(pk)
+        return self._render(request, plan)
+
+    def post(self, request, pk):
+        plan = self.get_plan(pk)
+        form = ConfirmationForm(request.POST)
+        if not form.is_valid():
+            return self._render(request, plan, form=form, status=400)
+
+        simulation_run = simulate_roa_change_plan(plan)
+        messages.success(request, f'Recorded ROA validation simulation run {simulation_run.name}.')
+        return redirect(simulation_run.get_absolute_url())
 
 
 class ASPAChangePlanPreviewView(ASPAChangePlanActionView):

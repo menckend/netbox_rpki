@@ -1034,10 +1034,19 @@ class ROAChangePlanActionViewTestCase(PluginViewTestCase):
         response = self.client.get(self.plan.get_absolute_url())
 
         self.assertHttpStatus(response, 200)
+        self.assertContains(response, reverse('plugins:netbox_rpki:roachangeplan_simulate', kwargs={'pk': self.plan.pk}))
         self.assertContains(response, reverse('plugins:netbox_rpki:roachangeplan_preview', kwargs={'pk': self.plan.pk}))
         self.assertContains(response, reverse('plugins:netbox_rpki:roachangeplan_acknowledge_lint', kwargs={'pk': self.plan.pk}))
         self.assertContains(response, reverse('plugins:netbox_rpki:roachangeplan_approve', kwargs={'pk': self.plan.pk}))
         self.assertNotContains(response, reverse('plugins:netbox_rpki:roachangeplan_apply', kwargs={'pk': self.plan.pk}))
+
+    def test_change_plan_detail_hides_simulate_button_without_change_permission(self):
+        self.add_permissions('netbox_rpki.view_roachangeplan')
+
+        response = self.client.get(self.plan.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertNotContains(response, reverse('plugins:netbox_rpki:roachangeplan_simulate', kwargs={'pk': self.plan.pk}))
 
     def test_acknowledge_view_records_lint_acknowledgements_without_approval(self):
         ack_required_finding = self.plan.lint_runs.get().findings.filter(
@@ -1076,6 +1085,32 @@ class ROAChangePlanActionViewTestCase(PluginViewTestCase):
         self.assertHttpStatus(response, 200)
         self.assertContains(response, 'Preview Provider Delta')
         self.assertContains(response, '10.89.0.0/24')
+
+    def test_simulate_view_creates_run_and_redirects(self):
+        self.add_permissions(
+            'netbox_rpki.view_roachangeplan',
+            'netbox_rpki.change_roachangeplan',
+            'netbox_rpki.view_roavalidationsimulationrun',
+        )
+        url = reverse('plugins:netbox_rpki:roachangeplan_simulate', kwargs={'pk': self.plan.pk})
+
+        get_response = self.client.get(url)
+
+        self.assertHttpStatus(get_response, 200)
+        self.assertContains(get_response, 'Run ROA Validation Simulation')
+
+        post_response = self.client.post(url, {'confirm': True})
+
+        simulation_run = self.plan.simulation_runs.order_by('-started_at', '-created').first()
+        self.assertIsNotNone(simulation_run)
+        self.assertRedirects(post_response, simulation_run.get_absolute_url())
+
+    def test_simulate_view_requires_change_permission(self):
+        self.add_permissions('netbox_rpki.view_roachangeplan')
+
+        response = self.client.get(reverse('plugins:netbox_rpki:roachangeplan_simulate', kwargs={'pk': self.plan.pk}))
+
+        self.assertHttpStatus(response, 403)
 
     def test_approve_view_renders_and_persists_governance_fields(self):
         self.add_permissions('netbox_rpki.view_roachangeplan', 'netbox_rpki.change_roachangeplan')
@@ -1219,6 +1254,7 @@ class ROAChangePlanActionViewTestCase(PluginViewTestCase):
 
         self.assertHttpStatus(response, 200)
         self.assertNotContains(response, reverse('plugins:netbox_rpki:roachangeplan_preview', kwargs={'pk': unsupported_plan.pk}))
+        self.assertContains(response, reverse('plugins:netbox_rpki:roachangeplan_simulate', kwargs={'pk': unsupported_plan.pk}))
         self.assertNotContains(response, reverse('plugins:netbox_rpki:roachangeplan_approve', kwargs={'pk': unsupported_plan.pk}))
         self.assertNotContains(response, reverse('plugins:netbox_rpki:roachangeplan_apply', kwargs={'pk': unsupported_plan.pk}))
 

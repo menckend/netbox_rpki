@@ -64,6 +64,7 @@ class UrlRegistrationTestCase(SimpleTestCase):
             'plugins:netbox_rpki:roachangeplan_preview': '/plugins/netbox_rpki/roachangeplans/1/preview/',
             'plugins:netbox_rpki:roachangeplan_approve': '/plugins/netbox_rpki/roachangeplans/1/approve/',
             'plugins:netbox_rpki:roachangeplan_apply': '/plugins/netbox_rpki/roachangeplans/1/apply/',
+            'plugins:netbox_rpki:roachangeplan_simulate': '/plugins/netbox_rpki/roachangeplans/1/simulate/',
         }
 
         for view_name, path in expected_routes.items():
@@ -86,6 +87,7 @@ class UrlRegistrationTestCase(SimpleTestCase):
         expected_routes = {
             'plugins:netbox_rpki:routingintentprofile_run': '/plugins/netbox_rpki/routingintentprofiles/1/run/',
             'plugins:netbox_rpki:routingintentexception_approve': '/plugins/netbox_rpki/routingintentexceptions/1/approve/',
+            'plugins:netbox_rpki:roareconciliationrun_create_plan': '/plugins/netbox_rpki/roareconciliationruns/1/create-plan/',
         }
 
         for view_name, path in expected_routes.items():

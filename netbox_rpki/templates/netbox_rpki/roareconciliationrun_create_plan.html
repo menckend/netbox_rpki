@@ -1,0 +1,36 @@
+{% extends 'generic/_base.html' %}
+
+{% block title %}Create Plan for {{ reconciliation_run }}{% endblock %}
+
+{% block content %}
+  <div class="row mt-5">
+    <div class="col col-md-8 offset-md-2">
+      <form action="" method="post" class="form">
+        {% csrf_token %}
+        {% for field in form.hidden_fields %}
+          {{ field }}
+        {% endfor %}
+        <div class="card border-primary">
+          <h2 class="card-header">Create ROA Change Plan</h2>
+          <div class="card-body">
+            <p>
+              Create a draft ROA change plan from reconciliation run <strong>{{ reconciliation_run }}</strong>.
+            </p>
+            <dl class="row">
+              <dt class="col-sm-4">Intent Profile</dt>
+              <dd class="col-sm-8">{{ reconciliation_run.intent_profile }}</dd>
+              <dt class="col-sm-4">Comparison Scope</dt>
+              <dd class="col-sm-8">{{ reconciliation_run.comparison_scope }}</dd>
+              <dt class="col-sm-4">Status</dt>
+              <dd class="col-sm-8">{{ reconciliation_run.status }}</dd>
+            </dl>
+          </div>
+          <div class="card-footer text-end">
+            <a href="{{ return_url }}" class="btn btn-outline-secondary">Cancel</a>
+            <button type="submit" name="_confirm" class="btn btn-primary">Create Plan</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endblock %}

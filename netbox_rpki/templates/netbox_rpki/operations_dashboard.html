@@ -369,7 +369,15 @@
   <div class="row mb-4">
     <div class="col col-md-12">
       <div class="card">
-        <h5 class="card-header">ROA Reconciliation Runs Requiring Attention</h5>
+        <div class="card-header">
+          <h5 class="mb-1">ROA Reconciliation Runs Requiring Attention</h5>
+          <div class="text-muted small">
+            {{ roa_reconciliation_summary.total_runs }} total / {{ roa_reconciliation_summary.completed_runs }} completed /
+            {{ roa_reconciliation_summary.replacement_required_intent_total }} replacement-required intents /
+            {{ roa_reconciliation_summary.lint_warning_total }} lint warnings /
+            {{ roa_reconciliation_summary.lint_error_total }} lint errors
+          </div>
+        </div>
         {% if reconciliation_attention_runs %}
           <div class="card-body table-responsive">
             <table class="table table-hover align-middle mb-0">
@@ -447,7 +455,20 @@
   <div class="row mb-4">
     <div class="col col-md-12">
       <div class="card">
-        <h5 class="card-header">Open ROA Change Plans Requiring Attention</h5>
+        <div class="card-header">
+          <h5 class="mb-1">Open ROA Change Plans Requiring Attention</h5>
+          <div class="text-muted small">
+            {{ roa_change_plan_summary.total_plans }} total /
+            {{ roa_change_plan_summary.by_status.draft|default:0 }} draft /
+            {{ roa_change_plan_summary.by_status.approved|default:0 }} approved /
+            {{ roa_change_plan_summary.by_status.failed|default:0 }} failed /
+            {{ roa_change_plan_summary.simulated_plan_count }} simulated /
+            {{ roa_change_plan_summary.simulation_missing_count }} without simulation /
+            {{ roa_change_plan_summary.simulation_blocking_plan_count }} simulation blocking /
+            {{ roa_change_plan_summary.simulation_ack_required_plan_count }} simulation ack-required /
+            {{ roa_change_plan_summary.lint_blocking_total }} lint blocking
+          </div>
+        </div>
         {% if change_plans_requiring_attention %}
           <div class="card-body table-responsive">
             <table class="table table-hover align-middle mb-0">

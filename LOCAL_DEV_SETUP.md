@@ -44,9 +44,12 @@ pip install -e ".[test]"
 
 # 5. Start everything
 cd devrun && ./dev.sh start
+
+# 6. (Optional) Seed the local IRRd with sample data
+./dev.sh irrd seed
 ```
 
-After step 5, NetBox is running at `http://127.0.0.1:8000` with the plugin enabled. The rest of this document explains each step and the ongoing workflow in detail.
+After step 5, NetBox is running at `http://127.0.0.1:8000` with the plugin enabled. Step 6 is only needed if you are working on IRR integration features. The rest of this document explains each step and the ongoing workflow in detail.
 
 ---
 
@@ -275,6 +278,8 @@ The wrapper checks that NetBox is reachable at `http://127.0.0.1:8000` before ru
 ## Local IRRd Lab
 
 IRRd runs as a Docker container managed by `devrun/docker-compose.yml`. There is no host-level IRRd install step.
+
+> **Note:** `./dev.sh start` brings up the IRRd container and creates its database, but does **not** seed it with sample data. The `LOCAL-IRR` source will be empty until you run `./dev.sh irrd seed`. This is intentional — most plugin work does not require IRRd content, and automatic seeding would overwrite manual changes.
 
 ### Manage IRRd independently
 

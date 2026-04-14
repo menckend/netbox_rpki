@@ -928,6 +928,11 @@ ROA_CHANGE_PLAN_DETAIL_SPEC = DetailSpec(
     actions=(
         DetailActionSpec(
             permission='netbox_rpki.change_roachangeplan',
+            label='Simulate',
+            direct_url=lambda obj: reverse('plugins:netbox_rpki:roachangeplan_simulate', kwargs={'pk': obj.pk}),
+        ),
+        DetailActionSpec(
+            permission='netbox_rpki.change_roachangeplan',
             label='Preview',
             direct_url=lambda obj: reverse('plugins:netbox_rpki:roachangeplan_preview', kwargs={'pk': obj.pk}),
             visible=lambda obj: obj.can_preview,
@@ -1294,6 +1299,14 @@ ROA_RECONCILIATION_RUN_DETAIL_SPEC = DetailSpec(
             value=get_run_result_summary,
             kind='code',
             empty_text='None',
+        ),
+    ),
+    actions=(
+        DetailActionSpec(
+            permission='netbox_rpki.change_routingintentprofile',
+            label='Create Plan',
+            direct_url=lambda obj: reverse('plugins:netbox_rpki:roareconciliationrun_create_plan', kwargs={'pk': obj.pk}),
+            visible=lambda obj: obj.status == models.ValidationRunStatus.COMPLETED,
         ),
     ),
     bottom_tables=(

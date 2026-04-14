@@ -93,6 +93,11 @@ def build_object_urlpatterns(spec):
                     views.ROAChangePlanApplyView.as_view(),
                     name='roachangeplan_apply',
                 ),
+                path(
+                    f'{path_prefix}/<int:pk>/simulate/',
+                    views.ROAChangePlanSimulateView.as_view(),
+                    name='roachangeplan_simulate',
+                ),
             )
         )
     if spec.registry_key == 'roalintfinding':
@@ -117,6 +122,14 @@ def build_object_urlpatterns(spec):
                 f'{path_prefix}/<int:pk>/create-plan/',
                 views.ASPAReconciliationRunCreatePlanView.as_view(),
                 name='aspareconciliationrun_create_plan',
+            )
+        )
+    if spec.registry_key == 'roareconciliationrun':
+        urlpatterns.append(
+            path(
+                f'{path_prefix}/<int:pk>/create-plan/',
+                views.ROAReconciliationRunCreatePlanView.as_view(),
+                name='roareconciliationrun_create_plan',
             )
         )
     if spec.registry_key == 'aspachangeplan':
