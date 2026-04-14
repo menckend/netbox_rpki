@@ -27,6 +27,7 @@ from netbox_rpki.tests.utils import (
     create_test_end_entity_certificate,
     create_test_imported_roa_authorization,
     create_test_intent_derivation_run,
+    create_test_lifecycle_health_policy,
     create_test_organization,
     create_test_object_validation_result,
     create_test_prefix,
@@ -1753,6 +1754,77 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
         self.assertContains(response, simulation_missing_plan.name)
         self.assertContains(response, 'No simulation')
 
+    def test_operations_dashboard_uses_effective_lifecycle_policy_thresholds(self):
+        self.add_permissions(
+            'netbox_rpki.view_rpkiprovideraccount',
+            'netbox_rpki.view_providersnapshot',
+            'netbox_rpki.view_providersnapshotdiff',
+            'netbox_rpki.view_roa',
+            'netbox_rpki.view_certificate',
+            'netbox_rpki.view_routingintenttemplatebinding',
+            'netbox_rpki.view_routingintentexception',
+            'netbox_rpki.view_bulkintentrun',
+            'netbox_rpki.view_roareconciliationrun',
+            'netbox_rpki.view_roachangeplan',
+            'netbox_rpki.view_aspareconciliationrun',
+            'netbox_rpki.view_aspachangeplan',
+        )
+
+        policy_organization = create_test_organization(
+            org_id='operations-policy-org',
+            name='Operations Policy Org',
+        )
+        create_test_lifecycle_health_policy(
+            name='Operations Policy Org Thresholds',
+            organization=policy_organization,
+            sync_stale_after_minutes=10,
+            roa_expiry_warning_days=7,
+            certificate_expiry_warning_days=7,
+            exception_expiry_warning_days=7,
+        )
+        healthy_provider_account = create_test_provider_account(
+            name='Policy Healthy Provider',
+            organization=policy_organization,
+            org_handle='ORG-OPS-POLICY-HEALTHY',
+            last_successful_sync=timezone.now() - timedelta(minutes=5),
+            last_sync_status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        stale_provider_account = create_test_provider_account(
+            name='Policy Stale Provider',
+            organization=policy_organization,
+            org_handle='ORG-OPS-POLICY-STALE',
+            last_successful_sync=timezone.now() - timedelta(minutes=5),
+            last_sync_status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        create_test_lifecycle_health_policy(
+            name='Policy Stale Provider Override',
+            organization=policy_organization,
+            provider_account=stale_provider_account,
+            sync_stale_after_minutes=1,
+        )
+
+        expiring_certificate = create_test_certificate(
+            name='Policy Expiring Certificate',
+            rpki_org=policy_organization,
+            valid_to=date.today() + timedelta(days=14),
+        )
+        create_test_roa(
+            name='Policy Expiring ROA',
+            signed_by=expiring_certificate,
+            origin_as=create_test_asn(64530),
+            valid_to=date.today() + timedelta(days=14),
+        )
+
+        response = self.client.get(reverse('plugins:netbox_rpki:operations_dashboard'))
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'Thresholds follow the effective lifecycle policy for each organization or provider account.')
+        self.assertContains(response, 'Policy Stale Provider')
+        self.assertContains(response, 'Stale after 1 minute(s)')
+        self.assertNotContains(response, healthy_provider_account.name)
+        self.assertNotContains(response, expiring_certificate.name)
+        self.assertNotContains(response, 'Policy Expiring ROA')
+
     def test_operations_dashboard_surfaces_blocking_simulation_posture_and_counts(self):
         self.add_permissions(
             'netbox_rpki.view_rpkiprovideraccount',
@@ -1829,7 +1901,7 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
         self.assertContains(response, 'Provider Accounts Requiring Attention')
         self.assertContains(response, self.arin_account.name)
         self.assertContains(response, '9 families: 1 pending, 8 not implemented')
-        self.assertContains(response, 'Last success:')
+        self.assertContains(response, 'Stale after 120 minute(s)')
         self.assertContains(response, 'Bulk Runs Requiring Attention')
 
 
