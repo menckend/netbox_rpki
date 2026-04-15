@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from uuid import uuid4
 
+from django.utils import timezone
 from django.utils.text import slugify
 from netaddr import IPNetwork
 
@@ -59,6 +60,101 @@ def create_test_lifecycle_health_policy(
         certificate_expired_grace_minutes=certificate_expired_grace_minutes,
         alert_repeat_after_minutes=alert_repeat_after_minutes,
         notes=notes,
+        **kwargs,
+    )
+
+
+def create_test_lifecycle_health_hook(
+    name='Lifecycle Health Hook 1',
+    organization=None,
+    provider_account=None,
+    policy=None,
+    enabled=True,
+    target_url='https://hooks.example.invalid/lifecycle',
+    secret='hook-secret',
+    headers_json=None,
+    event_kinds_json=None,
+    send_resolved=True,
+    notes='',
+    **kwargs,
+):
+    if policy is not None:
+        organization = policy.organization
+        if policy.provider_account_id is not None:
+            provider_account = policy.provider_account
+    if provider_account is not None:
+        organization = provider_account.organization
+    if organization is None:
+        organization = create_test_organization()
+    return rpki_models.LifecycleHealthHook.objects.create(
+        name=name,
+        organization=organization,
+        provider_account=provider_account,
+        policy=policy,
+        enabled=enabled,
+        target_url=target_url,
+        secret=secret,
+        headers_json=headers_json or {},
+        event_kinds_json=event_kinds_json or [],
+        send_resolved=send_resolved,
+        notes=notes,
+        **kwargs,
+    )
+
+
+def create_test_lifecycle_health_event(
+    name='Lifecycle Health Event 1',
+    organization=None,
+    provider_account=None,
+    policy=None,
+    hook=None,
+    related_snapshot=None,
+    related_snapshot_diff=None,
+    event_kind=rpki_models.LifecycleHealthEventKind.PUBLICATION_ATTENTION,
+    severity=rpki_models.LifecycleHealthEventSeverity.WARNING,
+    status=rpki_models.LifecycleHealthEventStatus.OPEN,
+    dedupe_key=None,
+    first_seen_at=None,
+    last_seen_at=None,
+    last_emitted_at=None,
+    resolved_at=None,
+    payload_json=None,
+    delivery_error='',
+    **kwargs,
+):
+    if hook is not None:
+        organization = hook.organization
+        provider_account = hook.provider_account
+        policy = hook.policy
+    if policy is not None:
+        organization = policy.organization
+        if policy.provider_account_id is not None:
+            provider_account = policy.provider_account
+    if provider_account is not None:
+        organization = provider_account.organization
+    if organization is None:
+        organization = create_test_organization()
+    dedupe_key = dedupe_key or slugify(name) or 'lifecycle-health-event'
+    first_seen_at = first_seen_at or timezone.now()
+    last_seen_at = last_seen_at or first_seen_at
+    return rpki_models.LifecycleHealthEvent.objects.create(
+        name=name,
+        organization=organization,
+        provider_account=provider_account,
+        policy=policy,
+        hook=hook,
+        related_snapshot=related_snapshot,
+        related_snapshot_diff=related_snapshot_diff,
+        event_kind=event_kind,
+        severity=severity,
+        status=status,
+        dedupe_key=dedupe_key,
+        first_seen_at=first_seen_at,
+        last_seen_at=last_seen_at,
+        last_emitted_at=last_emitted_at,
+        resolved_at=resolved_at,
+        payload_json=payload_json or {},
+        delivery_error=delivery_error,
         **kwargs,
     )
 

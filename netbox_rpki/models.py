@@ -257,6 +257,30 @@ class ProviderSyncFamilyStatus(models.TextChoices):
     NOT_IMPLEMENTED = "not_implemented", "Not Implemented"
 
 
+class LifecycleHealthEventKind(models.TextChoices):
+    SYNC_STALE = "sync_stale", "Sync Stale"
+    SYNC_FAILED = "sync_failed", "Sync Failed"
+    ROA_EXPIRING = "roa_expiring", "ROA Expiring"
+    CERTIFICATE_EXPIRING = "certificate_expiring", "Certificate Expiring"
+    EXCEPTION_EXPIRING = "exception_expiring", "Exception Expiring"
+    PUBLICATION_STALE = "publication_stale", "Publication Stale"
+    PUBLICATION_EXCHANGE_FAILED = "publication_exchange_failed", "Publication Exchange Failed"
+    PUBLICATION_ATTENTION = "publication_attention", "Publication Attention"
+    PUBLICATION_DIFF = "publication_diff", "Publication Diff"
+
+
+class LifecycleHealthEventSeverity(models.TextChoices):
+    INFO = "info", "Info"
+    WARNING = "warning", "Warning"
+    CRITICAL = "critical", "Critical"
+
+
+class LifecycleHealthEventStatus(models.TextChoices):
+    OPEN = "open", "Open"
+    REPEATED = "repeated", "Repeated"
+    RESOLVED = "resolved", "Resolved"
+
+
 class ExternalObjectType(models.TextChoices):
     ROA_AUTHORIZATION = "roa_authorization", "ROA Authorization"
     ASPA = "aspa", "ASPA"
@@ -2663,6 +2687,180 @@ class LifecycleHealthPolicy(NamedRpkiStandardModel):
 
     def get_absolute_url(self):
         return reverse('plugins:netbox_rpki:lifecyclehealthpolicy', args=[self.pk])
+
+
+class LifecycleHealthHook(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='lifecycle_health_hooks',
+    )
+    provider_account = models.ForeignKey(
+        to='RpkiProviderAccount',
+        on_delete=models.PROTECT,
+        related_name='lifecycle_health_hooks',
+        blank=True,
+        null=True,
+    )
+    policy = models.ForeignKey(
+        to='LifecycleHealthPolicy',
+        on_delete=models.PROTECT,
+        related_name='hooks',
+        blank=True,
+        null=True,
+    )
+    enabled = models.BooleanField(default=True)
+    target_url = models.CharField(max_length=500)
+    secret = models.CharField(max_length=255, blank=True)
+    headers_json = models.JSONField(default=dict, blank=True)
+    event_kinds_json = models.JSONField(default=list, blank=True)
+    send_resolved = models.BooleanField(default=True)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ('name',)
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse('plugins:netbox_rpki:lifecyclehealthhook', args=[self.pk])
+
+    def clean(self):
+        super().clean()
+        if (
+            self.provider_account_id is not None
+            and self.organization_id is not None
+            and self.provider_account.organization_id != self.organization_id
+        ):
+            raise ValidationError(
+                {
+                    'provider_account': (
+                        'Provider account must belong to the same organization as the lifecycle health hook.'
+                    )
+                }
+            )
+        if self.policy_id is not None:
+            if self.policy.organization_id != self.organization_id:
+                raise ValidationError(
+                    {
+                        'policy': (
+                            'Lifecycle health policy must belong to the same organization as the lifecycle health hook.'
+                        )
+                    }
+                )
+            if (
+                self.policy.provider_account_id is not None
+                and self.provider_account_id is not None
+                and self.policy.provider_account_id != self.provider_account_id
+            ):
+                raise ValidationError(
+                    {
+                        'policy': (
+                            'Provider-scoped lifecycle health policy must match the lifecycle health hook provider account.'
+                        )
+                    }
+                )
+
+
+class LifecycleHealthEvent(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='lifecycle_health_events',
+    )
+    provider_account = models.ForeignKey(
+        to='RpkiProviderAccount',
+        on_delete=models.PROTECT,
+        related_name='lifecycle_health_events',
+    )
+    policy = models.ForeignKey(
+        to='LifecycleHealthPolicy',
+        on_delete=models.PROTECT,
+        related_name='events',
+        blank=True,
+        null=True,
+    )
+    hook = models.ForeignKey(
+        to='LifecycleHealthHook',
+        on_delete=models.PROTECT,
+        related_name='events',
+    )
+    related_snapshot = models.ForeignKey(
+        to='ProviderSnapshot',
+        on_delete=models.PROTECT,
+        related_name='lifecycle_health_events',
+        blank=True,
+        null=True,
+    )
+    related_snapshot_diff = models.ForeignKey(
+        to='ProviderSnapshotDiff',
+        on_delete=models.PROTECT,
+        related_name='lifecycle_health_events',
+        blank=True,
+        null=True,
+    )
+    event_kind = models.CharField(max_length=64, choices=LifecycleHealthEventKind.choices)
+    severity = models.CharField(max_length=16, choices=LifecycleHealthEventSeverity.choices)
+    status = models.CharField(max_length=16, choices=LifecycleHealthEventStatus.choices, default=LifecycleHealthEventStatus.OPEN)
+    dedupe_key = models.CharField(max_length=255)
+    first_seen_at = models.DateTimeField()
+    last_seen_at = models.DateTimeField()
+    last_emitted_at = models.DateTimeField(blank=True, null=True)
+    resolved_at = models.DateTimeField(blank=True, null=True)
+    payload_json = models.JSONField(default=dict, blank=True)
+    delivery_error = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ('-last_seen_at', '-created')
+        constraints = (
+            models.UniqueConstraint(
+                fields=('hook', 'dedupe_key'),
+                name='nb_rpki_lchevent_hook_dedupe_unique',
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse('plugins:netbox_rpki:lifecyclehealthevent', args=[self.pk])
+
+    def clean(self):
+        super().clean()
+        if self.provider_account_id is not None and self.organization_id is not None and self.provider_account.organization_id != self.organization_id:
+            raise ValidationError(
+                {
+                    'provider_account': (
+                        'Provider account must belong to the same organization as the lifecycle health event.'
+                    )
+                }
+            )
+        if self.hook_id is not None:
+            if self.hook.organization_id != self.organization_id:
+                raise ValidationError(
+                    {
+                        'hook': (
+                            'Lifecycle health hook must belong to the same organization as the lifecycle health event.'
+                        )
+                    }
+                )
+            if self.hook.provider_account_id is not None and self.hook.provider_account_id != self.provider_account_id:
+                raise ValidationError(
+                    {
+                        'hook': (
+                            'Lifecycle health hook provider account must match the lifecycle health event provider account.'
+                        )
+                    }
+                )
+            if self.policy_id is not None and self.hook.policy_id is not None and self.policy_id != self.hook.policy_id:
+                raise ValidationError(
+                    {
+                        'policy': (
+                            'Lifecycle health event policy must match the lifecycle health hook policy.'
+                        )
+                    }
+                )
 
 
 class ProviderSyncRun(NamedRpkiStandardModel):

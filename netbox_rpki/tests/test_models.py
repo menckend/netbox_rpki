@@ -35,6 +35,8 @@ from netbox_rpki.tests.utils import (
     create_test_imported_aspa,
     create_test_imported_certificate_observation,
     create_test_lifecycle_health_policy,
+    create_test_lifecycle_health_event,
+    create_test_lifecycle_health_hook,
     create_test_imported_publication_point,
     create_test_imported_signed_object,
     create_test_manifest_entry,
@@ -725,6 +727,126 @@ class LifecycleHealthPolicyModelTestCase(TestCase):
             policy.get_absolute_url(),
             reverse('plugins:netbox_rpki:lifecyclehealthpolicy', args=[policy.pk]),
         )
+
+
+class LifecycleHealthHookAndEventModelTestCase(TestCase):
+    def test_hook_enforces_organization_and_policy_scope(self):
+        hook_organization = create_test_organization(org_id='lifecycle-hook-org', name='Lifecycle Hook Org')
+        mismatched_organization = create_test_organization(org_id='lifecycle-hook-mismatch-org', name='Lifecycle Hook Mismatch Org')
+        provider_account = create_test_provider_account(
+            name='Lifecycle Hook Provider',
+            organization=mismatched_organization,
+            org_handle='ORG-LIFECYCLE-HOOK-PROVIDER',
+        )
+        policy = create_test_lifecycle_health_policy(
+            name='Lifecycle Hook Policy',
+            organization=hook_organization,
+        )
+
+        hook = rpki_models.LifecycleHealthHook(
+            name='Mismatched Lifecycle Hook',
+            organization=hook_organization,
+            provider_account=provider_account,
+            target_url='https://hooks.example.invalid/mismatched',
+        )
+
+        with self.assertRaises(ValidationError) as context:
+            hook.full_clean()
+
+        self.assertEqual(
+            context.exception.message_dict,
+            {
+                'provider_account': [
+                    'Provider account must belong to the same organization as the lifecycle health hook.'
+                ]
+            },
+        )
+
+        hook = rpki_models.LifecycleHealthHook(
+            name='Mismatched Lifecycle Policy Hook',
+            organization=mismatched_organization,
+            policy=policy,
+            target_url='https://hooks.example.invalid/mismatched-policy',
+        )
+
+        with self.assertRaises(ValidationError) as context:
+            hook.full_clean()
+
+        self.assertEqual(
+            context.exception.message_dict,
+            {
+                'policy': [
+                    'Lifecycle health policy must belong to the same organization as the lifecycle health hook.'
+                ]
+            },
+        )
+
+    def test_hook_and_event_expose_absolute_urls(self):
+        organization = create_test_organization(org_id='lifecycle-hook-event-org', name='Lifecycle Hook Event Org')
+        provider_account = create_test_provider_account(
+            name='Lifecycle Hook Event Provider',
+            organization=organization,
+            org_handle='ORG-LIFECYCLE-HOOK-EVENT',
+        )
+        policy = create_test_lifecycle_health_policy(
+            name='Lifecycle Hook Event Policy',
+            organization=organization,
+            provider_account=provider_account,
+        )
+        hook = create_test_lifecycle_health_hook(
+            name='Lifecycle Hook Event Hook',
+            organization=organization,
+            provider_account=provider_account,
+            policy=policy,
+        )
+        event = create_test_lifecycle_health_event(
+            name='Lifecycle Hook Event',
+            organization=organization,
+            provider_account=provider_account,
+            policy=policy,
+            hook=hook,
+        )
+
+        self.assertEqual(
+            hook.get_absolute_url(),
+            reverse('plugins:netbox_rpki:lifecyclehealthhook', args=[hook.pk]),
+        )
+        self.assertEqual(
+            event.get_absolute_url(),
+            reverse('plugins:netbox_rpki:lifecyclehealthevent', args=[event.pk]),
+        )
+        self.assertEqual(str(hook), hook.name)
+        self.assertEqual(str(event), event.name)
+
+    def test_event_dedupe_key_is_unique_per_hook(self):
+        organization = create_test_organization(org_id='lifecycle-hook-dedupe-org', name='Lifecycle Hook Dedupe Org')
+        provider_account = create_test_provider_account(
+            name='Lifecycle Hook Dedupe Provider',
+            organization=organization,
+            org_handle='ORG-LIFECYCLE-HOOK-DEDUPE',
+        )
+        hook = create_test_lifecycle_health_hook(
+            name='Lifecycle Hook Dedupe Hook',
+            organization=organization,
+            provider_account=provider_account,
+        )
+        create_test_lifecycle_health_event(
+            name='Lifecycle Hook Dedupe Event',
+            organization=organization,
+            provider_account=provider_account,
+            hook=hook,
+            dedupe_key='lifecycle-hook-dedupe-event',
+        )
+
+        with transaction.atomic():
+            with self.assertRaises(IntegrityError):
+                create_test_lifecycle_health_event(
+                    name='Lifecycle Hook Dedupe Event Duplicate',
+                    organization=organization,
+                    provider_account=provider_account,
+                    hook=hook,
+                    dedupe_key='lifecycle-hook-dedupe-event',
+                )
 
 
 class PriorityOneModelBehaviorTestCase(TestCase):
