@@ -289,6 +289,7 @@ class RpkiProviderAccountSerializer(SERIALIZER_CLASS_MAP['rpkiprovideraccount'])
     supports_aspa_write = serializers.ReadOnlyField()
     aspa_write_mode = serializers.ReadOnlyField()
     aspa_write_capability = serializers.ReadOnlyField()
+    capability_matrix = serializers.ReadOnlyField()
     sync_health = serializers.ReadOnlyField()
     sync_health_display = serializers.ReadOnlyField()
     last_sync_rollup = serializers.SerializerMethodField()
@@ -304,6 +305,7 @@ class RpkiProviderAccountSerializer(SERIALIZER_CLASS_MAP['rpkiprovideraccount'])
             'supports_aspa_write',
             'aspa_write_mode',
             'aspa_write_capability',
+            'capability_matrix',
             'sync_health',
             'sync_health_display',
             'last_sync_rollup',
@@ -1383,6 +1385,14 @@ class ProviderSnapshotCompareActionSerializer(serializers.Serializer):
         required=False,
         allow_null=True,
     )
+
+
+class BulkIntentRunApproveActionSerializer(serializers.Serializer):
+    approved_by = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class BulkIntentRunApproveSecondaryActionSerializer(serializers.Serializer):
+    approved_by = serializers.CharField(required=False, allow_blank=True, default='')
 
 
 __all__ = tuple(spec.api.serializer_name for spec in API_OBJECT_SPECS)

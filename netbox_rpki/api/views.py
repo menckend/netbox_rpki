@@ -14,6 +14,8 @@ from netbox_rpki.api.serializers import (
     ASPAChangePlanApproveActionSerializer,
     ASPAChangePlanApproveSecondaryActionSerializer,
     BulkIntentRunActionSerializer,
+    BulkIntentRunApproveActionSerializer,
+    BulkIntentRunApproveSecondaryActionSerializer,
     ProviderSnapshotCompareActionSerializer,
     ROAChangePlanApproveSecondaryActionSerializer,
     RollbackBundleApplyActionSerializer,
@@ -55,6 +57,8 @@ from netbox_rpki.services import (
     apply_aspa_change_plan_provider_write,
     apply_roa_rollback_bundle,
     apply_roa_change_plan_provider_write,
+    approve_bulk_intent_run,
+    secondary_approve_bulk_intent_run,
     approve_rollback_bundle,
     approve_aspa_change_plan,
     approve_aspa_change_plan_secondary,
@@ -1284,8 +1288,62 @@ class ASPAChangePlanRollbackBundleViewSet(VIEWSET_CLASS_MAP['aspachangeplanrollb
         return Response(self._serialize_bundle_payload(request, bundle))
 
 
+class BulkIntentRunViewSet(VIEWSET_CLASS_MAP['bulkintentrun']):
+    http_method_names = ['get', 'head', 'options', 'post']
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        if getattr(self, 'action', None) in {'approve', 'approve_secondary'} and self.request.user.is_authenticated:
+            return self.queryset.model.objects.restrict(self.request.user, 'view')
+        return queryset
+
+    def _require_change_permission(self, bulk_run):
+        if not self.request.user.has_perm('netbox_rpki.change_bulkintentrun', bulk_run):
+            raise PermissionDenied('This user does not have permission to approve this bulk intent run.')
+
+    @action(detail=True, methods=['post'], permission_classes=[TokenWritePermission])
+    def approve(self, request, pk=None):
+        bulk_run = self.get_object()
+        self._require_change_permission(bulk_run)
+        input_serializer = BulkIntentRunApproveActionSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+
+        approved_by = (
+            input_serializer.validated_data.get('approved_by')
+            or getattr(request.user, 'username', '')
+        )
+        try:
+            bulk_run = approve_bulk_intent_run(bulk_run, approved_by=approved_by)
+        except Exception as exc:
+            raise ValidationError(str(exc)) from exc
+
+        serializer = SERIALIZER_CLASS_MAP['bulkintentrun'](bulk_run, context={'request': request})
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], permission_classes=[TokenWritePermission], url_path='approve-secondary')
+    def approve_secondary(self, request, pk=None):
+        bulk_run = self.get_object()
+        self._require_change_permission(bulk_run)
+        input_serializer = BulkIntentRunApproveSecondaryActionSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+
+        approved_by = (
+            input_serializer.validated_data.get('approved_by')
+            or getattr(request.user, 'username', '')
+        )
+        try:
+            bulk_run = secondary_approve_bulk_intent_run(bulk_run, approved_by=approved_by)
+        except Exception as exc:
+            raise ValidationError(str(exc)) from exc
+
+        serializer = SERIALIZER_CLASS_MAP['bulkintentrun'](bulk_run, context={'request': request})
+        return Response(serializer.data)
+
+
 VIEWSET_CLASS_MAP['routingintentprofile'] = RoutingIntentProfileViewSet
 globals()['RoutingIntentProfileViewSet'] = RoutingIntentProfileViewSet
+VIEWSET_CLASS_MAP['bulkintentrun'] = BulkIntentRunViewSet
+globals()['BulkIntentRunViewSet'] = BulkIntentRunViewSet
 VIEWSET_CLASS_MAP['routingintentexception'] = RoutingIntentExceptionViewSet
 globals()['RoutingIntentExceptionViewSet'] = RoutingIntentExceptionViewSet
 VIEWSET_CLASS_MAP['routingintenttemplatebinding'] = RoutingIntentTemplateBindingViewSet

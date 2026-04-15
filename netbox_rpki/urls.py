@@ -151,6 +151,21 @@ def build_object_urlpatterns(spec):
                 name='roareconciliationrun_create_plan',
             )
         )
+    if spec.registry_key == 'bulkintentrun':
+        urlpatterns.extend(
+            (
+                path(
+                    f'{path_prefix}/<int:pk>/approve/',
+                    views.BulkIntentRunApproveView.as_view(),
+                    name='bulkintentrun_approve',
+                ),
+                path(
+                    f'{path_prefix}/<int:pk>/approve-secondary/',
+                    views.BulkIntentRunApproveSecondaryView.as_view(),
+                    name='bulkintentrun_approve_secondary',
+                ),
+            )
+        )
     if spec.registry_key == 'aspachangeplan':
         urlpatterns.extend(
             (

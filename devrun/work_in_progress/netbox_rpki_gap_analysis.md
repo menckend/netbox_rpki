@@ -2,7 +2,109 @@
 
 Source matrix: `devrun/work_in_progress/netbox_rpki_feature_strategy_matrix.md`
 
+> **Last updated**: All previously identified gaps (C.6, H.6, G/I, A.4, M.3, N) have been closed.
+> See the "Closed Gaps" section for what was added in each area.
+
 ## Scope and Method
+
+This analysis compares the matrix objectives to the current codebase, using the actual implementation surfaces in:
+
+- `netbox_rpki/models.py`
+- `netbox_rpki/object_registry.py`
+- `netbox_rpki/views.py`
+- `netbox_rpki/api/serializers.py`
+- `netbox_rpki/api/views.py`
+- `netbox_rpki/graphql/schema.py`
+- `netbox_rpki/services/*`
+- `netbox_rpki/jobs.py`
+- `netbox_rpki/management/commands/*`
+- `netbox_rpki/tests/*`
+
+The plugin is materially broader than an early-stage RPKI inventory plugin. The registry currently drives ~100 object specs, with the majority of A-N implemented across real code, tests, and operator surfaces.
+
+## Executive Summary
+
+As of the most recent implementation pass, all identified structural gaps have been closed:
+
+- **C.6**: ROA change-plan creation now has a dedicated management command (`create_roa_change_plan`) and background job (`CreateROAChangePlanJob`).
+- **H.6**: Provider capability matrix is now explicit on `RpkiProviderAccount` with `supports_roa_read`, `supports_aspa_read`, `supports_certificate_inventory`, `supports_repository_metadata`, `supports_bulk_operations`, and a composite `capability_matrix` property.
+- **G/I**: Bulk intent governance is now fully operator-surfaced via REST (`approve`, `approve-secondary` POST actions on `/api/plugins/rpki/bulkintentruns/<pk>/`) and Web UI (`BulkIntentRunApproveView`, `BulkIntentRunApproveSecondaryView`).
+- **A.4**: Authored parent/child CA authority relationships are now a first-class model (`AuthoredCaRelationship`) with full registry coverage.
+- **M.3**: Context group inheritance is now explicit via `RoutingIntentContextGroup.inherits_from` (self-referential FK). A `RoutingIntentPolicyBundle` model provides named, reusable policy composition as a first-class surface.
+- **N**: Downstream/delegated authorization is now fully modeled via `DelegatedAuthorizationEntity`, `ManagedAuthorizationRelationship`, and `DelegatedPublicationWorkflow`, all with REST, GraphQL, and Web UI surfaces in the "Delegated" navigation group.
+
+## Section-by-Section Assessment
+
+| Matrix Section | Status | Evidence in Code | Primary Gap |
+| --- | --- | --- | --- |
+| A. Standards-Aligned Data Model | **Implemented** | All prior model coverage remains. `AuthoredCaRelationship` (A.4) was added with registry/REST/UI/GraphQL surfaces, migration `0050`. | **Closed.** A.4 now has first-class authored CA hierarchy model parity with imported topology. |
+| B. Registry-Driven Plugin Surfaces | Implemented | No change. | No gap. |
+| C. Intent-to-ROA Reconciliation | **Implemented** | `create_roa_change_plan` management command and `CreateROAChangePlanJob` added. C.6 surface parity is now symmetric across service, CLI, job, API, and UI. | **Closed.** |
+| D. ASPA Operations | Mostly implemented | No change. | Provider-backed write is Krill-only by design; ARIN remains ROA-import-only. Not a structural gap. |
+| E. ROA Linting and Safety Analysis | Implemented | No change. | No gap. |
+| F. ROV Impact Simulation | Implemented | No change. | No gap. |
+| G. Bulk Generation and Templating | **Implemented** | `BulkIntentRunViewSet` with `approve`/`approve_secondary` REST actions added. `BulkIntentRunApproveView`/`BulkIntentRunApproveSecondaryView` UI views added. | **Closed.** Governance is now fully operator-surfaced in both REST and UI. |
+| H. Provider Synchronization | **Implemented** | `capability_matrix` property added to `RpkiProviderAccount` with explicit read/write/feature flags. Exposed via `RpkiProviderAccountSerializer.capability_matrix`. | **Closed.** H.6 is now explicit. |
+| I. Change Control and Governance | **Implemented** | Bulk intent approval/secondary-approval operator surfaces are now present (see G). | **Closed.** |
+| J. Lifecycle, Expiry, and Publication Health | Implemented | No change. | No gap. |
+| K. IRR Coordination | Mostly implemented | No change. | Write-path breadth is intentionally limited by source capability mode. Not a structural gap. |
+| L. External Validator and Telemetry Overlays | Implemented | No change. | No gap. |
+| M. Service Context and Topology Binding | **Implemented** | `RoutingIntentContextGroup.inherits_from` FK added. `RoutingIntentPolicyBundle` model added with context_groups M2M, registry/REST/UI/GraphQL surfaces, migration `0050`. | **Closed.** M.3 inheritance and policy reuse are now first-class. |
+| N. Downstream and Delegated Authorization | **Implemented** | `DelegatedAuthorizationEntity`, `ManagedAuthorizationRelationship`, `DelegatedPublicationWorkflow` models added with registry/REST/UI/GraphQL surfaces in "Delegated" navigation group, migration `0050`. | **Closed.** N.1, N.2, N.3 are all addressed. |
+
+## Closed Gaps (detail)
+
+### C.6 — ROA Change-Plan Creation CLI/Job Surface
+
+- **Added**: `netbox_rpki/management/commands/create_roa_change_plan.py` — CLI entry point for creating an ROA change plan from a completed reconciliation run. Accepts `--reconciliation-run PK`, optional `--name`, optional `--enqueue`.
+- **Added**: `CreateROAChangePlanJob` class in `jobs.py` — background job counterpart following the same pattern as `CreateIrrChangePlansJob`.
+
+### H.6 — Explicit Provider Capability Matrix
+
+- **Added** to `RpkiProviderAccount` in `models.py`:
+  - `supports_roa_read` (bool property)
+  - `supports_aspa_read` (bool property)
+  - `supports_certificate_inventory` (bool property)
+  - `supports_repository_metadata` (bool property)
+  - `supports_bulk_operations` (bool property)
+  - `capability_matrix` (dict property, composite of all flags)
+- **Added** `capability_matrix = serializers.ReadOnlyField()` to `RpkiProviderAccountSerializer`.
+
+### G/I — Bulk Intent Governance Operator Surfaces
+
+- **Added** `BulkIntentRunViewSet` in `api/views.py` with `approve` and `approve_secondary` POST actions.
+- **Added** `BulkIntentRunApproveActionSerializer` and `BulkIntentRunApproveSecondaryActionSerializer` in `api/serializers.py`.
+- **Added** `BulkIntentRunApproveView` and `BulkIntentRunApproveSecondaryView` in `views.py`.
+- **Added** URL patterns `bulkintentrun_approve` and `bulkintentrun_approve_secondary` in `urls.py`.
+- **Added** template `netbox_rpki/templates/netbox_rpki/bulkintentrun_approve.html`.
+
+### A.4 — Authored CA Hierarchy Relationship Model
+
+- **Added** `AuthoredCaRelationshipType` and `AuthoredCaRelationshipStatus` choices in `models.py`.
+- **Added** `AuthoredCaRelationship` model with org, provider_account, child/parent CA handles, relationship_type, status, service_uri, and FK links back to imported parent/child links.
+- **Added** registry spec (`authoredcarelationship`) in `object_registry.py`.
+- **Migration**: `0050_routingintentcontextgroup_inherits_from_and_more`.
+
+### M.3 — Context Group Inheritance and Policy Reuse
+
+- **Added** `RoutingIntentContextGroup.inherits_from` (nullable FK to self) with cross-organization validation in `clean()`.
+- **Added** `RoutingIntentPolicyBundle` model with organization FK, `context_groups` M2M to `RoutingIntentContextGroup`, `enabled` flag, and `description`.
+- **Added** registry specs (`routingintentpolicybundle`) in `object_registry.py`.
+- **Updated** `routingintentcontextgroup` registry spec to include `inherits_from` in api_fields and filter_fields.
+- **Migration**: `0050_routingintentcontextgroup_inherits_from_and_more`.
+
+### N — Downstream and Delegated Authorization Models
+
+- **Added** choices: `DelegatedAuthorizationEntityKind`, `ManagedAuthorizationRelationshipRole`, `ManagedAuthorizationRelationshipStatus`, `DelegatedPublicationWorkflowStatus`.
+- **Added** `DelegatedAuthorizationEntity` model — downstream customer/partner/delegated entity as authorization subject.
+- **Added** `ManagedAuthorizationRelationship` model — org-to-entity mapping with role, status, service_uri; cross-org validation.
+- **Added** `DelegatedPublicationWorkflow` model — upstream-managed publication workflow with CA handles, approval tracking, and status.
+- **Added** registry specs in `object_registry.py` under navigation group "Delegated" (orders 201–203).
+- **Migration**: `0050_routingintentcontextgroup_inherits_from_and_more`.
+
+## Bottom Line
+
+All matrix gaps are now closed at the model, registry, REST API, GraphQL, and Web UI surface level. The plugin covers A–N with explicit first-class objects and operator workflows. Remaining provider breadth limitations (ARIN as ROA-import-only, IRR write breadth) are intentional scope decisions, not structural gaps.
 
 This analysis compares the matrix objectives to the current codebase, using the actual implementation surfaces in:
 

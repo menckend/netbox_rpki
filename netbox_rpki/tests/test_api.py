@@ -143,7 +143,11 @@ class Priority6GeneratedWorkflowSurfaceContractTestCase(SimpleTestCase):
                 self.assertTrue(spec.api.read_only)
                 self.assertFalse(spec.view.supports_create)
                 self.assertFalse(spec.view.supports_delete)
-                self.assertEqual(set(viewset_class.http_method_names), {'get', 'head', 'options'})
+                if registry_key == 'bulkintentrun':
+                    # bulkintentrun exposes approve/approve_secondary POST actions (Gap G/I)
+                    self.assertEqual(set(viewset_class.http_method_names), {'get', 'head', 'options', 'post'})
+                else:
+                    self.assertEqual(set(viewset_class.http_method_names), {'get', 'head', 'options'})
 
 
 class GraphQLSmokeTestCase(SimpleTestCase):
@@ -818,6 +822,7 @@ class ViewSetSmokeTestCase(SimpleTestCase):
             'aspachangeplanrollbackbundle',
             'roalintfinding',
             'roalintsuppression',
+            'bulkintentrun',
         }
 
         for spec in API_OBJECT_SPECS:
@@ -874,10 +879,13 @@ EXTRA_ACTION_NAME_CONTRACTS = {
     'aspareconciliationrun': ('create_plan', 'summary'),
     'aspachangeplan': ('apply', 'approve', 'approve_secondary', 'preview', 'summary'),
     'aspachangeplanrollbackbundle': ('apply', 'approve'),
+    'bulkintentrun': ('approve', 'approve_secondary'),
     'providersnapshot': ('compare', 'summary'),
     'routingintentprofile': ('run',),
     'routingintentexception': ('approve',),
     'routingintenttemplatebinding': ('preview', 'regenerate'),
+    'validatorinstance': ('history_summary',),
+    'telemetrysource': ('history_summary',),
     'rpkiprovideraccount': (
         'export_summary',
         'export_timeline',

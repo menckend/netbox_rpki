@@ -331,6 +331,13 @@ def _build_related_value(field_name: str, token: str, variant: int = 0, for_form
         value = create_test_roa(name=f"ROA {token}")
     elif field_name == "basis_derivation_run":
         value = create_test_intent_derivation_run(name=f"Basis Run {token}")
+    elif field_name == "delegated_entity":
+        org = create_unique_organization(f"{token}-delegated-entity-org")
+        value = create_test_model("DelegatedAuthorizationEntity", name=f"Delegated Entity {token}", organization=org)
+    elif field_name == "managed_relationship":
+        org = create_unique_organization(f"{token}-managed-rel-org")
+        entity = create_test_model("DelegatedAuthorizationEntity", name=f"Delegated Entity {token}", organization=org)
+        value = create_test_model("ManagedAuthorizationRelationship", name=f"Managed Rel {token}", organization=org, delegated_entity=entity)
     elif field_name == "reconciliation_run":
         if spec is not None and spec.model.__name__ in {
             "ASPAReconciliationRun",
@@ -573,6 +580,8 @@ def _register_scenario_builders() -> None:
             "routingintentexception": build_routing_intent_exception_form_data,
             "roalintruleconfig": build_roa_lint_rule_config_form_data,
             "lifecyclehealthpolicy": build_lifecycle_health_policy_form_data,
+            "telemetrysource": build_telemetry_source_form_data,
+            "managedauthorizationrelationship": build_managed_authorization_relationship_form_data,
         }
     )
     _FILTER_SCENARIO_BUILDERS.update(
@@ -1016,6 +1025,38 @@ def build_lifecycle_health_policy_form_data() -> dict[str, object]:
         "certificate_expired_grace_minutes": 0,
         "alert_repeat_after_minutes": 360,
         "notes": "Lifecycle thresholds for tests.",
+    }
+
+
+def build_telemetry_source_form_data() -> dict[str, object]:
+    token = unique_token("telemetry-source-form")
+    organization = create_unique_organization(f"telemetry-source-form-org-{token}")
+    return {
+        "name": f"Telemetry Source {token}",
+        "organization": organization.pk,
+        "slug": f"telemetry-source-{token}",
+        "enabled": True,
+        "source_type": rpki_models.TelemetrySourceType.IMPORTED_MRT,
+        "endpoint_label": "route-views2",
+        "collector_scope": "route-views",
+        "last_run_status": rpki_models.ValidationRunStatus.PENDING,
+    }
+
+
+def build_managed_authorization_relationship_form_data() -> dict[str, object]:
+    token = unique_token("managed-auth-rel-form")
+    organization = create_unique_organization(f"managed-auth-rel-form-org-{token}")
+    entity = create_test_model(
+        "DelegatedAuthorizationEntity",
+        name=f"Delegated Entity {token}",
+        organization=organization,
+    )
+    return {
+        "name": f"Managed Auth Relationship {token}",
+        "organization": organization.pk,
+        "delegated_entity": entity.pk,
+        "role": rpki_models.ManagedAuthorizationRelationshipRole.MANAGING_PARTY,
+        "status": rpki_models.ManagedAuthorizationRelationshipStatus.ACTIVE,
     }
 
 

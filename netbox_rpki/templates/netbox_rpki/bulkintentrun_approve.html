@@ -1,0 +1,48 @@
+{% extends 'generic/_base.html' %}
+
+{% block title %}{{ action_label }} {{ bulk_run }}{% endblock %}
+
+{% block content %}
+  <div class="row mt-5">
+    <div class="col col-md-8 offset-md-2">
+      <form action="" method="post" class="form">
+        {% csrf_token %}
+        {% for field in form.hidden_fields %}
+          {{ field }}
+        {% endfor %}
+        <div class="card border-{{ button_class }}">
+          <h2 class="card-header">{{ action_label }} Bulk Intent Run</h2>
+          <div class="card-body">
+            <p>
+              {{ action_label }} <strong>{{ bulk_run }}</strong>?
+            </p>
+            <dl class="row mb-0">
+              <dt class="col-sm-4">Organization</dt>
+              <dd class="col-sm-8">{{ bulk_run.organization }}</dd>
+              <dt class="col-sm-4">Status</dt>
+              <dd class="col-sm-8">{{ bulk_run.status }}</dd>
+              <dt class="col-sm-4">Target Mode</dt>
+              <dd class="col-sm-8">{{ bulk_run.target_mode }}</dd>
+              {% if bulk_run.ticket_reference %}
+                <dt class="col-sm-4">Ticket Reference</dt>
+                <dd class="col-sm-8">{{ bulk_run.ticket_reference }}</dd>
+              {% endif %}
+              {% if bulk_run.requires_secondary_approval %}
+                <dt class="col-sm-4">Requires Secondary Approval</dt>
+                <dd class="col-sm-8">Yes</dd>
+              {% endif %}
+              {% if bulk_run.approved_at %}
+                <dt class="col-sm-4">Primary Approval</dt>
+                <dd class="col-sm-8">{{ bulk_run.approved_by }} at {{ bulk_run.approved_at }}</dd>
+              {% endif %}
+            </dl>
+          </div>
+          <div class="card-footer text-end">
+            <a href="{{ return_url }}" class="btn btn-outline-secondary">Cancel</a>
+            <button type="submit" name="_confirm" class="btn btn-{{ button_class }}">{{ action_label }}</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endblock %}

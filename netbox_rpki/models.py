@@ -607,6 +607,49 @@ class PublicationState(models.TextChoices):
     SUPERSEDED = "superseded", "Superseded"
 
 
+# --- Section N: Downstream/Delegated Authorization choices ---
+
+class DelegatedAuthorizationEntityKind(models.TextChoices):
+    CUSTOMER = "customer", "Customer"
+    PARTNER = "partner", "Partner"
+    DELEGATED = "delegated", "Delegated Entity"
+    DOWNSTREAM = "downstream", "Downstream Operator"
+    OTHER = "other", "Other"
+
+
+class ManagedAuthorizationRelationshipRole(models.TextChoices):
+    MANAGING_PARTY = "managing_party", "Managing Party"
+    DELEGATING_PARTY = "delegating_party", "Delegating Party"
+
+
+class ManagedAuthorizationRelationshipStatus(models.TextChoices):
+    ACTIVE = "active", "Active"
+    PENDING = "pending", "Pending"
+    SUSPENDED = "suspended", "Suspended"
+    TERMINATED = "terminated", "Terminated"
+
+
+class DelegatedPublicationWorkflowStatus(models.TextChoices):
+    DRAFT = "draft", "Draft"
+    ACTIVE = "active", "Active"
+    SUSPENDED = "suspended", "Suspended"
+    ARCHIVED = "archived", "Archived"
+
+
+class PublicationState(models.TextChoices):
+    DRAFT = "draft", "Draft"
+    AWAITING_SECONDARY_APPROVAL = "awaiting_secondary_approval", "Awaiting Secondary Approval"
+    APPROVED_PENDING_APPLY = "approved_pending_apply", "Approved — Pending Apply"
+    APPLY_IN_PROGRESS = "apply_in_progress", "Apply In Progress"
+    APPLY_FAILED = "apply_failed", "Apply Failed"
+    APPLIED_AWAITING_VERIFICATION = "applied_awaiting_verification", "Applied — Awaiting Verification"
+    VERIFIED = "verified", "Verified"
+    VERIFIED_WITH_DRIFT = "verified_with_drift", "Verified With Drift"
+    VERIFICATION_FAILED = "verification_failed", "Verification Failed"
+    ROLLED_BACK = "rolled_back", "Rolled Back"
+    SUPERSEDED = "superseded", "Superseded"
+
+
 def validate_maintenance_window_bounds(*, start_at, end_at):
     if start_at is None or end_at is None:
         return
@@ -2011,6 +2054,17 @@ class RoutingIntentContextGroup(NamedRpkiStandardModel):
     priority = models.PositiveIntegerField(default=100)
     enabled = models.BooleanField(default=True)
     summary_json = models.JSONField(default=dict, blank=True)
+    inherits_from = models.ForeignKey(
+        to='self',
+        on_delete=models.SET_NULL,
+        related_name='inheriting_groups',
+        blank=True,
+        null=True,
+        help_text=(
+            'Parent context group whose enabled criteria are prepended before evaluating '
+            'this group\'s own criteria.  Enables layered policy reuse without duplicating criteria.'
+        ),
+    )
 
     class Meta:
         ordering = ("organization", "priority", "name")
@@ -2026,6 +2080,19 @@ class RoutingIntentContextGroup(NamedRpkiStandardModel):
 
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:routingintentcontextgroup", args=[self.pk])
+
+    def clean(self):
+        super().clean()
+        if self.inherits_from_id is not None and self.inherits_from_id == self.pk:
+            raise ValidationError({'inherits_from': 'A context group cannot inherit from itself.'})
+        if (
+            self.inherits_from_id is not None
+            and self.pk is not None
+            and self.inherits_from.organization_id != self.organization_id
+        ):
+            raise ValidationError({
+                'inherits_from': 'Inherited context group must belong to the same organization.'
+            })
 
 
 class RoutingIntentContextCriterion(NamedRpkiStandardModel):
@@ -2164,6 +2231,45 @@ class RoutingIntentContextCriterion(NamedRpkiStandardModel):
             raise ValidationError({
                 'match_provider_account': ['Provider account organization must match the context group organization.']
             })
+
+
+class RoutingIntentPolicyBundle(NamedRpkiStandardModel):
+    """
+    A reusable, named collection of routing-intent policy context groups.
+
+    Policy bundles let operators compose a set of context groups into a named
+    unit that can be referenced by multiple profiles or template bindings.
+    This provides explicit policy-reuse semantics distinct from priority ordering
+    or ad-hoc per-profile group lists.
+    """
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='routing_intent_policy_bundles',
+    )
+    description = models.TextField(blank=True)
+    enabled = models.BooleanField(default=True)
+    context_groups = models.ManyToManyField(
+        to='RoutingIntentContextGroup',
+        related_name='policy_bundles',
+        blank=True,
+        help_text='Context groups included in this policy bundle, evaluated in priority order.',
+    )
+
+    class Meta:
+        ordering = ("organization", "name")
+        constraints = (
+            models.UniqueConstraint(
+                fields=("organization", "name"),
+                name="nb_rpki_routingintentpolicybundle_org_name_unique",
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:routingintentpolicybundle", args=[self.pk])
 
 
 class ROAIntentOverride(NamedRpkiStandardModel):
@@ -3033,6 +3139,40 @@ class RpkiProviderAccount(NamedRpkiStandardModel):
     @property
     def sync_health_display(self) -> str:
         return ProviderSyncHealth(self.sync_health).label
+
+    # --- Explicit capability matrix (H.6) ---
+
+    @property
+    def supports_roa_read(self) -> bool:
+        return self.provider_type in (ProviderType.KRILL, ProviderType.ARIN)
+
+    @property
+    def supports_aspa_read(self) -> bool:
+        return self.provider_type == ProviderType.KRILL
+
+    @property
+    def supports_certificate_inventory(self) -> bool:
+        return self.provider_type == ProviderType.KRILL
+
+    @property
+    def supports_repository_metadata(self) -> bool:
+        return self.provider_type == ProviderType.KRILL
+
+    @property
+    def supports_bulk_operations(self) -> bool:
+        return self.provider_type == ProviderType.KRILL
+
+    @property
+    def capability_matrix(self) -> dict:
+        return {
+            'supports_roa_read': self.supports_roa_read,
+            'supports_roa_write': self.supports_roa_write,
+            'supports_aspa_read': self.supports_aspa_read,
+            'supports_aspa_write': self.supports_aspa_write,
+            'supports_certificate_inventory': self.supports_certificate_inventory,
+            'supports_repository_metadata': self.supports_repository_metadata,
+            'supports_bulk_operations': self.supports_bulk_operations,
+        }
 
 
 class IrrSource(NamedRpkiStandardModel):
@@ -6687,6 +6827,243 @@ def _register_plugin_action_urls():
         if meta is None or meta.abstract:
             continue
         setattr(value, '_get_action_url', classmethod(_plugin_get_action_url))
+
+
+# --- N: Downstream/Delegated Authorization models ---
+
+class DelegatedAuthorizationEntity(NamedRpkiStandardModel):
+    """
+    A downstream customer or delegated entity that holds RPKI authority under
+    this organization's CA hierarchy.
+
+    Represents the authorization subject in a delegated-RPKI or downstream
+    managed-routing-security relationship.  The entity may be a customer
+    organization, a downstream ISP partner, or any party that has been granted
+    resource delegation.
+    """
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='delegated_authorization_entities',
+        help_text='Upstream organization that manages this delegated entity.',
+    )
+    kind = models.CharField(
+        max_length=32,
+        choices=DelegatedAuthorizationEntityKind.choices,
+        default=DelegatedAuthorizationEntityKind.CUSTOMER,
+    )
+    contact_name = models.CharField(max_length=255, blank=True)
+    contact_email = models.EmailField(blank=True)
+    asn = models.BigIntegerField(blank=True, null=True, help_text='Primary ASN for this entity, if applicable.')
+    enabled = models.BooleanField(default=True)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ("organization", "name")
+        constraints = (
+            models.UniqueConstraint(
+                fields=("organization", "name"),
+                name="nb_rpki_delegatedauthentity_org_name_unique",
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:delegatedauthorizationentity", args=[self.pk])
+
+
+class ManagedAuthorizationRelationship(NamedRpkiStandardModel):
+    """
+    Maps an organization to a delegated authorization entity and defines the
+    authority role and operational status of that relationship.
+
+    A single organization may have multiple managed authorization relationships
+    covering different downstream entities, resource classes, or operational scopes.
+    """
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='managed_authorization_relationships',
+    )
+    delegated_entity = models.ForeignKey(
+        to='DelegatedAuthorizationEntity',
+        on_delete=models.PROTECT,
+        related_name='managed_authorization_relationships',
+    )
+    provider_account = models.ForeignKey(
+        to='RpkiProviderAccount',
+        on_delete=models.PROTECT,
+        related_name='managed_authorization_relationships',
+        blank=True,
+        null=True,
+    )
+    role = models.CharField(
+        max_length=32,
+        choices=ManagedAuthorizationRelationshipRole.choices,
+        default=ManagedAuthorizationRelationshipRole.MANAGING_PARTY,
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=ManagedAuthorizationRelationshipStatus.choices,
+        default=ManagedAuthorizationRelationshipStatus.ACTIVE,
+    )
+    service_uri = models.CharField(max_length=500, blank=True)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ("organization", "delegated_entity", "name")
+        constraints = (
+            models.UniqueConstraint(
+                fields=("organization", "delegated_entity"),
+                name="nb_rpki_managedauthrelationship_org_entity_unique",
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:managedauthorizationrelationship", args=[self.pk])
+
+    def clean(self):
+        super().clean()
+        if (
+            self.delegated_entity_id is not None
+            and self.delegated_entity.organization_id != self.organization_id
+        ):
+            raise ValidationError({
+                'delegated_entity': 'Delegated entity must belong to the same organization as this relationship.'
+            })
+
+
+class DelegatedPublicationWorkflow(NamedRpkiStandardModel):
+    """
+    Represents an upstream-managed publication workflow for a downstream entity.
+
+    Captures the operational workflow by which a managing organization provisions,
+    maintains, and verifies RPKI publication on behalf of a delegated entity.
+    This includes references to the CA handles, service endpoints, and approval
+    status.
+    """
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='delegated_publication_workflows',
+    )
+    managed_relationship = models.ForeignKey(
+        to='ManagedAuthorizationRelationship',
+        on_delete=models.PROTECT,
+        related_name='publication_workflows',
+    )
+    parent_ca_handle = models.CharField(max_length=100, blank=True)
+    child_ca_handle = models.CharField(max_length=100, blank=True)
+    publication_server_uri = models.CharField(max_length=500, blank=True)
+    status = models.CharField(
+        max_length=32,
+        choices=DelegatedPublicationWorkflowStatus.choices,
+        default=DelegatedPublicationWorkflowStatus.DRAFT,
+    )
+    requires_approval = models.BooleanField(default=True)
+    approved_at = models.DateTimeField(blank=True, null=True)
+    approved_by = models.CharField(max_length=255, blank=True)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ("organization", "managed_relationship", "name")
+        constraints = (
+            models.UniqueConstraint(
+                fields=("organization", "managed_relationship", "name"),
+                name="nb_rpki_delegatedpubworkflow_org_rel_name_unique",
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:delegatedpublicationworkflow", args=[self.pk])
+
+
+# --- A.4: Authored CA hierarchy topology ---
+
+class AuthoredCaRelationshipType(models.TextChoices):
+    PARENT = "parent", "Parent"
+    CHILD = "child", "Child"
+
+
+class AuthoredCaRelationshipStatus(models.TextChoices):
+    ACTIVE = "active", "Active"
+    SUSPENDED = "suspended", "Suspended"
+    DECOMMISSIONED = "decommissioned", "Decommissioned"
+
+
+class AuthoredCaRelationship(NamedRpkiStandardModel):
+    """
+    First-class authored representation of a parent/child CA authority relationship.
+
+    Models the local organization's view of CA authority topology as an authored
+    construct, distinct from imported (observed) topology captured in
+    ImportedParentLink and ImportedChildLink.  Both sides refer to CA handles
+    within the local account hierarchy; the parent handle is optional when the
+    relationship represents a top-of-hierarchy (self-signed TA) CA.
+    """
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='authored_ca_relationships',
+    )
+    provider_account = models.ForeignKey(
+        to='RpkiProviderAccount',
+        on_delete=models.PROTECT,
+        related_name='authored_ca_relationships',
+        blank=True,
+        null=True,
+    )
+    child_ca_handle = models.CharField(max_length=100)
+    parent_ca_handle = models.CharField(max_length=100, blank=True)
+    relationship_type = models.CharField(
+        max_length=16,
+        choices=AuthoredCaRelationshipType.choices,
+        default=AuthoredCaRelationshipType.PARENT,
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=AuthoredCaRelationshipStatus.choices,
+        default=AuthoredCaRelationshipStatus.ACTIVE,
+    )
+    service_uri = models.CharField(max_length=500, blank=True)
+    imported_parent_link = models.ForeignKey(
+        to='ImportedParentLink',
+        on_delete=models.SET_NULL,
+        related_name='authored_ca_relationships',
+        blank=True,
+        null=True,
+    )
+    imported_child_link = models.ForeignKey(
+        to='ImportedChildLink',
+        on_delete=models.SET_NULL,
+        related_name='authored_ca_relationships',
+        blank=True,
+        null=True,
+    )
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ("organization", "child_ca_handle", "parent_ca_handle")
+        constraints = (
+            models.UniqueConstraint(
+                fields=("organization", "child_ca_handle", "parent_ca_handle"),
+                name="nb_rpki_authoredcarelationship_org_child_parent_unique",
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:authoredcarelationship", args=[self.pk])
 
 
 _register_plugin_action_urls()

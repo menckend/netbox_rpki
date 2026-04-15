@@ -9,6 +9,7 @@ from netbox_rpki.services import (
     apply_irr_change_plan,
     build_bulk_routing_intent_baseline_fingerprint,
     create_irr_change_plans,
+    create_roa_change_plan,
     evaluate_lifecycle_health_events,
     preview_irr_change_plan,
     run_aspa_reconciliation_pipeline,
@@ -681,6 +682,67 @@ class RunIrrCoordinationJob(JobRunner):
         }
         self.job.save(update_fields=('data',))
         self.logger.info(f'Completed IRR coordination run {coordination_run.pk}')
+
+
+class CreateROAChangePlanJob(JobRunner):
+    class Meta:
+        name = 'ROA Change Plan Drafting'
+
+    @classmethod
+    def get_job_name(cls, reconciliation_run: rpki_models.ROAReconciliationRun | int) -> str:
+        reconciliation_run_pk = reconciliation_run.pk if hasattr(reconciliation_run, 'pk') else reconciliation_run
+        return f'{cls.name} [{reconciliation_run_pk}]'
+
+    @classmethod
+    def get_active_job_for_reconciliation_run(
+        cls,
+        reconciliation_run: rpki_models.ROAReconciliationRun | int,
+    ):
+        return Job.objects.filter(
+            name=cls.get_job_name(reconciliation_run),
+            status__in=JobStatusChoices.ENQUEUED_STATE_CHOICES,
+        ).order_by('created').first()
+
+    @classmethod
+    def enqueue_for_reconciliation_run(
+        cls,
+        reconciliation_run: rpki_models.ROAReconciliationRun | int,
+        *,
+        plan_name: str | None = None,
+        user=None,
+        schedule_at=None,
+    ):
+        if not isinstance(reconciliation_run, rpki_models.ROAReconciliationRun):
+            reconciliation_run = rpki_models.ROAReconciliationRun.objects.get(pk=reconciliation_run)
+
+        existing_job = cls.get_active_job_for_reconciliation_run(reconciliation_run)
+        if existing_job is not None:
+            return existing_job, False
+
+        job = cls.enqueue(
+            name=cls.get_job_name(reconciliation_run),
+            user=user,
+            schedule_at=schedule_at,
+            reconciliation_run_pk=reconciliation_run.pk,
+            plan_name=plan_name,
+        )
+        return job, True
+
+    def run(self, reconciliation_run_pk, plan_name=None, *args, **kwargs):
+        reconciliation_run = rpki_models.ROAReconciliationRun.objects.get(pk=reconciliation_run_pk)
+        self.logger.info(
+            f'Creating ROA change plan from reconciliation run {reconciliation_run.name} ({reconciliation_run.pk})'
+        )
+        plan = create_roa_change_plan(reconciliation_run, name=plan_name)
+        self.job.data = {
+            'roa_reconciliation_run_pk': reconciliation_run.pk,
+            'roa_change_plan_pk': plan.pk,
+        }
+        self.job.save(update_fields=('data',))
+        self.logger.info(
+            f'Created ROA change plan {plan.pk} with {plan.items.count()} items '
+            f'from reconciliation run {reconciliation_run.pk}'
+        )
 
 
 class CreateIrrChangePlansJob(JobRunner):

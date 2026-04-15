@@ -33,6 +33,7 @@ from netbox_rpki.services import (
     apply_aspa_change_plan_provider_write,
     apply_roa_rollback_bundle,
     apply_roa_change_plan_provider_write,
+    approve_bulk_intent_run,
     approve_rollback_bundle,
     approve_aspa_change_plan,
     approve_aspa_change_plan_secondary,
@@ -53,6 +54,7 @@ from netbox_rpki.services import (
     preview_aspa_change_plan_provider_write,
     preview_roa_change_plan_provider_write,
     run_routing_intent_template_binding_pipeline,
+    secondary_approve_bulk_intent_run,
     simulate_roa_change_plan,
     suppress_roa_lint_finding,
 )
@@ -821,6 +823,86 @@ class OrganizationCreateBulkIntentRunView(generic.ObjectEditView):
         else:
             messages.warning(request, f'{organization.name} already has a matching bulk routing-intent run in progress.')
         return redirect(organization.get_absolute_url())
+
+
+class BulkIntentRunApproveView(generic.ObjectEditView):
+    queryset = models.BulkIntentRun.objects.all()
+    template_name = 'netbox_rpki/bulkintentrun_approve.html'
+
+    def get_required_permission(self):
+        return 'netbox_rpki.change_bulkintentrun'
+
+    def get_bulk_run(self, pk):
+        return get_object_or_404(self.queryset, pk=pk)
+
+    def _render(self, request, bulk_run, *, form=None, status=200):
+        return render(request, self.template_name, {
+            'object': bulk_run,
+            'bulk_run': bulk_run,
+            'form': form or ConfirmationForm(),
+            'return_url': self.get_return_url(request, bulk_run),
+            'action_label': 'Approve',
+            'button_class': 'success',
+        }, status=status)
+
+    def get(self, request, pk):
+        bulk_run = self.get_bulk_run(pk)
+        return self._render(request, bulk_run)
+
+    def post(self, request, pk):
+        bulk_run = self.get_bulk_run(pk)
+        form = ConfirmationForm(request.POST)
+        if not form.is_valid():
+            return self._render(request, bulk_run, form=form, status=400)
+
+        try:
+            approve_bulk_intent_run(bulk_run, approved_by=getattr(request.user, 'username', ''))
+        except Exception as exc:
+            messages.error(request, str(exc))
+            return self._render(request, bulk_run, form=form, status=400)
+
+        messages.success(request, f'Approved bulk intent run "{bulk_run.name}".')
+        return redirect(bulk_run.get_absolute_url())
+
+
+class BulkIntentRunApproveSecondaryView(generic.ObjectEditView):
+    queryset = models.BulkIntentRun.objects.all()
+    template_name = 'netbox_rpki/bulkintentrun_approve.html'
+
+    def get_required_permission(self):
+        return 'netbox_rpki.change_bulkintentrun'
+
+    def get_bulk_run(self, pk):
+        return get_object_or_404(self.queryset, pk=pk)
+
+    def _render(self, request, bulk_run, *, form=None, status=200):
+        return render(request, self.template_name, {
+            'object': bulk_run,
+            'bulk_run': bulk_run,
+            'form': form or ConfirmationForm(),
+            'return_url': self.get_return_url(request, bulk_run),
+            'action_label': 'Secondary Approve',
+            'button_class': 'warning',
+        }, status=status)
+
+    def get(self, request, pk):
+        bulk_run = self.get_bulk_run(pk)
+        return self._render(request, bulk_run)
+
+    def post(self, request, pk):
+        bulk_run = self.get_bulk_run(pk)
+        form = ConfirmationForm(request.POST)
+        if not form.is_valid():
+            return self._render(request, bulk_run, form=form, status=400)
+
+        try:
+            secondary_approve_bulk_intent_run(bulk_run, approved_by=getattr(request.user, 'username', ''))
+        except Exception as exc:
+            messages.error(request, str(exc))
+            return self._render(request, bulk_run, form=form, status=400)
+
+        messages.success(request, f'Secondary-approved bulk intent run "{bulk_run.name}".')
+        return redirect(bulk_run.get_absolute_url())
 
 
 class ASPAReconciliationRunCreatePlanView(generic.ObjectEditView):
