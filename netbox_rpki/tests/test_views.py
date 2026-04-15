@@ -318,6 +318,8 @@ class ProviderAccountSyncViewTestCase(PluginViewTestCase):
         self.assertContains(response, 'Last Sync Summary')
         self.assertContains(response, 'provider_limited')
         self.assertContains(response, 'hosted ROA authorizations only')
+        self.assertContains(response, 'Lifecycle Health Timeline')
+        self.assertContains(response, 'Publication Diff Timeline')
 
 
 class ProviderSnapshotDetailViewTestCase(PluginViewTestCase):

@@ -476,6 +476,18 @@ def get_provider_account_pub_obs_rollup(account: models.RpkiProviderAccount) -> 
     return get_pretty_json(build_provider_account_pub_obs_rollup(account))
 
 
+def get_provider_account_health_timeline(account: models.RpkiProviderAccount) -> str | None:
+    from netbox_rpki.services.lifecycle_reporting import build_provider_lifecycle_timeline
+
+    return get_pretty_json(build_provider_lifecycle_timeline(account))
+
+
+def get_provider_account_publication_diff_timeline(account: models.RpkiProviderAccount) -> str | None:
+    from netbox_rpki.services.lifecycle_reporting import build_provider_publication_diff_timeline
+
+    return get_pretty_json(build_provider_publication_diff_timeline(account))
+
+
 def get_provider_sync_run_summary(run: models.ProviderSyncRun) -> str | None:
     return get_pretty_json(run.summary_json)
 
@@ -2416,6 +2428,18 @@ PROVIDER_ACCOUNT_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(
             label='Publication Observation Health',
             value=get_provider_account_pub_obs_rollup,
+            kind='code',
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='Lifecycle Health Timeline',
+            value=get_provider_account_health_timeline,
+            kind='code',
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='Publication Diff Timeline',
+            value=get_provider_account_publication_diff_timeline,
             kind='code',
             empty_text='None',
         ),
