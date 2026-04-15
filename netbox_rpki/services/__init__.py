@@ -57,6 +57,21 @@ from .routing_intent import (
     run_routing_intent_pipeline,
 )
 from .lifecycle_reporting import evaluate_lifecycle_health_events
+from .publication_state import (
+    PublicationStateResult,
+    derive_change_plan_publication_state,
+    derive_rollback_bundle_publication_state,
+)
+from .governance_summary import (
+    build_change_plan_governance_summary,
+    build_rollback_bundle_governance_summary,
+)
+from .bulk_intent_governance import (
+    approve_bulk_intent_run,
+    secondary_approve_bulk_intent_run,
+    is_bulk_intent_run_approved,
+)
+from .governance_rollup import build_organization_governance_rollup
 
 __all__ = (
     'ProviderSyncError',
@@ -104,4 +119,13 @@ __all__ = (
     'suppress_roa_lint_finding',
     'sync_provider_account',
     'evaluate_lifecycle_health_events',
+    'PublicationStateResult',
+    'derive_change_plan_publication_state',
+    'derive_rollback_bundle_publication_state',
+    'build_change_plan_governance_summary',
+    'build_rollback_bundle_governance_summary',
+    'approve_bulk_intent_run',
+    'secondary_approve_bulk_intent_run',
+    'is_bulk_intent_run_approved',
+    'build_organization_governance_rollup',
 )

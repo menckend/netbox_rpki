@@ -12,6 +12,18 @@ mkdir -p "$PID_DIR" "$GPG_DIR"
 chmod 700 "$GPG_DIR"
 chown -R "${IRRD_RUN_USER}:${IRRD_RUN_GROUP}" "$DATA_DIR"
 
+clear_stale_pid_files() {
+    local pid_file
+
+    shopt -s nullglob
+    for pid_file in "$PID_DIR"/*.pid; do
+        # The PID directory lives on a persistent volume, so stale lock files
+        # must be cleared before IRRd can restart cleanly.
+        rm -f "$pid_file"
+    done
+    shopt -u nullglob
+}
+
 wait_for_tcp() {
     local host="$1"
     local port="$2"
@@ -133,5 +145,6 @@ wait_for_tcp postgres 5432 PostgreSQL
 wait_for_tcp redis 6379 Redis
 ensure_database
 write_config
+clear_stale_pid_files
 irrd_database_upgrade --config="$CONFIG_PATH"
 exec irrd --foreground --config="$CONFIG_PATH"

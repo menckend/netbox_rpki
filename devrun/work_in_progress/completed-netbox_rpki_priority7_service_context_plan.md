@@ -95,6 +95,44 @@ These decisions should be treated as resolved for the first maturity wave unless
 
 ---
 
+## 4.1 Repository Grounding
+
+This plan must be executed against the plugin's current registry-driven architecture, not as an isolated design exercise.
+
+Current implementation anchors in this repository:
+
+- `netbox_rpki/models.py`
+  - explicit Django model layer for `RoutingIntentProfile`, `RoutingIntentRule`, `RoutingIntentTemplate`, `RoutingIntentTemplateRule`, `RoutingIntentTemplateBinding`, `RoutingIntentException`, and `ROAIntent`
+- `netbox_rpki/services/routing_intent.py`
+  - current compile and derivation engine
+  - existing selector handling, rule matching, binding compilation, exception application, preview generation, and emitted explanation text all live here
+- `netbox_rpki/object_registry.py`
+  - current registry-driven CRUD surface for the routing-intent object family
+- `netbox_rpki/detail_specs.py`
+  - current custom dashboard/detail projection for profiles, bindings, and exceptions
+- `netbox_rpki/tests/registry_scenarios.py`
+  - registry wiring scenarios that must be extended whenever new registry objects land
+- `netbox_rpki/tests/test_routing_intent_services.py`
+  - current focused test surface for routing-intent behavior
+
+This matters because the plugin has a deliberate split between:
+
+- explicit domain objects, migrations, and services
+- generated forms, filtersets, tables, views, API viewsets, URLs, navigation, and GraphQL surfaces
+
+For Priority 7 work, keep following the repository rule already documented in `CONTRIBUTING.md`:
+
+- keep models, migrations, business rules, and service behavior explicit
+- keep standard CRUD/UI/API/GraphQL plumbing registry-driven
+
+This is also the verification contract from `LOCAL_DEV_SETUP.md`:
+
+- use `./dev.sh test ...`, not raw `pytest`, for normal verification
+- prefer focused Django test labels during iteration
+- use the `contract` lane when registry surfaces change
+
+---
+
 ## 5. Proposed Model Direction
 
 The current gap is not best solved by adding many more `match_*` fields directly onto every existing rule object.
@@ -180,6 +218,69 @@ Prefer explicit derived summary fields over free-form explanation text alone.
 
 ---
 
+## 5.5 Slice A Scope Lock For The First Implementation Pass
+
+The first implementation pass should stay narrower than the full architectural target.
+
+The immediate goal is to land the reusable service-context object family and its generated surfaces without forcing the harder inheritance and topology-inference work into the same patch.
+
+### Include in the first pass
+
+- `RoutingIntentContextGroup`
+  - explicit Django model
+  - organization-scoped
+  - registry-managed CRUD surface
+  - enable/disable flag
+  - deterministic ordering/priority
+  - summary JSON for derived or cached read-only reporting
+- `RoutingIntentContextCriterion`
+  - explicit Django model
+  - belongs to one context group
+  - weighted/enabled ordering
+  - enough typed fields to represent first-wave criteria without burying all semantics in one opaque blob
+- read-only detail projection for context groups
+  - criteria count
+  - linked profile/binding counts once those relations land
+  - summary JSON rendering when present
+- base validation and registry tests
+
+### Explicitly defer from the first pass
+
+- profile inheritance via `parent_profile`
+- context-aware compile precedence changes
+- `ROAIntent` persistence changes
+- binding, exception, or override precedence refactors
+- deep provider/circuit/exchange resolution logic
+- any attempt to infer exchange membership from weak or indirect NetBox data
+
+### First-pass criterion families
+
+The first pass should lock the criterion vocabulary now, even if some families remain match-disabled until later slices.
+
+Recommended first-wave criterion type set:
+
+- `tenant`
+- `vrf`
+- `site`
+- `region`
+- `role`
+- `tag`
+- `custom_field`
+- `provider_account`
+- `circuit`
+- `circuit_provider`
+- `exchange`
+
+Implementation note:
+
+- `tenant`, `vrf`, `site`, `region`, and `provider_account` should prefer direct foreign keys where practical
+- `role`, `tag`, `custom_field`, `circuit_provider`, and `exchange` can use explicit string payload fields in Slice A
+- `circuit` can be represented structurally in Slice A even if full prefix-to-circuit matching remains deferred
+
+This keeps the object model stable while allowing later slices to incrementally turn on matcher behavior.
+
+---
+
 ## 6. Proposed Work Slices
 
 ### Slice A — Service-context domain model and matching substrate
@@ -217,6 +318,30 @@ If exchange linkage is not robust enough for the first slice, include it as a cr
 - new context-group models and migrations
 - registry, forms, filters, tables, serializers, and detail specs
 - tests for model validation and basic object-surface wiring
+
+**Repository touch map**
+
+- `netbox_rpki/models.py`
+  - add the new explicit models, enums, constraints, `__str__`, and `get_absolute_url`
+- `netbox_rpki/object_registry.py`
+  - add the two new registry object specs
+- `netbox_rpki/detail_specs.py`
+  - add explicit detail specs only if the generated detail card is not enough
+- `netbox_rpki/tests/utils.py`
+  - add factory helpers for both objects
+- `netbox_rpki/tests/registry_scenarios.py`
+  - add form, instance, and registry scenario coverage for both objects
+- `netbox_rpki/tests/test_models.py`
+  - add focused validation tests and object-behavior coverage
+- `netbox_rpki/migrations/`
+  - add one migration for the new models and their constraints
+
+**First patch acceptance bar**
+
+- both objects are creatable, editable, listable, and deletable through the generated plugin surfaces
+- model validation rejects structurally invalid criterion combinations
+- contract tests prove the new objects are wired into forms, filtersets, tables, API, URLs, navigation, and GraphQL
+- no routing-intent derivation behavior changes yet
 
 ### Slice B — Compile-time inheritance and precedence contract
 
@@ -331,6 +456,34 @@ Each slice should end with focused verification before moving on.
 - emitted intents persist enough context summary to explain membership decisions
 - ambiguous provider/circuit/exchange context produces warnings rather than silent misclassification
 - UI and API surfaces expose the same context meaning consistently
+
+### Local verification path
+
+Use the local workflow already documented in `LOCAL_DEV_SETUP.md`:
+
+```bash
+cd ~/src/netbox_rpki/devrun
+./dev.sh test fast
+./dev.sh test contract --verbosity 2
+./dev.sh test netbox_rpki.tests.test_models --verbosity 2
+./dev.sh test netbox_rpki.tests.test_routing_intent_services --verbosity 2
+```
+
+For Slice A specifically, `contract` plus the focused model tests are the minimum bar before moving on.
+
+---
+
+## 8.1 Immediate Next Patch
+
+The next implementation patch for this plan should be intentionally narrow:
+
+1. add `RoutingIntentContextGroup` and `RoutingIntentContextCriterion` to `netbox_rpki/models.py`
+2. add their migration
+3. register both objects through the standard registry pipeline
+4. add test factories and registry scenarios
+5. run the focused `devrun` verification path
+
+Do not mix Slice B or Slice C behavior into that same patch unless implementation evidence shows the model layer cannot stand on its own.
 
 ---
 

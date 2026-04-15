@@ -194,6 +194,9 @@ Explicit build choices:
   - user `irrd`
   - group `irrd`
 - Python package installed into the image: `irrd==4.5.2`
+- Post-install compatibility override:
+  - `bcrypt` is force-reinstalled as `4.0.1` after the `irrd==4.5.2` install
+  - reason: `irrd==4.5.2` pulls `bcrypt==4.3.0`, which emits a non-fatal `passlib` compatibility warning at runtime because `bcrypt.__about__` is missing there
 
 ### Container Wiring
 
@@ -216,7 +219,7 @@ Environment passed into the container:
 - `IRRD_DATABASE_PASSWORD`
 - `IRRD_HTTP_PORT=8000`
 - `IRRD_WHOIS_PORT=6043`
-- `IRRD_EXTERNAL_HTTP_URL=http://127.0.0.1:${IRRD_HTTP_PORT}/`
+- `IRRD_EXTERNAL_HTTP_URL=http://127.0.0.1:${IRRD_HTTP_PORT}`
 - `IRRD_SOURCE`
 - `IRRD_OVERRIDE_PASSWORD`
 
@@ -240,7 +243,7 @@ At startup, `entrypoint.sh` writes `/etc/irrd.yaml` with these explicit settings
   - `interface: 0.0.0.0`
   - `port: 8000`
   - `workers: 1`
-  - `url: http://127.0.0.1:6080/`
+  - `url: http://127.0.0.1:6080`
 - whois server:
   - `interface: 0.0.0.0`
   - `port: 6043`
@@ -278,6 +281,8 @@ Startup sequence owned by the entrypoint:
 - Ensure the `irrd` database role exists and has the configured password
 - Ensure the `irrd` database exists and is owned by `irrd`
 - Ensure `pgcrypto` exists in the `irrd` database
+- Clear stale `*.pid` files from `/var/lib/irrd/pids`
+  - reason: the PID directory lives on the persistent `irrd_state` volume, so stale PID files can survive restarts and block IRRd startup
 - Run `irrd_database_upgrade`
 - Start `irrd --foreground --config=/etc/irrd.yaml`
 
@@ -298,6 +303,11 @@ Live validation:
   - `Scope filter enabled: No`
   - no NRTM configuration present for `LOCAL-IRR`
   - whois `!v` returned `IRRd -- version 4.5.2`
+- Observed runtime notes:
+  - the stale PID cleanup is required for reliable restarts with the persistent `irrd_state` volume
+  - the previous `passlib`/`bcrypt` warning is eliminated once the image forces `bcrypt==4.0.1`
+  - IRRd still logs status requests as `/v1/status/v1/status/` even when the health check and manual probes call `http://127.0.0.1:6080/v1/status/` directly and receive `200 OK`
+  - treat that doubled-path log entry as an IRRd runtime quirk for now, not as a failing `devrun` probe
 
 ### Seeded Local Data
 

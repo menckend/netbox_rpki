@@ -49,6 +49,34 @@ from netbox_rpki.models import (
 )
 
 
+def _ordered_context_group_queryset():
+    return netbox_rpki.models.RoutingIntentContextGroup.objects.select_related('organization').order_by(
+        'organization__name',
+        'priority',
+        'name',
+        'pk',
+    )
+
+
+def _ordered_provider_account_queryset():
+    return netbox_rpki.models.RpkiProviderAccount.objects.select_related('organization').order_by(
+        'organization__name',
+        'name',
+        'pk',
+    )
+
+
+def _coerce_bound_pk(value):
+    if value in (None, '', [], (), {}):
+        return None
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def build_model_form_class(spec: ObjectSpec) -> type[NetBoxModelForm]:
     meta_class = type(
         'Meta',
@@ -91,6 +119,183 @@ def build_filter_form_class(spec: ObjectSpec) -> type[NetBoxModelFilterSetForm]:
 
 for object_spec in FILTER_FORM_OBJECT_SPECS:
     globals()[object_spec.filter_form.class_name] = build_filter_form_class(object_spec)
+
+
+_BaseRoutingIntentProfileForm = RoutingIntentProfileForm
+
+
+class RoutingIntentProfileForm(_BaseRoutingIntentProfileForm):
+    context_groups = DynamicModelMultipleChoiceField(
+        queryset=netbox_rpki.models.RoutingIntentContextGroup.objects.all(),
+        required=False,
+        label='Context Groups',
+        query_params={'organization_id': '$organization'},
+        help_text='Optional context groups used to narrow candidate prefixes before rules are evaluated.',
+    )
+
+    fieldsets = (
+        FieldSet('name', 'organization', 'status', 'is_default', 'enabled', 'allow_as0', name='Profile'),
+        FieldSet('selector_mode', 'prefix_selector_query', 'asn_selector_query', name='Selectors'),
+        FieldSet('default_max_length_policy', 'context_groups', name='Intent Policy'),
+        FieldSet('description', 'comments', 'tenant', 'tags', name='Metadata'),
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        organization_id = (
+            _coerce_bound_pk(self.data.get('organization'))
+            or _coerce_bound_pk(self.initial.get('organization'))
+            or getattr(getattr(self.instance, 'organization', None), 'pk', None)
+        )
+        queryset = _ordered_context_group_queryset()
+        if organization_id is not None:
+            queryset = queryset.filter(organization_id=organization_id)
+        self.fields['context_groups'].queryset = queryset
+
+    def clean_context_groups(self):
+        context_groups = self.cleaned_data.get('context_groups')
+        organization = self.cleaned_data.get('organization')
+        if not context_groups or organization is None:
+            return context_groups
+        invalid_ids = [
+            group.pk
+            for group in context_groups
+            if group.organization_id != organization.pk
+        ]
+        if invalid_ids:
+            raise ValidationError('Context groups must belong to the same organization as the routing intent profile.')
+        return context_groups
+
+
+_BaseRoutingIntentContextGroupForm = RoutingIntentContextGroupForm
+
+
+class RoutingIntentContextGroupForm(_BaseRoutingIntentContextGroupForm):
+    fieldsets = (
+        FieldSet('name', 'organization', 'context_type', 'priority', 'enabled', name='Context Group'),
+        FieldSet('description', 'comments', 'tenant', 'tags', name='Metadata'),
+    )
+
+
+_BaseRoutingIntentContextCriterionForm = RoutingIntentContextCriterionForm
+
+
+class RoutingIntentContextCriterionForm(_BaseRoutingIntentContextCriterionForm):
+    match_provider_account = DynamicModelChoiceField(
+        queryset=netbox_rpki.models.RpkiProviderAccount.objects.all(),
+        required=False,
+        label='Provider Account',
+    )
+
+    fieldsets = (
+        FieldSet('name', 'context_group', 'criterion_type', 'enabled', 'weight', name='Criterion'),
+        FieldSet(
+            'match_tenant',
+            'match_vrf',
+            'match_site',
+            'match_region',
+            'match_provider_account',
+            'match_circuit',
+            'match_provider',
+            'match_value',
+            name='Match Target',
+        ),
+        FieldSet('comments', 'tenant', 'tags', name='Metadata'),
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        context_group_id = (
+            _coerce_bound_pk(self.data.get('context_group'))
+            or _coerce_bound_pk(self.initial.get('context_group'))
+            or getattr(getattr(self.instance, 'context_group', None), 'pk', None)
+        )
+        provider_account_queryset = _ordered_provider_account_queryset()
+        if context_group_id is not None:
+            context_group = netbox_rpki.models.RoutingIntentContextGroup.objects.filter(pk=context_group_id).first()
+            if context_group is not None:
+                provider_account_queryset = provider_account_queryset.filter(
+                    organization_id=context_group.organization_id
+                )
+        self.fields['match_provider_account'].queryset = provider_account_queryset
+
+
+_BaseRoutingIntentTemplateBindingForm = RoutingIntentTemplateBindingForm
+
+
+class RoutingIntentTemplateBindingForm(_BaseRoutingIntentTemplateBindingForm):
+    context_groups = DynamicModelMultipleChoiceField(
+        queryset=netbox_rpki.models.RoutingIntentContextGroup.objects.all(),
+        required=False,
+        label='Context Groups',
+        help_text='Optional context groups that gate whether this binding applies to a candidate prefix.',
+    )
+
+    fieldsets = (
+        FieldSet('name', 'template', 'intent_profile', 'enabled', 'state', name='Binding'),
+        FieldSet('binding_priority', 'binding_label', 'context_groups', name='Scope'),
+        FieldSet(
+            'origin_asn_override',
+            'max_length_mode',
+            'max_length_value',
+            'prefix_selector_query',
+            'asn_selector_query',
+            name='Override Policy',
+        ),
+        FieldSet('comments', 'tenant', 'tags', name='Metadata'),
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        intent_profile_id = (
+            _coerce_bound_pk(self.data.get('intent_profile'))
+            or _coerce_bound_pk(self.initial.get('intent_profile'))
+            or getattr(getattr(self.instance, 'intent_profile', None), 'pk', None)
+        )
+        template_id = (
+            _coerce_bound_pk(self.data.get('template'))
+            or _coerce_bound_pk(self.initial.get('template'))
+            or getattr(getattr(self.instance, 'template', None), 'pk', None)
+        )
+        queryset = _ordered_context_group_queryset()
+        organization_id = None
+        if intent_profile_id is not None:
+            organization_id = (
+                netbox_rpki.models.RoutingIntentProfile.objects.filter(pk=intent_profile_id)
+                .values_list('organization_id', flat=True)
+                .first()
+            )
+        if organization_id is None and template_id is not None:
+            organization_id = (
+                netbox_rpki.models.RoutingIntentTemplate.objects.filter(pk=template_id)
+                .values_list('organization_id', flat=True)
+                .first()
+            )
+        if organization_id is not None:
+            queryset = queryset.filter(organization_id=organization_id)
+        self.fields['context_groups'].queryset = queryset
+
+    def clean_context_groups(self):
+        context_groups = self.cleaned_data.get('context_groups')
+        intent_profile = self.cleaned_data.get('intent_profile')
+        template = self.cleaned_data.get('template')
+        if not context_groups:
+            return context_groups
+        expected_organization = None
+        if intent_profile is not None:
+            expected_organization = intent_profile.organization
+        elif template is not None:
+            expected_organization = template.organization
+        if expected_organization is None:
+            return context_groups
+        invalid_ids = [
+            group.pk
+            for group in context_groups
+            if group.organization_id != expected_organization.pk
+        ]
+        if invalid_ids:
+            raise ValidationError('Context groups must belong to the same organization as the selected template binding.')
+        return context_groups
 
 
 def _lint_finding_label(obj):

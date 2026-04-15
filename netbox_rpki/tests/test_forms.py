@@ -1,6 +1,7 @@
 from django.test import SimpleTestCase, TestCase
 
 from netbox_rpki import forms
+from netbox_rpki import models as rpki_models
 from netbox_rpki.object_registry import FILTER_FORM_OBJECT_SPECS, FORM_OBJECT_SPECS
 from netbox_rpki.object_registry import get_object_spec
 from netbox_rpki.tests.registry_scenarios import (
@@ -9,6 +10,12 @@ from netbox_rpki.tests.registry_scenarios import (
     FORM_SCENARIOS,
     create_unique_organization,
     get_spec_values,
+)
+from netbox_rpki.tests.utils import (
+    create_test_provider_account,
+    create_test_routing_intent_context_group,
+    create_test_routing_intent_profile,
+    create_test_routing_intent_template,
 )
 
 
@@ -84,3 +91,99 @@ class CertificateFormBehaviorTestCase(TestCase):
 
             with self.subTest(missing_field=missing_field):
                 self.assertTrue(form.is_valid(), form.errors)
+
+
+class RoutingIntentContextFormBehaviorTestCase(TestCase):
+    def test_profile_form_limits_context_groups_to_selected_organization(self):
+        form_class = getattr(forms, get_object_spec('routingintentprofile').form.class_name)
+        organization = create_unique_organization('profile-context-org')
+        other_organization = create_unique_organization('profile-context-other-org')
+        matching_group = create_test_routing_intent_context_group(
+            name='Matching Group',
+            organization=organization,
+        )
+        create_test_routing_intent_context_group(
+            name='Other Group',
+            organization=other_organization,
+        )
+
+        form = form_class(
+            data={
+                'name': 'Scoped Profile',
+                'organization': organization.pk,
+                'status': rpki_models.RoutingIntentProfileStatus.DRAFT,
+                'selector_mode': rpki_models.RoutingIntentSelectorMode.FILTERED,
+                'default_max_length_policy': rpki_models.DefaultMaxLengthPolicy.EXACT,
+                'enabled': True,
+                'allow_as0': False,
+                'context_groups': [matching_group.pk],
+            }
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(
+            set(form.fields['context_groups'].queryset.values_list('pk', flat=True)),
+            {matching_group.pk},
+        )
+
+    def test_binding_form_rejects_cross_organization_context_groups(self):
+        form_class = getattr(forms, get_object_spec('routingintenttemplatebinding').form.class_name)
+        organization = create_unique_organization('binding-context-org')
+        other_organization = create_unique_organization('binding-context-other-org')
+        template = create_test_routing_intent_template(
+            name='Scoped Template',
+            organization=organization,
+        )
+        profile = create_test_routing_intent_profile(
+            name='Scoped Profile',
+            organization=organization,
+        )
+        invalid_group = create_test_routing_intent_context_group(
+            name='Invalid Group',
+            organization=other_organization,
+        )
+
+        form = form_class(
+            data={
+                'name': 'Scoped Binding',
+                'template': template.pk,
+                'intent_profile': profile.pk,
+                'enabled': True,
+                'binding_priority': 100,
+                'binding_label': '',
+                'max_length_mode': rpki_models.RoutingIntentRuleMaxLengthMode.INHERIT,
+                'prefix_selector_query': '',
+                'asn_selector_query': '',
+                'state': rpki_models.RoutingIntentTemplateBindingState.PENDING,
+                'context_groups': [invalid_group.pk],
+            }
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn('context_groups', form.errors)
+
+    def test_context_criterion_form_limits_provider_accounts_to_context_group_organization(self):
+        form_class = getattr(forms, get_object_spec('routingintentcontextcriterion').form.class_name)
+        organization = create_unique_organization('criterion-context-org')
+        other_organization = create_unique_organization('criterion-context-other-org')
+        context_group = create_test_routing_intent_context_group(
+            name='Criterion Group',
+            organization=organization,
+        )
+        matching_account = create_test_provider_account(
+            name='Matching Account',
+            organization=organization,
+            org_handle='ORG-CRITERION-MATCH',
+        )
+        create_test_provider_account(
+            name='Other Account',
+            organization=other_organization,
+            org_handle='ORG-CRITERION-OTHER',
+        )
+
+        form = form_class(initial={'context_group': context_group.pk})
+
+        self.assertEqual(
+            set(form.fields['match_provider_account'].queryset.values_list('pk', flat=True)),
+            {matching_account.pk},
+        )

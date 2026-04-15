@@ -8,7 +8,14 @@ from netbox_rpki.tests.registry_scenarios import (
     TABLE_SCENARIOS,
     get_spec_values,
 )
-from netbox_rpki.tests.utils import create_test_provider_snapshot_diff
+from netbox_rpki.tests.utils import (
+    create_test_provider_snapshot_diff,
+    create_test_routing_intent_context_criterion,
+    create_test_routing_intent_context_group,
+    create_test_routing_intent_profile,
+    create_test_routing_intent_template,
+    create_test_routing_intent_template_binding,
+)
 
 
 PRIORITY6_EXPECTED_DEFAULT_COLUMNS = {
@@ -93,3 +100,52 @@ class ProviderSnapshotDiffTableTestCase(TestCase):
 
         self.assertIn('last_exchange_result', publication_table.Meta.default_columns)
         self.assertIn('not_after', certificate_table.Meta.default_columns)
+
+
+class RoutingIntentContextTableTestCase(TestCase):
+    def test_profile_and_binding_tables_render_context_group_names(self):
+        context_group = create_test_routing_intent_context_group(name='Core Edge')
+        profile = create_test_routing_intent_profile(name='Profile With Context', organization=context_group.organization)
+        profile.context_groups.add(context_group)
+        template = create_test_routing_intent_template(name='Template With Context', organization=context_group.organization)
+        binding = create_test_routing_intent_template_binding(
+            name='Binding With Context',
+            template=template,
+            intent_profile=profile,
+        )
+        binding.context_groups.add(context_group)
+
+        profile_table = tables.RoutingIntentProfileTable(type(profile).objects.filter(pk=profile.pk))
+        binding_table = tables.RoutingIntentTemplateBindingTable(type(binding).objects.filter(pk=binding.pk))
+
+        self.assertEqual(profile_table.render_context_group_names(profile), 'Core Edge')
+        self.assertEqual(binding_table.render_context_group_names(binding), 'Core Edge')
+        self.assertIn('context_group_names', profile_table.columns.columns)
+        self.assertIn('context_group_names', binding_table.columns.columns)
+
+    def test_context_group_and_criterion_tables_expose_compact_relationship_columns(self):
+        context_group = create_test_routing_intent_context_group(name='Peering')
+        profile = create_test_routing_intent_profile(name='Peering Profile', organization=context_group.organization)
+        profile.context_groups.add(context_group)
+        template = create_test_routing_intent_template(name='Peering Template', organization=context_group.organization)
+        binding = create_test_routing_intent_template_binding(
+            name='Peering Binding',
+            template=template,
+            intent_profile=profile,
+        )
+        binding.context_groups.add(context_group)
+        criterion = create_test_routing_intent_context_criterion(
+            name='IX Tag',
+            context_group=context_group,
+            match_value='ix',
+        )
+
+        context_group_table = tables.RoutingIntentContextGroupTable(type(context_group).objects.filter(pk=context_group.pk))
+        criterion_table = tables.RoutingIntentContextCriterionTable(type(criterion).objects.filter(pk=criterion.pk))
+
+        self.assertEqual(context_group_table.value_criteria_count(context_group), 1)
+        self.assertEqual(context_group_table.value_profile_count(context_group), 1)
+        self.assertEqual(context_group_table.value_binding_count(context_group), 1)
+        self.assertEqual(criterion_table.render_match_target(criterion), 'ix')
+        self.assertIn('criteria_count', context_group_table.columns.columns)
+        self.assertIn('match_target', criterion_table.columns.columns)

@@ -37,6 +37,7 @@ class PublishedAuthorization:
 class CompiledTemplateBinding:
     binding: rpki_models.RoutingIntentTemplateBinding
     rules: tuple[rpki_models.RoutingIntentTemplateRule, ...]
+    context_groups: tuple[rpki_models.RoutingIntentContextGroup, ...]
     prefix_ids: frozenset[int]
     selected_asns: tuple[ASN, ...]
     default_origin_asn: ASN | None
@@ -68,6 +69,7 @@ class CompiledRoutingIntentPolicy:
     prefixes: tuple[Prefix, ...]
     selected_asns: tuple[ASN, ...]
     default_origin_asn: ASN | None
+    profile_context_groups: tuple[rpki_models.RoutingIntentContextGroup, ...]
     local_rules: tuple[rpki_models.RoutingIntentRule, ...]
     exceptions: tuple[CompiledRoutingIntentException, ...]
     overrides: tuple[rpki_models.ROAIntentOverride, ...]
@@ -285,6 +287,146 @@ def _prefix_matches_custom_field(prefix: Prefix, expression: str) -> bool:
     return str(custom_field_data.get(field_name, '')) == expected_value
 
 
+def _normalize_context_token(value) -> str:
+    return str(value or '').strip().lower()
+
+
+def _extract_prefix_context_tokens(prefix: Prefix, field_names: tuple[str, ...]) -> set[str]:
+    tokens: set[str] = set()
+    custom_field_data = getattr(prefix, 'custom_field_data', {}) or {}
+    for field_name in field_names:
+        value = custom_field_data.get(field_name)
+        if value in (None, ''):
+            continue
+        if isinstance(value, (list, tuple, set)):
+            tokens.update(_normalize_context_token(item) for item in value if item not in (None, ''))
+        else:
+            tokens.add(_normalize_context_token(value))
+    return {token for token in tokens if token}
+
+
+def _prefix_matches_context_criterion(
+    prefix: Prefix,
+    criterion: rpki_models.RoutingIntentContextCriterion,
+) -> tuple[bool, tuple[str, ...]]:
+    warnings: list[str] = []
+
+    if criterion.criterion_type == rpki_models.RoutingIntentContextCriterionType.TENANT:
+        return prefix.tenant_id == criterion.match_tenant_id, ()
+    if criterion.criterion_type == rpki_models.RoutingIntentContextCriterionType.VRF:
+        return prefix.vrf_id == criterion.match_vrf_id, ()
+    if criterion.criterion_type == rpki_models.RoutingIntentContextCriterionType.SITE:
+        site = _resolve_prefix_site(prefix)
+        return getattr(site, 'pk', None) == criterion.match_site_id, ()
+    if criterion.criterion_type == rpki_models.RoutingIntentContextCriterionType.REGION:
+        region = _resolve_prefix_region(prefix)
+        return getattr(region, 'pk', None) == criterion.match_region_id, ()
+    if criterion.criterion_type == rpki_models.RoutingIntentContextCriterionType.ROLE:
+        role = getattr(prefix, 'role', None)
+        role_tokens = {
+            _normalize_context_token(role),
+            _normalize_context_token(getattr(role, 'name', '')),
+            _normalize_context_token(getattr(role, 'slug', '')),
+        }
+        return _normalize_context_token(criterion.match_value) in role_tokens, ()
+    if criterion.criterion_type == rpki_models.RoutingIntentContextCriterionType.TAG:
+        return _prefix_has_tag(prefix, criterion.match_value), ()
+    if criterion.criterion_type == rpki_models.RoutingIntentContextCriterionType.CUSTOM_FIELD:
+        return _prefix_matches_custom_field(prefix, criterion.match_value), ()
+
+    if criterion.criterion_type == rpki_models.RoutingIntentContextCriterionType.PROVIDER_ACCOUNT:
+        tokens = _extract_prefix_context_tokens(
+            prefix,
+            (
+                'provider_account',
+                'provider_account_id',
+                'provider_account_pk',
+                'provider_account_name',
+                'provider_account_handle',
+            ),
+        )
+        expected_tokens = {
+            _normalize_context_token(criterion.match_provider_account_id),
+            _normalize_context_token(criterion.match_provider_account.name if criterion.match_provider_account_id else ''),
+            _normalize_context_token(criterion.match_provider_account.org_handle if criterion.match_provider_account_id else ''),
+        }
+        if not tokens:
+            warnings.append(
+                'Unable to resolve provider-account context for prefix {prefix} and criterion {criterion}.'.format(
+                    prefix=prefix.prefix,
+                    criterion=criterion.name,
+                )
+            )
+            return False, tuple(warnings)
+        return bool(tokens & expected_tokens), tuple(warnings)
+
+    if criterion.criterion_type == rpki_models.RoutingIntentContextCriterionType.CIRCUIT:
+        tokens = _extract_prefix_context_tokens(prefix, ('circuit', 'circuit_id', 'circuit_pk', 'circuit_cid'))
+        expected_tokens = {
+            _normalize_context_token(criterion.match_circuit_id),
+            _normalize_context_token(getattr(criterion.match_circuit, 'cid', '') if criterion.match_circuit_id else ''),
+        }
+        if not tokens:
+            warnings.append(
+                'Unable to resolve circuit context for prefix {prefix} and criterion {criterion}.'.format(
+                    prefix=prefix.prefix,
+                    criterion=criterion.name,
+                )
+            )
+            return False, tuple(warnings)
+        return bool(tokens & expected_tokens), tuple(warnings)
+
+    if criterion.criterion_type == rpki_models.RoutingIntentContextCriterionType.CIRCUIT_PROVIDER:
+        tokens = _extract_prefix_context_tokens(prefix, ('circuit_provider', 'provider', 'provider_id', 'provider_slug'))
+        expected_tokens = {
+            _normalize_context_token(criterion.match_provider_id),
+            _normalize_context_token(getattr(criterion.match_provider, 'name', '') if criterion.match_provider_id else ''),
+            _normalize_context_token(getattr(criterion.match_provider, 'slug', '') if criterion.match_provider_id else ''),
+        }
+        if not tokens:
+            warnings.append(
+                'Unable to resolve circuit-provider context for prefix {prefix} and criterion {criterion}.'.format(
+                    prefix=prefix.prefix,
+                    criterion=criterion.name,
+                )
+            )
+            return False, tuple(warnings)
+        return bool(tokens & expected_tokens), tuple(warnings)
+
+    if criterion.criterion_type == rpki_models.RoutingIntentContextCriterionType.EXCHANGE:
+        tokens = _extract_prefix_context_tokens(prefix, ('exchange', 'exchange_id', 'exchange_slug', 'ix'))
+        expected_token = _normalize_context_token(criterion.match_value)
+        if not tokens:
+            warnings.append(
+                'Unable to resolve exchange context for prefix {prefix} and criterion {criterion}.'.format(
+                    prefix=prefix.prefix,
+                    criterion=criterion.name,
+                )
+            )
+            return False, tuple(warnings)
+        return expected_token in tokens, tuple(warnings)
+
+    return False, ()
+
+
+def _prefix_matches_context_group(
+    prefix: Prefix,
+    context_group: rpki_models.RoutingIntentContextGroup,
+) -> tuple[bool, tuple[str, ...]]:
+    warnings: list[str] = []
+    criteria = tuple(context_group.criteria.filter(enabled=True).order_by('weight', 'name', 'pk'))
+    if not criteria:
+        warnings.append(f'Context group {context_group.name} has no enabled criteria.')
+        return False, tuple(warnings)
+
+    for criterion in criteria:
+        matched, criterion_warnings = _prefix_matches_context_criterion(prefix, criterion)
+        warnings.extend(criterion_warnings)
+        if not matched:
+            return False, tuple(warnings)
+    return True, tuple(warnings)
+
+
 def _prefix_matches_rule(prefix: Prefix, rule: rpki_models.RoutingIntentRule) -> bool:
     if rule.address_family:
         family = rpki_models.AddressFamily.IPV6 if prefix.family == 6 else rpki_models.AddressFamily.IPV4
@@ -494,7 +636,7 @@ def _resolve_binding_default_max_length(
     return None
 
 
-def _fingerprint_queryset(prefixes, asns, profile, rules, overrides, template_bindings=()) -> str:
+def _fingerprint_queryset(prefixes, asns, profile, rules, overrides, template_bindings=(), context_groups=()) -> str:
     payload = '|'.join(
         [
             str(profile.pk),
@@ -505,6 +647,7 @@ def _fingerprint_queryset(prefixes, asns, profile, rules, overrides, template_bi
             ','.join(str(rule.pk) for rule in rules),
             ','.join(str(override.pk) for override in overrides),
             ','.join(template_bindings),
+            ','.join(str(group.pk) for group in context_groups),
         ]
     )
     return hashlib.sha256(payload.encode('utf-8')).hexdigest()
@@ -546,6 +689,7 @@ def _build_binding_summary_payload(
     binding: rpki_models.RoutingIntentTemplateBinding,
     *,
     template_rules,
+    context_groups,
     template_fingerprint: str,
     binding_fingerprint: str,
     scoped_prefixes,
@@ -560,6 +704,9 @@ def _build_binding_summary_payload(
         'scoped_prefix_count': len(scoped_prefixes),
         'scoped_asn_count': len(scoped_asns),
         'active_rule_count': len(template_rules),
+        'context_group_count': len(context_groups),
+        'context_group_ids': [group.pk for group in context_groups],
+        'context_group_names': [group.name for group in context_groups],
         'warning_count': len(binding_warnings),
         'warnings': list(binding_warnings),
     }
@@ -629,6 +776,7 @@ def _build_compiled_template_binding(
     commit_current: bool = False,
 ) -> CompiledTemplateBinding:
     binding_warnings: list[str] = []
+    context_groups = tuple(binding.context_groups.filter(enabled=True).order_by('priority', 'name', 'pk'))
     prefix_queryset = Prefix.objects.filter(pk__in=[prefix.pk for prefix in profile_prefixes]).select_related(
         'tenant', 'vrf', 'role', '_site', '_region'
     )
@@ -686,6 +834,7 @@ def _build_compiled_template_binding(
             binding.asn_selector_query or '',
             str(binding.template.template_version),
             template_fingerprint,
+            ','.join(str(group.pk) for group in context_groups),
             ','.join(str(prefix.pk) for prefix in scoped_prefixes),
             ','.join(str(asn.pk) for asn in scoped_asns),
             str(getattr(binding_default_origin_asn, 'asn', '')),
@@ -695,6 +844,7 @@ def _build_compiled_template_binding(
     summary_payload = _build_binding_summary_payload(
         binding,
         template_rules=template_rules,
+        context_groups=context_groups,
         template_fingerprint=template_fingerprint,
         binding_fingerprint=binding_fingerprint,
         scoped_prefixes=scoped_prefixes,
@@ -733,6 +883,7 @@ def _build_compiled_template_binding(
     return CompiledTemplateBinding(
         binding=binding,
         rules=template_rules,
+        context_groups=context_groups,
         prefix_ids=frozenset(prefix.pk for prefix in scoped_prefixes),
         selected_asns=scoped_asns,
         default_origin_asn=binding_default_origin_asn,
@@ -769,6 +920,7 @@ def compile_routing_intent_policy(
             profile.asn_selector_query,
         )
     )
+    profile_context_groups = tuple(profile.context_groups.filter(enabled=True).order_by('priority', 'name', 'pk'))
     local_rules = tuple(
         profile.rules.filter(enabled=True)
         .select_related('origin_asn', 'match_tenant', 'match_vrf', 'match_site', 'match_region')
@@ -851,6 +1003,7 @@ def compile_routing_intent_policy(
         prefixes=prefixes,
         selected_asns=selected_asns,
         default_origin_asn=default_origin_asn,
+        profile_context_groups=profile_context_groups,
         local_rules=local_rules,
         exceptions=compiled_exceptions,
         overrides=overrides,
@@ -868,6 +1021,7 @@ def compile_routing_intent_policy(
                     *[compiled_exception.fingerprint for compiled_exception in compiled_exceptions],
                 )
             ),
+            context_groups=profile_context_groups,
         ),
     )
 
@@ -916,6 +1070,7 @@ def _evaluate_compiled_roa_intents(
     active_binding_ids = frozenset(compiled_binding.binding.pk for compiled_binding in compiled_policy.template_bindings)
 
     for prefix in compiled_policy.prefixes:
+        prefix_warnings: list[str] = []
         included = True
         origin_asn = compiled_policy.default_origin_asn
         origin_asn_value = getattr(compiled_policy.default_origin_asn, 'asn', None)
@@ -924,14 +1079,54 @@ def _evaluate_compiled_roa_intents(
         applied_override = None
         explanation_parts = [f'Selected prefix {prefix.prefix} from profile query.']
         last_template_binding_name = None
+        matched_profile_context_groups: list[rpki_models.RoutingIntentContextGroup] = []
+        matched_binding_context_groups: dict[int, list[rpki_models.RoutingIntentContextGroup]] = {}
+
+        if compiled_policy.profile_context_groups:
+            for context_group in compiled_policy.profile_context_groups:
+                matched_group, group_warnings = _prefix_matches_context_group(prefix, context_group)
+                prefix_warnings.extend(group_warnings)
+                if matched_group:
+                    matched_profile_context_groups.append(context_group)
+            if not matched_profile_context_groups:
+                included = False
+                explanation_parts.append('No profile context group matched this prefix.')
+            else:
+                explanation_parts.append(
+                    'Matched profile context groups: {groups}.'.format(
+                        groups=', '.join(group.name for group in matched_profile_context_groups),
+                    )
+                )
 
         for compiled_binding in compiled_policy.template_bindings:
             if prefix.pk not in compiled_binding.prefix_ids:
                 continue
 
+            if compiled_binding.context_groups:
+                matched_groups_for_binding: list[rpki_models.RoutingIntentContextGroup] = []
+                for context_group in compiled_binding.context_groups:
+                    matched_group, group_warnings = _prefix_matches_context_group(prefix, context_group)
+                    prefix_warnings.extend(group_warnings)
+                    if matched_group:
+                        matched_groups_for_binding.append(context_group)
+                if not matched_groups_for_binding:
+                    explanation_parts.append(
+                        f'Skipped template binding {compiled_binding.binding.name} because no binding context group matched.'
+                    )
+                    continue
+                matched_binding_context_groups[compiled_binding.binding.pk] = matched_groups_for_binding
+
             before_template_state = (included, origin_asn_value, max_length)
             binding_changed_state = False
             explanation_parts.append(f'Applied template binding {compiled_binding.binding.name}.')
+            if compiled_binding.binding.pk in matched_binding_context_groups:
+                explanation_parts.append(
+                    'Binding context groups: {groups}.'.format(
+                        groups=', '.join(
+                            group.name for group in matched_binding_context_groups[compiled_binding.binding.pk]
+                        )
+                    )
+                )
 
             if compiled_binding.default_origin_asn is not None:
                 included = True
@@ -968,7 +1163,7 @@ def _evaluate_compiled_roa_intents(
 
             after_template_state = (included, origin_asn_value, max_length)
             if last_template_binding_name and binding_changed_state and after_template_state != before_template_state:
-                warnings.append(
+                prefix_warnings.append(
                     'Template binding {binding} overrode template-derived policy from binding {prior} for prefix {prefix}.'.format(
                         binding=compiled_binding.binding.name,
                         prior=last_template_binding_name,
@@ -1055,7 +1250,7 @@ def _evaluate_compiled_roa_intents(
 
         is_as0 = origin_asn_value == 0
         if is_as0 and not profile.allow_as0:
-            warnings.append(f'Prefix {prefix.prefix} resolved to AS0 but AS0 is disabled on profile {profile.name}.')
+            prefix_warnings.append(f'Prefix {prefix.prefix} resolved to AS0 but AS0 is disabled on profile {profile.name}.')
             explanation_parts.append('AS0 resolution blocked because the profile does not allow AS0.')
             included = False
 
@@ -1073,6 +1268,17 @@ def _evaluate_compiled_roa_intents(
             else rpki_models.ROAIntentExposureState.ELIGIBLE_NOT_ADVERTISED
         )
         prefix_text = str(prefix.prefix)
+        summary_json = {
+            'profile_context_group_ids': [group.pk for group in matched_profile_context_groups],
+            'profile_context_group_names': [group.name for group in matched_profile_context_groups],
+            'binding_context_groups': {
+                str(binding_pk): [group.name for group in groups]
+                for binding_pk, groups in matched_binding_context_groups.items()
+            },
+            'warnings': sorted(set(prefix_warnings)),
+            'source_rule_id': getattr(source_rule, 'pk', None),
+            'applied_override_id': getattr(applied_override, 'pk', None),
+        }
 
         results.append(
             {
@@ -1091,9 +1297,11 @@ def _evaluate_compiled_roa_intents(
                 'source_rule': source_rule,
                 'applied_override': applied_override,
                 'explanation': ' '.join(explanation_parts),
+                'summary_json': summary_json,
                 'is_as0': is_as0,
             }
         )
+        warnings.extend(prefix_warnings)
 
     return tuple(results), tuple(warnings)
 
@@ -1167,6 +1375,7 @@ def derive_roa_intents(
             derived_state=row['derived_state'],
             exposure_state=row['exposure_state'],
             explanation=row['explanation'],
+            summary_json=row['summary_json'],
         )
         emitted_count += 1
 

@@ -987,6 +987,74 @@ def create_test_routing_intent_rule(
     )
 
 
+def create_test_routing_intent_context_group(
+    name='Routing Intent Context Group 1',
+    organization=None,
+    context_type=None,
+    description='',
+    priority=100,
+    enabled=True,
+    summary_json=None,
+    **kwargs,
+):
+    if organization is None:
+        organization = create_test_organization()
+    return rpki_models.RoutingIntentContextGroup.objects.create(
+        name=name,
+        organization=organization,
+        context_type=context_type or rpki_models.RoutingIntentContextType.SERVICE,
+        description=description,
+        priority=priority,
+        enabled=enabled,
+        summary_json=summary_json or {},
+        **kwargs,
+    )
+
+
+def create_test_routing_intent_context_criterion(
+    name='Routing Intent Context Criterion 1',
+    context_group=None,
+    criterion_type=None,
+    match_tenant=None,
+    match_vrf=None,
+    match_site=None,
+    match_region=None,
+    match_provider_account=None,
+    match_circuit=None,
+    match_provider=None,
+    match_value='',
+    enabled=True,
+    weight=100,
+    **kwargs,
+):
+    if context_group is None:
+        context_group = create_test_routing_intent_context_group()
+    criterion_type = criterion_type or rpki_models.RoutingIntentContextCriterionType.TAG
+    if criterion_type in {
+        rpki_models.RoutingIntentContextCriterionType.ROLE,
+        rpki_models.RoutingIntentContextCriterionType.TAG,
+        rpki_models.RoutingIntentContextCriterionType.CUSTOM_FIELD,
+        rpki_models.RoutingIntentContextCriterionType.EXCHANGE,
+    } and not match_value:
+        match_value = 'edge'
+    return rpki_models.RoutingIntentContextCriterion.objects.create(
+        name=name,
+        context_group=context_group,
+        criterion_type=criterion_type,
+        match_tenant=match_tenant,
+        match_vrf=match_vrf,
+        match_site=match_site,
+        match_region=match_region,
+        match_provider_account=match_provider_account,
+        match_circuit=match_circuit,
+        match_provider=match_provider,
+        match_value=match_value,
+        enabled=enabled,
+        weight=weight,
+        **kwargs,
+    )
+
+
 def create_test_roa_intent_override(
     name='ROA Intent Override 1',
     organization=None,

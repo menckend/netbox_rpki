@@ -6,6 +6,7 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
+from tenancy.models import Tenant
 
 from netbox_rpki import models as rpki_models
 from netbox_rpki.models import Certificate, CertificateAsn, CertificatePrefix, Organization, Roa, RoaPrefix
@@ -62,6 +63,8 @@ from netbox_rpki.tests.utils import (
     create_test_roa_reconciliation_run,
     create_test_roa_prefix,
     create_test_router_certificate,
+    create_test_routing_intent_context_criterion,
+    create_test_routing_intent_context_group,
     create_test_routing_intent_profile,
     create_test_routing_intent_rule,
     create_test_sample_dataset,
@@ -1522,3 +1525,70 @@ class RoutingIntentTemplateModelBehaviorTestCase(TestCase):
         self.assertEqual(str(exception), 'Template Exception')
         self.assertEqual(str(bulk_run), 'Bulk Run')
         self.assertEqual(str(scope_result), 'Scope Result')
+
+
+class RoutingIntentContextModelTestCase(TestCase):
+    def test_context_group_exposes_absolute_url_and_string(self):
+        group = create_test_routing_intent_context_group(
+            name='Transit Edge Group',
+            context_type=rpki_models.RoutingIntentContextType.TRANSIT,
+        )
+
+        self.assertEqual(str(group), 'Transit Edge Group')
+        self.assertEqual(
+            group.get_absolute_url(),
+            reverse('plugins:netbox_rpki:routingintentcontextgroup', args=[group.pk]),
+        )
+
+    def test_context_criterion_requires_expected_match_field(self):
+        criterion = rpki_models.RoutingIntentContextCriterion(
+            name='Tenant Criterion',
+            context_group=create_test_routing_intent_context_group(),
+            criterion_type=rpki_models.RoutingIntentContextCriterionType.TENANT,
+        )
+
+        with self.assertRaises(ValidationError):
+            criterion.full_clean()
+
+    def test_context_criterion_rejects_unrelated_match_fields(self):
+        criterion = rpki_models.RoutingIntentContextCriterion(
+            name='Invalid Tag Criterion',
+            context_group=create_test_routing_intent_context_group(),
+            criterion_type=rpki_models.RoutingIntentContextCriterionType.TAG,
+            match_value='edge',
+            match_tenant=Tenant.objects.create(name='Invalid Criterion Tenant', slug='invalid-criterion-tenant'),
+        )
+
+        with self.assertRaises(ValidationError):
+            criterion.full_clean()
+
+    def test_context_criterion_provider_account_must_match_group_organization(self):
+        group_org = create_test_organization(org_id='group-org', name='Group Org')
+        provider_org = create_test_organization(org_id='provider-org', name='Provider Org')
+        group = create_test_routing_intent_context_group(organization=group_org)
+        provider_account = create_test_provider_account(
+            organization=provider_org,
+            org_handle='PROVIDER-ORG',
+        )
+        criterion = rpki_models.RoutingIntentContextCriterion(
+            name='Provider Criterion',
+            context_group=group,
+            criterion_type=rpki_models.RoutingIntentContextCriterionType.PROVIDER_ACCOUNT,
+            match_provider_account=provider_account,
+        )
+
+        with self.assertRaises(ValidationError):
+            criterion.full_clean()
+
+    def test_context_criterion_string_and_absolute_url(self):
+        criterion = create_test_routing_intent_context_criterion(
+            name='Edge Tag',
+            criterion_type=rpki_models.RoutingIntentContextCriterionType.TAG,
+            match_value='edge',
+        )
+
+        self.assertEqual(str(criterion), 'Edge Tag')
+        self.assertEqual(
+            criterion.get_absolute_url(),
+            reverse('plugins:netbox_rpki:routingintentcontextcriterion', args=[criterion.pk]),
+        )

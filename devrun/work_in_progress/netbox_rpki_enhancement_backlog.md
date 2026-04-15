@@ -1,6 +1,6 @@
 # NetBox RPKI Plugin: High-Priority Enhancement Backlog for Hosted-RPKI Consumers
 
-**Last updated:** April 14, 2026 (P8 implementation plan linked)
+**Last updated:** April 14, 2026 (P8 status refreshed)
 
 ## 1. Purpose
 
@@ -26,7 +26,7 @@ Exact test counts are intentionally not repeated throughout this file. They drif
 | Intent and ROA reconciliation | Functionally complete | Real operator workflow exists for intent derivation, reconciliation, replacement-aware drift classification, draft change-plan generation, lint and simulation-aware approval gating, simulation audit persistence, aggregate reporting, and drill-down UX across service, job, command, API, and web surfaces. | Follow-on refinement rather than missing baseline capability. |
 | Provider sync and write-through | Mostly complete | Live ARIN ROA import remains available, and the Krill slice now supports retained snapshots, durable external identity, imported object families, diff persistence, sync-health metadata, and ROA preview, approve, and apply flows. | Broader provider coverage, deeper family-specific diff reporting, better freshness and churn visibility, and richer publication-observation fidelity. |
 | ASPA operations | Partially complete | ASPA inventory, provider import, intent, reconciliation, and operator drill-down surfaces now exist and share the core workflow shape used for ROAs. | Provider-backed ASPA write-back, broader provider support, richer reporting, and future lint or simulation support. |
-| Governance and reporting | Partially complete | ROA change plans support preview, approval, apply, ticket or change metadata, maintenance windows, approval history, and provider execution audit rows. Routing-intent exceptions now also have explicit approval workflow surfaces, and the operations dashboard surfaces stale template bindings, expiring routing-intent exceptions, recent bulk intent-run health, stale or failed sync state, and expiry visibility. | Rollback bundles, multi-stage approvals, richer publication-state semantics, exports, alerting hooks, and broader governance beyond the current Krill-backed ROA slice. |
+| Governance and reporting | Mostly complete | ROA and ASPA change plans now support preview, approval, secondary approval, apply, maintenance-window and ticket metadata, approval history, provider execution audit rows, publication-state rollups, and provider-backed rollback bundles with explicit approve and apply actions. Routing-intent exceptions also have explicit approval workflow surfaces, and governance rollups plus operations-dashboard views surface stale bindings, expiring exceptions, recent bulk-run health, stale or failed sync state, and expiry visibility. | Cross-family governance breadth, export polish, alerting expansion, and deeper policy-driven governance beyond the current ROA, ASPA, rollback-bundle, and typed-exception slices. |
 | Standards-aligned schema | Functionally complete for the first normalization wave | Compatibility-preserving normalization is in place around `SignedObject`, certificate roles, authored or imported publication linkage, and validation linkage. | Second-wave refinement rather than another schema reset. |
 
 ## 3. End-State Objectives
@@ -108,9 +108,7 @@ The closure order should stay dependency-driven rather than milestone-driven.
 
 ### Priority 4: ROA Linting and Safety Analysis
 
-- [Maturity Plan](netbox_rpki_priority4_linting_maturity_plan.md)
-
-- **Status:** Partially complete
+- **Status:** Mostly complete
 - **End state:** operators can see when intended or published ROAs are too broad, unnecessary, risky, or inconsistent with routing intent
 - **Current state:** reconciliation and change-plan flows can persist `ROALintRun` and `ROALintFinding` records, expose summary counts in API and UI surfaces, and present operator drill-down from reconciliation and plan detail pages. Per-organization `ROALintRuleConfig` overrides now allow rule-specific severity or approval-impact tuning without changing global defaults. Lint suppressions now support intent, profile, organization-wide, and prefix-scoped workflows, and the rule set has expanded into tenant-aware ownership-context analysis for intent, published ROA state, and create-plan authorization checks. Findings now carry operator-facing explanation fields, and approval plus standalone acknowledgement workflows now support `previously_acknowledged` carry-forward posture with explicit re-confirmation before approval gates pass. Focused linting, provider-write, view, API, and full plugin-suite verification are green for this implementation wave.
 - **Remaining gap:** deepen the rule set further, broaden roll-up or reporting treatment of suppressions and acknowledgement state, and decide whether additional governance or acknowledgement lifecycle semantics should sit on top of the current lint posture contract
@@ -136,7 +134,7 @@ The closure order should stay dependency-driven rather than milestone-driven.
 
 - [Implementation Plan](netbox_rpki_priority7_service_context_plan.md)
 
-- **Status:** Partially complete
+- **Status:** Mostly complete
 - **End state:** policy can be expressed and explained in terms of tenant, VRF, site, region, service role, provider, circuit, exchange, or other operating context
 - **Current state:** the existing intent layer already binds to prefixes, ASNs, tenant, VRF, site, region, tags, and custom fields
 - **Remaining gap:** broader topology and service-context binding, better inheritance or profile semantics, and more expressive grouping for operator-scale policy reuse
@@ -144,13 +142,11 @@ The closure order should stay dependency-driven rather than milestone-driven.
 
 ### Priority 8: Change Control and Auditability
 
-- [Maturity Plan](netbox_rpki_priority8_change_control_maturity_plan.md)
-
-- **Status:** Partially complete
+- **Status:** Functionally complete for the first governance wave
 - **End state:** publication workflows are policy-aware, multi-stage, rollback-capable, and fully auditable across providers
-- **Current state:** ROA and ASPA change plans now support preview, approval, apply, actor attribution, maintenance-window metadata, ticket and change references, approval history, provider execution audit rows, optional dual-approval workflow with distinct secondary approvers, and provider-backed rollback bundles captured automatically on successful apply with approve and apply operator actions through service, API, and web surfaces. The newer routing-intent template workflow now also has explicit approval metadata and operator actions for typed exceptions before they affect derived policy.
-- **Remaining gap:** richer publication-state semantics, and broader extension of the governance contract beyond the current ROA and ASPA plan plus typed-exception slice
-- **Closure order:** after linting and simulation are available for the same plan objects
+- **Current state:** the first governance wave is materially landed. ROA and ASPA change plans now support preview, approval, secondary approval with distinct actors, apply, actor attribution, maintenance-window metadata, ticket and change references, approval history, provider execution audit rows, and provider-backed rollback bundles captured automatically on successful apply. Rollback bundles are first-class records with their own approve and apply actions, and publication-state derivation now surfaces lifecycle states such as awaiting approval, awaiting secondary approval, approved, applied, rollback-available, rollback-approved, and rolled back through service, API, and web surfaces. Governance rollups and dashboard surfaces now summarize approval posture across bulk runs and plan families. The newer routing-intent workflow also has explicit approval metadata and operator actions for typed exceptions before they affect derived policy.
+- **Remaining gap:** broader extension of the governance contract beyond the current ROA, ASPA, rollback-bundle, bulk-run, and typed-exception slices; more policy-driven governance controls; and future reporting or export polish on top of the now-landed governance substrate
+- **Closure order:** treat Priority 8 as dependency-closed for the first wave; future work here should build incrementally on the completed plan and current maturity backlog
 
 ### Priority 9: Lifecycle, Expiry, and Publication Health Reporting
 

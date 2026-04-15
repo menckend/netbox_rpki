@@ -36,7 +36,7 @@ PRIORITY6_EXPECTED_FILTERSET_CONTRACT = {
         'search_fields': ('name__icontains', 'prefix_cidr_text__icontains', 'reason__icontains', 'approved_by__icontains', 'comments__icontains'),
     },
     'bulkintentrun': {
-        'fields': ('name', 'organization', 'status', 'trigger_mode', 'target_mode', 'tenant'),
+        'fields': ('name', 'organization', 'status', 'trigger_mode', 'target_mode', 'requires_secondary_approval', 'tenant'),
         'search_fields': ('name__icontains', 'baseline_fingerprint__icontains', 'resulting_fingerprint__icontains', 'comments__icontains'),
     },
     'bulkintentrunscoperesult': {

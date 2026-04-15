@@ -85,6 +85,8 @@ from netbox_rpki.tests.utils import (
     create_test_roa_reconciliation_run,
     create_test_roa_validation_simulation_result,
     create_test_roa_validation_simulation_run,
+    create_test_routing_intent_context_criterion,
+    create_test_routing_intent_context_group,
     create_test_routing_intent_profile,
     create_test_routing_intent_exception,
     create_test_routing_intent_template,
@@ -194,6 +196,97 @@ class LifecycleHealthSurfaceContractTestCase(SimpleTestCase):
         self.assertIn('delivery_error', event_serializer.Meta.fields)
         self.assertIn('related_snapshot', event_serializer.Meta.fields)
         self.assertIn('related_snapshot_diff', event_serializer.Meta.fields)
+
+
+class RoutingIntentContextSerializerTestCase(TestCase):
+    def test_profile_serializer_exposes_context_group_details(self):
+        organization = create_test_organization(
+            org_id='profile-context-serializer-org',
+            name='Profile Context Serializer Org',
+        )
+        profile = create_test_routing_intent_profile(
+            name='Profile Serializer',
+            organization=organization,
+        )
+        context_group = create_test_routing_intent_context_group(
+            name='Service Edge',
+            organization=organization,
+            priority=50,
+        )
+        profile.context_groups.add(context_group)
+
+        serializer = api_serializers.RoutingIntentProfileSerializer(profile, context={'request': None})
+
+        self.assertEqual(serializer.data['context_group_details'][0]['name'], 'Service Edge')
+        self.assertEqual(serializer.data['context_group_details'][0]['priority'], 50)
+        self.assertIn('object_url', serializer.data['context_group_details'][0])
+
+    def test_context_group_serializer_exposes_criteria_and_related_consumers(self):
+        organization = create_test_organization(
+            org_id='group-context-serializer-org',
+            name='Group Context Serializer Org',
+        )
+        profile = create_test_routing_intent_profile(
+            name='Consumer Profile',
+            organization=organization,
+        )
+        template = create_test_routing_intent_template(
+            name='Consumer Template',
+            organization=organization,
+        )
+        binding = create_test_routing_intent_template_binding(
+            name='Consumer Binding',
+            template=template,
+            intent_profile=profile,
+        )
+        context_group = create_test_routing_intent_context_group(
+            name='Peering Group',
+            organization=organization,
+        )
+        profile.context_groups.add(context_group)
+        binding.context_groups.add(context_group)
+        create_test_routing_intent_context_criterion(
+            name='Exchange Tag',
+            context_group=context_group,
+            criterion_type=rpki_models.RoutingIntentContextCriterionType.TAG,
+            match_value='ix',
+        )
+
+        serializer = api_serializers.RoutingIntentContextGroupSerializer(context_group, context={'request': None})
+
+        self.assertEqual(serializer.data['criteria_details'][0]['target'], 'ix')
+        self.assertEqual(serializer.data['intent_profile_details'][0]['name'], 'Consumer Profile')
+        self.assertEqual(serializer.data['template_binding_details'][0]['name'], 'Consumer Binding')
+
+    def test_binding_serializer_exposes_context_group_details(self):
+        organization = create_test_organization(
+            org_id='binding-context-serializer-org',
+            name='Binding Context Serializer Org',
+        )
+        profile = create_test_routing_intent_profile(
+            name='Binding Profile',
+            organization=organization,
+        )
+        template = create_test_routing_intent_template(
+            name='Binding Template',
+            organization=organization,
+        )
+        binding = create_test_routing_intent_template_binding(
+            name='Binding Serializer',
+            template=template,
+            intent_profile=profile,
+        )
+        context_group = create_test_routing_intent_context_group(
+            name='Access Group',
+            organization=organization,
+            priority=25,
+        )
+        binding.context_groups.add(context_group)
+
+        serializer = api_serializers.RoutingIntentTemplateBindingSerializer(binding, context={'request': None})
+
+        self.assertEqual(serializer.data['context_group_details'][0]['name'], 'Access Group')
+        self.assertEqual(serializer.data['context_group_details'][0]['priority'], 25)
 
 
 class RpkiProviderAccountSerializerTestCase(TestCase):

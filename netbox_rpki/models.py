@@ -175,6 +175,30 @@ class RoutingIntentExceptionEffectMode(models.TextChoices):
     TEMPORARY_REPLACEMENT = "temporary_replacement", "Temporary Replacement"
 
 
+class RoutingIntentContextType(models.TextChoices):
+    SERVICE = "service", "Service"
+    PROVIDER_EDGE = "provider_edge", "Provider Edge"
+    TRANSIT = "transit", "Transit"
+    IX = "ix", "Internet Exchange"
+    CUSTOMER = "customer", "Customer"
+    BACKBONE = "backbone", "Backbone"
+    OTHER = "other", "Other"
+
+
+class RoutingIntentContextCriterionType(models.TextChoices):
+    TENANT = "tenant", "Tenant"
+    VRF = "vrf", "VRF"
+    SITE = "site", "Site"
+    REGION = "region", "Region"
+    ROLE = "role", "Prefix Role"
+    TAG = "tag", "Tag"
+    CUSTOM_FIELD = "custom_field", "Custom Field"
+    PROVIDER_ACCOUNT = "provider_account", "Provider Account"
+    CIRCUIT = "circuit", "Circuit"
+    CIRCUIT_PROVIDER = "circuit_provider", "Circuit Provider"
+    EXCHANGE = "exchange", "Exchange"
+
+
 class BulkIntentTargetMode(models.TextChoices):
     PROFILES = "profiles", "Profiles"
     BINDINGS = "bindings", "Bindings"
@@ -454,6 +478,20 @@ class ASPAChangePlanItemSemantic(models.TextChoices):
     ADD_PROVIDER = "add_provider", "Add Provider"
     REMOVE_PROVIDER = "remove_provider", "Remove Provider"
     RESHAPE = "reshape", "Reshape"
+
+
+class PublicationState(models.TextChoices):
+    DRAFT = "draft", "Draft"
+    AWAITING_SECONDARY_APPROVAL = "awaiting_secondary_approval", "Awaiting Secondary Approval"
+    APPROVED_PENDING_APPLY = "approved_pending_apply", "Approved — Pending Apply"
+    APPLY_IN_PROGRESS = "apply_in_progress", "Apply In Progress"
+    APPLY_FAILED = "apply_failed", "Apply Failed"
+    APPLIED_AWAITING_VERIFICATION = "applied_awaiting_verification", "Applied — Awaiting Verification"
+    VERIFIED = "verified", "Verified"
+    VERIFIED_WITH_DRIFT = "verified_with_drift", "Verified With Drift"
+    VERIFICATION_FAILED = "verification_failed", "Verification Failed"
+    ROLLED_BACK = "rolled_back", "Rolled Back"
+    SUPERSEDED = "superseded", "Superseded"
 
 
 def validate_maintenance_window_bounds(*, start_at, end_at):
@@ -1735,6 +1773,11 @@ class RoutingIntentProfile(JobsMixin, NamedRpkiStandardModel):
         choices=DefaultMaxLengthPolicy.choices,
         default=DefaultMaxLengthPolicy.EXACT,
     )
+    context_groups = models.ManyToManyField(
+        to='RoutingIntentContextGroup',
+        related_name='intent_profiles',
+        blank=True,
+    )
     allow_as0 = models.BooleanField(default=False)
     enabled = models.BooleanField(default=True)
 
@@ -1819,6 +1862,176 @@ class RoutingIntentRule(NamedRpkiStandardModel):
 
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:routingintentrule", args=[self.pk])
+
+
+class RoutingIntentContextGroup(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='routing_intent_context_groups'
+    )
+    context_type = models.CharField(
+        max_length=32,
+        choices=RoutingIntentContextType.choices,
+        default=RoutingIntentContextType.SERVICE,
+    )
+    description = models.TextField(blank=True)
+    priority = models.PositiveIntegerField(default=100)
+    enabled = models.BooleanField(default=True)
+    summary_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("organization", "priority", "name")
+        constraints = (
+            models.UniqueConstraint(
+                fields=("organization", "name"),
+                name="netbox_rpki_routingintentcontextgroup_org_name_unique",
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:routingintentcontextgroup", args=[self.pk])
+
+
+class RoutingIntentContextCriterion(NamedRpkiStandardModel):
+    context_group = models.ForeignKey(
+        to='RoutingIntentContextGroup',
+        on_delete=models.PROTECT,
+        related_name='criteria'
+    )
+    criterion_type = models.CharField(
+        max_length=32,
+        choices=RoutingIntentContextCriterionType.choices,
+    )
+    match_tenant = models.ForeignKey(
+        to='tenancy.Tenant',
+        on_delete=models.PROTECT,
+        related_name='routing_intent_context_criteria',
+        blank=True,
+        null=True
+    )
+    match_vrf = models.ForeignKey(
+        to='ipam.VRF',
+        on_delete=models.PROTECT,
+        related_name='routing_intent_context_criteria',
+        blank=True,
+        null=True
+    )
+    match_site = models.ForeignKey(
+        to='dcim.Site',
+        on_delete=models.PROTECT,
+        related_name='routing_intent_context_criteria',
+        blank=True,
+        null=True
+    )
+    match_region = models.ForeignKey(
+        to='dcim.Region',
+        on_delete=models.PROTECT,
+        related_name='routing_intent_context_criteria',
+        blank=True,
+        null=True
+    )
+    match_provider_account = models.ForeignKey(
+        to='RpkiProviderAccount',
+        on_delete=models.PROTECT,
+        related_name='routing_intent_context_criteria',
+        blank=True,
+        null=True
+    )
+    match_circuit = models.ForeignKey(
+        to='circuits.Circuit',
+        on_delete=models.PROTECT,
+        related_name='routing_intent_context_criteria',
+        blank=True,
+        null=True
+    )
+    match_provider = models.ForeignKey(
+        to='circuits.Provider',
+        on_delete=models.PROTECT,
+        related_name='routing_intent_context_criteria',
+        blank=True,
+        null=True
+    )
+    match_value = models.CharField(max_length=255, blank=True)
+    enabled = models.BooleanField(default=True)
+    weight = models.PositiveIntegerField(default=100)
+
+    class Meta:
+        ordering = ("context_group", "weight", "name")
+        constraints = (
+            models.UniqueConstraint(
+                fields=("context_group", "name"),
+                name="netbox_rpki_routingintentcontextcriterion_group_name_unique",
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:routingintentcontextcriterion", args=[self.pk])
+
+    def clean(self):
+        super().clean()
+
+        required_field_by_type = {
+            RoutingIntentContextCriterionType.TENANT: 'match_tenant',
+            RoutingIntentContextCriterionType.VRF: 'match_vrf',
+            RoutingIntentContextCriterionType.SITE: 'match_site',
+            RoutingIntentContextCriterionType.REGION: 'match_region',
+            RoutingIntentContextCriterionType.ROLE: 'match_value',
+            RoutingIntentContextCriterionType.TAG: 'match_value',
+            RoutingIntentContextCriterionType.CUSTOM_FIELD: 'match_value',
+            RoutingIntentContextCriterionType.PROVIDER_ACCOUNT: 'match_provider_account',
+            RoutingIntentContextCriterionType.CIRCUIT: 'match_circuit',
+            RoutingIntentContextCriterionType.CIRCUIT_PROVIDER: 'match_provider',
+            RoutingIntentContextCriterionType.EXCHANGE: 'match_value',
+        }
+        if self.criterion_type not in required_field_by_type:
+            if not self.criterion_type:
+                raise ValidationError({'criterion_type': ['This field is required.']})
+            raise ValidationError({'criterion_type': ['Select a valid choice.']})
+        required_field = required_field_by_type[self.criterion_type]
+        populated_fields = {
+            'match_tenant': self.match_tenant_id,
+            'match_vrf': self.match_vrf_id,
+            'match_site': self.match_site_id,
+            'match_region': self.match_region_id,
+            'match_provider_account': self.match_provider_account_id,
+            'match_circuit': self.match_circuit_id,
+            'match_provider': self.match_provider_id,
+            'match_value': self.match_value,
+        }
+
+        if populated_fields[required_field] in (None, ''):
+            raise ValidationError({required_field: [f'{required_field} is required for criterion type {self.criterion_type}.']})
+
+        invalid_fields = [
+            field_name
+            for field_name, value in populated_fields.items()
+            if field_name != required_field and value not in (None, '')
+        ]
+        if invalid_fields:
+            raise ValidationError({
+                required_field: [
+                    'Criterion type {criterion_type} must not set unrelated match fields: {fields}.'.format(
+                        criterion_type=self.criterion_type,
+                        fields=', '.join(sorted(invalid_fields)),
+                    )
+                ]
+            })
+
+        if (
+            self.match_provider_account_id is not None
+            and self.context_group_id is not None
+            and self.match_provider_account.organization_id != self.context_group.organization_id
+        ):
+            raise ValidationError({
+                'match_provider_account': ['Provider account organization must match the context group organization.']
+            })
 
 
 class ROAIntentOverride(NamedRpkiStandardModel):
@@ -2038,6 +2251,11 @@ class RoutingIntentTemplateBinding(NamedRpkiStandardModel):
     max_length_value = models.PositiveSmallIntegerField(blank=True, null=True)
     prefix_selector_query = models.TextField(blank=True)
     asn_selector_query = models.TextField(blank=True)
+    context_groups = models.ManyToManyField(
+        to='RoutingIntentContextGroup',
+        related_name='template_bindings',
+        blank=True,
+    )
     state = models.CharField(
         max_length=32,
         choices=RoutingIntentTemplateBindingState.choices,
@@ -2208,11 +2426,67 @@ class BulkIntentRun(NamedRpkiStandardModel):
     completed_at = models.DateTimeField(blank=True, null=True)
     summary_json = models.JSONField(default=dict, blank=True)
 
+    # Governance metadata
+    requires_secondary_approval = models.BooleanField(default=False)
+    ticket_reference = models.CharField(max_length=200, blank=True)
+    change_reference = models.CharField(max_length=200, blank=True)
+    maintenance_window_start = models.DateTimeField(blank=True, null=True)
+    maintenance_window_end = models.DateTimeField(blank=True, null=True)
+    approved_at = models.DateTimeField(blank=True, null=True)
+    approved_by = models.CharField(max_length=150, blank=True)
+    secondary_approved_at = models.DateTimeField(blank=True, null=True)
+    secondary_approved_by = models.CharField(max_length=150, blank=True)
+    requested_by = models.CharField(max_length=150, blank=True)
+
     class Meta:
         ordering = ("-started_at", "name")
+        constraints = (
+            models.CheckConstraint(
+                condition=(
+                    models.Q(maintenance_window_start__isnull=True)
+                    | models.Q(maintenance_window_end__isnull=True)
+                    | models.Q(maintenance_window_end__gte=models.F('maintenance_window_start'))
+                ),
+                name='netbox_rpki_bulkintentrun_valid_maintenance_window',
+            ),
+        )
 
     def __str__(self):
         return self.name
+
+    def clean(self):
+        super().clean()
+        validate_maintenance_window_bounds(
+            start_at=self.maintenance_window_start,
+            end_at=self.maintenance_window_end,
+        )
+        if self.pk:
+            try:
+                original = type(self).objects.get(pk=self.pk)
+            except type(self).DoesNotExist:
+                original = None
+            if (
+                original is not None
+                and original.status != ValidationRunStatus.PENDING
+                and original.requires_secondary_approval != self.requires_secondary_approval
+            ):
+                raise ValidationError({
+                    'requires_secondary_approval': (
+                        'Cannot change dual-approval requirement after the run has left PENDING status.'
+                    )
+                })
+
+    @property
+    def has_governance_metadata(self) -> bool:
+        return any(
+            (
+                self.ticket_reference,
+                self.change_reference,
+                self.maintenance_window_start,
+                self.approved_at,
+                self.requested_by,
+            )
+        )
 
 
 class BulkIntentRunScopeResult(NamedRpkiStandardModel):
@@ -2427,6 +2701,7 @@ class ROAIntent(NamedRpkiStandardModel):
         default=ROAIntentExposureState.ELIGIBLE_NOT_ADVERTISED,
     )
     explanation = models.TextField(blank=True)
+    summary_json = models.JSONField(default=dict, blank=True)
 
     class Meta:
         ordering = ("name",)

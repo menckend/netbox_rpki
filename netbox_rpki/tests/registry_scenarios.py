@@ -67,6 +67,8 @@ from netbox_rpki.tests.utils import (
     create_test_imported_parent_link,
     create_test_imported_child_link,
     create_test_imported_resource_entitlement,
+    create_test_lifecycle_health_event,
+    create_test_lifecycle_health_hook,
     create_test_lifecycle_health_policy,
     create_test_imported_publication_point,
     create_test_imported_signed_object,
@@ -88,6 +90,8 @@ from netbox_rpki.tests.utils import (
     create_test_roa_validation_simulation_result,
     create_test_roa_validation_simulation_run,
     create_test_router_certificate,
+    create_test_routing_intent_context_criterion,
+    create_test_routing_intent_context_group,
     create_test_routing_intent_exception,
     create_test_rsc,
     create_test_rsc_file_hash,
@@ -544,6 +548,8 @@ def _register_scenario_builders() -> None:
             "certificateprefix": build_certificate_prefix_form_data,
             "certificateasn": build_certificate_asn_form_data,
             "routingintenttemplate": build_routing_intent_template_form_data,
+            "routingintentcontextgroup": build_routing_intent_context_group_form_data,
+            "routingintentcontextcriterion": build_routing_intent_context_criterion_form_data,
             "routingintenttemplaterule": build_routing_intent_template_rule_form_data,
             "routingintenttemplatebinding": build_routing_intent_template_binding_form_data,
             "routingintentexception": build_routing_intent_exception_form_data,
@@ -576,6 +582,12 @@ def _register_scenario_builders() -> None:
             "routingintenttemplate": lambda: build_routing_intent_template_instance(
                 unique_token("routing-intent-template-instance")
             ),
+            "routingintentcontextgroup": lambda: build_routing_intent_context_group_instance(
+                unique_token("routing-intent-context-group-instance")
+            ),
+            "routingintentcontextcriterion": lambda: build_routing_intent_context_criterion_instance(
+                unique_token("routing-intent-context-criterion-instance")
+            ),
             "routingintenttemplaterule": lambda: build_routing_intent_template_rule_instance(
                 unique_token("routing-intent-template-rule-instance")
             ),
@@ -584,6 +596,9 @@ def _register_scenario_builders() -> None:
             ),
             "routingintentexception": lambda: build_routing_intent_exception_instance(
                 unique_token("routing-intent-exception-instance")
+            ),
+            "lifecyclehealthevent": lambda: build_lifecycle_health_event_instance(
+                unique_token("lifecycle-health-event-instance")
             ),
             "bulkintentrun": lambda: create_test_bulk_intent_run(name=f"Bulk Intent Run {unique_token('bulk-intent-run')}"),
             "bulkintentrunscoperesult": lambda: create_test_bulk_intent_run_scope_result(
@@ -797,6 +812,33 @@ def build_routing_intent_template_form_data() -> dict[str, object]:
     }
 
 
+def build_routing_intent_context_group_form_data() -> dict[str, object]:
+    organization = create_unique_organization("routing-intent-context-group-form-org")
+    return {
+        "name": f"Routing Intent Context Group {unique_token('routing-intent-context-group-form')}",
+        "organization": organization.pk,
+        "context_type": rpki_models.RoutingIntentContextType.SERVICE,
+        "priority": 100,
+        "enabled": True,
+    }
+
+
+def build_routing_intent_context_criterion_form_data() -> dict[str, object]:
+    organization = create_unique_organization("routing-intent-context-criterion-form-org")
+    context_group = create_test_routing_intent_context_group(
+        name=f"Routing Intent Context Group {unique_token('routing-intent-context-criterion-form-group')}",
+        organization=organization,
+    )
+    return {
+        "name": f"Routing Intent Context Criterion {unique_token('routing-intent-context-criterion-form')}",
+        "context_group": context_group.pk,
+        "criterion_type": rpki_models.RoutingIntentContextCriterionType.TAG,
+        "match_value": "edge",
+        "weight": 100,
+        "enabled": True,
+    }
+
+
 def build_routing_intent_template_rule_form_data() -> dict[str, object]:
     organization = create_unique_organization("routing-intent-template-rule-form-org")
     template = create_test_routing_intent_template(
@@ -894,6 +936,36 @@ def build_routing_intent_template_instance(token: str, variant: int = 0):
     )
 
 
+def build_routing_intent_context_group_instance(token: str, variant: int = 0):
+    organization = create_unique_organization(f"{token}-org")
+    return create_test_routing_intent_context_group(
+        name=f"Routing Intent Context Group {token}",
+        organization=organization,
+        priority=100 + variant,
+        enabled=variant % 2 == 0,
+    )
+
+
+def build_routing_intent_context_criterion_instance(token: str, variant: int = 0):
+    organization = create_unique_organization(f"{token}-org")
+    context_group = create_test_routing_intent_context_group(
+        name=f"Routing Intent Context Group {token}",
+        organization=organization,
+    )
+    return create_test_routing_intent_context_criterion(
+        name=f"Routing Intent Context Criterion {token}",
+        context_group=context_group,
+        criterion_type=(
+            rpki_models.RoutingIntentContextCriterionType.TAG
+            if variant % 2 == 0
+            else rpki_models.RoutingIntentContextCriterionType.ROLE
+        ),
+        match_value='edge' if variant % 2 == 0 else 'customer',
+        weight=100 + variant,
+        enabled=variant % 2 == 0,
+    )
+
+
 def build_routing_intent_template_rule_instance(token: str, variant: int = 0):
     organization = create_unique_organization(f"{token}-org")
     template = create_test_routing_intent_template(
@@ -943,6 +1015,32 @@ def build_routing_intent_exception_instance(token: str, variant: int = 0):
             else rpki_models.RoutingIntentExceptionEffectMode.FORCE_INCLUDE
         ),
         enabled=variant % 2 == 0,
+    )
+
+
+def build_lifecycle_health_event_instance(token: str, variant: int = 0):
+    organization = create_unique_organization(f"{token}-org")
+    provider_account = create_test_provider_account(
+        organization=organization,
+        name=f"Provider Account {token}",
+        org_handle=f"ORG-{token.upper()}",
+    )
+    policy = create_test_lifecycle_health_policy(
+        name=f"Lifecycle Health Policy {token}",
+        organization=organization,
+        provider_account=provider_account if variant % 2 == 0 else None,
+    )
+    hook = create_test_lifecycle_health_hook(
+        name=f"Lifecycle Health Hook {token}",
+        policy=policy,
+        provider_account=provider_account if policy.provider_account_id is not None else None,
+    )
+    return create_test_lifecycle_health_event(
+        name=f"Lifecycle Health Event {token}",
+        hook=hook,
+        policy=policy,
+        provider_account=provider_account if hook.provider_account_id is not None else None,
+        dedupe_key=f"lifecycle-health-event-{token}",
     )
 
 

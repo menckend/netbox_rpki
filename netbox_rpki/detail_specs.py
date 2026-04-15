@@ -11,6 +11,15 @@ from django.utils import timezone
 
 from netbox_rpki import models
 from netbox_rpki.services import build_roa_change_plan_lint_posture
+from netbox_rpki.services.publication_state import (
+    derive_change_plan_publication_state,
+    derive_rollback_bundle_publication_state,
+)
+from netbox_rpki.services.governance_summary import (
+    build_change_plan_governance_summary,
+    build_rollback_bundle_governance_summary,
+)
+from netbox_rpki.services.governance_rollup import build_organization_governance_rollup
 from netbox_rpki.services.provider_sync_evidence import (
     get_certificate_observation_evidence_summary,
     get_certificate_observation_is_ambiguous,
@@ -111,6 +120,12 @@ ORGANIZATION_DETAIL_SPEC = DetailSpec(
             value=lambda obj: obj.ext_url,
             kind='url',
         ),
+        DetailFieldSpec(
+            label='Governance Roll-up',
+            value=lambda obj: get_pretty_json(build_organization_governance_rollup(obj)),
+            kind='code',
+            empty_text='None',
+        ),
     ),
     actions=(
         DetailActionSpec(
@@ -192,6 +207,15 @@ def get_binding_asn_selector(binding: models.RoutingIntentTemplateBinding) -> st
 
 def get_binding_summary(binding: models.RoutingIntentTemplateBinding) -> str | None:
     return get_pretty_json(binding.summary_json)
+
+
+def get_context_group_summary(context_group: models.RoutingIntentContextGroup) -> str | None:
+    return get_pretty_json(context_group.summary_json)
+
+
+def get_context_group_labels(context_group: models.RoutingIntentContextGroup) -> str | None:
+    labels = [criterion.name for criterion in context_group.criteria.filter(enabled=True).order_by('weight', 'name')]
+    return ', '.join(labels) or None
 
 
 def get_exception_lifecycle_status(exception: models.RoutingIntentException) -> str:
@@ -302,6 +326,16 @@ def get_plan_summary(plan: models.ROAChangePlan) -> str | None:
     if isinstance(plan, models.ROAChangePlan):
         summary['lint_posture'] = build_roa_change_plan_lint_posture(plan)
     return get_pretty_json(summary)
+
+
+def get_change_plan_publication_state(plan) -> str | None:
+    result = derive_change_plan_publication_state(plan)
+    return get_pretty_json(result.as_dict())
+
+
+def get_rollback_bundle_publication_state(bundle) -> str | None:
+    result = derive_rollback_bundle_publication_state(bundle)
+    return get_pretty_json(result.as_dict())
 
 
 def get_lint_run_summary(run: models.ROALintRun) -> str | None:
@@ -947,6 +981,12 @@ ROA_CHANGE_PLAN_DETAIL_SPEC = DetailSpec(
             empty_text='None',
         ),
         DetailFieldSpec(label='Status', value=lambda obj: obj.status),
+        DetailFieldSpec(
+            label='Publication State',
+            value=get_change_plan_publication_state,
+            kind='code',
+            empty_text='None',
+        ),
         DetailFieldSpec(label='Requires Secondary Approval', value=lambda obj: obj.requires_secondary_approval),
         DetailFieldSpec(label='Ticket Reference', value=lambda obj: obj.ticket_reference, empty_text='None'),
         DetailFieldSpec(label='Change Reference', value=lambda obj: obj.change_reference, empty_text='None'),
@@ -1145,6 +1185,12 @@ ROA_CHANGE_PLAN_ROLLBACK_BUNDLE_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(label='Organization', value=lambda obj: obj.organization, kind='link'),
         DetailFieldSpec(label='Source Plan', value=lambda obj: obj.source_plan, kind='link'),
         DetailFieldSpec(label='Status', value=lambda obj: obj.status),
+        DetailFieldSpec(
+            label='Publication State',
+            value=get_rollback_bundle_publication_state,
+            kind='code',
+            empty_text='None',
+        ),
         DetailFieldSpec(label='Item Count', value=lambda obj: obj.item_count),
         DetailFieldSpec(label='Ticket Reference', value=lambda obj: obj.ticket_reference, empty_text='None'),
         DetailFieldSpec(label='Change Reference', value=lambda obj: obj.change_reference, empty_text='None'),
@@ -1188,6 +1234,12 @@ ASPA_CHANGE_PLAN_ROLLBACK_BUNDLE_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(label='Organization', value=lambda obj: obj.organization, kind='link'),
         DetailFieldSpec(label='Source Plan', value=lambda obj: obj.source_plan, kind='link'),
         DetailFieldSpec(label='Status', value=lambda obj: obj.status),
+        DetailFieldSpec(
+            label='Publication State',
+            value=get_rollback_bundle_publication_state,
+            kind='code',
+            empty_text='None',
+        ),
         DetailFieldSpec(label='Item Count', value=lambda obj: obj.item_count),
         DetailFieldSpec(label='Ticket Reference', value=lambda obj: obj.ticket_reference, empty_text='None'),
         DetailFieldSpec(label='Change Reference', value=lambda obj: obj.change_reference, empty_text='None'),
@@ -1235,6 +1287,7 @@ ROUTING_INTENT_PROFILE_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(label='Selector Mode', value=lambda obj: obj.selector_mode),
         DetailFieldSpec(label='Default Max Length Policy', value=lambda obj: obj.default_max_length_policy),
         DetailFieldSpec(label='Allow AS0', value=lambda obj: obj.allow_as0),
+        DetailFieldSpec(label='Context Groups', value=get_related_count('context_groups')),
         DetailFieldSpec(label='Rules', value=get_related_count('rules')),
         DetailFieldSpec(label='Overrides', value=get_related_count('overrides')),
         DetailFieldSpec(label='Derived Intents', value=get_related_count('roa_intents')),
@@ -1269,6 +1322,11 @@ ROUTING_INTENT_PROFILE_DETAIL_SPEC = DetailSpec(
     ),
     side_tables=(
         DetailTableSpec(
+            title='Context Groups',
+            table_class_name='RoutingIntentContextGroupTable',
+            queryset=lambda obj: obj.context_groups.all(),
+        ),
+        DetailTableSpec(
             title='Routing Intent Rules',
             table_class_name='RoutingIntentRuleTable',
             queryset=lambda obj: obj.rules.all(),
@@ -1294,6 +1352,46 @@ ROUTING_INTENT_PROFILE_DETAIL_SPEC = DetailSpec(
             title='Derived ROA Intents',
             table_class_name='ROAIntentTable',
             queryset=lambda obj: obj.roa_intents.all(),
+        ),
+    ),
+)
+
+
+ROUTING_INTENT_CONTEXT_GROUP_DETAIL_SPEC = DetailSpec(
+    model=models.RoutingIntentContextGroup,
+    list_url_name='plugins:netbox_rpki:routingintentcontextgroup_list',
+    breadcrumb_label='Routing Intent Context Groups',
+    card_title='Routing Intent Context Group',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Organization', value=lambda obj: obj.organization, kind='link'),
+        DetailFieldSpec(label='Context Type', value=lambda obj: obj.context_type),
+        DetailFieldSpec(label='Priority', value=lambda obj: obj.priority),
+        DetailFieldSpec(label='Enabled', value=lambda obj: obj.enabled),
+        DetailFieldSpec(label='Criteria', value=get_related_count('criteria')),
+        DetailFieldSpec(label='Profiles', value=get_related_count('intent_profiles')),
+        DetailFieldSpec(label='Template Bindings', value=get_related_count('template_bindings')),
+        DetailFieldSpec(label='Description', value=lambda obj: obj.description or None, kind='code', empty_text='None'),
+        DetailFieldSpec(label='Enabled Criteria', value=get_context_group_labels, empty_text='None'),
+        DetailFieldSpec(label='Summary', value=get_context_group_summary, kind='code', empty_text='None'),
+    ),
+    side_tables=(
+        DetailTableSpec(
+            title='Context Criteria',
+            table_class_name='RoutingIntentContextCriterionTable',
+            queryset=lambda obj: obj.criteria.all(),
+        ),
+    ),
+    bottom_tables=(
+        DetailTableSpec(
+            title='Intent Profiles',
+            table_class_name='RoutingIntentProfileTable',
+            queryset=lambda obj: obj.intent_profiles.all(),
+        ),
+        DetailTableSpec(
+            title='Template Bindings',
+            table_class_name='RoutingIntentTemplateBindingTable',
+            queryset=lambda obj: obj.template_bindings.all(),
         ),
     ),
 )
@@ -1354,6 +1452,7 @@ ROUTING_INTENT_TEMPLATE_BINDING_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(label='Max Length Mode', value=lambda obj: obj.max_length_mode),
         DetailFieldSpec(label='Max Length Value', value=lambda obj: obj.max_length_value, empty_text='None'),
         DetailFieldSpec(label='Last Compiled Fingerprint', value=lambda obj: obj.last_compiled_fingerprint or None, empty_text='None'),
+        DetailFieldSpec(label='Context Groups', value=get_related_count('context_groups')),
         DetailFieldSpec(
             label='Prefix Selector Query',
             value=get_binding_prefix_selector,
@@ -1388,6 +1487,11 @@ ROUTING_INTENT_TEMPLATE_BINDING_DETAIL_SPEC = DetailSpec(
     ),
     side_tables=(
         DetailTableSpec(
+            title='Context Groups',
+            table_class_name='RoutingIntentContextGroupTable',
+            queryset=lambda obj: obj.context_groups.all(),
+        ),
+        DetailTableSpec(
             title='Binding Exceptions',
             table_class_name='RoutingIntentExceptionTable',
             queryset=lambda obj: obj.exceptions.all(),
@@ -1412,6 +1516,16 @@ BULK_INTENT_RUN_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(label='Started At', value=lambda obj: obj.started_at, empty_text='None'),
         DetailFieldSpec(label='Completed At', value=lambda obj: obj.completed_at, empty_text='None'),
         DetailFieldSpec(label='Summary', value=get_bulk_run_summary, kind='code', empty_text='None'),
+        DetailFieldSpec(label='Requested By', value=lambda obj: obj.requested_by or None, empty_text='None'),
+        DetailFieldSpec(label='Ticket Reference', value=lambda obj: obj.ticket_reference or None, empty_text='None'),
+        DetailFieldSpec(label='Change Reference', value=lambda obj: obj.change_reference or None, empty_text='None'),
+        DetailFieldSpec(label='Requires Secondary Approval', value=lambda obj: obj.requires_secondary_approval),
+        DetailFieldSpec(label='Approved At', value=lambda obj: obj.approved_at, empty_text='None'),
+        DetailFieldSpec(label='Approved By', value=lambda obj: obj.approved_by or None, empty_text='None'),
+        DetailFieldSpec(label='Secondary Approved At', value=lambda obj: obj.secondary_approved_at, empty_text='None'),
+        DetailFieldSpec(label='Secondary Approved By', value=lambda obj: obj.secondary_approved_by or None, empty_text='None'),
+        DetailFieldSpec(label='Maintenance Window Start', value=lambda obj: obj.maintenance_window_start, empty_text='None'),
+        DetailFieldSpec(label='Maintenance Window End', value=lambda obj: obj.maintenance_window_end, empty_text='None'),
     ),
     bottom_tables=(
         DetailTableSpec(
@@ -1710,6 +1824,12 @@ ASPA_CHANGE_PLAN_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(label='Provider Account', value=lambda obj: obj.provider_account, kind='link', empty_text='None'),
         DetailFieldSpec(label='Provider Snapshot', value=lambda obj: obj.provider_snapshot, kind='link', empty_text='None'),
         DetailFieldSpec(label='Status', value=lambda obj: obj.status),
+        DetailFieldSpec(
+            label='Publication State',
+            value=get_change_plan_publication_state,
+            kind='code',
+            empty_text='None',
+        ),
         DetailFieldSpec(label='Requires Secondary Approval', value=lambda obj: obj.requires_secondary_approval),
         DetailFieldSpec(label='Ticket Reference', value=lambda obj: obj.ticket_reference, empty_text='None'),
         DetailFieldSpec(label='Change Reference', value=lambda obj: obj.change_reference, empty_text='None'),
@@ -2749,6 +2869,7 @@ DETAIL_SPEC_BY_MODEL = {
     models.ProviderSnapshotDiff: PROVIDER_SNAPSHOT_DIFF_DETAIL_SPEC,
     models.ProviderSnapshotDiffItem: PROVIDER_SNAPSHOT_DIFF_ITEM_DETAIL_SPEC,
     models.RoutingIntentProfile: ROUTING_INTENT_PROFILE_DETAIL_SPEC,
+    models.RoutingIntentContextGroup: ROUTING_INTENT_CONTEXT_GROUP_DETAIL_SPEC,
     models.RoutingIntentTemplateBinding: ROUTING_INTENT_TEMPLATE_BINDING_DETAIL_SPEC,
     models.RoutingIntentException: ROUTING_INTENT_EXCEPTION_DETAIL_SPEC,
     models.BulkIntentRun: BULK_INTENT_RUN_DETAIL_SPEC,

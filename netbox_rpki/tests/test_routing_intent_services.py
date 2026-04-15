@@ -44,6 +44,8 @@ from netbox_rpki.tests.utils import (
     create_test_roa_prefix,
     create_test_routing_intent_profile,
     create_test_routing_intent_exception,
+    create_test_routing_intent_context_criterion,
+    create_test_routing_intent_context_group,
     create_test_routing_intent_rule,
     create_test_routing_intent_template,
     create_test_routing_intent_template_binding,
@@ -253,6 +255,107 @@ class RoutingIntentServiceTestCase(TestCase):
         self.assertEqual(primary_intent.origin_asn, replacement_origin)
         self.assertEqual(primary_intent.max_length, 27)
         self.assertIn('Applied exception Temporary Replacement (temporary_replacement).', primary_intent.explanation)
+
+    def test_profile_context_groups_narrow_candidate_prefixes_and_persist_summary(self):
+        self.primary_prefix.custom_field_data = {'service_context': 'edge'}
+        self.primary_prefix.save()
+        self.secondary_prefix.custom_field_data = {'service_context': 'core'}
+        self.secondary_prefix.save()
+
+        context_group = create_test_routing_intent_context_group(
+            name='Edge Services',
+            organization=self.organization,
+        )
+        create_test_routing_intent_context_criterion(
+            name='Edge Service Context',
+            context_group=context_group,
+            criterion_type=rpki_models.RoutingIntentContextCriterionType.CUSTOM_FIELD,
+            match_value='service_context=edge',
+        )
+        self.profile.context_groups.add(context_group)
+
+        derivation_run = derive_roa_intents(self.profile)
+        primary_intent = derivation_run.roa_intents.get(prefix=self.primary_prefix)
+        secondary_intent = derivation_run.roa_intents.get(prefix=self.secondary_prefix)
+
+        self.assertEqual(primary_intent.derived_state, rpki_models.ROAIntentDerivedState.ACTIVE)
+        self.assertEqual(secondary_intent.derived_state, rpki_models.ROAIntentDerivedState.SUPPRESSED)
+        self.assertIn('Matched profile context groups: Edge Services.', primary_intent.explanation)
+        self.assertEqual(primary_intent.summary_json['profile_context_group_names'], ['Edge Services'])
+        self.assertEqual(secondary_intent.summary_json['profile_context_group_names'], [])
+
+    def test_binding_context_groups_gate_binding_application(self):
+        self.primary_prefix.custom_field_data = {'service_context': 'edge'}
+        self.primary_prefix.save()
+        self.secondary_prefix.custom_field_data = {'service_context': 'core'}
+        self.secondary_prefix.save()
+
+        profile = create_test_routing_intent_profile(
+            name='Binding Context Profile',
+            organization=self.organization,
+            status=rpki_models.RoutingIntentProfileStatus.ACTIVE,
+            selector_mode=rpki_models.RoutingIntentSelectorMode.FILTERED,
+            prefix_selector_query=f'tenant_id={self.tenant.pk}',
+            asn_selector_query='id=999999999',
+        )
+        template = create_test_routing_intent_template(
+            name='Binding Context Template',
+            organization=self.organization,
+            status=rpki_models.RoutingIntentTemplateStatus.ACTIVE,
+        )
+        create_test_routing_intent_template_rule(
+            name='Binding Context Include',
+            template=template,
+            action=rpki_models.RoutingIntentRuleAction.INCLUDE,
+        )
+        binding = create_test_routing_intent_template_binding(
+            name='Edge Binding',
+            template=template,
+            intent_profile=profile,
+            origin_asn_override=self.origin_asn,
+        )
+        context_group = create_test_routing_intent_context_group(
+            name='Binding Edge Group',
+            organization=self.organization,
+        )
+        create_test_routing_intent_context_criterion(
+            name='Binding Edge Criterion',
+            context_group=context_group,
+            criterion_type=rpki_models.RoutingIntentContextCriterionType.CUSTOM_FIELD,
+            match_value='service_context=edge',
+        )
+        binding.context_groups.add(context_group)
+
+        derivation_run = derive_roa_intents(profile)
+        primary_intent = derivation_run.roa_intents.get(prefix=self.primary_prefix)
+        secondary_intent = derivation_run.roa_intents.get(prefix=self.secondary_prefix)
+
+        self.assertEqual(primary_intent.origin_asn, self.origin_asn)
+        self.assertEqual(secondary_intent.derived_state, rpki_models.ROAIntentDerivedState.SHADOWED)
+        self.assertIn('Binding context groups: Binding Edge Group.', primary_intent.explanation)
+        self.assertIn('Skipped template binding Edge Binding because no binding context group matched.', secondary_intent.explanation)
+        self.assertEqual(primary_intent.summary_json['binding_context_groups'][str(binding.pk)], ['Binding Edge Group'])
+
+    def test_unresolved_provider_account_context_emits_warning(self):
+        provider_account = create_test_provider_account(
+            organization=self.organization,
+            org_handle='ORG-INTENT',
+        )
+        context_group = create_test_routing_intent_context_group(
+            name='Provider Scoped',
+            organization=self.organization,
+        )
+        create_test_routing_intent_context_criterion(
+            name='Provider Criterion',
+            context_group=context_group,
+            criterion_type=rpki_models.RoutingIntentContextCriterionType.PROVIDER_ACCOUNT,
+            match_provider_account=provider_account,
+        )
+        self.profile.context_groups.add(context_group)
+
+        derivation_run = derive_roa_intents(self.profile)
+
+        self.assertIn('Unable to resolve provider-account context', derivation_run.error_summary)
 
     def test_expired_exception_does_not_apply(self):
         create_test_routing_intent_exception(

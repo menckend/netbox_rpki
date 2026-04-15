@@ -13,6 +13,11 @@ from netbox_rpki.services.lifecycle_reporting import (
     build_diff_publication_health_rollup,
     build_snapshot_publication_health_rollup,
 )
+from netbox_rpki.services.governance_rollup import build_organization_governance_rollup
+from netbox_rpki.services.publication_state import (
+    derive_change_plan_publication_state,
+    derive_rollback_bundle_publication_state,
+)
 from netbox_rpki.services.provider_sync_contract import (
     build_provider_account_rollup,
     build_provider_snapshot_diff_rollup,
@@ -32,7 +37,6 @@ from netbox_rpki.services.provider_sync_evidence import (
     get_signed_object_publication_linkage_status,
 )
 
-
 def _simulation_run_summary(run):
     summary = dict(run.summary_json or {})
     summary.setdefault('plan_fingerprint', run.plan_fingerprint)
@@ -47,6 +51,24 @@ def _simulation_result_details(result):
     details.setdefault('approval_impact', result.approval_impact)
     details.setdefault('scenario_type', result.scenario_type)
     return details
+
+
+def _brief_related_object(obj, *, extra_fields=None):
+    payload = {
+        'id': obj.pk,
+        'name': str(obj),
+        'object_url': obj.get_absolute_url(),
+    }
+    for field_name in extra_fields or ():
+        payload[field_name] = getattr(obj, field_name)
+    return payload
+
+
+def _brief_related_collection(queryset, *, extra_fields=None):
+    return [
+        _brief_related_object(obj, extra_fields=extra_fields)
+        for obj in queryset
+    ]
 
 
 def build_serializer_class(spec: ObjectSpec) -> type[NetBoxModelSerializer]:
@@ -76,6 +98,22 @@ for object_spec in API_OBJECT_SPECS:
     serializer_class = build_serializer_class(object_spec)
     SERIALIZER_CLASS_MAP[object_spec.registry_key] = serializer_class
     globals()[object_spec.api.serializer_name] = serializer_class
+
+
+class OrganizationSerializer(SERIALIZER_CLASS_MAP['organization']):
+    governance_rollup = serializers.SerializerMethodField()
+
+    class Meta(SERIALIZER_CLASS_MAP['organization'].Meta):
+        fields = SERIALIZER_CLASS_MAP['organization'].Meta.fields + (
+            'governance_rollup',
+        )
+
+    def get_governance_rollup(self, obj):
+        return build_organization_governance_rollup(obj)
+
+
+SERIALIZER_CLASS_MAP['organization'] = OrganizationSerializer
+globals()['OrganizationSerializer'] = OrganizationSerializer
 
 
 class RpkiProviderAccountSerializer(SERIALIZER_CLASS_MAP['rpkiprovideraccount']):
@@ -209,6 +247,7 @@ globals()['ROAReconciliationRunSerializer'] = ROAReconciliationRunSerializer
 
 
 class ROAChangePlanSerializer(SERIALIZER_CLASS_MAP['roachangeplan']):
+    publication_state = serializers.SerializerMethodField()
     latest_lint_run = serializers.SerializerMethodField()
     latest_lint_summary = serializers.SerializerMethodField()
     latest_lint_posture = serializers.SerializerMethodField()
@@ -219,6 +258,7 @@ class ROAChangePlanSerializer(SERIALIZER_CLASS_MAP['roachangeplan']):
 
     class Meta(SERIALIZER_CLASS_MAP['roachangeplan'].Meta):
         fields = SERIALIZER_CLASS_MAP['roachangeplan'].Meta.fields + (
+            'publication_state',
             'latest_lint_run',
             'latest_lint_summary',
             'latest_lint_posture',
@@ -278,9 +318,60 @@ class ROAChangePlanSerializer(SERIALIZER_CLASS_MAP['roachangeplan']):
             'scenario_type_counts': summary.get('scenario_type_counts') or {},
         }
 
+    def get_publication_state(self, obj):
+        return derive_change_plan_publication_state(obj).as_dict()
+
 
 SERIALIZER_CLASS_MAP['roachangeplan'] = ROAChangePlanSerializer
 globals()['ROAChangePlanSerializer'] = ROAChangePlanSerializer
+
+
+class ASPAChangePlanSerializer(SERIALIZER_CLASS_MAP['aspachangeplan']):
+    publication_state = serializers.SerializerMethodField()
+
+    class Meta(SERIALIZER_CLASS_MAP['aspachangeplan'].Meta):
+        fields = SERIALIZER_CLASS_MAP['aspachangeplan'].Meta.fields + (
+            'publication_state',
+        )
+
+    def get_publication_state(self, obj):
+        return derive_change_plan_publication_state(obj).as_dict()
+
+
+SERIALIZER_CLASS_MAP['aspachangeplan'] = ASPAChangePlanSerializer
+globals()['ASPAChangePlanSerializer'] = ASPAChangePlanSerializer
+
+
+class ROAChangePlanRollbackBundleSerializer(SERIALIZER_CLASS_MAP['roachangeplanrollbackbundle']):
+    publication_state = serializers.SerializerMethodField()
+
+    class Meta(SERIALIZER_CLASS_MAP['roachangeplanrollbackbundle'].Meta):
+        fields = SERIALIZER_CLASS_MAP['roachangeplanrollbackbundle'].Meta.fields + (
+            'publication_state',
+        )
+
+    def get_publication_state(self, obj):
+        return derive_rollback_bundle_publication_state(obj).as_dict()
+
+
+SERIALIZER_CLASS_MAP['roachangeplanrollbackbundle'] = ROAChangePlanRollbackBundleSerializer
+globals()['ROAChangePlanRollbackBundleSerializer'] = ROAChangePlanRollbackBundleSerializer
+
+
+class ASPAChangePlanRollbackBundleSerializer(SERIALIZER_CLASS_MAP['aspachangeplanrollbackbundle']):
+    publication_state = serializers.SerializerMethodField()
+
+    class Meta(SERIALIZER_CLASS_MAP['aspachangeplanrollbackbundle'].Meta):
+        fields = SERIALIZER_CLASS_MAP['aspachangeplanrollbackbundle'].Meta.fields + (
+            'publication_state',
+        )
+
+    def get_publication_state(self, obj):
+        return derive_rollback_bundle_publication_state(obj).as_dict()
+
+
+SERIALIZER_CLASS_MAP['aspachangeplanrollbackbundle'] = ASPAChangePlanRollbackBundleSerializer
+globals()['ASPAChangePlanRollbackBundleSerializer'] = ASPAChangePlanRollbackBundleSerializer
 
 
 class ROAValidationSimulationRunSerializer(SERIALIZER_CLASS_MAP['roavalidationsimulationrun']):
@@ -600,6 +691,112 @@ class ProviderSnapshotDiffSerializer(SERIALIZER_CLASS_MAP['providersnapshotdiff'
 
 SERIALIZER_CLASS_MAP['providersnapshotdiff'] = ProviderSnapshotDiffSerializer
 globals()['ProviderSnapshotDiffSerializer'] = ProviderSnapshotDiffSerializer
+
+
+class RoutingIntentProfileSerializer(SERIALIZER_CLASS_MAP['routingintentprofile']):
+    context_group_details = serializers.SerializerMethodField()
+
+    class Meta(SERIALIZER_CLASS_MAP['routingintentprofile'].Meta):
+        fields = SERIALIZER_CLASS_MAP['routingintentprofile'].Meta.fields + (
+            'context_group_details',
+        )
+
+    def get_context_group_details(self, obj):
+        queryset = obj.context_groups.order_by('priority', 'name', 'pk')
+        return _brief_related_collection(
+            queryset,
+            extra_fields=('context_type', 'priority', 'enabled'),
+        )
+
+
+SERIALIZER_CLASS_MAP['routingintentprofile'] = RoutingIntentProfileSerializer
+globals()['RoutingIntentProfileSerializer'] = RoutingIntentProfileSerializer
+
+
+class RoutingIntentContextGroupSerializer(SERIALIZER_CLASS_MAP['routingintentcontextgroup']):
+    criteria_details = serializers.SerializerMethodField()
+    intent_profile_details = serializers.SerializerMethodField()
+    template_binding_details = serializers.SerializerMethodField()
+
+    class Meta(SERIALIZER_CLASS_MAP['routingintentcontextgroup'].Meta):
+        fields = SERIALIZER_CLASS_MAP['routingintentcontextgroup'].Meta.fields + (
+            'criteria_details',
+            'intent_profile_details',
+            'template_binding_details',
+        )
+
+    def get_criteria_details(self, obj):
+        queryset = obj.criteria.select_related(
+            'match_tenant',
+            'match_vrf',
+            'match_site',
+            'match_region',
+            'match_provider_account',
+            'match_circuit',
+            'match_provider',
+        ).order_by('weight', 'name', 'pk')
+        details = []
+        for criterion in queryset:
+            target = (
+                criterion.match_tenant
+                or criterion.match_vrf
+                or criterion.match_site
+                or criterion.match_region
+                or criterion.match_provider_account
+                or criterion.match_circuit
+                or criterion.match_provider
+                or criterion.match_value
+                or None
+            )
+            details.append(
+                {
+                    'id': criterion.pk,
+                    'name': str(criterion),
+                    'object_url': criterion.get_absolute_url(),
+                    'criterion_type': criterion.criterion_type,
+                    'target': str(target) if target is not None else None,
+                    'enabled': criterion.enabled,
+                    'weight': criterion.weight,
+                }
+            )
+        return details
+
+    def get_intent_profile_details(self, obj):
+        queryset = obj.intent_profiles.select_related('organization').order_by('name', 'pk')
+        return _brief_related_collection(queryset, extra_fields=('status', 'enabled'))
+
+    def get_template_binding_details(self, obj):
+        queryset = obj.template_bindings.select_related('template', 'intent_profile').order_by(
+            'intent_profile__name',
+            'binding_priority',
+            'name',
+            'pk',
+        )
+        return _brief_related_collection(queryset, extra_fields=('state', 'binding_priority', 'enabled'))
+
+
+SERIALIZER_CLASS_MAP['routingintentcontextgroup'] = RoutingIntentContextGroupSerializer
+globals()['RoutingIntentContextGroupSerializer'] = RoutingIntentContextGroupSerializer
+
+
+class RoutingIntentTemplateBindingSerializer(SERIALIZER_CLASS_MAP['routingintenttemplatebinding']):
+    context_group_details = serializers.SerializerMethodField()
+
+    class Meta(SERIALIZER_CLASS_MAP['routingintenttemplatebinding'].Meta):
+        fields = SERIALIZER_CLASS_MAP['routingintenttemplatebinding'].Meta.fields + (
+            'context_group_details',
+        )
+
+    def get_context_group_details(self, obj):
+        queryset = obj.context_groups.order_by('priority', 'name', 'pk')
+        return _brief_related_collection(
+            queryset,
+            extra_fields=('context_type', 'priority', 'enabled'),
+        )
+
+
+SERIALIZER_CLASS_MAP['routingintenttemplatebinding'] = RoutingIntentTemplateBindingSerializer
+globals()['RoutingIntentTemplateBindingSerializer'] = RoutingIntentTemplateBindingSerializer
 
 
 class ImportedPublicationPointSerializer(SERIALIZER_CLASS_MAP['importedpublicationpoint']):

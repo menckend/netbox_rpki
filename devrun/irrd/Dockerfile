@@ -21,7 +21,8 @@ RUN apt-get update \
 RUN groupadd --system irrd \
     && useradd --system --gid irrd --home-dir /var/lib/irrd --create-home irrd
 
-RUN python -m pip install --no-cache-dir irrd==4.5.2
+RUN python -m pip install --no-cache-dir irrd==4.5.2 \
+    && python -m pip install --no-cache-dir --force-reinstall --no-deps bcrypt==4.0.1
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod 755 /entrypoint.sh
