@@ -156,11 +156,11 @@ The closure order should stay dependency-driven rather than milestone-driven.
 
 - [Implementation Plan](netbox_rpki_priority9_lifecycle_publication_health_plan.md)
 
-- **Status:** Partially complete
-- **End state:** operators can see expiry risk, stale publication, sync age, provider health, and publication freshness from a single reporting layer
-- **Current state:** the operations dashboard and computed provider sync-health surfaces now cover stale or failed provider syncs, ROA and certificate expiry windows, stale routing-intent bindings, expiring routing-intent exceptions with visible lifecycle state, and recent bulk intent-run health
-- **Remaining gap:** exports, thresholds, alerting hooks, publication-observation data, and richer timeline or diff-oriented reporting
-- **Closure order:** alongside provider-sync maturation, because reporting quality depends on sync and publication evidence quality
+- **Status:** Functionally complete
+- **End state:** operators can see expiry risk, stale publication, sync age, provider health, publication freshness, exportable reporting, and alerting hooks from a single reporting layer
+- **Current state:** the lifecycle reporting stack now covers policy-driven thresholds, provider lifecycle summaries, publication-observation health, provider-account timelines, publication-diff timelines, dashboard and provider-account detail drill-downs, explicit UI and API export surfaces for JSON and CSV, and lifecycle-health alerting hooks with event audit records
+- **Remaining gap:** follow-on refinement only, such as additional presentation polish or new reporting dimensions that build on the completed contract rather than replacing it
+- **Closure order:** closed; future work should be incremental and should reuse the shared lifecycle reporting and export contracts
 
 ### Priority 10: IRR Coordination
 
