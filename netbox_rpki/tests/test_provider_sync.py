@@ -14,6 +14,8 @@ from netbox_rpki.services.lifecycle_reporting import (
     LIFECYCLE_HEALTH_SUMMARY_SCHEMA_VERSION,
     build_provider_lifecycle_health_summary,
     resolve_lifecycle_health_policy,
+    build_snapshot_publication_health_rollup,
+    build_diff_publication_health_rollup,
 )
 from netbox_rpki.services.provider_sync_contract import (
     PROVIDER_SYNC_FAMILY_ORDER,
@@ -137,6 +139,14 @@ class ProviderSyncServiceTestCase(TestCase):
         self.assertEqual(snapshot.summary_json['latest_snapshot_name'], snapshot.name)
         self.assertEqual(snapshot.summary_json['latest_snapshot_status'], rpki_models.ValidationRunStatus.COMPLETED)
         self.assertEqual(snapshot.summary_json['latest_snapshot_completed_at'], sync_run.completed_at.isoformat())
+        self.assertEqual(
+            snapshot.summary_json['publication_health'],
+            build_snapshot_publication_health_rollup(snapshot),
+        )
+        self.assertEqual(
+            self.provider_account.last_sync_summary_json['publication_health'],
+            snapshot.summary_json['publication_health'],
+        )
         rollup = build_provider_account_rollup(self.provider_account, summary=snapshot.summary_json)
         snapshot_rollup = build_provider_snapshot_rollup(snapshot)
         self.assertEqual(rollup['latest_snapshot_id'], snapshot.pk)
@@ -510,6 +520,14 @@ class ProviderSyncServiceTestCase(TestCase):
             snapshot.summary_json['families'][rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY]['records_imported'],
             3,
         )
+        self.assertEqual(snapshot.summary_json['publication_health']['summary_schema_version'], 1)
+        self.assertEqual(snapshot.summary_json['publication_health']['publication_points']['total'], 1)
+        self.assertEqual(snapshot.summary_json['publication_health']['signed_objects']['total'], 2)
+        self.assertEqual(snapshot.summary_json['publication_health']['certificate_observations']['total'], 3)
+        self.assertEqual(
+            provider_account.last_sync_summary_json['publication_health'],
+            snapshot.summary_json['publication_health'],
+        )
         self.assertEqual(snapshot.summary_json['family_rollups'][0]['freshness_status'], 'fresh')
         self.assertEqual(snapshot.summary_json['family_rollups'][0]['churn_status'], 'steady')
         self.assertIn(
@@ -624,6 +642,8 @@ class ProviderSyncServiceTestCase(TestCase):
         self.assertEqual(second_snapshot.summary_json['latest_snapshot_name'], second_snapshot.name)
         self.assertEqual(second_snapshot.summary_json['latest_diff_id'], snapshot_diff.pk)
         self.assertEqual(second_snapshot.summary_json['latest_diff_name'], snapshot_diff.name)
+        self.assertEqual(first_snapshot.summary_json['publication_health'], second_snapshot.summary_json['publication_health'])
+        self.assertEqual(provider_account.last_sync_summary_json['publication_health'], second_snapshot.summary_json['publication_health'])
         diff_rollup = build_provider_snapshot_diff_rollup(snapshot_diff)
         self.assertEqual(diff_rollup['item_count'], 0)
         self.assertEqual(diff_rollup['family_count'], len(diff_rollup['family_rollups']))
@@ -776,6 +796,13 @@ class ProviderSyncServiceTestCase(TestCase):
                 rpki_models.ProviderSyncFamily.SIGNED_OBJECT_INVENTORY,
             }.issubset(set(snapshot_diff.items.values_list('object_family', flat=True)))
         )
+        publication_diff_rollup = build_diff_publication_health_rollup(snapshot_diff)
+        self.assertEqual(publication_diff_rollup['summary_schema_version'], 1)
+        self.assertEqual(
+            publication_diff_rollup['publication_family_counts'][rpki_models.ProviderSyncFamily.PUBLICATION_POINTS]['changed'],
+            1,
+        )
+        self.assertGreaterEqual(publication_diff_rollup['publication_changes'], 1)
         self.assertEqual(second_snapshot.summary_json['latest_snapshot_id'], second_snapshot.pk)
         self.assertEqual(second_snapshot.summary_json['latest_snapshot_name'], second_snapshot.name)
         self.assertEqual(second_snapshot.summary_json['latest_diff_id'], snapshot_diff.pk)
@@ -1043,9 +1070,14 @@ class ProviderSyncServiceTestCase(TestCase):
         self.assertEqual(rollup['snapshot_name'], latest_snapshot.name)
         self.assertEqual(rollup['certificate_observations']['total'], 3)
         self.assertEqual(rollup['certificate_observations']['stale'], 1)
-        self.assertEqual(rollup['certificate_observations']['expiring_soon'], 1)
+        self.assertEqual(rollup['certificate_observations']['expiring_soon'], 2)
+        self.assertEqual(rollup['certificate_observations']['expired'], 0)
         self.assertEqual(rollup['publication_points']['total'], 3)
-        self.assertEqual(rollup['publication_points']['exchange_not_ok'], 1)
+        self.assertEqual(rollup['publication_points']['exchange_failed'], 1)
+        self.assertEqual(rollup['publication_points']['exchange_overdue'], 0)
+        self.assertEqual(rollup['publication_health']['summary_schema_version'], 1)
+        self.assertEqual(rollup['publication_health']['signed_objects']['total'], 0)
+        self.assertEqual(rollup['publication_health']['attention_item_count'], 13)
 
     def test_build_provider_account_pub_obs_rollup_returns_none_without_completed_snapshot(self):
         provider_account = create_test_provider_account(

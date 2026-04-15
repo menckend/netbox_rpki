@@ -8,7 +8,10 @@ from django.db.models import Count, Q
 from django.utils import timezone
 
 from netbox_rpki import models as rpki_models
-from netbox_rpki.services.lifecycle_reporting import build_provider_lifecycle_health_summary
+from netbox_rpki.services.lifecycle_reporting import (
+    build_provider_lifecycle_health_summary,
+    build_publication_health_rollup,
+)
 
 
 PROVIDER_SYNC_SUMMARY_SCHEMA_VERSION = 1
@@ -516,6 +519,7 @@ def build_provider_account_rollup(
         'latest_snapshot_completed_at': latest_snapshot_completed_at,
         'latest_diff_id': latest_diff_id,
         'latest_diff_name': latest_diff_name,
+        'publication_health': dict(summary.get('publication_health') or {}),
         'lifecycle_health_summary': build_provider_lifecycle_health_summary(
             provider_account,
             visible_snapshot_ids=visible_snapshot_ids,
@@ -527,59 +531,22 @@ def build_provider_account_rollup(
 def build_provider_account_pub_obs_rollup(
     provider_account: rpki_models.RpkiProviderAccount,
 ) -> dict[str, object] | None:
-    latest_snapshot = (
-        provider_account.snapshots
-        .filter(status=rpki_models.ValidationRunStatus.COMPLETED)
-        .order_by('-fetched_at', '-pk')
-        .first()
-    )
-    if latest_snapshot is None:
+    rollup = build_publication_health_rollup(provider_account)
+    if rollup is None:
         return None
 
-    now = timezone.now()
-    expiry_window = now + timedelta(days=30)
-    cert_counts = rpki_models.ImportedCertificateObservation.objects.filter(
-        provider_snapshot=latest_snapshot,
-    ).aggregate(
-        total=Count('pk'),
-        stale=Count('pk', filter=Q(is_stale=True)),
-        expiring_soon=Count(
-            'pk',
-            filter=Q(
-                is_stale=False,
-                not_after__isnull=False,
-                not_after__gt=now,
-                not_after__lte=expiry_window,
-            ),
-        ),
-    )
-    publication_point_counts = rpki_models.ImportedPublicationPoint.objects.filter(
-        provider_snapshot=latest_snapshot,
-    ).aggregate(
-        total=Count('pk'),
-        exchange_not_ok=Count(
-            'pk',
-            filter=(
-                Q(last_exchange_result__isnull=False)
-                & ~Q(last_exchange_result='')
-                & ~Q(last_exchange_result__iexact='success')
-            ),
-        ),
-    )
-
     return {
-        'snapshot_id': latest_snapshot.pk,
-        'snapshot_name': latest_snapshot.name,
-        'snapshot_fetched_at': _datetime_text(latest_snapshot.fetched_at),
+        'snapshot_id': rollup['snapshot_id'],
+        'snapshot_name': rollup['snapshot_name'],
+        'snapshot_fetched_at': rollup['snapshot_fetched_at'],
+        'snapshot_completed_at': rollup['snapshot_completed_at'],
+        'publication_health': dict(rollup['publication_health']),
+        'publication_points': dict(rollup['publication_points']),
+        'signed_objects': dict(rollup['signed_objects']),
         'certificate_observations': {
-            'total': int(cert_counts['total'] or 0),
-            'stale': int(cert_counts['stale'] or 0),
-            'expiring_soon': int(cert_counts['expiring_soon'] or 0),
+            **dict(rollup['certificate_observations']),
         },
-        'publication_points': {
-            'total': int(publication_point_counts['total'] or 0),
-            'exchange_not_ok': int(publication_point_counts['exchange_not_ok'] or 0),
-        },
+        'attention_item_count': int(rollup['attention_item_count']),
     }
 
 

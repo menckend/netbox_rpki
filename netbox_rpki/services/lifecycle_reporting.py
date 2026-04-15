@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Mapping
 from datetime import date, datetime, time, timedelta
 
@@ -7,9 +8,15 @@ from django.db.models import Count, Q
 from django.utils import timezone
 
 from netbox_rpki import models as rpki_models
+from netbox_rpki.services.provider_sync_evidence import (
+    build_certificate_observation_attention_summary,
+    build_publication_point_attention_summary,
+    build_signed_object_attention_summary,
+)
 
 
 LIFECYCLE_HEALTH_SUMMARY_SCHEMA_VERSION = 1
+PUBLICATION_HEALTH_SUMMARY_SCHEMA_VERSION = 1
 
 LIFECYCLE_HEALTH_DEFAULTS = {
     'sync_stale_after_minutes': 120,
@@ -20,6 +27,38 @@ LIFECYCLE_HEALTH_DEFAULTS = {
     'publication_stale_after_minutes': 180,
     'certificate_expired_grace_minutes': 0,
     'alert_repeat_after_minutes': 360,
+}
+
+PUBLICATION_HEALTH_EMPTY_SUMMARY = {
+    'summary_schema_version': PUBLICATION_HEALTH_SUMMARY_SCHEMA_VERSION,
+    'status': 'healthy',
+    'publication_points': {
+        'total': 0,
+        'stale': 0,
+        'exchange_failed': 0,
+        'exchange_overdue': 0,
+        'authored_linkage_missing': 0,
+        'attention_item_count': 0,
+    },
+    'signed_objects': {
+        'total': 0,
+        'stale': 0,
+        'authored_linkage_missing': 0,
+        'publication_linkage_missing': 0,
+        'by_type': {},
+        'attention_item_count': 0,
+    },
+    'certificate_observations': {
+        'total': 0,
+        'stale': 0,
+        'expiring_soon': 0,
+        'expired': 0,
+        'ambiguous': 0,
+        'publication_linkage_missing': 0,
+        'signed_object_linkage_missing': 0,
+        'attention_item_count': 0,
+    },
+    'attention_item_count': 0,
 }
 
 
@@ -37,6 +76,207 @@ def _sanitize_related_reference(value: object, *, visible_ids: set[object] | Non
     if value in visible_ids:
         return value
     return None
+
+
+def _copy_publication_health_summary(summary: Mapping[str, object] | None) -> dict[str, object] | None:
+    if not summary:
+        return None
+    return {
+        'summary_schema_version': int(summary.get('summary_schema_version', PUBLICATION_HEALTH_SUMMARY_SCHEMA_VERSION) or PUBLICATION_HEALTH_SUMMARY_SCHEMA_VERSION),
+        'status': summary.get('status', 'healthy'),
+        'publication_points': dict(summary.get('publication_points') or {}),
+        'signed_objects': dict(summary.get('signed_objects') or {}),
+        'certificate_observations': dict(summary.get('certificate_observations') or {}),
+        'attention_item_count': int(summary.get('attention_item_count', 0) or 0),
+    }
+
+
+def _empty_publication_health_summary() -> dict[str, object]:
+    return {
+        'summary_schema_version': PUBLICATION_HEALTH_SUMMARY_SCHEMA_VERSION,
+        'status': 'healthy',
+        'publication_points': dict(PUBLICATION_HEALTH_EMPTY_SUMMARY['publication_points']),
+        'signed_objects': dict(PUBLICATION_HEALTH_EMPTY_SUMMARY['signed_objects']),
+        'certificate_observations': dict(PUBLICATION_HEALTH_EMPTY_SUMMARY['certificate_observations']),
+        'attention_item_count': 0,
+    }
+
+
+def _latest_completed_snapshot(provider_account: rpki_models.RpkiProviderAccount) -> rpki_models.ProviderSnapshot | None:
+    return (
+        provider_account.snapshots
+        .filter(status=rpki_models.ValidationRunStatus.COMPLETED)
+        .order_by('-fetched_at', '-pk')
+        .first()
+    )
+
+
+def _aggregate_publication_health(snapshot: rpki_models.ProviderSnapshot, *, thresholds: Mapping[str, int], now) -> dict[str, object]:
+    publication_points_qs = rpki_models.ImportedPublicationPoint.objects.filter(provider_snapshot=snapshot)
+    signed_objects_qs = rpki_models.ImportedSignedObject.objects.filter(provider_snapshot=snapshot)
+    certificate_observations_qs = rpki_models.ImportedCertificateObservation.objects.filter(provider_snapshot=snapshot)
+
+    publication_points = {
+        'total': 0,
+        'stale': 0,
+        'exchange_failed': 0,
+        'exchange_overdue': 0,
+        'authored_linkage_missing': 0,
+        'attention_item_count': 0,
+    }
+    signed_objects = {
+        'total': 0,
+        'stale': 0,
+        'authored_linkage_missing': 0,
+        'publication_linkage_missing': 0,
+        'by_type': Counter(),
+        'attention_item_count': 0,
+    }
+    certificate_observations = {
+        'total': 0,
+        'stale': 0,
+        'expiring_soon': 0,
+        'expired': 0,
+        'ambiguous': 0,
+        'publication_linkage_missing': 0,
+        'signed_object_linkage_missing': 0,
+        'attention_item_count': 0,
+    }
+
+    for publication_point in publication_points_qs:
+        summary = build_publication_point_attention_summary(publication_point, now=now, thresholds=thresholds)
+        publication_points['total'] += 1
+        publication_points['stale'] += int(bool(summary['stale']))
+        publication_points['exchange_failed'] += int(bool(summary['exchange']['failed']))
+        publication_points['exchange_overdue'] += int(bool(summary['exchange']['overdue']))
+        publication_points['authored_linkage_missing'] += int(bool(summary['authored_linkage']['missing']))
+        publication_points['attention_item_count'] += int(summary['attention_count'])
+
+    for signed_object in signed_objects_qs:
+        summary = build_signed_object_attention_summary(signed_object)
+        signed_objects['total'] += 1
+        signed_objects['stale'] += int(bool(summary['stale']))
+        signed_objects['authored_linkage_missing'] += int(bool(summary['authored_linkage']['missing']))
+        signed_objects['publication_linkage_missing'] += int(bool(summary['publication_linkage']['missing']))
+        signed_objects['by_type'][summary['signed_object_type']] += 1
+        signed_objects['attention_item_count'] += int(summary['attention_count'])
+
+    for certificate_observation in certificate_observations_qs:
+        summary = build_certificate_observation_attention_summary(
+            certificate_observation,
+            now=now,
+            thresholds=thresholds,
+        )
+        certificate_observations['total'] += 1
+        certificate_observations['stale'] += int(bool(summary['stale']))
+        certificate_observations['expiring_soon'] += int(bool(summary['expiry']['expiring_soon']))
+        certificate_observations['expired'] += int(bool(summary['expiry']['expired']))
+        certificate_observations['ambiguous'] += int(bool(summary['evidence']['is_ambiguous']))
+        certificate_observations['publication_linkage_missing'] += int(bool(summary['publication_linkage']['missing']))
+        certificate_observations['signed_object_linkage_missing'] += int(bool(summary['signed_object_linkage']['missing']))
+        certificate_observations['attention_item_count'] += int(summary['attention_count'])
+
+    publication_health = {
+        'summary_schema_version': PUBLICATION_HEALTH_SUMMARY_SCHEMA_VERSION,
+        'status': 'attention',
+        'publication_points': publication_points,
+        'signed_objects': signed_objects,
+        'certificate_observations': certificate_observations,
+    }
+    publication_health['signed_objects']['by_type'] = dict(signed_objects['by_type'])
+    publication_health['attention_item_count'] = (
+        publication_points['attention_item_count']
+        + signed_objects['attention_item_count']
+        + certificate_observations['attention_item_count']
+    )
+    publication_health['status'] = 'healthy' if publication_health['attention_item_count'] == 0 else 'attention'
+    return publication_health
+
+
+def build_snapshot_publication_health_rollup(
+    snapshot: rpki_models.ProviderSnapshot,
+    *,
+    policy: rpki_models.LifecycleHealthPolicy | None = None,
+    now=None,
+) -> dict[str, object]:
+    persisted = _copy_publication_health_summary((snapshot.summary_json or {}).get('publication_health'))
+    if persisted is not None:
+        return persisted
+
+    now = now or timezone.now()
+    _, thresholds, _ = get_effective_lifecycle_thresholds(
+        organization=snapshot.organization,
+        provider_account=snapshot.provider_account,
+        policy=policy,
+    )
+    return _aggregate_publication_health(snapshot, thresholds=thresholds, now=now)
+
+
+def build_publication_health_rollup(
+    provider_account: rpki_models.RpkiProviderAccount,
+    *,
+    policy: rpki_models.LifecycleHealthPolicy | None = None,
+    now=None,
+) -> dict[str, object] | None:
+    latest_snapshot = _latest_completed_snapshot(provider_account)
+    if latest_snapshot is None:
+        return None
+
+    now = now or timezone.now()
+    publication_health = build_snapshot_publication_health_rollup(
+        latest_snapshot,
+        policy=policy,
+        now=now,
+    )
+    return {
+        'snapshot_id': latest_snapshot.pk,
+        'snapshot_name': latest_snapshot.name,
+        'snapshot_fetched_at': _datetime_text(latest_snapshot.fetched_at),
+        'snapshot_completed_at': _datetime_text(latest_snapshot.completed_at),
+        'publication_health': publication_health,
+        'publication_points': dict(publication_health['publication_points']),
+        'signed_objects': dict(publication_health['signed_objects']),
+        'certificate_observations': dict(publication_health['certificate_observations']),
+        'attention_item_count': int(publication_health['attention_item_count']),
+    }
+
+
+def build_diff_publication_health_rollup(
+    snapshot_diff: rpki_models.ProviderSnapshotDiff,
+) -> dict[str, object]:
+    families = (
+        rpki_models.ProviderSyncFamily.PUBLICATION_POINTS,
+        rpki_models.ProviderSyncFamily.SIGNED_OBJECT_INVENTORY,
+        rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY,
+    )
+    rows = snapshot_diff.items.filter(object_family__in=families)
+    family_counts: dict[str, dict[str, int]] = {
+        family: {'added': 0, 'removed': 0, 'changed': 0, 'stale': 0}
+        for family in families
+    }
+    totals = {'added': 0, 'removed': 0, 'changed': 0, 'stale': 0}
+    for row in rows:
+        family_summary = family_counts[row.object_family]
+        change_key = row.change_type.lower()
+        if change_key in family_summary:
+            family_summary[change_key] += 1
+            totals[change_key] += 1
+        if row.is_stale:
+            family_summary['stale'] += 1
+            totals['stale'] += 1
+
+    publication_change_count = totals['added'] + totals['removed'] + totals['changed']
+    return {
+        'summary_schema_version': PUBLICATION_HEALTH_SUMMARY_SCHEMA_VERSION,
+        'status': 'attention' if publication_change_count or totals['stale'] else 'healthy',
+        'publication_family_counts': family_counts,
+        'records_added': totals['added'],
+        'records_removed': totals['removed'],
+        'records_changed': totals['changed'],
+        'records_stale': totals['stale'],
+        'publication_changes': publication_change_count,
+        'item_count': rows.count(),
+    }
 
 
 def resolve_lifecycle_health_policy(
@@ -209,91 +449,78 @@ def _build_publication_section(
     provider_account: rpki_models.RpkiProviderAccount,
     *,
     thresholds: Mapping[str, int],
+    now,
 ) -> dict[str, object]:
-    latest_snapshot = (
-        provider_account.snapshots
-        .filter(status=rpki_models.ValidationRunStatus.COMPLETED)
-        .order_by('-fetched_at', '-pk')
-        .first()
-    )
+    latest_snapshot = _latest_completed_snapshot(provider_account)
     if latest_snapshot is None:
         return {
             'available': False,
             'snapshot_id': None,
             'snapshot_name': '',
             'snapshot_fetched_at': '',
+            'publication_health': _empty_publication_health_summary(),
             'publication_points': {
                 'total': 0,
-                'exchange_not_ok': 0,
+                'exchange_failed': 0,
+                'exchange_overdue': 0,
                 'stale': 0,
+                'authored_linkage_missing': 0,
                 'attention_threshold': int(thresholds['publication_exchange_failure_threshold']),
+            },
+            'signed_objects': {
+                'total': 0,
+                'stale': 0,
+                'authored_linkage_missing': 0,
+                'publication_linkage_missing': 0,
+                'by_type': {},
             },
             'certificate_observations': {
                 'total': 0,
                 'stale': 0,
                 'expiring_soon': 0,
+                'expired': 0,
+                'ambiguous': 0,
+                'publication_linkage_missing': 0,
+                'signed_object_linkage_missing': 0,
             },
             'attention_count': 0,
             'placeholder': True,
         }
 
-    now = timezone.now()
-    expiry_window = now + timedelta(days=int(thresholds['certificate_expiry_warning_days']))
-    certificate_counts = rpki_models.ImportedCertificateObservation.objects.filter(
-        provider_snapshot=latest_snapshot,
-    ).aggregate(
-        total=Count('pk'),
-        stale=Count('pk', filter=Q(is_stale=True)),
-        expiring_soon=Count(
-            'pk',
-            filter=Q(
-                is_stale=False,
-                not_after__isnull=False,
-                not_after__gt=now,
-                not_after__lte=expiry_window,
-            ),
-        ),
-    )
-    publication_point_counts = rpki_models.ImportedPublicationPoint.objects.filter(
-        provider_snapshot=latest_snapshot,
-    ).aggregate(
-        total=Count('pk'),
-        stale=Count('pk', filter=Q(is_stale=True)),
-        exchange_not_ok=Count(
-            'pk',
-            filter=(
-                Q(last_exchange_result__isnull=False)
-                & ~Q(last_exchange_result='')
-                & ~Q(last_exchange_result__iexact='success')
-            ),
-        ),
-    )
-    attention_count = 0
-    if int(publication_point_counts['exchange_not_ok'] or 0) >= int(thresholds['publication_exchange_failure_threshold']):
-        attention_count += 1
-    if int(publication_point_counts['stale'] or 0) > 0:
-        attention_count += 1
-    if int(certificate_counts['stale'] or 0) > 0:
-        attention_count += 1
+    publication_health = build_snapshot_publication_health_rollup(latest_snapshot, now=now)
 
     return {
         'available': True,
         'snapshot_id': latest_snapshot.pk,
         'snapshot_name': latest_snapshot.name,
         'snapshot_fetched_at': _datetime_text(latest_snapshot.fetched_at),
+        'publication_health': publication_health,
         'publication_points': {
-            'total': int(publication_point_counts['total'] or 0),
-            'stale': int(publication_point_counts['stale'] or 0),
-            'exchange_not_ok': int(publication_point_counts['exchange_not_ok'] or 0),
+            'total': int(publication_health['publication_points']['total']),
+            'stale': int(publication_health['publication_points']['stale']),
+            'exchange_failed': int(publication_health['publication_points']['exchange_failed']),
+            'exchange_overdue': int(publication_health['publication_points']['exchange_overdue']),
+            'authored_linkage_missing': int(publication_health['publication_points']['authored_linkage_missing']),
             'attention_threshold': int(thresholds['publication_exchange_failure_threshold']),
             'stale_after_minutes': int(thresholds['publication_stale_after_minutes']),
         },
-        'certificate_observations': {
-            'total': int(certificate_counts['total'] or 0),
-            'stale': int(certificate_counts['stale'] or 0),
-            'expiring_soon': int(certificate_counts['expiring_soon'] or 0),
+        'signed_objects': {
+            'total': int(publication_health['signed_objects']['total']),
+            'stale': int(publication_health['signed_objects']['stale']),
+            'authored_linkage_missing': int(publication_health['signed_objects']['authored_linkage_missing']),
+            'publication_linkage_missing': int(publication_health['signed_objects']['publication_linkage_missing']),
+            'by_type': dict(publication_health['signed_objects']['by_type']),
         },
-        'attention_count': attention_count,
+        'certificate_observations': {
+            'total': int(publication_health['certificate_observations']['total']),
+            'stale': int(publication_health['certificate_observations']['stale']),
+            'expiring_soon': int(publication_health['certificate_observations']['expiring_soon']),
+            'expired': int(publication_health['certificate_observations']['expired']),
+            'ambiguous': int(publication_health['certificate_observations']['ambiguous']),
+            'publication_linkage_missing': int(publication_health['certificate_observations']['publication_linkage_missing']),
+            'signed_object_linkage_missing': int(publication_health['certificate_observations']['signed_object_linkage_missing']),
+        },
+        'attention_count': int(publication_health['attention_item_count']),
         'placeholder': True,
     }
 
@@ -329,13 +556,16 @@ def _build_attention_summary(summary: Mapping[str, object]) -> dict[str, object]
     sync_section = dict(summary.get('sync') or {})
     expiry_section = dict(summary.get('expiry') or {})
     publication_section = dict(summary.get('publication') or {})
+    publication_health = dict(summary.get('publication_health') or {})
     diff_section = dict(summary.get('diff') or {})
 
     expiry_attention_count = sum(
         int((expiry_section.get(key) or {}).get('count', 0) or 0)
         for key in ('roas', 'certificates', 'exceptions')
     )
-    publication_attention_count = int(publication_section.get('attention_count', 0) or 0)
+    publication_attention_count = int(
+        publication_health.get('attention_item_count', publication_section.get('attention_count', 0)) or 0
+    )
     diff_attention_count = sum(
         int(diff_section.get(key, 0) or 0)
         for key in ('records_added', 'records_removed', 'records_changed')
@@ -384,13 +614,28 @@ def build_provider_lifecycle_health_summary(
         'policy': _serialize_lifecycle_policy(resolved_policy, thresholds, source),
         'sync': _compute_sync_state(provider_account, thresholds=thresholds, now=now),
         'expiry': _count_expiring_objects(provider_account, thresholds=thresholds, now=now),
-        'publication': _build_publication_section(provider_account, thresholds=thresholds),
         'diff': _build_diff_section(
             provider_account,
             visible_snapshot_ids=visible_snapshot_ids,
             visible_diff_ids=visible_diff_ids,
         ),
     }
+    publication_rollup = build_publication_health_rollup(
+        provider_account,
+        policy=resolved_policy,
+        now=now,
+    )
+    publication_health = (
+        dict(publication_rollup['publication_health'])
+        if publication_rollup is not None
+        else _empty_publication_health_summary()
+    )
+    summary['publication_health'] = publication_health
+    summary['publication'] = _build_publication_section(
+        provider_account,
+        thresholds=thresholds,
+        now=now,
+    )
     summary['attention_summary'] = _build_attention_summary(summary)
     return summary
 

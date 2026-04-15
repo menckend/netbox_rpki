@@ -15,6 +15,7 @@ from ipam.models.asns import ASN
 from ipam.models.ip import Prefix
 
 from netbox_rpki import models as rpki_models
+from netbox_rpki.services.lifecycle_reporting import build_snapshot_publication_health_rollup
 from . import provider_sync_krill
 from .provider_sync_contract import build_family_summary, build_provider_sync_summary, family_capability_extra
 from .provider_sync_diff import build_latest_provider_snapshot_diff
@@ -1327,6 +1328,7 @@ def sync_provider_account(
         summary['latest_snapshot_name'] = snapshot.name
         summary['latest_snapshot_completed_at'] = completed_at.isoformat()
         summary['latest_snapshot_status'] = rpki_models.ValidationRunStatus.COMPLETED
+        summary['publication_health'] = build_snapshot_publication_health_rollup(snapshot)
         snapshot.status = rpki_models.ValidationRunStatus.COMPLETED
         snapshot.completed_at = completed_at
         snapshot.summary_json = summary
