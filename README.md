@@ -450,7 +450,7 @@ The plugin declares NetBox compatibility for the 4.5.x release line. Verificatio
 | 4.5.0 | 3.12 | GA | Release-gated developer install verified end-to-end. |
 | 4.5.7 | 3.12 | GA | Release-gated developer install verified end-to-end. |
 | 4.5.x | 3.12 | Beta | Supported release line, but exact patch combinations other than the GA anchors are not release-gated. |
-| 4.5.x | 3.13 - 3.14 | Best effort | Allowed for operator evaluation and tracked in the compatibility contract CI lane, but not release-gated. |
+| 4.5.x | 3.13 - 3.14 | Best effort | Allowed for operator evaluation and covered by the compatibility contract tests, but not release-gated. |
 | < 4.5 or >= 4.6 | any | Unsupported | Outside the plugin compatibility window. |
 | 4.5.x | < 3.12 or > 3.14 | Unsupported | Outside the documented Python range. |
 
