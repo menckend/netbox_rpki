@@ -16,7 +16,9 @@ from netbox_rpki.services.provider_sync_evidence import (
 
 
 LIFECYCLE_HEALTH_SUMMARY_SCHEMA_VERSION = 1
+LIFECYCLE_TIMELINE_SCHEMA_VERSION = 1
 PUBLICATION_HEALTH_SUMMARY_SCHEMA_VERSION = 1
+PUBLICATION_DIFF_TIMELINE_SCHEMA_VERSION = 1
 
 LIFECYCLE_HEALTH_DEFAULTS = {
     'sync_stale_after_minutes': 120,
@@ -76,6 +78,10 @@ def _sanitize_related_reference(value: object, *, visible_ids: set[object] | Non
     if value in visible_ids:
         return value
     return None
+
+
+def _summary_int(summary: Mapping[str, object], key: str) -> int:
+    return int(summary.get(key, 0) or 0)
 
 
 def _copy_publication_health_summary(summary: Mapping[str, object] | None) -> dict[str, object] | None:
@@ -276,6 +282,185 @@ def build_diff_publication_health_rollup(
         'records_stale': totals['stale'],
         'publication_changes': publication_change_count,
         'item_count': rows.count(),
+    }
+
+
+def _snapshot_timeline_status(
+    *,
+    snapshot: rpki_models.ProviderSnapshot,
+    summary: Mapping[str, object],
+    publication_health: Mapping[str, object],
+    latest_diff_publication_rollup: Mapping[str, object] | None,
+) -> str:
+    status = str(summary.get('status') or snapshot.status or '').lower()
+    if status == str(rpki_models.ValidationRunStatus.FAILED):
+        return 'critical'
+
+    attention_count = (
+        _summary_int(summary, 'records_stale')
+        + _summary_int(summary, 'records_failed')
+        + int(publication_health.get('attention_item_count', 0) or 0)
+    )
+    if latest_diff_publication_rollup is not None:
+        attention_count += int(latest_diff_publication_rollup.get('publication_changes', 0) or 0)
+        attention_count += int(latest_diff_publication_rollup.get('records_stale', 0) or 0)
+
+    return 'healthy' if attention_count == 0 else 'warning'
+
+
+def _build_snapshot_timeline_row(
+    snapshot: rpki_models.ProviderSnapshot,
+    *,
+    visible_diff_ids: set[object] | None = None,
+) -> dict[str, object]:
+    summary = dict(snapshot.summary_json or {})
+    publication_health = _copy_publication_health_summary(summary.get('publication_health'))
+    if publication_health is None:
+        publication_health = build_snapshot_publication_health_rollup(snapshot)
+
+    latest_diff_id = _sanitize_related_reference(summary.get('latest_diff_id'), visible_ids=visible_diff_ids)
+    latest_diff = None
+    latest_diff_publication_rollup: dict[str, object] | None = None
+    latest_diff_summary: dict[str, object] = {}
+
+    if latest_diff_id is not None:
+        latest_diff = (
+            snapshot.diffs_as_comparison
+            .select_related('base_snapshot', 'comparison_snapshot')
+            .filter(pk=latest_diff_id)
+            .first()
+        )
+    elif visible_diff_ids is None:
+        latest_diff = (
+            snapshot.diffs_as_comparison
+            .select_related('base_snapshot', 'comparison_snapshot')
+            .order_by('-compared_at', '-created', '-pk')
+            .first()
+        )
+    else:
+        latest_diff = (
+            snapshot.diffs_as_comparison
+            .select_related('base_snapshot', 'comparison_snapshot')
+            .filter(pk__in=visible_diff_ids)
+            .order_by('-compared_at', '-created', '-pk')
+            .first()
+        )
+
+    if latest_diff is not None:
+        latest_diff_summary = dict(latest_diff.summary_json or {})
+        latest_diff_publication_rollup = build_diff_publication_health_rollup(latest_diff)
+        latest_diff_id = latest_diff.pk
+    latest_diff_totals = dict(latest_diff_summary.get('totals') or {})
+    records_added = _summary_int(latest_diff_totals, 'records_added')
+    records_removed = _summary_int(latest_diff_totals, 'records_removed')
+    records_changed = _summary_int(latest_diff_totals, 'records_changed')
+    publication_changes = int((latest_diff_publication_rollup or {}).get('publication_changes', 0) or 0)
+    records_stale = int((latest_diff_publication_rollup or {}).get('records_stale', 0) or 0)
+
+    return {
+        'timeline_schema_version': LIFECYCLE_TIMELINE_SCHEMA_VERSION,
+        'snapshot_id': snapshot.pk,
+        'snapshot_name': snapshot.name,
+        'snapshot_url': snapshot.get_absolute_url(),
+        'snapshot_status': snapshot.status,
+        'fetched_at': _datetime_text(snapshot.fetched_at),
+        'completed_at': _datetime_text(snapshot.completed_at),
+        'lifecycle_status': _snapshot_timeline_status(
+            snapshot=snapshot,
+            summary=summary,
+            publication_health=publication_health,
+            latest_diff_publication_rollup=latest_diff_publication_rollup,
+        ),
+        'publication_status': 'healthy' if int(publication_health.get('attention_item_count', 0) or 0) == 0 else 'attention',
+        'publication_attention_count': int(publication_health.get('attention_item_count', 0) or 0),
+        'latest_diff_id': latest_diff_id,
+        'latest_diff_name': latest_diff.name if latest_diff is not None else '',
+        'latest_diff_url': latest_diff.get_absolute_url() if latest_diff is not None else '',
+        'records_added': records_added,
+        'records_removed': records_removed,
+        'records_changed': records_changed,
+        'records_churned': records_added + records_removed + records_changed,
+        'records_stale': records_stale,
+        'publication_changes': publication_changes,
+        'publication_family_counts': dict((latest_diff_publication_rollup or {}).get('publication_family_counts', {})),
+    }
+
+
+def build_provider_lifecycle_timeline(
+    provider_account: rpki_models.RpkiProviderAccount,
+    *,
+    limit: int = 20,
+    visible_snapshot_ids: set[object] | None = None,
+    visible_diff_ids: set[object] | None = None,
+) -> dict[str, object]:
+    snapshots = provider_account.snapshots.order_by('-completed_at', '-fetched_at', '-created', '-pk')
+    if visible_snapshot_ids is not None:
+        snapshots = snapshots.filter(pk__in=visible_snapshot_ids)
+
+    items = [
+        _build_snapshot_timeline_row(snapshot, visible_diff_ids=visible_diff_ids)
+        for snapshot in snapshots[:limit]
+    ]
+    return {
+        'timeline_schema_version': LIFECYCLE_TIMELINE_SCHEMA_VERSION,
+        'provider_account_id': provider_account.pk,
+        'provider_account_name': provider_account.name,
+        'limit': int(limit),
+        'item_count': len(items),
+        'items': items,
+    }
+
+
+def _build_diff_timeline_row(
+    snapshot_diff: rpki_models.ProviderSnapshotDiff,
+) -> dict[str, object]:
+    summary = dict(snapshot_diff.summary_json or {})
+    totals = dict(summary.get('totals') or {})
+    publication_rollup = build_diff_publication_health_rollup(snapshot_diff)
+    return {
+        'timeline_schema_version': PUBLICATION_DIFF_TIMELINE_SCHEMA_VERSION,
+        'snapshot_diff_id': snapshot_diff.pk,
+        'snapshot_diff_name': snapshot_diff.name,
+        'snapshot_diff_url': snapshot_diff.get_absolute_url(),
+        'base_snapshot_id': snapshot_diff.base_snapshot_id,
+        'base_snapshot_name': snapshot_diff.base_snapshot.name,
+        'base_snapshot_url': snapshot_diff.base_snapshot.get_absolute_url(),
+        'comparison_snapshot_id': snapshot_diff.comparison_snapshot_id,
+        'comparison_snapshot_name': snapshot_diff.comparison_snapshot.name,
+        'comparison_snapshot_url': snapshot_diff.comparison_snapshot.get_absolute_url(),
+        'status': summary.get('status', snapshot_diff.status),
+        'compared_at': _datetime_text(snapshot_diff.compared_at),
+        'records_added': _summary_int(totals, 'records_added'),
+        'records_removed': _summary_int(totals, 'records_removed'),
+        'records_changed': _summary_int(totals, 'records_changed'),
+        'records_stale': _summary_int(totals, 'records_stale'),
+        'publication_changes': int(publication_rollup['publication_changes']),
+        'publication_family_counts': dict(publication_rollup['publication_family_counts']),
+        'item_count': int(publication_rollup['item_count']),
+    }
+
+
+def build_provider_publication_diff_timeline(
+    provider_account: rpki_models.RpkiProviderAccount,
+    *,
+    limit: int = 20,
+    visible_diff_ids: set[object] | None = None,
+) -> dict[str, object]:
+    diffs = provider_account.snapshot_diffs.order_by('-compared_at', '-created', '-pk')
+    if visible_diff_ids is not None:
+        diffs = diffs.filter(pk__in=visible_diff_ids)
+
+    items = [
+        _build_diff_timeline_row(snapshot_diff)
+        for snapshot_diff in diffs[:limit]
+    ]
+    return {
+        'timeline_schema_version': PUBLICATION_DIFF_TIMELINE_SCHEMA_VERSION,
+        'provider_account_id': provider_account.pk,
+        'provider_account_name': provider_account.name,
+        'limit': int(limit),
+        'item_count': len(items),
+        'items': items,
     }
 
 

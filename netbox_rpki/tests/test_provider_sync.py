@@ -12,7 +12,11 @@ from netbox_rpki.services import ProviderSyncError, sync_provider_account
 from netbox_rpki.services.lifecycle_reporting import (
     LIFECYCLE_HEALTH_DEFAULTS,
     LIFECYCLE_HEALTH_SUMMARY_SCHEMA_VERSION,
+    LIFECYCLE_TIMELINE_SCHEMA_VERSION,
+    PUBLICATION_DIFF_TIMELINE_SCHEMA_VERSION,
     build_provider_lifecycle_health_summary,
+    build_provider_lifecycle_timeline,
+    build_provider_publication_diff_timeline,
     resolve_lifecycle_health_policy,
     build_snapshot_publication_health_rollup,
     build_diff_publication_health_rollup,
@@ -62,6 +66,8 @@ from netbox_rpki.tests.utils import (
     create_test_prefix,
     create_test_publication_point,
     create_test_provider_account,
+    create_test_provider_snapshot_diff,
+    create_test_provider_snapshot_diff_item,
     create_test_provider_snapshot,
     create_test_signed_object,
 )
@@ -1093,6 +1099,268 @@ class ProviderSyncServiceTestCase(TestCase):
         )
 
         self.assertIsNone(build_provider_account_pub_obs_rollup(provider_account))
+
+    def test_build_provider_lifecycle_timeline_orders_snapshots_and_hides_invisible_related_objects(self):
+        now = timezone.now()
+        provider_account = create_test_provider_account(
+            name='Lifecycle Timeline Account',
+            organization=self.organization,
+            provider_type=rpki_models.ProviderType.KRILL,
+            ca_handle='netbox-rpki-dev',
+            api_base_url='https://localhost:3001',
+            org_handle='ORG-LIFECYCLE-TIMELINE',
+        )
+        older_snapshot = create_test_provider_snapshot(
+            name='Older Lifecycle Snapshot',
+            organization=self.organization,
+            provider_account=provider_account,
+            fetched_at=now - timedelta(days=2),
+            completed_at=now - timedelta(days=2, minutes=5),
+            summary_json={
+                'summary_schema_version': PROVIDER_SYNC_SUMMARY_SCHEMA_VERSION,
+                'status': rpki_models.ValidationRunStatus.COMPLETED,
+                'latest_snapshot_id': None,
+                'latest_snapshot_name': '',
+                'latest_snapshot_completed_at': '',
+                'latest_snapshot_status': rpki_models.ValidationRunStatus.COMPLETED,
+                'publication_health': {
+                    'summary_schema_version': 1,
+                    'status': 'healthy',
+                    'publication_points': {
+                        'total': 0,
+                        'stale': 0,
+                        'exchange_failed': 0,
+                        'exchange_overdue': 0,
+                        'authored_linkage_missing': 0,
+                        'attention_item_count': 0,
+                    },
+                    'signed_objects': {
+                        'total': 0,
+                        'stale': 0,
+                        'authored_linkage_missing': 0,
+                        'publication_linkage_missing': 0,
+                        'by_type': {},
+                        'attention_item_count': 0,
+                    },
+                    'certificate_observations': {
+                        'total': 0,
+                        'stale': 0,
+                        'expiring_soon': 0,
+                        'expired': 0,
+                        'ambiguous': 0,
+                        'publication_linkage_missing': 0,
+                        'signed_object_linkage_missing': 0,
+                        'attention_item_count': 0,
+                    },
+                    'attention_item_count': 0,
+                },
+                'totals': {
+                    'records_added': 0,
+                    'records_removed': 0,
+                    'records_changed': 0,
+                    'records_stale': 0,
+                    'records_failed': 0,
+                },
+            },
+        )
+        newer_snapshot = create_test_provider_snapshot(
+            name='Newer Lifecycle Snapshot',
+            organization=self.organization,
+            provider_account=provider_account,
+            fetched_at=now - timedelta(days=1),
+            completed_at=now - timedelta(days=1, minutes=5),
+            summary_json={
+                'summary_schema_version': PROVIDER_SYNC_SUMMARY_SCHEMA_VERSION,
+                'status': rpki_models.ValidationRunStatus.COMPLETED,
+                'latest_snapshot_id': None,
+                'latest_snapshot_name': '',
+                'latest_snapshot_completed_at': '',
+                'latest_snapshot_status': rpki_models.ValidationRunStatus.COMPLETED,
+                'publication_health': {
+                    'summary_schema_version': 1,
+                    'status': 'attention',
+                    'publication_points': {
+                        'total': 1,
+                        'stale': 0,
+                        'exchange_failed': 0,
+                        'exchange_overdue': 0,
+                        'authored_linkage_missing': 0,
+                        'attention_item_count': 1,
+                    },
+                    'signed_objects': {
+                        'total': 0,
+                        'stale': 0,
+                        'authored_linkage_missing': 0,
+                        'publication_linkage_missing': 0,
+                        'by_type': {},
+                        'attention_item_count': 0,
+                    },
+                    'certificate_observations': {
+                        'total': 0,
+                        'stale': 0,
+                        'expiring_soon': 0,
+                        'expired': 0,
+                        'ambiguous': 0,
+                        'publication_linkage_missing': 0,
+                        'signed_object_linkage_missing': 0,
+                        'attention_item_count': 0,
+                    },
+                    'attention_item_count': 1,
+                },
+                'totals': {
+                    'records_added': 0,
+                    'records_removed': 0,
+                    'records_changed': 0,
+                    'records_stale': 0,
+                    'records_failed': 0,
+                },
+            },
+        )
+        snapshot_diff = create_test_provider_snapshot_diff(
+            name='Lifecycle Timeline Diff',
+            organization=self.organization,
+            provider_account=provider_account,
+            base_snapshot=older_snapshot,
+            comparison_snapshot=newer_snapshot,
+            compared_at=now - timedelta(hours=12),
+            summary_json={
+                'status': rpki_models.ValidationRunStatus.COMPLETED,
+                'totals': {
+                    'records_added': 0,
+                    'records_removed': 0,
+                    'records_changed': 1,
+                    'records_stale': 1,
+                },
+            },
+        )
+        create_test_provider_snapshot_diff_item(
+            snapshot_diff=snapshot_diff,
+            object_family=rpki_models.ProviderSyncFamily.PUBLICATION_POINTS,
+            change_type=rpki_models.ProviderSnapshotDiffChangeType.CHANGED,
+            is_stale=True,
+        )
+        newer_snapshot.summary_json = {
+            **newer_snapshot.summary_json,
+            'latest_diff_id': snapshot_diff.pk,
+            'latest_diff_name': snapshot_diff.name,
+        }
+        newer_snapshot.save(update_fields=('summary_json',))
+
+        timeline = build_provider_lifecycle_timeline(provider_account)
+        filtered_timeline = build_provider_lifecycle_timeline(
+            provider_account,
+            visible_snapshot_ids={older_snapshot.pk},
+            visible_diff_ids=set(),
+        )
+
+        self.assertEqual(timeline['timeline_schema_version'], LIFECYCLE_TIMELINE_SCHEMA_VERSION)
+        self.assertEqual([row['snapshot_id'] for row in timeline['items']], [newer_snapshot.pk, older_snapshot.pk])
+        self.assertEqual(timeline['items'][0]['latest_diff_id'], snapshot_diff.pk)
+        self.assertEqual(timeline['items'][0]['publication_changes'], 1)
+        self.assertEqual(timeline['items'][0]['publication_status'], 'attention')
+        self.assertEqual(filtered_timeline['timeline_schema_version'], LIFECYCLE_TIMELINE_SCHEMA_VERSION)
+        self.assertEqual([row['snapshot_id'] for row in filtered_timeline['items']], [older_snapshot.pk])
+        self.assertIsNone(filtered_timeline['items'][0]['latest_diff_id'])
+        self.assertEqual(filtered_timeline['items'][0]['latest_diff_url'], '')
+
+    def test_build_provider_publication_diff_timeline_orders_rows_and_surfaces_publication_counts(self):
+        now = timezone.now()
+        provider_account = create_test_provider_account(
+            name='Publication Diff Timeline Account',
+            organization=self.organization,
+            provider_type=rpki_models.ProviderType.KRILL,
+            ca_handle='netbox-rpki-dev',
+            api_base_url='https://localhost:3001',
+            org_handle='ORG-PUBLICATION-DIFF-TIMELINE',
+        )
+        first_snapshot = create_test_provider_snapshot(
+            name='First Diff Snapshot',
+            organization=self.organization,
+            provider_account=provider_account,
+            fetched_at=now - timedelta(days=3),
+            completed_at=now - timedelta(days=3, minutes=5),
+        )
+        second_snapshot = create_test_provider_snapshot(
+            name='Second Diff Snapshot',
+            organization=self.organization,
+            provider_account=provider_account,
+            fetched_at=now - timedelta(days=2),
+            completed_at=now - timedelta(days=2, minutes=5),
+        )
+        third_snapshot = create_test_provider_snapshot(
+            name='Third Diff Snapshot',
+            organization=self.organization,
+            provider_account=provider_account,
+            fetched_at=now - timedelta(days=1),
+            completed_at=now - timedelta(days=1, minutes=5),
+        )
+        older_diff = create_test_provider_snapshot_diff(
+            name='Older Publication Diff',
+            organization=self.organization,
+            provider_account=provider_account,
+            base_snapshot=first_snapshot,
+            comparison_snapshot=second_snapshot,
+            compared_at=now - timedelta(days=2, minutes=30),
+            summary_json={
+                'status': rpki_models.ValidationRunStatus.COMPLETED,
+                'totals': {
+                    'records_added': 0,
+                    'records_removed': 0,
+                    'records_changed': 0,
+                    'records_stale': 0,
+                },
+            },
+        )
+        newer_diff = create_test_provider_snapshot_diff(
+            name='Newer Publication Diff',
+            organization=self.organization,
+            provider_account=provider_account,
+            base_snapshot=second_snapshot,
+            comparison_snapshot=third_snapshot,
+            compared_at=now - timedelta(days=1, minutes=30),
+            summary_json={
+                'status': rpki_models.ValidationRunStatus.COMPLETED,
+                'totals': {
+                    'records_added': 2,
+                    'records_removed': 1,
+                    'records_changed': 1,
+                    'records_stale': 1,
+                },
+            },
+        )
+        create_test_provider_snapshot_diff_item(
+            snapshot_diff=older_diff,
+            object_family=rpki_models.ProviderSyncFamily.PUBLICATION_POINTS,
+            change_type=rpki_models.ProviderSnapshotDiffChangeType.CHANGED,
+        )
+        create_test_provider_snapshot_diff_item(
+            snapshot_diff=newer_diff,
+            object_family=rpki_models.ProviderSyncFamily.PUBLICATION_POINTS,
+            change_type=rpki_models.ProviderSnapshotDiffChangeType.CHANGED,
+            is_stale=True,
+        )
+        create_test_provider_snapshot_diff_item(
+            snapshot_diff=newer_diff,
+            object_family=rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS,
+            change_type=rpki_models.ProviderSnapshotDiffChangeType.ADDED,
+        )
+
+        timeline = build_provider_publication_diff_timeline(provider_account)
+        filtered_timeline = build_provider_publication_diff_timeline(
+            provider_account,
+            visible_diff_ids={older_diff.pk},
+        )
+
+        self.assertEqual(timeline['timeline_schema_version'], PUBLICATION_DIFF_TIMELINE_SCHEMA_VERSION)
+        self.assertEqual(timeline['item_count'], 2)
+        self.assertEqual([row['snapshot_diff_id'] for row in timeline['items']], [newer_diff.pk, older_diff.pk])
+        self.assertEqual(timeline['items'][0]['publication_family_counts'][rpki_models.ProviderSyncFamily.PUBLICATION_POINTS]['changed'], 1)
+        self.assertEqual(timeline['items'][0]['publication_changes'], 1)
+        self.assertEqual(timeline['items'][0]['records_changed'], 1)
+        self.assertEqual(filtered_timeline['timeline_schema_version'], PUBLICATION_DIFF_TIMELINE_SCHEMA_VERSION)
+        self.assertEqual(filtered_timeline['item_count'], 1)
+        self.assertEqual(filtered_timeline['items'][0]['snapshot_diff_id'], older_diff.pk)
+        self.assertEqual(filtered_timeline['items'][0]['publication_changes'], 1)
 
     def test_build_snapshot_signed_object_type_breakdown_counts_each_type(self):
         snapshot = create_test_provider_snapshot(
