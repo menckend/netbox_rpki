@@ -93,6 +93,13 @@ from .bgp_telemetry import (
     TELEMETRY_FETCH_MODE_SNAPSHOT_IMPORT,
     sync_telemetry_source,
 )
+from .overlay_correlation import (
+    build_aspa_overlay_summary,
+    build_imported_certificate_observation_overlay_summary,
+    build_imported_signed_object_overlay_summary,
+    build_roa_overlay_summary,
+    build_signed_object_overlay_summary,
+)
 
 __all__ = (
     'ProviderSyncError',
@@ -166,4 +173,9 @@ __all__ = (
     'BgpTelemetryError',
     'TELEMETRY_FETCH_MODE_SNAPSHOT_IMPORT',
     'sync_telemetry_source',
+    'build_aspa_overlay_summary',
+    'build_imported_certificate_observation_overlay_summary',
+    'build_imported_signed_object_overlay_summary',
+    'build_roa_overlay_summary',
+    'build_signed_object_overlay_summary',
 )

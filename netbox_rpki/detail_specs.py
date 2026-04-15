@@ -11,6 +11,13 @@ from django.utils import timezone
 
 from netbox_rpki import models
 from netbox_rpki.services import build_roa_change_plan_lint_posture
+from netbox_rpki.services.overlay_correlation import (
+    build_aspa_overlay_summary,
+    build_imported_certificate_observation_overlay_summary,
+    build_imported_signed_object_overlay_summary,
+    build_roa_overlay_summary,
+    build_signed_object_overlay_summary,
+)
 from netbox_rpki.services.publication_state import (
     derive_change_plan_publication_state,
     derive_rollback_bundle_publication_state,
@@ -52,6 +59,26 @@ def get_imported_signed_object_evidence_summary(obj: models.ImportedSignedObject
 
 def get_imported_certificate_observation_evidence_summary(obj: models.ImportedCertificateObservation) -> str | None:
     return get_pretty_json(get_certificate_observation_evidence_summary(obj))
+
+
+def get_signed_object_external_overlay_summary(obj: models.SignedObject) -> str | None:
+    return get_pretty_json(build_signed_object_overlay_summary(obj))
+
+
+def get_roa_external_overlay_summary(obj: models.Roa) -> str | None:
+    return get_pretty_json(build_roa_overlay_summary(obj))
+
+
+def get_aspa_external_overlay_summary(obj: models.ASPA) -> str | None:
+    return get_pretty_json(build_aspa_overlay_summary(obj))
+
+
+def get_imported_signed_object_external_overlay_summary(obj: models.ImportedSignedObject) -> str | None:
+    return get_pretty_json(build_imported_signed_object_overlay_summary(obj))
+
+
+def get_imported_certificate_observation_external_overlay_summary(obj: models.ImportedCertificateObservation) -> str | None:
+    return get_pretty_json(build_imported_certificate_observation_overlay_summary(obj))
 
 
 @dataclass(frozen=True)
@@ -877,6 +904,12 @@ IMPORTED_SIGNED_OBJECT_DETAIL_SPEC = DetailSpec(
             kind='code',
             empty_text='None',
         ),
+        DetailFieldSpec(
+            label='External Overlay Summary',
+            value=get_imported_signed_object_external_overlay_summary,
+            kind='code',
+            empty_text='None',
+        ),
         DetailFieldSpec(label='Payload', value=lambda obj: get_pretty_json(obj.payload_json), kind='code', empty_text='None'),
     ),
 )
@@ -916,6 +949,12 @@ IMPORTED_CERTIFICATE_OBSERVATION_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(
             label='Evidence Summary',
             value=get_imported_certificate_observation_evidence_summary,
+            kind='code',
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='External Overlay Summary',
+            value=get_imported_certificate_observation_external_overlay_summary,
             kind='code',
             empty_text='None',
         ),
@@ -961,6 +1000,12 @@ ASPA_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(label='Validation State', value=lambda obj: obj.validation_state),
         DetailFieldSpec(label='Authorized Providers', value=get_related_count('provider_authorizations')),
         DetailFieldSpec(label='Validated Payloads', value=get_related_count('validated_payloads')),
+        DetailFieldSpec(
+            label='External Overlay Summary',
+            value=get_aspa_external_overlay_summary,
+            kind='code',
+            empty_text='None',
+        ),
     ),
     side_tables=(
         DetailTableSpec(
@@ -2441,6 +2486,12 @@ SIGNED_OBJECT_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(label='Valid From', value=lambda obj: obj.valid_from, empty_text='None'),
         DetailFieldSpec(label='Valid To', value=lambda obj: obj.valid_to, empty_text='None'),
         DetailFieldSpec(label='Raw Payload Reference', value=lambda obj: obj.raw_payload_reference, empty_text='None'),
+        DetailFieldSpec(
+            label='External Overlay Summary',
+            value=get_signed_object_external_overlay_summary,
+            kind='code',
+            empty_text='None',
+        ),
     ),
     bottom_tables=(
         DetailTableSpec(
@@ -2647,6 +2698,12 @@ ROA_DETAIL_SPEC = DetailSpec(
             label='Signed Object',
             value=lambda obj: obj.signed_object,
             kind='link',
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='External Overlay Summary',
+            value=get_roa_external_overlay_summary,
+            kind='code',
             empty_text='None',
         ),
     ),

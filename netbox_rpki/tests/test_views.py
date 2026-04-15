@@ -82,6 +82,9 @@ from netbox_rpki.tests.utils import (
     create_test_provider_account,
     create_test_provider_snapshot,
     create_test_router_certificate,
+    create_test_telemetry_run,
+    create_test_telemetry_source,
+    create_test_bgp_path_observation,
     create_test_validated_aspa_payload,
     create_test_validated_roa_payload,
     create_test_signed_object,
@@ -1409,6 +1412,201 @@ class AspaDetailViewTestCase(PluginViewTestCase):
         self.assertContains(response, str(self.provider_authorization.provider_as))
         self.assertContains(response, 'Validated ASPA Payloads')
         self.assertContains(response, self.validated_payload.name)
+
+
+class ExternalOverlayDetailViewTestCase(PluginViewTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='overlay-view-org', name='Overlay View Org')
+        cls.prefix = create_test_prefix(prefix='203.0.113.0/24')
+        cls.origin_as = create_test_asn(65320)
+        cls.provider_as = create_test_asn(65321)
+        cls.peer_as = create_test_asn(65322)
+
+        cls.roa_signed_object = create_test_signed_object(
+            name='Overlay View ROA Signed Object',
+            organization=cls.organization,
+            object_type=rpki_models.SignedObjectType.ROA,
+            object_uri='rsync://overlay-view.invalid/roa.roa',
+        )
+        cls.roa = create_test_roa(
+            name='Overlay View ROA',
+            signed_by=cls.roa_signed_object.resource_certificate,
+            signed_object=cls.roa_signed_object,
+            origin_as=cls.origin_as,
+        )
+        create_test_roa_prefix(prefix=cls.prefix, roa=cls.roa, max_length=24)
+
+        cls.aspa_signed_object = create_test_signed_object(
+            name='Overlay View ASPA Signed Object',
+            organization=cls.organization,
+            object_type=rpki_models.SignedObjectType.ASPA,
+            object_uri='rsync://overlay-view.invalid/customer.aspa',
+        )
+        cls.aspa = create_test_aspa(
+            name='Overlay View ASPA',
+            organization=cls.organization,
+            signed_object=cls.aspa_signed_object,
+            customer_as=cls.origin_as,
+        )
+        create_test_aspa_provider(aspa=cls.aspa, provider_as=cls.provider_as)
+
+        cls.validation_run = create_test_validation_run(
+            name='Overlay View Validation Run',
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        cls.roa_validation_result = create_test_object_validation_result(
+            name='Overlay View ROA Validation Result',
+            validation_run=cls.validation_run,
+            signed_object=cls.roa_signed_object,
+            validation_state=rpki_models.ValidationState.VALID,
+            disposition=rpki_models.ValidationDisposition.ACCEPTED,
+        )
+        create_test_validated_roa_payload(
+            name='Overlay View Validated ROA Payload',
+            validation_run=cls.validation_run,
+            roa=cls.roa,
+            object_validation_result=cls.roa_validation_result,
+            prefix=cls.prefix,
+            origin_as=cls.origin_as,
+            max_length=24,
+        )
+        cls.aspa_validation_result = create_test_object_validation_result(
+            name='Overlay View ASPA Validation Result',
+            validation_run=cls.validation_run,
+            signed_object=cls.aspa_signed_object,
+            validation_state=rpki_models.ValidationState.VALID,
+            disposition=rpki_models.ValidationDisposition.ACCEPTED,
+        )
+        create_test_validated_aspa_payload(
+            name='Overlay View Validated ASPA Payload',
+            validation_run=cls.validation_run,
+            aspa=cls.aspa,
+            object_validation_result=cls.aspa_validation_result,
+            customer_as=cls.origin_as,
+            provider_as=cls.provider_as,
+        )
+
+        cls.telemetry_source = create_test_telemetry_source(
+            name='Overlay View Telemetry Source',
+            organization=cls.organization,
+            slug='overlay-view-telemetry',
+        )
+        cls.telemetry_run = create_test_telemetry_run(
+            name='Overlay View Telemetry Run',
+            source=cls.telemetry_source,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        create_test_bgp_path_observation(
+            name='Overlay View ROA Observation',
+            telemetry_run=cls.telemetry_run,
+            source=cls.telemetry_source,
+            prefix=cls.prefix,
+            observed_prefix='203.0.113.0/24',
+            origin_as=cls.origin_as,
+            observed_origin_asn=cls.origin_as.asn,
+            peer_as=cls.peer_as,
+            observed_peer_asn=cls.peer_as.asn,
+            raw_as_path=f'{cls.peer_as.asn} 64510 {cls.origin_as.asn}',
+            path_asns_json=[cls.peer_as.asn, 64510, cls.origin_as.asn],
+        )
+        create_test_bgp_path_observation(
+            name='Overlay View ASPA Observation',
+            telemetry_run=cls.telemetry_run,
+            source=cls.telemetry_source,
+            prefix=cls.prefix,
+            observed_prefix='203.0.113.0/24',
+            origin_as=cls.origin_as,
+            observed_origin_asn=cls.origin_as.asn,
+            peer_as=cls.peer_as,
+            observed_peer_asn=cls.peer_as.asn,
+            raw_as_path=f'{cls.peer_as.asn} {cls.provider_as.asn} {cls.origin_as.asn}',
+            path_asns_json=[cls.peer_as.asn, cls.provider_as.asn, cls.origin_as.asn],
+        )
+
+        cls.provider_account = create_test_provider_account(
+            name='Overlay View Provider Account',
+            organization=cls.organization,
+            org_handle='ORG-OVERLAY-VIEW',
+        )
+        cls.provider_snapshot = create_test_provider_snapshot(
+            name='Overlay View Provider Snapshot',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+        )
+        cls.imported_publication_point = create_test_imported_publication_point(
+            name='Overlay View Imported Publication Point',
+            organization=cls.organization,
+            provider_snapshot=cls.provider_snapshot,
+            publication_uri='rsync://overlay-view.invalid/repo/',
+        )
+        cls.imported_signed_object = create_test_imported_signed_object(
+            name='Overlay View Imported Signed Object',
+            organization=cls.organization,
+            provider_snapshot=cls.provider_snapshot,
+            publication_point=cls.imported_publication_point,
+            authored_signed_object=cls.roa_signed_object,
+            signed_object_type=rpki_models.SignedObjectType.ROA,
+            signed_object_uri=cls.roa_signed_object.object_uri,
+        )
+        create_test_object_validation_result(
+            name='Overlay View Imported Validation Result',
+            validation_run=cls.validation_run,
+            imported_signed_object=cls.imported_signed_object,
+            validation_state=rpki_models.ValidationState.VALID,
+            disposition=rpki_models.ValidationDisposition.ACCEPTED,
+        )
+        cls.imported_certificate_observation = create_test_imported_certificate_observation(
+            name='Overlay View Imported Certificate Observation',
+            organization=cls.organization,
+            provider_snapshot=cls.provider_snapshot,
+            publication_point=cls.imported_publication_point,
+            signed_object=cls.imported_signed_object,
+            signed_object_uri=cls.imported_signed_object.signed_object_uri,
+        )
+
+    def test_signed_and_imported_detail_views_show_external_overlay_summary(self):
+        self.add_permissions(
+            'netbox_rpki.view_signedobject',
+            'netbox_rpki.view_importedsignedobject',
+            'netbox_rpki.view_importedcertificateobservation',
+            'netbox_rpki.view_objectvalidationresult',
+        )
+
+        signed_response = self.client.get(self.roa_signed_object.get_absolute_url())
+        imported_response = self.client.get(self.imported_signed_object.get_absolute_url())
+        certificate_response = self.client.get(self.imported_certificate_observation.get_absolute_url())
+
+        self.assertHttpStatus(signed_response, 200)
+        self.assertContains(signed_response, 'External Overlay Summary')
+        self.assertContains(signed_response, 'latest_validator_posture')
+
+        self.assertHttpStatus(imported_response, 200)
+        self.assertContains(imported_response, 'External Overlay Summary')
+        self.assertContains(imported_response, 'provider_evidence_linkage_status')
+
+        self.assertHttpStatus(certificate_response, 200)
+        self.assertContains(certificate_response, 'External Overlay Summary')
+        self.assertContains(certificate_response, 'latest_telemetry_posture')
+
+    def test_roa_and_aspa_detail_views_show_external_overlay_summary(self):
+        self.add_permissions(
+            'netbox_rpki.view_roa',
+            'netbox_rpki.view_aspa',
+            'netbox_rpki.view_validatedroapayload',
+            'netbox_rpki.view_validatedaspapayload',
+        )
+
+        roa_response = self.client.get(self.roa.get_absolute_url())
+        aspa_response = self.client.get(self.aspa.get_absolute_url())
+
+        self.assertHttpStatus(roa_response, 200)
+        self.assertContains(roa_response, 'External Overlay Summary')
+        self.assertContains(roa_response, 'matched_observation_count')
+
+        self.assertHttpStatus(aspa_response, 200)
+        self.assertContains(aspa_response, 'External Overlay Summary')
+        self.assertContains(aspa_response, 'supported_provider_asns')
 
 
 class ValidatedPayloadDetailViewTestCase(PluginViewTestCase):

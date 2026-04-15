@@ -36,6 +36,13 @@ from netbox_rpki.services.provider_sync_evidence import (
     get_signed_object_evidence_summary,
     get_signed_object_publication_linkage_status,
 )
+from netbox_rpki.services.overlay_correlation import (
+    build_aspa_overlay_summary,
+    build_imported_certificate_observation_overlay_summary,
+    build_imported_signed_object_overlay_summary,
+    build_roa_overlay_summary,
+    build_signed_object_overlay_summary,
+)
 
 from .filters import GRAPHQL_FILTER_CLASS_MAP
 
@@ -367,6 +374,26 @@ class SignedObjectSurfaceMixin:
     def validation_results(self) -> list[Annotated["ObjectValidationResultType", strawberry.lazy('.types')]]:
         return self.validation_results.all()
 
+    @strawberry.field
+    def external_overlay_summary(self) -> JSON:
+        return build_signed_object_overlay_summary(self)
+
+
+@strawberry.type
+class RoaOverlayMixin:
+
+    @strawberry.field
+    def external_overlay_summary(self) -> JSON:
+        return build_roa_overlay_summary(self)
+
+
+@strawberry.type
+class AspaOverlayMixin:
+
+    @strawberry.field
+    def external_overlay_summary(self) -> JSON:
+        return build_aspa_overlay_summary(self)
+
 
 @strawberry.type
 class ImportedPublicationPointEvidenceMixin:
@@ -394,6 +421,10 @@ class ImportedSignedObjectEvidenceMixin:
     @strawberry.field
     def evidence_summary(self) -> JSON:
         return get_signed_object_evidence_summary(self)
+
+    @strawberry.field
+    def external_overlay_summary(self) -> JSON:
+        return build_imported_signed_object_overlay_summary(self)
 
 
 @strawberry.type
@@ -423,6 +454,10 @@ class ImportedCertificateObservationEvidenceMixin:
     def evidence_summary(self) -> JSON:
         return get_certificate_observation_evidence_summary(self)
 
+    @strawberry.field
+    def external_overlay_summary(self) -> JSON:
+        return build_imported_certificate_observation_overlay_summary(self)
+
 
 REPORTING_MIXINS = {
     'validatorinstance': ValidatorInstanceReportingMixin,
@@ -433,6 +468,8 @@ REPORTING_MIXINS = {
     'telemetrysource': TelemetrySourceReportingMixin,
     'telemetryrun': TelemetryRunReportingMixin,
     'bgppathobservation': BgpPathObservationReportingMixin,
+    'roa': RoaOverlayMixin,
+    'aspa': AspaOverlayMixin,
     'rpkiprovideraccount': ProviderAccountReportingMixin,
     'providersnapshot': ProviderSnapshotReportingMixin,
     'providersnapshotdiff': ProviderSnapshotDiffReportingMixin,

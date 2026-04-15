@@ -36,6 +36,13 @@ from netbox_rpki.services.provider_sync_evidence import (
     get_signed_object_evidence_summary,
     get_signed_object_publication_linkage_status,
 )
+from netbox_rpki.services.overlay_correlation import (
+    build_aspa_overlay_summary,
+    build_imported_certificate_observation_overlay_summary,
+    build_imported_signed_object_overlay_summary,
+    build_roa_overlay_summary,
+    build_signed_object_overlay_summary,
+)
 
 def _simulation_run_summary(run):
     summary = dict(run.summary_json or {})
@@ -951,12 +958,14 @@ class ImportedSignedObjectSerializer(SERIALIZER_CLASS_MAP['importedsignedobject'
     publication_linkage_status = serializers.SerializerMethodField()
     authored_linkage_status = serializers.SerializerMethodField()
     evidence_summary = serializers.SerializerMethodField()
+    external_overlay_summary = serializers.SerializerMethodField()
 
     class Meta(SERIALIZER_CLASS_MAP['importedsignedobject'].Meta):
         fields = SERIALIZER_CLASS_MAP['importedsignedobject'].Meta.fields + (
             'publication_linkage_status',
             'authored_linkage_status',
             'evidence_summary',
+            'external_overlay_summary',
         )
 
     def get_publication_linkage_status(self, obj):
@@ -967,6 +976,9 @@ class ImportedSignedObjectSerializer(SERIALIZER_CLASS_MAP['importedsignedobject'
 
     def get_evidence_summary(self, obj):
         return get_signed_object_evidence_summary(obj)
+
+    def get_external_overlay_summary(self, obj):
+        return build_imported_signed_object_overlay_summary(obj)
 
 
 SERIALIZER_CLASS_MAP['importedsignedobject'] = ImportedSignedObjectSerializer
@@ -980,6 +992,7 @@ class ImportedCertificateObservationSerializer(SERIALIZER_CLASS_MAP['importedcer
     publication_linkage_status = serializers.SerializerMethodField()
     signed_object_linkage_status = serializers.SerializerMethodField()
     evidence_summary = serializers.SerializerMethodField()
+    external_overlay_summary = serializers.SerializerMethodField()
 
     class Meta(SERIALIZER_CLASS_MAP['importedcertificateobservation'].Meta):
         fields = SERIALIZER_CLASS_MAP['importedcertificateobservation'].Meta.fields + (
@@ -989,6 +1002,7 @@ class ImportedCertificateObservationSerializer(SERIALIZER_CLASS_MAP['importedcer
             'publication_linkage_status',
             'signed_object_linkage_status',
             'evidence_summary',
+            'external_overlay_summary',
         )
 
     def get_source_count(self, obj):
@@ -1009,6 +1023,9 @@ class ImportedCertificateObservationSerializer(SERIALIZER_CLASS_MAP['importedcer
     def get_evidence_summary(self, obj):
         return get_certificate_observation_evidence_summary(obj)
 
+    def get_external_overlay_summary(self, obj):
+        return build_imported_certificate_observation_overlay_summary(obj)
+
 
 SERIALIZER_CLASS_MAP['importedcertificateobservation'] = ImportedCertificateObservationSerializer
 globals()['ImportedCertificateObservationSerializer'] = ImportedCertificateObservationSerializer
@@ -1023,6 +1040,7 @@ class SignedObjectSerializer(SERIALIZER_CLASS_MAP['signedobject']):
     rsc_extension = serializers.SerializerMethodField()
     imported_signed_object_observations = serializers.SerializerMethodField()
     validation_results = serializers.SerializerMethodField()
+    external_overlay_summary = serializers.SerializerMethodField()
 
     class Meta(SERIALIZER_CLASS_MAP['signedobject'].Meta):
         fields = SERIALIZER_CLASS_MAP['signedobject'].Meta.fields + (
@@ -1034,6 +1052,7 @@ class SignedObjectSerializer(SERIALIZER_CLASS_MAP['signedobject']):
             'rsc_extension',
             'imported_signed_object_observations',
             'validation_results',
+            'external_overlay_summary',
         )
 
     def _is_detail_view(self):
@@ -1099,9 +1118,44 @@ class SignedObjectSerializer(SERIALIZER_CLASS_MAP['signedobject']):
             select_related_fields=('validation_run', 'signed_object'),
         )
 
+    def get_external_overlay_summary(self, obj):
+        return build_signed_object_overlay_summary(obj)
+
 
 SERIALIZER_CLASS_MAP['signedobject'] = SignedObjectSerializer
 globals()['SignedObjectSerializer'] = SignedObjectSerializer
+
+
+class RoaSerializer(SERIALIZER_CLASS_MAP['roa']):
+    external_overlay_summary = serializers.SerializerMethodField()
+
+    class Meta(SERIALIZER_CLASS_MAP['roa'].Meta):
+        fields = SERIALIZER_CLASS_MAP['roa'].Meta.fields + (
+            'external_overlay_summary',
+        )
+
+    def get_external_overlay_summary(self, obj):
+        return build_roa_overlay_summary(obj)
+
+
+SERIALIZER_CLASS_MAP['roa'] = RoaSerializer
+globals()['RoaSerializer'] = RoaSerializer
+
+
+class ASPASerializer(SERIALIZER_CLASS_MAP['aspa']):
+    external_overlay_summary = serializers.SerializerMethodField()
+
+    class Meta(SERIALIZER_CLASS_MAP['aspa'].Meta):
+        fields = SERIALIZER_CLASS_MAP['aspa'].Meta.fields + (
+            'external_overlay_summary',
+        )
+
+    def get_external_overlay_summary(self, obj):
+        return build_aspa_overlay_summary(obj)
+
+
+SERIALIZER_CLASS_MAP['aspa'] = ASPASerializer
+globals()['ASPASerializer'] = ASPASerializer
 
 
 class ROAChangePlanApproveActionSerializer(serializers.Serializer):
