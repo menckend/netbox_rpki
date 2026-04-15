@@ -1,0 +1,39 @@
+{
+  "metadata": {
+    "generated": "2026-04-15T03:33:32+00:00",
+    "repository_serial": "4242"
+  },
+  "roas": [
+    {
+      "prefix": "203.0.113.0/24",
+      "asn": "AS64500",
+      "maxLength": 24,
+      "uri": "rsync://rpki.example.invalid/repo/roa-one.roa",
+      "hash": "hash-roa-one",
+      "ta": "test-ta",
+      "expires": "2026-05-01T00:00:00+00:00"
+    },
+    {
+      "prefix": "198.51.100.0/24",
+      "asn": "AS64510",
+      "maxLength": 24,
+      "uri": "rsync://rpki.example.invalid/repo/unmatched.roa",
+      "hash": "hash-roa-unmatched",
+      "ta": "test-ta",
+      "expires": "2026-05-01T00:00:00+00:00"
+    }
+  ],
+  "aspas": [
+    {
+      "customer": "AS64500",
+      "providers": [
+        "AS64501",
+        "AS64502"
+      ],
+      "uri": "rsync://rpki.example.invalid/repo/customer.aspa",
+      "hash": "hash-aspa-one",
+      "ta": "test-ta",
+      "expires": "2026-05-01T00:00:00+00:00"
+    }
+  ]
+}

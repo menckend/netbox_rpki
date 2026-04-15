@@ -243,6 +243,46 @@ class ProviderSnapshotDiffReportingMixin:
 
 
 @strawberry.type
+class ValidatorInstanceReportingMixin:
+
+    @strawberry.field
+    def summary(self) -> JSON:
+        return self.summary_json or {}
+
+
+@strawberry.type
+class ValidationRunReportingMixin:
+
+    @strawberry.field
+    def summary(self) -> JSON:
+        return self.summary_json or {}
+
+
+@strawberry.type
+class ObjectValidationResultReportingMixin:
+
+    @strawberry.field
+    def details(self) -> JSON:
+        return self.details_json or {}
+
+
+@strawberry.type
+class ValidatedRoaPayloadReportingMixin:
+
+    @strawberry.field
+    def details(self) -> JSON:
+        return self.details_json or {}
+
+
+@strawberry.type
+class ValidatedAspaPayloadReportingMixin:
+
+    @strawberry.field
+    def details(self) -> JSON:
+        return self.details_json or {}
+
+
+@strawberry.type
 class SignedObjectSurfaceMixin:
 
     @strawberry.field
@@ -353,6 +393,11 @@ class ImportedCertificateObservationEvidenceMixin:
 
 
 REPORTING_MIXINS = {
+    'validatorinstance': ValidatorInstanceReportingMixin,
+    'validationrun': ValidationRunReportingMixin,
+    'objectvalidationresult': ObjectValidationResultReportingMixin,
+    'validatedroapayload': ValidatedRoaPayloadReportingMixin,
+    'validatedaspapayload': ValidatedAspaPayloadReportingMixin,
     'rpkiprovideraccount': ProviderAccountReportingMixin,
     'providersnapshot': ProviderSnapshotReportingMixin,
     'providersnapshotdiff': ProviderSnapshotDiffReportingMixin,

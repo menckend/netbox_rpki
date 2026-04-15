@@ -793,6 +793,7 @@ def create_test_validator_instance(
     base_url='',
     status=None,
     last_run_at=None,
+    summary_json=None,
     **kwargs,
 ):
     if organization is None:
@@ -805,6 +806,7 @@ def create_test_validator_instance(
         base_url=base_url,
         status=status or rpki_models.ValidationRunStatus.PENDING,
         last_run_at=last_run_at,
+        summary_json=summary_json or {},
         **kwargs,
     )
 
@@ -816,6 +818,7 @@ def create_test_validation_run(
     started_at=None,
     completed_at=None,
     repository_serial='',
+    summary_json=None,
     **kwargs,
 ):
     if validator is None:
@@ -827,6 +830,7 @@ def create_test_validation_run(
         started_at=started_at,
         completed_at=completed_at,
         repository_serial=repository_serial,
+        summary_json=summary_json or {},
         **kwargs,
     )
 
@@ -835,10 +839,16 @@ def create_test_object_validation_result(
     name='Object Validation Result 1',
     validation_run=None,
     signed_object=None,
+    imported_signed_object=None,
     validation_state=None,
     disposition=None,
     observed_at=None,
+    match_status='',
+    external_object_uri='',
+    external_content_hash='',
+    external_object_key='',
     reason='',
+    details_json=None,
     **kwargs,
 ):
     if validation_run is None:
@@ -847,10 +857,16 @@ def create_test_object_validation_result(
         name=name,
         validation_run=validation_run,
         signed_object=signed_object,
+        imported_signed_object=imported_signed_object,
         validation_state=validation_state or rpki_models.ValidationState.UNKNOWN,
         disposition=disposition or rpki_models.ValidationDisposition.NOTED,
         observed_at=observed_at,
+        match_status=match_status,
+        external_object_uri=external_object_uri,
+        external_content_hash=external_content_hash,
+        external_object_key=external_object_key,
         reason=reason,
+        details_json=details_json or {},
         **kwargs,
     )
 
@@ -863,6 +879,8 @@ def create_test_validated_roa_payload(
     prefix=None,
     origin_as=None,
     max_length=None,
+    observed_prefix='',
+    details_json=None,
     **kwargs,
 ):
     if validation_run is None:
@@ -881,6 +899,8 @@ def create_test_validated_roa_payload(
         prefix=prefix,
         origin_as=origin_as,
         max_length=max_length,
+        observed_prefix=observed_prefix,
+        details_json=details_json or {},
         **kwargs,
     )
 
@@ -892,6 +912,7 @@ def create_test_validated_aspa_payload(
     object_validation_result=None,
     customer_as=None,
     provider_as=None,
+    details_json=None,
     **kwargs,
 ):
     if validation_run is None:
@@ -909,6 +930,7 @@ def create_test_validated_aspa_payload(
         object_validation_result=object_validation_result,
         customer_as=customer_as,
         provider_as=provider_as,
+        details_json=details_json or {},
         **kwargs,
     )
 

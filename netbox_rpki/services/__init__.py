@@ -81,6 +81,13 @@ from .irr_write import (
     create_irr_change_plans,
     preview_irr_change_plan,
 )
+from .external_validation import (
+    ExternalValidationError,
+    VALIDATOR_FETCH_MODE_LIVE_API,
+    VALIDATOR_FETCH_MODE_SNAPSHOT_IMPORT,
+    VALIDATOR_FETCH_MODES,
+    sync_validator_instance,
+)
 
 __all__ = (
     'ProviderSyncError',
@@ -137,6 +144,7 @@ __all__ = (
     'secondary_approve_bulk_intent_run',
     'is_bulk_intent_run_approved',
     'build_organization_governance_rollup',
+    'ExternalValidationError',
     'IrrSyncError',
     'sync_irr_source',
     'IrrCoordinationError',
@@ -146,4 +154,8 @@ __all__ = (
     'IrrWriteExecutionError',
     'preview_irr_change_plan',
     'apply_irr_change_plan',
+    'VALIDATOR_FETCH_MODE_LIVE_API',
+    'VALIDATOR_FETCH_MODE_SNAPSHOT_IMPORT',
+    'VALIDATOR_FETCH_MODES',
+    'sync_validator_instance',
 )

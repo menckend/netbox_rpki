@@ -1649,6 +1649,7 @@ class ValidatorInstance(NamedRpkiStandardModel):
         default=ValidationRunStatus.PENDING,
     )
     last_run_at = models.DateTimeField(blank=True, null=True)
+    summary_json = models.JSONField(default=dict, blank=True)
 
     class Meta:
         ordering = ("name",)
@@ -1674,6 +1675,7 @@ class ValidationRun(NamedRpkiStandardModel):
     started_at = models.DateTimeField(blank=True, null=True)
     completed_at = models.DateTimeField(blank=True, null=True)
     repository_serial = models.CharField(max_length=128, blank=True)
+    summary_json = models.JSONField(default=dict, blank=True)
 
     class Meta:
         ordering = ("name",)
@@ -1698,6 +1700,13 @@ class ObjectValidationResult(NamedRpkiStandardModel):
         blank=True,
         null=True
     )
+    imported_signed_object = models.ForeignKey(
+        to='ImportedSignedObject',
+        on_delete=models.PROTECT,
+        related_name='validation_results',
+        blank=True,
+        null=True,
+    )
     validation_state = models.CharField(
         max_length=32,
         choices=ValidationState.choices,
@@ -1709,7 +1718,12 @@ class ObjectValidationResult(NamedRpkiStandardModel):
         default=ValidationDisposition.NOTED,
     )
     observed_at = models.DateTimeField(blank=True, null=True)
+    match_status = models.CharField(max_length=32, blank=True)
+    external_object_uri = models.CharField(max_length=500, blank=True)
+    external_content_hash = models.CharField(max_length=255, blank=True)
+    external_object_key = models.CharField(max_length=255, blank=True)
     reason = models.TextField(blank=True)
+    details_json = models.JSONField(default=dict, blank=True)
 
     class Meta:
         ordering = ("name",)
@@ -1744,7 +1758,9 @@ class ValidatedRoaPayload(NamedRpkiStandardModel):
     prefix = models.ForeignKey(
         to=Prefix,
         on_delete=models.PROTECT,
-        related_name='validated_roa_payloads'
+        related_name='validated_roa_payloads',
+        blank=True,
+        null=True,
     )
     origin_as = models.ForeignKey(
         to=ASN,
@@ -1754,6 +1770,8 @@ class ValidatedRoaPayload(NamedRpkiStandardModel):
         null=True
     )
     max_length = models.IntegerField(blank=True, null=True)
+    observed_prefix = models.CharField(max_length=64, blank=True)
+    details_json = models.JSONField(default=dict, blank=True)
 
     class Meta:
         ordering = ("name",)
@@ -1818,6 +1836,7 @@ class ValidatedAspaPayload(NamedRpkiStandardModel):
         blank=True,
         null=True
     )
+    details_json = models.JSONField(default=dict, blank=True)
 
     class Meta:
         ordering = ("name",)

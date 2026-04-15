@@ -65,6 +65,7 @@ from netbox_rpki.tests.utils import (
     create_test_validated_aspa_payload,
     create_test_validated_roa_payload,
     create_test_validation_run,
+    create_test_validator_instance,
 )
 
 
@@ -1089,6 +1090,71 @@ class SignedObjectGraphQLTestCase(PluginGraphQLTestMixin, APITestCase):
         self.assertEqual(
             [int(item['id']) for item in payload['validation_results']],
             [self.object_validation_result.pk],
+        )
+
+
+class ValidationReportingGraphQLTestCase(APITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(name='Validation GraphQL Org')
+        cls.validator = create_test_validator_instance(
+            name='Validation GraphQL Validator',
+            organization=cls.organization,
+            summary_json={'adapter': 'routinator'},
+        )
+        cls.validation_run = create_test_validation_run(
+            name='Validation GraphQL Run',
+            validator=cls.validator,
+            summary_json={'validated_roa_payload_count': 1},
+        )
+        cls.object_validation_result = create_test_object_validation_result(
+            name='Validation GraphQL Result',
+            validation_run=cls.validation_run,
+            details_json={'match_status_reason': 'exact_uri_match'},
+        )
+
+    def graphql_request(self, query):
+        response = self.client.post(reverse('graphql'), data={'query': query}, format='json', **self.header)
+        self.assertHttpStatus(response, 200)
+        return json.loads(response.content)
+
+    def test_validation_objects_expose_summary_and_detail_fields(self):
+        self.add_permissions(
+            'netbox_rpki.view_validatorinstance',
+            'netbox_rpki.view_validationrun',
+            'netbox_rpki.view_objectvalidationresult',
+        )
+
+        query = f'''
+        {{
+          netbox_rpki_validationrun(id: {self.validation_run.pk}) {{
+            id
+            summary
+          }}
+          netbox_rpki_objectvalidationresult(id: {self.object_validation_result.pk}) {{
+            id
+            details
+          }}
+          netbox_rpki_validatorinstance(id: {self.validator.pk}) {{
+            id
+            summary
+          }}
+        }}
+        '''
+        data = self.graphql_request(query)
+
+        self.assertNotIn('errors', data)
+        self.assertEqual(
+            data['data']['netbox_rpki_validationrun']['summary']['validated_roa_payload_count'],
+            1,
+        )
+        self.assertEqual(
+            data['data']['netbox_rpki_objectvalidationresult']['details']['match_status_reason'],
+            'exact_uri_match',
+        )
+        self.assertEqual(
+            data['data']['netbox_rpki_validatorinstance']['summary']['adapter'],
+            'routinator',
         )
 
 

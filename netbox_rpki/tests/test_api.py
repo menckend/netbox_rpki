@@ -98,6 +98,7 @@ from netbox_rpki.tests.utils import (
     create_test_validated_aspa_payload,
     create_test_validated_roa_payload,
     create_test_validation_run,
+    create_test_validator_instance,
 )
 
 
@@ -368,6 +369,37 @@ class RpkiProviderAccountSerializerTestCase(TestCase):
         self.assertEqual(aspa_rollup['status'], rpki_models.ProviderSyncFamilyStatus.NOT_IMPLEMENTED)
         self.assertEqual(aspa_rollup['capability_mode'], 'provider_limited')
         self.assertIn('hosted ROA authorizations only', aspa_rollup['capability_reason'])
+
+    def test_validation_serializers_expose_summary_and_detail_fields(self):
+        validator = create_test_validator_instance(
+            name='Serializer Validator',
+            summary_json={'adapter': 'routinator'},
+        )
+        validation_run = create_test_validation_run(
+            validator=validator,
+            summary_json={'validated_roa_payload_count': 1},
+        )
+        object_result = create_test_object_validation_result(
+            validation_run=validation_run,
+            details_json={'match_status_reason': 'exact_uri_match'},
+        )
+        payload = create_test_validated_roa_payload(
+            validation_run=validation_run,
+            object_validation_result=object_result,
+            observed_prefix='198.51.100.0/24',
+            details_json={'ta': 'test-ta'},
+        )
+
+        validator_data = api_serializers.ValidatorInstanceSerializer(validator, context={'request': None}).data
+        run_data = api_serializers.ValidationRunSerializer(validation_run, context={'request': None}).data
+        result_data = api_serializers.ObjectValidationResultSerializer(object_result, context={'request': None}).data
+        payload_data = api_serializers.ValidatedRoaPayloadSerializer(payload, context={'request': None}).data
+
+        self.assertEqual(validator_data['summary']['adapter'], 'routinator')
+        self.assertEqual(run_data['summary']['validated_roa_payload_count'], 1)
+        self.assertEqual(result_data['details']['match_status_reason'], 'exact_uri_match')
+        self.assertEqual(payload_data['details']['ta'], 'test-ta')
+        self.assertEqual(payload_data['observed_prefix'], '198.51.100.0/24')
 
 
 class RpkiProviderAccountSummaryAPITestCase(PluginAPITestCase):

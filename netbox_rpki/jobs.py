@@ -4,6 +4,7 @@ from core.models import Job
 
 from netbox_rpki import models as rpki_models
 from netbox_rpki.services import (
+    VALIDATOR_FETCH_MODE_LIVE_API,
     apply_irr_change_plan,
     build_bulk_routing_intent_baseline_fingerprint,
     create_irr_change_plans,
@@ -15,6 +16,7 @@ from netbox_rpki.services import (
     run_routing_intent_pipeline,
     sync_irr_source,
     sync_provider_account,
+    sync_validator_instance,
 )
 
 
@@ -447,6 +449,97 @@ class SyncIrrSourceJob(JobRunner):
         }
         self.job.save(update_fields=('data',))
         self.logger.info(f'Completed IRR import with snapshot {snapshot.pk}')
+
+
+class SyncValidatorInstanceJob(JobRunner):
+    class Meta:
+        name = 'Validator Import'
+
+    @classmethod
+    def get_job_name(
+        cls,
+        validator: rpki_models.ValidatorInstance | int,
+        *,
+        fetch_mode: str = VALIDATOR_FETCH_MODE_LIVE_API,
+        snapshot_file: str | None = None,
+    ) -> str:
+        validator_pk = validator.pk if hasattr(validator, 'pk') else validator
+        suffix = f':{snapshot_file}' if snapshot_file else ''
+        return f'{cls.name} [{validator_pk}:{fetch_mode}{suffix}]'
+
+    @classmethod
+    def get_active_job_for_validator(
+        cls,
+        validator: rpki_models.ValidatorInstance | int,
+        *,
+        fetch_mode: str = VALIDATOR_FETCH_MODE_LIVE_API,
+        snapshot_file: str | None = None,
+    ):
+        return Job.objects.filter(
+            name=cls.get_job_name(validator, fetch_mode=fetch_mode, snapshot_file=snapshot_file),
+            status__in=JobStatusChoices.ENQUEUED_STATE_CHOICES,
+        ).order_by('created').first()
+
+    @classmethod
+    def enqueue_for_validator(
+        cls,
+        validator: rpki_models.ValidatorInstance | int,
+        *,
+        fetch_mode: str = VALIDATOR_FETCH_MODE_LIVE_API,
+        snapshot_file: str | None = None,
+        user=None,
+        schedule_at=None,
+    ):
+        if not isinstance(validator, rpki_models.ValidatorInstance):
+            validator = rpki_models.ValidatorInstance.objects.get(pk=validator)
+
+        existing_job = cls.get_active_job_for_validator(
+            validator,
+            fetch_mode=fetch_mode,
+            snapshot_file=snapshot_file,
+        )
+        if existing_job is not None:
+            return existing_job, False
+
+        if rpki_models.ValidationRun.objects.filter(
+            validator=validator,
+            status=rpki_models.ValidationRunStatus.RUNNING,
+        ).exists():
+            return None, False
+
+        job = cls.enqueue(
+            name=cls.get_job_name(validator, fetch_mode=fetch_mode, snapshot_file=snapshot_file),
+            user=user,
+            schedule_at=schedule_at,
+            validator_pk=validator.pk,
+            fetch_mode=fetch_mode,
+            snapshot_file=snapshot_file,
+        )
+        return job, True
+
+    def run(
+        self,
+        validator_pk,
+        fetch_mode=VALIDATOR_FETCH_MODE_LIVE_API,
+        snapshot_file=None,
+        *args,
+        **kwargs,
+    ):
+        validator = rpki_models.ValidatorInstance.objects.get(pk=validator_pk)
+        self.logger.info(f'Running validator import for {validator.name} ({validator.pk})')
+        run = sync_validator_instance(
+            validator,
+            fetch_mode=fetch_mode,
+            snapshot_file=snapshot_file,
+        )
+        self.job.data = {
+            'validator_pk': validator.pk,
+            'validation_run_pk': run.pk,
+            'fetch_mode': fetch_mode,
+            'snapshot_file': snapshot_file,
+        }
+        self.job.save(update_fields=('data',))
+        self.logger.info(f'Completed validator import with validation run {run.pk}')
 
 
 class RunIrrCoordinationJob(JobRunner):

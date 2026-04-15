@@ -116,6 +116,86 @@ SERIALIZER_CLASS_MAP['organization'] = OrganizationSerializer
 globals()['OrganizationSerializer'] = OrganizationSerializer
 
 
+class ValidatorInstanceSerializer(SERIALIZER_CLASS_MAP['validatorinstance']):
+    summary = serializers.SerializerMethodField()
+
+    class Meta(SERIALIZER_CLASS_MAP['validatorinstance'].Meta):
+        fields = SERIALIZER_CLASS_MAP['validatorinstance'].Meta.fields + (
+            'summary',
+        )
+
+    def get_summary(self, obj):
+        return obj.summary_json or {}
+
+
+SERIALIZER_CLASS_MAP['validatorinstance'] = ValidatorInstanceSerializer
+globals()['ValidatorInstanceSerializer'] = ValidatorInstanceSerializer
+
+
+class ValidationRunSerializer(SERIALIZER_CLASS_MAP['validationrun']):
+    summary = serializers.SerializerMethodField()
+
+    class Meta(SERIALIZER_CLASS_MAP['validationrun'].Meta):
+        fields = SERIALIZER_CLASS_MAP['validationrun'].Meta.fields + (
+            'summary',
+        )
+
+    def get_summary(self, obj):
+        return obj.summary_json or {}
+
+
+SERIALIZER_CLASS_MAP['validationrun'] = ValidationRunSerializer
+globals()['ValidationRunSerializer'] = ValidationRunSerializer
+
+
+class ObjectValidationResultSerializer(SERIALIZER_CLASS_MAP['objectvalidationresult']):
+    details = serializers.SerializerMethodField()
+
+    class Meta(SERIALIZER_CLASS_MAP['objectvalidationresult'].Meta):
+        fields = SERIALIZER_CLASS_MAP['objectvalidationresult'].Meta.fields + (
+            'details',
+        )
+
+    def get_details(self, obj):
+        return obj.details_json or {}
+
+
+SERIALIZER_CLASS_MAP['objectvalidationresult'] = ObjectValidationResultSerializer
+globals()['ObjectValidationResultSerializer'] = ObjectValidationResultSerializer
+
+
+class ValidatedRoaPayloadSerializer(SERIALIZER_CLASS_MAP['validatedroapayload']):
+    details = serializers.SerializerMethodField()
+
+    class Meta(SERIALIZER_CLASS_MAP['validatedroapayload'].Meta):
+        fields = SERIALIZER_CLASS_MAP['validatedroapayload'].Meta.fields + (
+            'details',
+        )
+
+    def get_details(self, obj):
+        return obj.details_json or {}
+
+
+SERIALIZER_CLASS_MAP['validatedroapayload'] = ValidatedRoaPayloadSerializer
+globals()['ValidatedRoaPayloadSerializer'] = ValidatedRoaPayloadSerializer
+
+
+class ValidatedAspaPayloadSerializer(SERIALIZER_CLASS_MAP['validatedaspapayload']):
+    details = serializers.SerializerMethodField()
+
+    class Meta(SERIALIZER_CLASS_MAP['validatedaspapayload'].Meta):
+        fields = SERIALIZER_CLASS_MAP['validatedaspapayload'].Meta.fields + (
+            'details',
+        )
+
+    def get_details(self, obj):
+        return obj.details_json or {}
+
+
+SERIALIZER_CLASS_MAP['validatedaspapayload'] = ValidatedAspaPayloadSerializer
+globals()['ValidatedAspaPayloadSerializer'] = ValidatedAspaPayloadSerializer
+
+
 class RpkiProviderAccountSerializer(SERIALIZER_CLASS_MAP['rpkiprovideraccount']):
     supports_roa_write = serializers.ReadOnlyField()
     roa_write_mode = serializers.ReadOnlyField()
