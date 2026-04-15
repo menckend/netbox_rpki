@@ -1205,6 +1205,73 @@ class RoutingIntentExceptionActionViewTestCase(PluginViewTestCase):
         self.assertIsNotNone(self.exception.approved_at)
 
 
+class DelegatedPublicationWorkflowActionViewTestCase(PluginViewTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(
+            org_id='delegated-workflow-view-org',
+            name='Delegated Workflow View Org',
+        )
+        cls.provider_account = create_test_provider_account(
+            name='Delegated Workflow View Provider',
+            organization=cls.organization,
+            org_handle='ORG-DELEGATED-VIEW',
+        )
+        cls.entity = rpki_models.DelegatedAuthorizationEntity.objects.create(
+            name='Delegated Workflow View Entity',
+            organization=cls.organization,
+            kind=rpki_models.DelegatedAuthorizationEntityKind.DOWNSTREAM,
+        )
+        cls.relationship = rpki_models.ManagedAuthorizationRelationship.objects.create(
+            name='Delegated Workflow View Relationship',
+            organization=cls.organization,
+            delegated_entity=cls.entity,
+            provider_account=cls.provider_account,
+            status=rpki_models.ManagedAuthorizationRelationshipStatus.ACTIVE,
+        )
+        cls.workflow = rpki_models.DelegatedPublicationWorkflow.objects.create(
+            name='Delegated Workflow View Workflow',
+            organization=cls.organization,
+            managed_relationship=cls.relationship,
+            child_ca_handle='delegated-child-view',
+            publication_server_uri='https://publication.example.invalid/view/',
+            status=rpki_models.DelegatedPublicationWorkflowStatus.ACTIVE,
+            requires_approval=True,
+        )
+
+    def test_workflow_detail_shows_approve_button_and_summary(self):
+        self.add_permissions(
+            'netbox_rpki.view_delegatedpublicationworkflow',
+            'netbox_rpki.change_delegatedpublicationworkflow',
+        )
+
+        response = self.client.get(self.workflow.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'Workflow Summary')
+        self.assertContains(response, 'awaiting_approval')
+        self.assertContains(
+            response,
+            reverse('plugins:netbox_rpki:delegatedpublicationworkflow_approve', kwargs={'pk': self.workflow.pk}),
+        )
+
+    def test_workflow_approve_view_sets_actor_and_timestamp(self):
+        self.add_permissions(
+            'netbox_rpki.view_delegatedpublicationworkflow',
+            'netbox_rpki.change_delegatedpublicationworkflow',
+        )
+
+        response = self.client.post(
+            reverse('plugins:netbox_rpki:delegatedpublicationworkflow_approve', kwargs={'pk': self.workflow.pk}),
+            {'confirm': True},
+        )
+
+        self.assertRedirects(response, self.workflow.get_absolute_url())
+        self.workflow.refresh_from_db()
+        self.assertEqual(self.workflow.approved_by, self.user.username)
+        self.assertIsNotNone(self.workflow.approved_at)
+
+
 class OrganizationAspaReconciliationViewTestCase(PluginViewTestCase):
     @classmethod
     def setUpTestData(cls):

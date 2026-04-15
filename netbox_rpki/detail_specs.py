@@ -33,6 +33,12 @@ from netbox_rpki.services.governance_summary import (
     build_rollback_bundle_governance_summary,
 )
 from netbox_rpki.services.governance_rollup import build_organization_governance_rollup
+from netbox_rpki.services.delegated_workflow import (
+    build_authored_ca_relationship_delegated_summary,
+    build_delegated_authorization_entity_summary,
+    build_delegated_publication_workflow_summary,
+    build_managed_authorization_relationship_summary,
+)
 from netbox_rpki.services.provider_sync_evidence import (
     get_certificate_observation_evidence_summary,
     get_certificate_observation_is_ambiguous,
@@ -3067,6 +3073,147 @@ PROVIDER_SNAPSHOT_DIFF_ITEM_DETAIL_SPEC = DetailSpec(
 )
 
 
+def get_delegated_authorization_entity_summary(obj: models.DelegatedAuthorizationEntity) -> str | None:
+    return get_pretty_json(build_delegated_authorization_entity_summary(obj))
+
+
+def get_managed_authorization_relationship_summary(obj: models.ManagedAuthorizationRelationship) -> str | None:
+    return get_pretty_json(build_managed_authorization_relationship_summary(obj))
+
+
+def get_delegated_publication_workflow_summary(obj: models.DelegatedPublicationWorkflow) -> str | None:
+    return get_pretty_json(build_delegated_publication_workflow_summary(obj))
+
+
+def get_authored_ca_relationship_delegated_summary(obj: models.AuthoredCaRelationship) -> str | None:
+    return get_pretty_json(build_authored_ca_relationship_delegated_summary(obj))
+
+
+AUTHORED_CA_RELATIONSHIP_DETAIL_SPEC = DetailSpec(
+    model=models.AuthoredCaRelationship,
+    list_url_name='plugins:netbox_rpki:authoredcarelationship_list',
+    breadcrumb_label='Authored CA Relationships',
+    card_title='Authored CA Relationship',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Organization', value=lambda obj: obj.organization, kind='link'),
+        DetailFieldSpec(label='Provider Account', value=lambda obj: obj.provider_account, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Child CA Handle', value=lambda obj: obj.child_ca_handle),
+        DetailFieldSpec(label='Parent CA Handle', value=lambda obj: obj.parent_ca_handle, empty_text='None'),
+        DetailFieldSpec(label='Relationship Type', value=lambda obj: obj.relationship_type),
+        DetailFieldSpec(label='Status', value=lambda obj: obj.status),
+        DetailFieldSpec(label='Service URI', value=lambda obj: obj.service_uri, kind='url', empty_text='None'),
+        DetailFieldSpec(label='Delegated Workflow Summary', value=get_authored_ca_relationship_delegated_summary, kind='code', empty_text='None'),
+    ),
+    bottom_tables=(
+        DetailTableSpec(
+            title='Linked Delegated Publication Workflows',
+            table_class_name='DelegatedPublicationWorkflowTable',
+            queryset=lambda obj: models.DelegatedPublicationWorkflow.objects.filter(
+                organization=obj.organization,
+                child_ca_handle=obj.child_ca_handle,
+            ),
+        ),
+    ),
+)
+
+
+DELEGATED_AUTHORIZATION_ENTITY_DETAIL_SPEC = DetailSpec(
+    model=models.DelegatedAuthorizationEntity,
+    list_url_name='plugins:netbox_rpki:delegatedauthorizationentity_list',
+    breadcrumb_label='Delegated Authorization Entities',
+    card_title='Delegated Authorization Entity',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Organization', value=lambda obj: obj.organization, kind='link'),
+        DetailFieldSpec(label='Kind', value=lambda obj: obj.kind),
+        DetailFieldSpec(label='Contact Name', value=lambda obj: obj.contact_name, empty_text='None'),
+        DetailFieldSpec(label='Contact Email', value=lambda obj: obj.contact_email, empty_text='None'),
+        DetailFieldSpec(label='ASN', value=lambda obj: obj.asn, empty_text='None'),
+        DetailFieldSpec(label='Enabled', value=lambda obj: obj.enabled),
+        DetailFieldSpec(label='Entity Summary', value=get_delegated_authorization_entity_summary, kind='code', empty_text='None'),
+    ),
+    bottom_tables=(
+        DetailTableSpec(
+            title='Managed Authorization Relationships',
+            table_class_name='ManagedAuthorizationRelationshipTable',
+            queryset=lambda obj: obj.managed_authorization_relationships.all(),
+        ),
+        DetailTableSpec(
+            title='Delegated Publication Workflows',
+            table_class_name='DelegatedPublicationWorkflowTable',
+            queryset=lambda obj: models.DelegatedPublicationWorkflow.objects.filter(
+                managed_relationship__delegated_entity=obj,
+            ),
+        ),
+    ),
+)
+
+
+MANAGED_AUTHORIZATION_RELATIONSHIP_DETAIL_SPEC = DetailSpec(
+    model=models.ManagedAuthorizationRelationship,
+    list_url_name='plugins:netbox_rpki:managedauthorizationrelationship_list',
+    breadcrumb_label='Managed Authorization Relationships',
+    card_title='Managed Authorization Relationship',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Organization', value=lambda obj: obj.organization, kind='link'),
+        DetailFieldSpec(label='Delegated Entity', value=lambda obj: obj.delegated_entity, kind='link'),
+        DetailFieldSpec(label='Provider Account', value=lambda obj: obj.provider_account, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Role', value=lambda obj: obj.role),
+        DetailFieldSpec(label='Status', value=lambda obj: obj.status),
+        DetailFieldSpec(label='Service URI', value=lambda obj: obj.service_uri, kind='url', empty_text='None'),
+        DetailFieldSpec(label='Relationship Summary', value=get_managed_authorization_relationship_summary, kind='code', empty_text='None'),
+    ),
+    bottom_tables=(
+        DetailTableSpec(
+            title='Delegated Publication Workflows',
+            table_class_name='DelegatedPublicationWorkflowTable',
+            queryset=lambda obj: obj.publication_workflows.all(),
+        ),
+    ),
+)
+
+
+DELEGATED_PUBLICATION_WORKFLOW_DETAIL_SPEC = DetailSpec(
+    model=models.DelegatedPublicationWorkflow,
+    list_url_name='plugins:netbox_rpki:delegatedpublicationworkflow_list',
+    breadcrumb_label='Delegated Publication Workflows',
+    card_title='Delegated Publication Workflow',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Organization', value=lambda obj: obj.organization, kind='link'),
+        DetailFieldSpec(label='Managed Relationship', value=lambda obj: obj.managed_relationship, kind='link'),
+        DetailFieldSpec(label='Parent CA Handle', value=lambda obj: obj.parent_ca_handle, empty_text='None'),
+        DetailFieldSpec(label='Child CA Handle', value=lambda obj: obj.child_ca_handle, empty_text='None'),
+        DetailFieldSpec(label='Publication Server URI', value=lambda obj: obj.publication_server_uri, kind='url', empty_text='None'),
+        DetailFieldSpec(label='Status', value=lambda obj: obj.status),
+        DetailFieldSpec(label='Requires Approval', value=lambda obj: obj.requires_approval),
+        DetailFieldSpec(label='Approved At', value=lambda obj: obj.approved_at, empty_text='None'),
+        DetailFieldSpec(label='Approved By', value=lambda obj: obj.approved_by, empty_text='None'),
+        DetailFieldSpec(label='Workflow Summary', value=get_delegated_publication_workflow_summary, kind='code', empty_text='None'),
+    ),
+    actions=(
+        DetailActionSpec(
+            permission='netbox_rpki.change_delegatedpublicationworkflow',
+            label='Approve Workflow',
+            direct_url=lambda obj: reverse('plugins:netbox_rpki:delegatedpublicationworkflow_approve', kwargs={'pk': obj.pk}),
+            visible=lambda obj: obj.requires_approval and obj.approved_at is None,
+        ),
+    ),
+    bottom_tables=(
+        DetailTableSpec(
+            title='Linked Authored CA Relationships',
+            table_class_name='AuthoredCaRelationshipTable',
+            queryset=lambda obj: models.AuthoredCaRelationship.objects.filter(
+                organization=obj.organization,
+                child_ca_handle=obj.child_ca_handle,
+            ),
+        ),
+    ),
+)
+
+
 DETAIL_SPEC_BY_MODEL = {
     models.Organization: ORGANIZATION_DETAIL_SPEC,
     models.SignedObject: SIGNED_OBJECT_DETAIL_SPEC,
@@ -3087,6 +3234,10 @@ DETAIL_SPEC_BY_MODEL = {
     models.ProviderSnapshot: PROVIDER_SNAPSHOT_DETAIL_SPEC,
     models.ProviderSnapshotDiff: PROVIDER_SNAPSHOT_DIFF_DETAIL_SPEC,
     models.ProviderSnapshotDiffItem: PROVIDER_SNAPSHOT_DIFF_ITEM_DETAIL_SPEC,
+    models.AuthoredCaRelationship: AUTHORED_CA_RELATIONSHIP_DETAIL_SPEC,
+    models.DelegatedAuthorizationEntity: DELEGATED_AUTHORIZATION_ENTITY_DETAIL_SPEC,
+    models.ManagedAuthorizationRelationship: MANAGED_AUTHORIZATION_RELATIONSHIP_DETAIL_SPEC,
+    models.DelegatedPublicationWorkflow: DELEGATED_PUBLICATION_WORKFLOW_DETAIL_SPEC,
     models.RoutingIntentProfile: ROUTING_INTENT_PROFILE_DETAIL_SPEC,
     models.RoutingIntentContextGroup: ROUTING_INTENT_CONTEXT_GROUP_DETAIL_SPEC,
     models.RoutingIntentTemplateBinding: ROUTING_INTENT_TEMPLATE_BINDING_DETAIL_SPEC,

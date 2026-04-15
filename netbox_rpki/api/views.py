@@ -16,6 +16,7 @@ from netbox_rpki.api.serializers import (
     BulkIntentRunActionSerializer,
     BulkIntentRunApproveActionSerializer,
     BulkIntentRunApproveSecondaryActionSerializer,
+    DelegatedPublicationWorkflowApproveActionSerializer,
     ProviderSnapshotCompareActionSerializer,
     ROAChangePlanApproveSecondaryActionSerializer,
     RollbackBundleApplyActionSerializer,
@@ -57,6 +58,7 @@ from netbox_rpki.services import (
     apply_aspa_change_plan_provider_write,
     apply_roa_rollback_bundle,
     apply_roa_change_plan_provider_write,
+    approve_delegated_publication_workflow,
     approve_bulk_intent_run,
     secondary_approve_bulk_intent_run,
     approve_rollback_bundle,
@@ -231,6 +233,36 @@ class RoutingIntentExceptionViewSet(VIEWSET_CLASS_MAP['routingintentexception'])
         exception.approved_by = getattr(request.user, 'username', '')
         exception.save(update_fields=('approved_at', 'approved_by'))
         return Response(SERIALIZER_CLASS_MAP['routingintentexception'](exception, context={'request': request}).data)
+
+
+class DelegatedPublicationWorkflowViewSet(VIEWSET_CLASS_MAP['delegatedpublicationworkflow']):
+    def get_queryset(self):
+        queryset = super().get_queryset()
+
+        if getattr(self, 'action', None) == 'approve' and self.request.user.is_authenticated:
+            return self.queryset.model.objects.restrict(self.request.user, 'change')
+
+        return queryset
+
+    @action(detail=True, methods=['post'], permission_classes=[TokenWritePermission])
+    def approve(self, request, pk=None):
+        workflow = self.get_object()
+
+        if not request.user.has_perm('netbox_rpki.change_delegatedpublicationworkflow', workflow):
+            raise PermissionDenied('This user does not have permission to approve this delegated publication workflow.')
+
+        input_serializer = DelegatedPublicationWorkflowApproveActionSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+        approved_by = input_serializer.validated_data.get('approved_by') or getattr(request.user, 'username', '')
+
+        try:
+            workflow = approve_delegated_publication_workflow(workflow, approved_by=approved_by)
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+
+        return Response(
+            SERIALIZER_CLASS_MAP['delegatedpublicationworkflow'](workflow, context={'request': request}).data
+        )
 
 
 class RoutingIntentTemplateBindingViewSet(VIEWSET_CLASS_MAP['routingintenttemplatebinding']):
@@ -1346,6 +1378,8 @@ VIEWSET_CLASS_MAP['bulkintentrun'] = BulkIntentRunViewSet
 globals()['BulkIntentRunViewSet'] = BulkIntentRunViewSet
 VIEWSET_CLASS_MAP['routingintentexception'] = RoutingIntentExceptionViewSet
 globals()['RoutingIntentExceptionViewSet'] = RoutingIntentExceptionViewSet
+VIEWSET_CLASS_MAP['delegatedpublicationworkflow'] = DelegatedPublicationWorkflowViewSet
+globals()['DelegatedPublicationWorkflowViewSet'] = DelegatedPublicationWorkflowViewSet
 VIEWSET_CLASS_MAP['routingintenttemplatebinding'] = RoutingIntentTemplateBindingViewSet
 globals()['RoutingIntentTemplateBindingViewSet'] = RoutingIntentTemplateBindingViewSet
 VIEWSET_CLASS_MAP['organization'] = OrganizationViewSet

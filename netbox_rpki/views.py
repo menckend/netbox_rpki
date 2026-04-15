@@ -44,6 +44,7 @@ from netbox_rpki.services import (
     build_telemetry_source_attention_items,
     build_validation_run_attention_items,
     build_validator_instance_attention_items,
+    approve_delegated_publication_workflow,
     approve_roa_change_plan,
     approve_roa_change_plan_secondary,
     build_roa_change_plan_delta,
@@ -682,6 +683,46 @@ class RoutingIntentExceptionApproveView(generic.ObjectEditView):
         exception.save(update_fields=('approved_at', 'approved_by'))
         messages.success(request, f'Approved routing intent exception {exception.name}.')
         return redirect(exception.get_absolute_url())
+
+
+class DelegatedPublicationWorkflowApproveView(generic.ObjectEditView):
+    queryset = models.DelegatedPublicationWorkflow.objects.all()
+    template_name = 'netbox_rpki/delegatedpublicationworkflow_approve.html'
+
+    def get_required_permission(self):
+        return 'netbox_rpki.change_delegatedpublicationworkflow'
+
+    def get_workflow(self, pk):
+        return get_object_or_404(self.queryset, pk=pk)
+
+    def _render(self, request, workflow, *, form=None, status=200):
+        return render(request, self.template_name, {
+            'object': workflow,
+            'workflow': workflow,
+            'form': form or ConfirmationForm(),
+            'return_url': self.get_return_url(request, workflow),
+        }, status=status)
+
+    def get(self, request, pk):
+        workflow = self.get_workflow(pk)
+        return self._render(request, workflow)
+
+    def post(self, request, pk):
+        workflow = self.get_workflow(pk)
+        form = ConfirmationForm(request.POST)
+        if not form.is_valid():
+            return self._render(request, workflow, form=form, status=400)
+
+        try:
+            approve_delegated_publication_workflow(
+                workflow,
+                approved_by=getattr(request.user, 'username', ''),
+            )
+        except ValueError:
+            return HttpResponseBadRequest('This delegated publication workflow cannot be approved.')
+
+        messages.success(request, f'Approved delegated publication workflow {workflow.name}.')
+        return redirect(workflow.get_absolute_url())
 
 
 class ROAReconciliationRunCreatePlanView(generic.ObjectEditView):

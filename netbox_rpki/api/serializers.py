@@ -18,6 +18,12 @@ from netbox_rpki.services.publication_state import (
     derive_change_plan_publication_state,
     derive_rollback_bundle_publication_state,
 )
+from netbox_rpki.services.delegated_workflow import (
+    build_authored_ca_relationship_delegated_summary,
+    build_delegated_authorization_entity_summary,
+    build_delegated_publication_workflow_summary,
+    build_managed_authorization_relationship_summary,
+)
 from netbox_rpki.services.provider_sync_contract import (
     build_provider_account_rollup,
     build_provider_snapshot_diff_rollup,
@@ -133,6 +139,70 @@ class OrganizationSerializer(SERIALIZER_CLASS_MAP['organization']):
 
 SERIALIZER_CLASS_MAP['organization'] = OrganizationSerializer
 globals()['OrganizationSerializer'] = OrganizationSerializer
+
+
+class DelegatedAuthorizationEntitySerializer(SERIALIZER_CLASS_MAP['delegatedauthorizationentity']):
+    entity_summary = serializers.SerializerMethodField()
+
+    class Meta(SERIALIZER_CLASS_MAP['delegatedauthorizationentity'].Meta):
+        fields = SERIALIZER_CLASS_MAP['delegatedauthorizationentity'].Meta.fields + (
+            'entity_summary',
+        )
+
+    def get_entity_summary(self, obj):
+        return build_delegated_authorization_entity_summary(obj)
+
+
+SERIALIZER_CLASS_MAP['delegatedauthorizationentity'] = DelegatedAuthorizationEntitySerializer
+globals()['DelegatedAuthorizationEntitySerializer'] = DelegatedAuthorizationEntitySerializer
+
+
+class ManagedAuthorizationRelationshipSerializer(SERIALIZER_CLASS_MAP['managedauthorizationrelationship']):
+    relationship_summary = serializers.SerializerMethodField()
+
+    class Meta(SERIALIZER_CLASS_MAP['managedauthorizationrelationship'].Meta):
+        fields = SERIALIZER_CLASS_MAP['managedauthorizationrelationship'].Meta.fields + (
+            'relationship_summary',
+        )
+
+    def get_relationship_summary(self, obj):
+        return build_managed_authorization_relationship_summary(obj)
+
+
+SERIALIZER_CLASS_MAP['managedauthorizationrelationship'] = ManagedAuthorizationRelationshipSerializer
+globals()['ManagedAuthorizationRelationshipSerializer'] = ManagedAuthorizationRelationshipSerializer
+
+
+class DelegatedPublicationWorkflowSerializer(SERIALIZER_CLASS_MAP['delegatedpublicationworkflow']):
+    workflow_summary = serializers.SerializerMethodField()
+
+    class Meta(SERIALIZER_CLASS_MAP['delegatedpublicationworkflow'].Meta):
+        fields = SERIALIZER_CLASS_MAP['delegatedpublicationworkflow'].Meta.fields + (
+            'workflow_summary',
+        )
+
+    def get_workflow_summary(self, obj):
+        return build_delegated_publication_workflow_summary(obj)
+
+
+SERIALIZER_CLASS_MAP['delegatedpublicationworkflow'] = DelegatedPublicationWorkflowSerializer
+globals()['DelegatedPublicationWorkflowSerializer'] = DelegatedPublicationWorkflowSerializer
+
+
+class AuthoredCaRelationshipSerializer(SERIALIZER_CLASS_MAP['authoredcarelationship']):
+    delegated_workflow_summary = serializers.SerializerMethodField()
+
+    class Meta(SERIALIZER_CLASS_MAP['authoredcarelationship'].Meta):
+        fields = SERIALIZER_CLASS_MAP['authoredcarelationship'].Meta.fields + (
+            'delegated_workflow_summary',
+        )
+
+    def get_delegated_workflow_summary(self, obj):
+        return build_authored_ca_relationship_delegated_summary(obj)
+
+
+SERIALIZER_CLASS_MAP['authoredcarelationship'] = AuthoredCaRelationshipSerializer
+globals()['AuthoredCaRelationshipSerializer'] = AuthoredCaRelationshipSerializer
 
 
 class ValidatorInstanceSerializer(SERIALIZER_CLASS_MAP['validatorinstance']):
@@ -1392,6 +1462,10 @@ class BulkIntentRunApproveActionSerializer(serializers.Serializer):
 
 
 class BulkIntentRunApproveSecondaryActionSerializer(serializers.Serializer):
+    approved_by = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class DelegatedPublicationWorkflowApproveActionSerializer(serializers.Serializer):
     approved_by = serializers.CharField(required=False, allow_blank=True, default='')
 
 

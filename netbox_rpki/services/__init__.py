@@ -72,6 +72,13 @@ from .bulk_intent_governance import (
     is_bulk_intent_run_approved,
 )
 from .governance_rollup import build_organization_governance_rollup
+from .delegated_workflow import (
+    approve_delegated_publication_workflow,
+    build_authored_ca_relationship_delegated_summary,
+    build_delegated_authorization_entity_summary,
+    build_delegated_publication_workflow_summary,
+    build_managed_authorization_relationship_summary,
+)
 from .irr_sync import IrrSyncError, sync_irr_source
 from .irr_coordination import IrrCoordinationError, run_irr_coordination
 from .irr_write import (
@@ -172,6 +179,11 @@ __all__ = (
     'secondary_approve_bulk_intent_run',
     'is_bulk_intent_run_approved',
     'build_organization_governance_rollup',
+    'approve_delegated_publication_workflow',
+    'build_authored_ca_relationship_delegated_summary',
+    'build_delegated_authorization_entity_summary',
+    'build_delegated_publication_workflow_summary',
+    'build_managed_authorization_relationship_summary',
     'ExternalValidationError',
     'IrrSyncError',
     'sync_irr_source',

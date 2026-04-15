@@ -1,0 +1,41 @@
+{% extends 'generic/_base.html' %}
+
+{% block title %}Approve {{ workflow }}{% endblock %}
+
+{% block content %}
+  <div class="row mt-5">
+    <div class="col col-md-8 offset-md-2">
+      <form action="" method="post" class="form">
+        {% csrf_token %}
+        {% for field in form.hidden_fields %}
+          {{ field }}
+        {% endfor %}
+        <div class="card border-warning">
+          <h2 class="card-header">Approve Delegated Publication Workflow</h2>
+          <div class="card-body">
+            <p>
+              Approve <strong>{{ workflow }}</strong> so it can become effective when its delegated
+              relationship and publication prerequisites are satisfied.
+            </p>
+            <dl class="row mb-0">
+              <dt class="col-sm-4">Organization</dt>
+              <dd class="col-sm-8">{{ workflow.organization }}</dd>
+              <dt class="col-sm-4">Managed Relationship</dt>
+              <dd class="col-sm-8">{{ workflow.managed_relationship }}</dd>
+              <dt class="col-sm-4">Parent CA Handle</dt>
+              <dd class="col-sm-8">{{ workflow.parent_ca_handle|default:'None' }}</dd>
+              <dt class="col-sm-4">Child CA Handle</dt>
+              <dd class="col-sm-8">{{ workflow.child_ca_handle|default:'None' }}</dd>
+              <dt class="col-sm-4">Publication Endpoint</dt>
+              <dd class="col-sm-8">{{ workflow.publication_server_uri|default:'None' }}</dd>
+            </dl>
+          </div>
+          <div class="card-footer text-end">
+            <a href="{{ return_url }}" class="btn btn-outline-secondary">Cancel</a>
+            <button type="submit" name="_confirm" class="btn btn-primary">Approve Workflow</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endblock %}

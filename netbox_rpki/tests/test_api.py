@@ -184,6 +184,62 @@ class SerializerSmokeTestCase(SimpleTestCase):
         )
 
 
+class DelegatedWorkflowSerializerTestCase(TestCase):
+    def test_delegated_workflow_serializers_expose_service_backed_summaries(self):
+        organization = create_test_organization(
+            org_id='delegated-serializer-org',
+            name='Delegated Serializer Org',
+        )
+        provider_account = create_test_provider_account(
+            name='Delegated Serializer Provider',
+            organization=organization,
+            org_handle='ORG-DELEGATED-SERIALIZER',
+        )
+        entity = rpki_models.DelegatedAuthorizationEntity.objects.create(
+            name='Delegated Serializer Entity',
+            organization=organization,
+            kind=rpki_models.DelegatedAuthorizationEntityKind.DELEGATED,
+        )
+        relationship = rpki_models.ManagedAuthorizationRelationship.objects.create(
+            name='Delegated Serializer Relationship',
+            organization=organization,
+            delegated_entity=entity,
+            provider_account=provider_account,
+            status=rpki_models.ManagedAuthorizationRelationshipStatus.ACTIVE,
+        )
+        workflow = rpki_models.DelegatedPublicationWorkflow.objects.create(
+            name='Delegated Serializer Workflow',
+            organization=organization,
+            managed_relationship=relationship,
+            child_ca_handle='delegated-child-serializer',
+            publication_server_uri='https://publication.example.invalid/serializer/',
+            status=rpki_models.DelegatedPublicationWorkflowStatus.ACTIVE,
+            requires_approval=True,
+        )
+        authored_relationship = rpki_models.AuthoredCaRelationship.objects.create(
+            name='Delegated Serializer Authored CA Relationship',
+            organization=organization,
+            provider_account=provider_account,
+            child_ca_handle='delegated-child-serializer',
+            relationship_type=rpki_models.AuthoredCaRelationshipType.PARENT,
+            status=rpki_models.AuthoredCaRelationshipStatus.ACTIVE,
+        )
+
+        entity_data = api_serializers.DelegatedAuthorizationEntitySerializer(entity, context={'request': None}).data
+        relationship_data = api_serializers.ManagedAuthorizationRelationshipSerializer(relationship, context={'request': None}).data
+        workflow_data = api_serializers.DelegatedPublicationWorkflowSerializer(workflow, context={'request': None}).data
+        authored_data = api_serializers.AuthoredCaRelationshipSerializer(authored_relationship, context={'request': None}).data
+
+        self.assertIn('entity_summary', entity_data)
+        self.assertEqual(entity_data['entity_summary']['workflow_count'], 1)
+        self.assertIn('relationship_summary', relationship_data)
+        self.assertEqual(relationship_data['relationship_summary']['workflow_count'], 1)
+        self.assertIn('workflow_summary', workflow_data)
+        self.assertEqual(workflow_data['workflow_summary']['linkage']['linkage_status'], 'linked')
+        self.assertIn('delegated_workflow_summary', authored_data)
+        self.assertEqual(authored_data['delegated_workflow_summary']['workflow_count'], 1)
+
+
 class LifecycleHealthSurfaceContractTestCase(SimpleTestCase):
     def test_lifecycle_health_hook_and_event_api_surfaces_are_registered(self):
         hook_spec = get_object_spec('lifecyclehealthhook')
@@ -875,6 +931,7 @@ def _get_custom_action_route_names(contract):
     return (contract['route_name'],)
 
 EXTRA_ACTION_NAME_CONTRACTS = {
+    'delegatedpublicationworkflow': ('approve',),
     'organization': ('create_bulk_intent_run', 'run_aspa_reconciliation'),
     'aspareconciliationrun': ('create_plan', 'summary'),
     'aspachangeplan': ('apply', 'approve', 'approve_secondary', 'preview', 'summary'),
@@ -903,6 +960,17 @@ EXTRA_ACTION_NAME_CONTRACTS = {
 }
 
 CUSTOM_ACTION_CONTRACTS = {
+    'delegatedpublicationworkflow': {
+        'actions': ('approve',),
+        'route_name': 'plugins-api:netbox_rpki-api:delegatedpublicationworkflow-approve',
+        'denied_status': 404,
+        'view_permissions': ('netbox_rpki.view_delegatedpublicationworkflow',),
+        'allowed_permissions': (
+            'netbox_rpki.view_delegatedpublicationworkflow',
+            'netbox_rpki.change_delegatedpublicationworkflow',
+        ),
+        'instance_attr': 'delegated_publication_workflow',
+    },
     'organization': {
         'actions': ('run_aspa_reconciliation', 'create_bulk_intent_run'),
         'route_names': (
@@ -1313,6 +1381,27 @@ class CustomActionSurfaceContractTestCase(PluginAPITestCase):
             name='Custom Action Provider',
             organization=cls.organization,
             org_handle='ORG-CUSTOM-ACTION',
+        )
+        cls.delegated_entity = rpki_models.DelegatedAuthorizationEntity.objects.create(
+            name='Custom Action Delegated Entity',
+            organization=cls.organization,
+            kind=rpki_models.DelegatedAuthorizationEntityKind.DOWNSTREAM,
+        )
+        cls.managed_authorization_relationship = rpki_models.ManagedAuthorizationRelationship.objects.create(
+            name='Custom Action Managed Relationship',
+            organization=cls.organization,
+            delegated_entity=cls.delegated_entity,
+            provider_account=cls.provider_account,
+            status=rpki_models.ManagedAuthorizationRelationshipStatus.ACTIVE,
+        )
+        cls.delegated_publication_workflow = rpki_models.DelegatedPublicationWorkflow.objects.create(
+            name='Custom Action Delegated Workflow',
+            organization=cls.organization,
+            managed_relationship=cls.managed_authorization_relationship,
+            child_ca_handle='delegated-child-ca',
+            publication_server_uri='https://publication.example.invalid/upstream/',
+            status=rpki_models.DelegatedPublicationWorkflowStatus.ACTIVE,
+            requires_approval=True,
         )
         cls.reconciliation_run = create_test_roa_reconciliation_run(
             name='Custom Action Reconciliation',
@@ -1756,6 +1845,78 @@ class RoutingIntentExceptionActionAPITestCase(PluginAPITestCase):
         self.assertHttpStatus(response, 200)
         serializer = api_serializers.RoutingIntentExceptionSerializer(
             self.exception.__class__.objects.get(pk=self.exception.pk),
+            context={'request': response.wsgi_request},
+        )
+        self.assertEqual(set(response.data), set(serializer.data))
+
+
+class DelegatedPublicationWorkflowActionAPITestCase(PluginAPITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(
+            org_id='delegated-workflow-action-org',
+            name='Delegated Workflow Action Org',
+        )
+        cls.provider_account = create_test_provider_account(
+            name='Delegated Workflow Provider',
+            organization=cls.organization,
+            org_handle='ORG-DELEGATED-WORKFLOW',
+        )
+        cls.entity = rpki_models.DelegatedAuthorizationEntity.objects.create(
+            name='Delegated Workflow Entity',
+            organization=cls.organization,
+            kind=rpki_models.DelegatedAuthorizationEntityKind.CUSTOMER,
+        )
+        cls.relationship = rpki_models.ManagedAuthorizationRelationship.objects.create(
+            name='Delegated Workflow Relationship',
+            organization=cls.organization,
+            delegated_entity=cls.entity,
+            provider_account=cls.provider_account,
+            status=rpki_models.ManagedAuthorizationRelationshipStatus.ACTIVE,
+        )
+        cls.workflow = rpki_models.DelegatedPublicationWorkflow.objects.create(
+            name='Delegated Workflow Action',
+            organization=cls.organization,
+            managed_relationship=cls.relationship,
+            child_ca_handle='delegated-child-approve',
+            publication_server_uri='https://publication.example.invalid/delegated/',
+            status=rpki_models.DelegatedPublicationWorkflowStatus.ACTIVE,
+            requires_approval=True,
+        )
+
+    def test_approve_action_sets_actor_and_timestamp(self):
+        self.add_permissions(
+            'netbox_rpki.view_delegatedpublicationworkflow',
+            'netbox_rpki.change_delegatedpublicationworkflow',
+        )
+        url = reverse(
+            'plugins-api:netbox_rpki-api:delegatedpublicationworkflow-approve',
+            kwargs={'pk': self.workflow.pk},
+        )
+
+        response = self.client.post(url, {}, format='json', **self.header)
+
+        self.assertHttpStatus(response, 200)
+        self.workflow.refresh_from_db()
+        self.assertEqual(self.workflow.approved_by, self.user.username)
+        self.assertIsNotNone(self.workflow.approved_at)
+        self.assertEqual(response.data['workflow_summary']['approval']['approval_state'], 'approved')
+
+    def test_approve_action_response_matches_workflow_serializer_contract(self):
+        self.add_permissions(
+            'netbox_rpki.view_delegatedpublicationworkflow',
+            'netbox_rpki.change_delegatedpublicationworkflow',
+        )
+        url = reverse(
+            'plugins-api:netbox_rpki-api:delegatedpublicationworkflow-approve',
+            kwargs={'pk': self.workflow.pk},
+        )
+
+        response = self.client.post(url, {}, format='json', **self.header)
+
+        self.assertHttpStatus(response, 200)
+        serializer = api_serializers.DelegatedPublicationWorkflowSerializer(
+            self.workflow.__class__.objects.get(pk=self.workflow.pk),
             context={'request': response.wsgi_request},
         )
         self.assertEqual(set(response.data), set(serializer.data))

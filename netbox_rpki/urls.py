@@ -84,6 +84,14 @@ def build_object_urlpatterns(spec):
                 name='routingintentexception_approve',
             )
         )
+    if spec.registry_key == 'delegatedpublicationworkflow':
+        urlpatterns.append(
+            path(
+                f'{path_prefix}/<int:pk>/approve/',
+                views.DelegatedPublicationWorkflowApproveView.as_view(),
+                name='delegatedpublicationworkflow_approve',
+            )
+        )
     if spec.registry_key == 'roachangeplan':
         urlpatterns.extend(
             (

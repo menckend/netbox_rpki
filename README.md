@@ -32,6 +32,8 @@ The latest provider-sync reporting work adds stable evidence summaries so import
 
 The first IRR coordination slice now adds source-backed IRR import surfaces for configured `IrrSource` records, retained `IrrSnapshot` history, and normalized imported IRR inventory for `route`, `route6`, `route-set`, `as-set`, `aut-num`, and `mntner` families. The initial live adapter targets IRRd-compatible sources through the local IRRd lab, while snapshot-file import remains available for deterministic tests and disconnected development.
 
+The delegated-authorization slice now adds service-backed operator posture for delegated entities, managed authorization relationships, authored CA relationship linkage, and delegated publication workflows. Delegated publication workflows can now be approved through the API and web UI, and delegated detail surfaces expose readiness, approval, and authored-topology linkage summaries instead of remaining passive CRUD records.
+
 The external-validator import slice now extends the existing validation model family with run summaries, object-level evidence details, imported signed-object correlation, and unmatched payload retention. The first concrete adapter targets Routinator `jsonext` data through either the live API or exported snapshot files, and normalizes both validated ROA and ASPA observations into the shared validator run history.
 
 The telemetry substrate slice now adds `TelemetrySource`, retained `TelemetryRun` history, and `BgpPathObservation` persistence for imported MRT-derived JSON snapshots. Each observation preserves raw AS-path text, normalized ASN-sequence JSON, and a stable `path_hash`, so later overlay and historical-comparison slices can correlate route visibility without redesigning the storage contract.
