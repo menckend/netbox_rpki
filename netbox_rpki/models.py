@@ -636,6 +636,11 @@ class DelegatedPublicationWorkflowStatus(models.TextChoices):
     ARCHIVED = "archived", "Archived"
 
 
+class AuthoredAsSetMemberType(models.TextChoices):
+    ASN = "asn", "ASN"
+    AS_SET = "as_set", "AS-Set"
+
+
 class PublicationState(models.TextChoices):
     DRAFT = "draft", "Draft"
     AWAITING_SECONDARY_APPROVAL = "awaiting_secondary_approval", "Awaiting Secondary Approval"
@@ -7236,6 +7241,144 @@ class AuthoredCaRelationship(NamedRpkiStandardModel):
             and self.managed_relationship.provider_account_id != self.provider_account_id
         ):
             errors['provider_account'] = 'Provider account must match the managed relationship when both are set.'
+
+        if errors:
+            raise ValidationError(errors)
+
+
+class AuthoredAsSet(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='authored_as_sets',
+    )
+    provider_account = models.ForeignKey(
+        to='RpkiProviderAccount',
+        on_delete=models.PROTECT,
+        related_name='authored_as_sets',
+        blank=True,
+        null=True,
+    )
+    delegated_entity = models.ForeignKey(
+        to='DelegatedAuthorizationEntity',
+        on_delete=models.PROTECT,
+        related_name='authored_as_sets',
+        blank=True,
+        null=True,
+    )
+    managed_relationship = models.ForeignKey(
+        to='ManagedAuthorizationRelationship',
+        on_delete=models.PROTECT,
+        related_name='authored_as_sets',
+        blank=True,
+        null=True,
+    )
+    set_name = models.CharField(max_length=255)
+    enabled = models.BooleanField(default=True)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ("organization", "set_name", "name")
+        constraints = (
+            models.UniqueConstraint(
+                fields=("organization", "set_name"),
+                name="nb_rpki_authoredasset_org_set_name_unique",
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:authoredasset", args=[self.pk])
+
+    def clean(self):
+        super().clean()
+        errors = {}
+
+        if (
+            self.delegated_entity_id is not None
+            and self.delegated_entity.organization_id != self.organization_id
+        ):
+            errors['delegated_entity'] = 'Delegated entity must belong to the same organization as this AS-set.'
+
+        if (
+            self.managed_relationship_id is not None
+            and self.managed_relationship.organization_id != self.organization_id
+        ):
+            errors['managed_relationship'] = 'Managed relationship must belong to the same organization as this AS-set.'
+
+        if (
+            self.provider_account_id is not None
+            and self.provider_account.organization_id != self.organization_id
+        ):
+            errors['provider_account'] = 'Provider account must belong to the same organization as this AS-set.'
+
+        if (
+            self.delegated_entity_id is not None
+            and self.managed_relationship_id is not None
+            and self.managed_relationship.delegated_entity_id != self.delegated_entity_id
+        ):
+            errors['managed_relationship'] = 'Managed relationship delegated entity must match the AS-set delegated entity.'
+
+        if (
+            self.provider_account_id is not None
+            and self.managed_relationship_id is not None
+            and self.managed_relationship.provider_account_id is not None
+            and self.managed_relationship.provider_account_id != self.provider_account_id
+        ):
+            errors['provider_account'] = 'Provider account must match the managed relationship when both are set.'
+
+        if errors:
+            raise ValidationError(errors)
+
+
+class AuthoredAsSetMember(NamedRpkiStandardModel):
+    authored_as_set = models.ForeignKey(
+        to='AuthoredAsSet',
+        on_delete=models.PROTECT,
+        related_name='members',
+    )
+    member_type = models.CharField(
+        max_length=16,
+        choices=AuthoredAsSetMemberType.choices,
+        default=AuthoredAsSetMemberType.ASN,
+    )
+    member_asn_value = models.BigIntegerField(blank=True, null=True)
+    nested_set_name = models.CharField(max_length=255, blank=True)
+    enabled = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ("authored_as_set", "name")
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:authoredassetmember", args=[self.pk])
+
+    @property
+    def member_text(self) -> str:
+        if self.member_type == AuthoredAsSetMemberType.ASN and self.member_asn_value is not None:
+            return f'AS{self.member_asn_value}'
+        if self.member_type == AuthoredAsSetMemberType.AS_SET:
+            return self.nested_set_name.strip().upper()
+        return ''
+
+    def clean(self):
+        super().clean()
+        errors = {}
+
+        if self.member_type == AuthoredAsSetMemberType.ASN:
+            if self.member_asn_value is None:
+                errors['member_asn_value'] = 'ASN members require member_asn_value.'
+            if self.nested_set_name:
+                errors['nested_set_name'] = 'ASN members must not define nested_set_name.'
+        elif self.member_type == AuthoredAsSetMemberType.AS_SET:
+            if not self.nested_set_name.strip():
+                errors['nested_set_name'] = 'AS-set members require nested_set_name.'
+            if self.member_asn_value is not None:
+                errors['member_asn_value'] = 'AS-set members must not define member_asn_value.'
 
         if errors:
             raise ValidationError(errors)

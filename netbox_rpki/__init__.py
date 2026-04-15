@@ -28,5 +28,13 @@ class RpkiConfig(PluginConfig):
 
         from . import jobs  # noqa: F401
 
+        # Register per-group top-level menus when top_level_menu is enabled.
+        # super().ready() looks for navigation.menu (singular); since we export
+        # navigation.menus instead, we register each entry manually here.
+        from . import navigation as _nav
+        from netbox.plugins import register_menu as _register_menu
+        for _m in getattr(_nav, 'menus', ()):
+            _register_menu(_m)
+
 
 config = RpkiConfig

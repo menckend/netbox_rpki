@@ -7,6 +7,12 @@ from django.test import TestCase
 from netbox_rpki import models as rpki_models
 from netbox_rpki.services import create_irr_change_plans
 from netbox_rpki.tests.utils import (
+    create_test_authored_as_set,
+    create_test_authored_as_set_member,
+    create_test_imported_irr_as_set,
+    create_test_imported_irr_as_set_member,
+    create_test_imported_irr_route_set,
+    create_test_imported_irr_route_set_member,
     create_test_imported_irr_maintainer,
     create_test_irr_coordination_result,
     create_test_irr_coordination_run,
@@ -144,7 +150,28 @@ class IrrChangePlanServiceTestCase(TestCase):
         self.assertEqual(item.action, rpki_models.IrrChangePlanAction.NOOP)
         self.assertEqual(item.request_payload_json, {})
 
-    def test_create_irr_change_plans_keeps_set_membership_families_advisory_only(self):
+    def test_create_irr_change_plans_builds_route_set_and_as_set_drafts(self):
+        route_set = create_test_imported_irr_route_set(
+            snapshot=self.snapshot,
+            source=self.source,
+            stable_key='route_set:AS64500:RS-EDGE',
+            rpsl_pk='AS64500:RS-EDGE',
+            set_name='AS64500:RS-EDGE',
+            object_text=(
+                'route-set: AS64500:RS-EDGE\n'
+                'descr: Example route set\n'
+                'mnt-by: LOCAL-IRR-MNT\n'
+                'members: 198.51.100.0/24\n'
+                'source: LOCAL-IRR\n'
+            ),
+        )
+        create_test_imported_irr_route_set_member(
+            snapshot=self.snapshot,
+            source=self.source,
+            parent_route_set=route_set,
+            member_text='198.51.100.0/24',
+            normalized_prefix='198.51.100.0/24',
+        )
         create_test_irr_coordination_result(
             name='Route-Set Membership Gap',
             coordination_run=self.coordination_run,
@@ -157,30 +184,47 @@ class IrrChangePlanServiceTestCase(TestCase):
             summary_json={
                 'route_stable_key': 'route:203.0.113.0/24AS64500',
                 'route_set_name': 'AS64500:RS-EDGE',
+                'route_set_stable_key': route_set.stable_key,
+                'route_prefix': '203.0.113.0/24',
             },
         )
         create_test_irr_coordination_result(
-            name='AS-Set Context Gap',
+            name='AS-Set Membership Gap',
             coordination_run=self.coordination_run,
             source=self.source,
             snapshot=self.snapshot,
             coordination_family=rpki_models.IrrCoordinationFamily.AS_SET_MEMBERSHIP,
-            result_type=rpki_models.IrrCoordinationResultType.POLICY_CONTEXT_GAP,
+            result_type=rpki_models.IrrCoordinationResultType.MISSING_IN_SOURCE,
             severity=rpki_models.ReconciliationSeverity.WARNING,
-            stable_object_key='AS64500',
+            stable_object_key='AS64500:AS-CUSTOMERS|AS64500',
             summary_json={
-                'origin_asn': 'AS64500',
-                'route_policy_count': 1,
+                'as_set_name': 'AS64500:AS-CUSTOMERS',
+                'member_text': 'AS64500',
+                'member_key': 'AS64500',
+                'authored_as_set_id': create_test_authored_as_set(
+                    name='Authored Customers',
+                    organization=self.organization,
+                    set_name='AS64500:AS-CUSTOMERS',
+                ).pk,
             },
+        )
+        authored_as_set = rpki_models.AuthoredAsSet.objects.get(set_name='AS64500:AS-CUSTOMERS')
+        create_test_authored_as_set_member(
+            name='Authored Customer ASN',
+            authored_as_set=authored_as_set,
+            member_type=rpki_models.AuthoredAsSetMemberType.ASN,
+            member_asn_value=64500,
         )
 
         plans = create_irr_change_plans(self.coordination_run)
 
         self.assertEqual(len(plans), 1)
         plan = plans[0]
-        self.assertFalse(plan.summary_json['previewable'])
-        self.assertFalse(plan.summary_json['applyable'])
-        self.assertEqual(plan.summary_json['item_counts'][rpki_models.IrrChangePlanAction.NOOP], 2)
+        self.assertTrue(plan.summary_json['previewable'])
+        self.assertTrue(plan.summary_json['applyable'])
+        self.assertEqual(plan.summary_json['item_counts'][rpki_models.IrrChangePlanAction.CREATE], 1)
+        self.assertEqual(plan.summary_json['item_counts'][rpki_models.IrrChangePlanAction.MODIFY], 1)
+        self.assertEqual(plan.summary_json['item_counts'][rpki_models.IrrChangePlanAction.NOOP], 0)
         self.assertEqual(
             plan.summary_json['family_counts'][rpki_models.IrrCoordinationFamily.ROUTE_SET_MEMBERSHIP],
             1,
@@ -189,25 +233,23 @@ class IrrChangePlanServiceTestCase(TestCase):
             plan.summary_json['family_counts'][rpki_models.IrrCoordinationFamily.AS_SET_MEMBERSHIP],
             1,
         )
-        self.assertIn(
-            'Route-set membership results are advisory-only',
-            ' '.join(plan.summary_json['capability_warnings']),
-        )
-        self.assertIn(
-            'AS-set membership results are advisory-only',
-            ' '.join(plan.summary_json['capability_warnings']),
-        )
-
         items = list(plan.items.order_by('coordination_result__coordination_family', 'pk'))
-        self.assertEqual([item.action for item in items], [rpki_models.IrrChangePlanAction.NOOP, rpki_models.IrrChangePlanAction.NOOP])
+        self.assertEqual([item.action for item in items], [rpki_models.IrrChangePlanAction.CREATE, rpki_models.IrrChangePlanAction.MODIFY])
         self.assertEqual(items[0].object_family, rpki_models.IrrCoordinationFamily.AS_SET_MEMBERSHIP)
         self.assertEqual(items[1].object_family, rpki_models.IrrCoordinationFamily.ROUTE_SET_MEMBERSHIP)
-        self.assertIn('advisory-only', items[0].reason)
-        self.assertIn('advisory-only', items[1].reason)
-        self.assertEqual(items[0].before_state_json['origin_asn'], 'AS64500')
-        self.assertEqual(items[1].before_state_json['route_set_name'], 'AS64500:RS-EDGE')
-        self.assertEqual(items[0].request_payload_json, {})
-        self.assertEqual(items[1].request_payload_json, {})
+        self.assertEqual(items[0].after_state_json['set_name'], 'AS64500:AS-CUSTOMERS')
+        self.assertEqual(items[0].after_state_json['members'], ['AS64500'])
+        self.assertEqual(items[0].request_payload_json['operation'], rpki_models.IrrChangePlanAction.CREATE)
+        self.assertEqual(items[0].request_payload_json['attributes']['as-set'], 'AS64500:AS-CUSTOMERS')
+        self.assertEqual(items[0].request_payload_json['attributes']['members'], ['AS64500'])
+        self.assertEqual(items[1].before_state_json['set_name'], 'AS64500:RS-EDGE')
+        self.assertEqual(items[1].after_state_json['members'], ['198.51.100.0/24', '203.0.113.0/24'])
+        self.assertEqual(items[1].request_payload_json['operation'], rpki_models.IrrChangePlanAction.MODIFY)
+        self.assertEqual(items[1].request_payload_json['attributes']['route-set'], 'AS64500:RS-EDGE')
+        self.assertEqual(
+            items[1].request_payload_json['attributes']['members'],
+            ['198.51.100.0/24', '203.0.113.0/24'],
+        )
 
 
 class CreateIrrChangePlansCommandTestCase(TestCase):

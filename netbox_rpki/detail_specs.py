@@ -3150,6 +3150,47 @@ AUTHORED_CA_RELATIONSHIP_DETAIL_SPEC = DetailSpec(
 )
 
 
+AUTHORED_AS_SET_DETAIL_SPEC = DetailSpec(
+    model=models.AuthoredAsSet,
+    list_url_name='plugins:netbox_rpki:authoredasset_list',
+    breadcrumb_label='Authored AS-Sets',
+    card_title='Authored AS-Set',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Organization', value=lambda obj: obj.organization, kind='link'),
+        DetailFieldSpec(label='Provider Account', value=lambda obj: obj.provider_account, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Delegated Entity', value=lambda obj: obj.delegated_entity, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Managed Relationship', value=lambda obj: obj.managed_relationship, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Set Name', value=lambda obj: obj.set_name),
+        DetailFieldSpec(label='Enabled', value=lambda obj: obj.enabled),
+        DetailFieldSpec(label='Notes', value=lambda obj: obj.notes, empty_text='None'),
+    ),
+    bottom_tables=(
+        DetailTableSpec(
+            title='Members',
+            table_class_name='AuthoredAsSetMemberTable',
+            queryset=lambda obj: obj.members.all(),
+        ),
+    ),
+)
+
+
+AUTHORED_AS_SET_MEMBER_DETAIL_SPEC = DetailSpec(
+    model=models.AuthoredAsSetMember,
+    list_url_name='plugins:netbox_rpki:authoredassetmember_list',
+    breadcrumb_label='Authored AS-Set Members',
+    card_title='Authored AS-Set Member',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Authored AS-Set', value=lambda obj: obj.authored_as_set, kind='link'),
+        DetailFieldSpec(label='Member Type', value=lambda obj: obj.member_type),
+        DetailFieldSpec(label='Member ASN', value=lambda obj: obj.member_asn_value, empty_text='None'),
+        DetailFieldSpec(label='Nested Set Name', value=lambda obj: obj.nested_set_name, empty_text='None'),
+        DetailFieldSpec(label='Enabled', value=lambda obj: obj.enabled),
+    ),
+)
+
+
 DELEGATED_AUTHORIZATION_ENTITY_DETAIL_SPEC = DetailSpec(
     model=models.DelegatedAuthorizationEntity,
     list_url_name='plugins:netbox_rpki:delegatedauthorizationentity_list',
@@ -3264,6 +3305,8 @@ DETAIL_SPEC_BY_MODEL = {
     models.ProviderSnapshotDiff: PROVIDER_SNAPSHOT_DIFF_DETAIL_SPEC,
     models.ProviderSnapshotDiffItem: PROVIDER_SNAPSHOT_DIFF_ITEM_DETAIL_SPEC,
     models.AuthoredCaRelationship: AUTHORED_CA_RELATIONSHIP_DETAIL_SPEC,
+    models.AuthoredAsSet: AUTHORED_AS_SET_DETAIL_SPEC,
+    models.AuthoredAsSetMember: AUTHORED_AS_SET_MEMBER_DETAIL_SPEC,
     models.DelegatedAuthorizationEntity: DELEGATED_AUTHORIZATION_ENTITY_DETAIL_SPEC,
     models.ManagedAuthorizationRelationship: MANAGED_AUTHORIZATION_RELATIONSHIP_DETAIL_SPEC,
     models.DelegatedPublicationWorkflow: DELEGATED_PUBLICATION_WORKFLOW_DETAIL_SPEC,

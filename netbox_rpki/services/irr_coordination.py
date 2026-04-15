@@ -209,6 +209,7 @@ def _build_coordination_results(*, organization, sources, coordination_run):
             _append_as_set_membership_results(
                 results=results,
                 coordination_run=coordination_run,
+                organization=organization,
                 source=source,
                 snapshot=snapshot,
                 imported_routes=imported_routes,
@@ -328,90 +329,131 @@ def _append_as_set_membership_results(
     *,
     results,
     coordination_run,
+    organization,
     source,
     snapshot,
     imported_routes,
     netbox_routes_by_key,
 ):
-    policies_by_origin_asn = defaultdict(list)
-    routes_by_origin_asn = defaultdict(list)
+    representative_routes_by_member = defaultdict(list)
     for route in imported_routes:
-        policy_row = netbox_routes_by_key.get(route.stable_key)
-        if policy_row is None:
-            continue
         origin_asn = _canonicalize_asn(route.origin_asn)
-        if not origin_asn:
-            continue
-        policies_by_origin_asn[origin_asn].append(policy_row)
-        routes_by_origin_asn[origin_asn].append(route)
+        if origin_asn:
+            representative_routes_by_member[origin_asn].append(route)
+        for route_set_name in route.route_set_names_json or []:
+            canonical_route_set_name = _canonicalize_set_name(route_set_name)
+            if canonical_route_set_name:
+                representative_routes_by_member[canonical_route_set_name].append(route)
 
-    memberships_by_asn = defaultdict(list)
+    authored_memberships_by_set = defaultdict(dict)
+    authored_members = (
+        rpki_models.AuthoredAsSetMember.objects.filter(
+            authored_as_set__organization=organization,
+            authored_as_set__enabled=True,
+            enabled=True,
+        )
+        .select_related('authored_as_set')
+        .order_by('authored_as_set__set_name', 'name', 'pk')
+    )
+    for membership in authored_members:
+        canonical_set_name = _canonicalize_set_name(membership.authored_as_set.set_name)
+        member_key = _canonicalize_authored_as_set_member(membership)
+        if not canonical_set_name or not member_key:
+            continue
+        authored_memberships_by_set[canonical_set_name][member_key] = membership
+
+    imported_memberships_by_set = defaultdict(dict)
     as_set_members = rpki_models.ImportedIrrAsSetMember.objects.filter(
         snapshot=snapshot,
     ).select_related('parent_as_set')
     for membership in as_set_members:
-        origin_asn = _canonicalize_asn(membership.normalized_asn)
-        if not origin_asn:
+        canonical_set_name = _canonicalize_set_name(membership.parent_as_set.set_name)
+        member_key = _canonicalize_imported_as_set_member(membership)
+        if not canonical_set_name or not member_key:
             continue
-        memberships_by_asn[origin_asn].append(membership)
+        imported_memberships_by_set[canonical_set_name][member_key] = membership
 
-    for origin_asn in sorted(routes_by_origin_asn):
-        policy_rows = policies_by_origin_asn[origin_asn]
-        route_rows = routes_by_origin_asn[origin_asn]
-        representative_policy = policy_rows[0]
-        representative_route = route_rows[0]
-        memberships = memberships_by_asn.get(origin_asn, [])
-        if not memberships:
-            results.append(
-                _create_result(
-                    coordination_run=coordination_run,
-                    source=source,
-                    snapshot=snapshot,
-                    coordination_family=rpki_models.IrrCoordinationFamily.AS_SET_MEMBERSHIP,
-                    result_type=rpki_models.IrrCoordinationResultType.POLICY_CONTEXT_GAP,
-                    severity=rpki_models.ReconciliationSeverity.WARNING,
-                    stable_object_key=origin_asn,
-                    netbox_object_key=representative_policy.stable_key,
-                    source_object_key=representative_route.stable_key,
-                    roa_intent=representative_policy.roa_intent,
-                    imported_route_object=representative_route,
-                    summary_json={
-                        'origin_asn': origin_asn,
-                        'source_name': source.name,
-                        'snapshot_id': snapshot.pk,
-                        'route_policy_count': len(route_rows),
-                        'route_stable_keys': [route.stable_key for route in route_rows],
-                        'message': 'No imported AS-set membership was found for this active origin ASN.',
-                    },
-                )
+    compared_sets = sorted(set(authored_memberships_by_set) | set(imported_memberships_by_set))
+    for canonical_set_name in compared_sets:
+        authored_memberships = authored_memberships_by_set.get(canonical_set_name, {})
+        imported_memberships = imported_memberships_by_set.get(canonical_set_name, {})
+        compared_member_keys = sorted(set(authored_memberships) | set(imported_memberships))
+        for member_key in compared_member_keys:
+            authored_membership = authored_memberships.get(member_key)
+            imported_membership = imported_memberships.get(member_key)
+            representative_route = next(
+                iter(representative_routes_by_member.get(member_key) or representative_routes_by_member.get(canonical_set_name) or []),
+                None,
             )
-            continue
+            policy_row = (
+                netbox_routes_by_key.get(representative_route.stable_key)
+                if representative_route is not None
+                else None
+            )
+            if authored_membership is not None:
+                as_set_name = authored_membership.authored_as_set.set_name
+                member_text = authored_membership.member_text
+                authored_set_id = authored_membership.authored_as_set_id
+                authored_member_id = authored_membership.pk
+                member_type = authored_membership.member_type
+            else:
+                as_set_name = imported_membership.parent_as_set.set_name
+                member_text = imported_membership.member_text
+                authored_set_id = None
+                authored_member_id = None
+                member_type = imported_membership.member_type
 
-        for membership in memberships:
+            summary_json = {
+                'as_set_name': as_set_name,
+                'member_text': member_text,
+                'member_key': member_key,
+                'member_type': member_type,
+                'member_present_in_authored_policy': authored_membership is not None,
+                'member_present_in_source': imported_membership is not None,
+                'authored_as_set_id': authored_set_id,
+                'authored_as_set_member_id': authored_member_id,
+                'source_name': source.name,
+                'snapshot_id': snapshot.pk,
+            }
+            if imported_membership is not None:
+                summary_json['as_set_stable_key'] = imported_membership.parent_as_set.stable_key
+                summary_json['membership_stable_key'] = imported_membership.stable_key
+                summary_json['membership_member_type'] = imported_membership.member_type
+            if policy_row is not None:
+                summary_json['route_policy_key'] = policy_row.stable_key
+            if representative_route is not None:
+                summary_json['representative_route_stable_key'] = representative_route.stable_key
+
+            result_type = rpki_models.IrrCoordinationResultType.MATCH
+            severity = rpki_models.ReconciliationSeverity.INFO
+            source_object_key = imported_membership.stable_key if imported_membership is not None else ''
+            if authored_membership is not None and imported_membership is None:
+                result_type = rpki_models.IrrCoordinationResultType.MISSING_IN_SOURCE
+                severity = rpki_models.ReconciliationSeverity.WARNING
+                summary_json['message'] = 'Authored AS-set policy expects this membership, but the target IRR source does not publish it.'
+            elif imported_membership is not None and authored_membership is None:
+                result_type = rpki_models.IrrCoordinationResultType.EXTRA_IN_SOURCE
+                severity = rpki_models.ReconciliationSeverity.WARNING
+                summary_json['message'] = 'Target IRR source publishes an AS-set membership that is not present in authored policy.'
+
             results.append(
                 _create_result(
                     coordination_run=coordination_run,
                     source=source,
                     snapshot=snapshot,
                     coordination_family=rpki_models.IrrCoordinationFamily.AS_SET_MEMBERSHIP,
-                    result_type=rpki_models.IrrCoordinationResultType.MATCH,
-                    severity=rpki_models.ReconciliationSeverity.INFO,
-                    stable_object_key=f'{origin_asn}|{membership.parent_as_set.set_name}',
-                    netbox_object_key=representative_policy.stable_key,
-                    source_object_key=membership.stable_key,
-                    roa_intent=representative_policy.roa_intent,
+                    result_type=result_type,
+                    severity=severity,
+                    stable_object_key=f'{as_set_name}|{member_key}',
+                    netbox_object_key=(
+                        f'authored_as_set:{authored_set_id}|{member_key}'
+                        if authored_set_id is not None
+                        else (policy_row.stable_key if policy_row is not None else '')
+                    ),
+                    source_object_key=source_object_key,
+                    roa_intent=getattr(policy_row, 'roa_intent', None),
                     imported_route_object=representative_route,
-                    summary_json={
-                        'origin_asn': origin_asn,
-                        'as_set_name': membership.parent_as_set.set_name,
-                        'as_set_stable_key': membership.parent_as_set.stable_key,
-                        'membership_stable_key': membership.stable_key,
-                        'membership_member_type': membership.member_type,
-                        'source_name': source.name,
-                        'snapshot_id': snapshot.pk,
-                        'route_policy_count': len(route_rows),
-                        'route_stable_keys': [route.stable_key for route in route_rows],
-                    },
+                    summary_json=summary_json,
                 )
             )
 
@@ -682,3 +724,21 @@ def _canonicalize_asn(value):
     if candidate.startswith('AS'):
         return candidate
     return f'AS{candidate}'
+
+
+def _canonicalize_authored_as_set_member(membership):
+    if membership.member_type == rpki_models.AuthoredAsSetMemberType.ASN:
+        return _canonicalize_asn(membership.member_asn_value)
+    if membership.member_type == rpki_models.AuthoredAsSetMemberType.AS_SET:
+        return _canonicalize_set_name(membership.nested_set_name)
+    return ''
+
+
+def _canonicalize_imported_as_set_member(membership):
+    if membership.member_type == rpki_models.IrrMemberType.ASN:
+        return _canonicalize_asn(membership.normalized_asn or membership.member_text)
+    if membership.member_type == rpki_models.IrrMemberType.AS_SET:
+        return _canonicalize_set_name(membership.normalized_set_name or membership.member_text)
+    if (membership.member_text or '').strip().upper().startswith('AS') and ':' in (membership.member_text or ''):
+        return _canonicalize_set_name(membership.member_text)
+    return _canonicalize_asn(membership.member_text)

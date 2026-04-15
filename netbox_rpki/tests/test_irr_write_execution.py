@@ -8,7 +8,11 @@ from django.test import TestCase
 from netbox_rpki import models as rpki_models
 from netbox_rpki.services import apply_irr_change_plan, preview_irr_change_plan
 from netbox_rpki.tests.utils import (
+    create_test_authored_as_set,
+    create_test_authored_as_set_member,
     create_test_imported_irr_route_object,
+    create_test_imported_irr_route_set,
+    create_test_imported_irr_route_set_member,
     create_test_irr_change_plan,
     create_test_irr_change_plan_item,
     create_test_irr_source,
@@ -196,6 +200,191 @@ class IrrWriteExecutionServiceTestCase(TestCase):
         self.assertEqual(execution.status, rpki_models.IrrWriteExecutionStatus.PARTIAL)
         self.assertEqual(self.plan.status, rpki_models.IrrChangePlanStatus.FAILED)
         self.assertIn('Delete rejected', execution.error)
+
+    def test_preview_irr_change_plan_builds_route_set_modify_payloads(self):
+        route_set = create_test_imported_irr_route_set(
+            snapshot=self.plan.snapshot,
+            source=self.source,
+            stable_key='route_set:AS64500:RS-EDGE',
+            rpsl_pk='AS64500:RS-EDGE',
+            set_name='AS64500:RS-EDGE',
+            object_text=(
+                'route-set: AS64500:RS-EDGE\n'
+                'descr: Example route set\n'
+                'mnt-by: LOCAL-IRR-MNT\n'
+                'members: 198.51.100.0/24\n'
+                'source: LOCAL-IRR\n'
+            ),
+        )
+        create_test_imported_irr_route_set_member(
+            snapshot=self.plan.snapshot,
+            source=self.source,
+            parent_route_set=route_set,
+            member_text='198.51.100.0/24',
+            normalized_prefix='198.51.100.0/24',
+        )
+        create_test_irr_change_plan_item(
+            name='Modify Route Set',
+            change_plan=self.plan,
+            object_family=rpki_models.IrrCoordinationFamily.ROUTE_SET_MEMBERSHIP,
+            action=rpki_models.IrrChangePlanAction.MODIFY,
+            stable_object_key='route:203.0.113.0/24AS64500|AS64500:RS-EDGE',
+            source_object_key=route_set.stable_key,
+            before_state_json={
+                'object_class': 'route-set',
+                'set_name': 'AS64500:RS-EDGE',
+                'rpsl_pk': 'AS64500:RS-EDGE',
+                'stable_key': route_set.stable_key,
+                'members': ['198.51.100.0/24'],
+                'mp_members': [],
+                'existing_object_text': route_set.object_text,
+            },
+            after_state_json={
+                'object_class': 'route-set',
+                'set_name': 'AS64500:RS-EDGE',
+                'rpsl_pk': 'AS64500:RS-EDGE',
+                'stable_key': route_set.stable_key,
+                'members': ['198.51.100.0/24', '203.0.113.0/24'],
+                'mp_members': [],
+                'existing_object_text': route_set.object_text,
+            },
+        )
+
+        execution, payload = preview_irr_change_plan(self.plan, requested_by='preview-user')
+
+        self.assertEqual(execution.status, rpki_models.IrrWriteExecutionStatus.COMPLETED)
+        self.assertEqual(payload['actionable_item_count'], 1)
+        item_result = payload['item_results'][0]
+        self.assertEqual(item_result['action'], rpki_models.IrrChangePlanAction.MODIFY)
+        self.assertEqual(item_result['operations'][0]['method'], 'POST')
+        object_text = item_result['operations'][0]['body']['objects'][0]['object_text']
+        self.assertIn('route-set: AS64500:RS-EDGE', object_text)
+        self.assertIn('members:         198.51.100.0/24, 203.0.113.0/24', object_text)
+
+    @patch('netbox_rpki.services.irr_write.urlopen')
+    def test_apply_irr_change_plan_submits_route_set_modify_payload(self, urlopen_mock):
+        urlopen_mock.return_value = _MockHttpResponse({'summary': {'objects_found': 1, 'successful': 1, 'failed': 0}})
+        route_set = create_test_imported_irr_route_set(
+            snapshot=self.plan.snapshot,
+            source=self.source,
+            stable_key='route_set:AS64500:RS-EDGE',
+            rpsl_pk='AS64500:RS-EDGE',
+            set_name='AS64500:RS-EDGE',
+            object_text=(
+                'route-set: AS64500:RS-EDGE\n'
+                'descr: Example route set\n'
+                'mnt-by: LOCAL-IRR-MNT\n'
+                'members: 198.51.100.0/24\n'
+                'source: LOCAL-IRR\n'
+            ),
+        )
+        create_test_irr_change_plan_item(
+            name='Modify Route Set',
+            change_plan=self.plan,
+            object_family=rpki_models.IrrCoordinationFamily.ROUTE_SET_MEMBERSHIP,
+            action=rpki_models.IrrChangePlanAction.MODIFY,
+            stable_object_key='route:203.0.113.0/24AS64500|AS64500:RS-EDGE',
+            source_object_key=route_set.stable_key,
+            before_state_json={
+                'object_class': 'route-set',
+                'set_name': 'AS64500:RS-EDGE',
+                'rpsl_pk': 'AS64500:RS-EDGE',
+                'stable_key': route_set.stable_key,
+                'members': ['198.51.100.0/24'],
+                'mp_members': [],
+                'existing_object_text': route_set.object_text,
+            },
+            after_state_json={
+                'object_class': 'route-set',
+                'set_name': 'AS64500:RS-EDGE',
+                'rpsl_pk': 'AS64500:RS-EDGE',
+                'stable_key': route_set.stable_key,
+                'members': ['198.51.100.0/24', '203.0.113.0/24'],
+                'mp_members': [],
+                'existing_object_text': route_set.object_text,
+            },
+        )
+
+        execution, _response_payload = apply_irr_change_plan(self.plan, requested_by='apply-user')
+
+        self.assertEqual(execution.status, rpki_models.IrrWriteExecutionStatus.COMPLETED)
+        request = urlopen_mock.call_args.args[0]
+        self.assertEqual(request.method, 'POST')
+        posted_body = json.loads(request.data.decode('utf-8'))
+        self.assertEqual(posted_body['override'], 'override-pass')
+        self.assertIn('route-set: AS64500:RS-EDGE', posted_body['objects'][0]['object_text'])
+
+    def test_preview_irr_change_plan_builds_as_set_create_payloads(self):
+        authored_as_set = create_test_authored_as_set(
+            name='Authored Customers',
+            organization=self.organization,
+            set_name='AS64500:AS-CUSTOMERS',
+        )
+        create_test_authored_as_set_member(
+            name='Authored Customer ASN',
+            authored_as_set=authored_as_set,
+            member_type=rpki_models.AuthoredAsSetMemberType.ASN,
+            member_asn_value=64500,
+        )
+        create_test_irr_change_plan_item(
+            name='Create AS-Set',
+            change_plan=self.plan,
+            object_family=rpki_models.IrrCoordinationFamily.AS_SET_MEMBERSHIP,
+            action=rpki_models.IrrChangePlanAction.CREATE,
+            stable_object_key='AS64500:AS-CUSTOMERS|AS64500',
+            before_state_json={},
+            after_state_json={
+                'object_class': 'as-set',
+                'set_name': 'AS64500:AS-CUSTOMERS',
+                'rpsl_pk': 'AS64500:AS-CUSTOMERS',
+                'stable_key': f'authored_as_set:{authored_as_set.pk}',
+                'members': ['AS64500'],
+            },
+        )
+
+        execution, payload = preview_irr_change_plan(self.plan, requested_by='preview-user')
+
+        self.assertEqual(execution.status, rpki_models.IrrWriteExecutionStatus.COMPLETED)
+        self.assertEqual(payload['actionable_item_count'], 1)
+        item_result = payload['item_results'][0]
+        self.assertEqual(item_result['action'], rpki_models.IrrChangePlanAction.CREATE)
+        self.assertEqual(item_result['operations'][0]['method'], 'POST')
+        object_text = item_result['operations'][0]['body']['objects'][0]['object_text']
+        self.assertIn('as-set:          AS64500:AS-CUSTOMERS', object_text)
+        self.assertIn('members:         AS64500', object_text)
+
+    @patch('netbox_rpki.services.irr_write.urlopen')
+    def test_apply_irr_change_plan_submits_as_set_create_payload(self, urlopen_mock):
+        urlopen_mock.return_value = _MockHttpResponse({'summary': {'objects_found': 1, 'successful': 1, 'failed': 0}})
+        authored_as_set = create_test_authored_as_set(
+            name='Authored Customers',
+            organization=self.organization,
+            set_name='AS64500:AS-CUSTOMERS',
+        )
+        create_test_irr_change_plan_item(
+            name='Create AS-Set',
+            change_plan=self.plan,
+            object_family=rpki_models.IrrCoordinationFamily.AS_SET_MEMBERSHIP,
+            action=rpki_models.IrrChangePlanAction.CREATE,
+            stable_object_key='AS64500:AS-CUSTOMERS|AS64500',
+            before_state_json={},
+            after_state_json={
+                'object_class': 'as-set',
+                'set_name': 'AS64500:AS-CUSTOMERS',
+                'rpsl_pk': 'AS64500:AS-CUSTOMERS',
+                'stable_key': f'authored_as_set:{authored_as_set.pk}',
+                'members': ['AS64500'],
+            },
+        )
+
+        execution, _response_payload = apply_irr_change_plan(self.plan, requested_by='apply-user')
+
+        self.assertEqual(execution.status, rpki_models.IrrWriteExecutionStatus.COMPLETED)
+        request = urlopen_mock.call_args.args[0]
+        self.assertEqual(request.method, 'POST')
+        posted_body = json.loads(request.data.decode('utf-8'))
+        self.assertEqual(posted_body['override'], 'override-pass')
+        self.assertIn('as-set:          AS64500:AS-CUSTOMERS', posted_body['objects'][0]['object_text'])
 
 
 class ExecuteIrrChangePlanCommandTestCase(TestCase):

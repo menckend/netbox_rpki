@@ -2,44 +2,37 @@
 
 ## Purpose
 
-This plan turns the current gap analysis into an implementation sequence. It focuses on the highest-value remaining gaps:
+This plan turned the current gap analysis into an implementation sequence. As of 2026-04-15, the planned gaps from domains `N`, `K`, `A`, and `H` have been closed.
 
-1. Domain `N`: downstream and delegated authorization is modeled but not operationally integrated.
-2. Domain `K`: IRR coordination is still centered on route-object drift rather than richer IRR policy families.
-3. Domain `A`: model-convention consistency is uneven in older/core models.
-4. Domain `H`: provider-gated live-backend behavior is documented, but test-lane enforcement is still mostly social.
+Completion summary:
 
-This plan is intentionally incremental. Each phase should land in a reviewable PR-sized slice with tests and clear operator-visible outcomes.
+1. Domain `N`: delegated/downstream authorization is operational in authored policy scope, delegated publication workflow services, approval actions, and delegated summaries.
+2. Domain `K`: IRR coordination now includes route-set and AS-set authored-policy comparison plus actionable drafting.
+3. Domain `A`: model-convention drift is no longer an active gap; the direct `NetBoxModel` inconsistency called out in the earlier analysis is no longer present.
+4. Domain `H`: provider-gated testing now has an explicit opt-in `live-provider` lane and default-skip helpers for real-backend tests.
+
+This plan was intentionally incremental. Each phase landed in reviewable slices with tests and operator-visible outcomes.
+
+## Status
+
+All phases below are now complete. No implementation items remain open in this plan.
 
 ## Recommended Priority Order
 
 ### P0. Decide the first operational meaning of delegated authorization
 
-Why first:
+Status: complete
 
-- Domain `N` is the only remaining strategic gap that is mostly schema-only.
-- It also affects how later work should treat provider scoping, authored CA relationships, and publication workflows.
-- Without this decision, implementation risks adding more passive models without behavior.
+Retrospective outcome:
 
-Decision checkpoint for you:
-
-- Choose the first workflow where delegated/downstream entities must matter.
-- Recommended first choice: make delegated authorization affect authored policy and publication workflows before changing intent derivation semantics.
-
-Recommended choice details:
-
-- Treat `DelegatedAuthorizationEntity` as an operational ownership subject for authored CA/publication relationships.
-- Treat `ManagedAuthorizationRelationship` as the governance and scoping bridge from local organization to delegated entity.
-- Treat `DelegatedPublicationWorkflow` as the first executable workflow surface.
-- Defer changing ROA/ASPA intent derivation semantics until the publication and ownership model is proven.
-
-Why this recommendation:
-
-- It is the smallest change that makes domain `N` real.
-- It aligns with the existing `AuthoredCaRelationship` and delegated-publication models.
-- It avoids destabilizing the already large routing-intent and reconciliation pipeline too early.
+- `DelegatedAuthorizationEntity` is now an operational ownership subject.
+- `ManagedAuthorizationRelationship` is now the scoping bridge between the local organization and delegated policy/workflow objects.
+- `DelegatedPublicationWorkflow` became the first executable delegated workflow surface.
+- Delegated scope also now carries into ROA/ASPA intent and change-plan semantics.
 
 ## Phase 1: Make Domain N Operational
+
+Status: complete
 
 ### Goal
 
@@ -95,11 +88,13 @@ Implement the first workflow slice as:
 
 ### Exit criteria
 
-- At least one delegated-domain service module exists and is exercised by tests.
+- Delegated-domain service modules exist and are exercised by tests.
 - Delegated workflow state is visible in UI/API detail payloads.
-- Domain `N` can be reclassified from `Partial` to at least `Mostly implemented`.
+- Domain `N` is operational rather than schema-only.
 
 ## Phase 2: Extend Domain N Into Intent and Publication Semantics
+
+Status: complete
 
 ### Goal
 
@@ -140,35 +135,32 @@ Before coding this phase, confirm which semantic should come first:
 - `netbox_rpki/tests/test_aspa_intent_services.py`
 - `netbox_rpki/tests/test_provider_write.py`
 
-### Risk
+### Outcome
 
-- This phase touches the highest-complexity service code in the repo.
-- It should not begin until Phase 1 establishes a clear ownership model and vocabulary.
+- Delegated scope is carried through ROA/ASPA intent and change-plan semantics with validation and tests.
 
 ## Phase 3: Expand IRR Coordination Beyond Route Objects
 
+Status: complete
+
 ### Goal
 
-Bring route-set and AS-set coordination from modeled inventory into actionable coordination behavior.
+Complete IRR set-family work beyond the original route-object-centric path.
 
 ### Why this is third
 
 - The current route-object path already provides operational value.
-- This is important, but less foundational than making domain `N` real.
+- Route-set and AS-set read-path coverage is already in place, so the remaining work is narrower than when this plan was first drafted.
+- This is important, but still less foundational than making domain `N` real.
 - It can be scoped cleanly without destabilizing existing ROA/ASPA governance.
 
 ### Suggested slice order
 
-1. Add read-only coordination results for `ROUTE_SET_MEMBERSHIP`.
-   First land comparison and reporting only.
+Completed scope:
 
-2. Add read-only coordination results for `AS_SET_MEMBERSHIP`.
-   Again, comparison/reporting before write plans.
-
-3. Add actionable change-plan generation only after read-only comparison is stable.
-   Start with `NOOP` and advisory output if source capability is limited.
-
-4. Leave `AUT_NUM_CONTEXT` and maintainer-supportability as advisory unless a clear write contract is available.
+1. `ROUTE_SET_MEMBERSHIP` read-only coordination and actionable drafting are implemented and tested.
+2. `AS_SET_MEMBERSHIP` now compares imported IRR state against authored AS-set policy and supports actionable drafting.
+3. Set-family plan items are carried through the existing reporting surfaces; `AUT_NUM_CONTEXT` and maintainer-supportability remain advisory where no safe write contract exists.
 
 ### Proposed code areas
 
@@ -182,16 +174,18 @@ Bring route-set and AS-set coordination from modeled inventory into actionable c
 
 ### Deliverables
 
-1. Coordination results created for route-set and AS-set families.
-2. Summary JSON and dashboard attention counts include those families meaningfully.
-3. If write automation is supported, draft change-plan items can be generated.
-4. If write automation is not supported, plans still explain why the result is advisory-only.
+1. Keep coordination results and summary JSON for route-set and AS-set families as first-class outputs.
+2. Preserve advisory-only `NOOP` behavior when a family or source capability is not safely writable.
+3. Add capability-gated draft change-plan generation for set-family deltas where automation is supported.
+4. Carry set-family results through the existing plan/detail/reporting surfaces.
 
 ### Exit criteria
 
-- Domain `K` can be reclassified from “mostly implemented, route-object-centric” to “implemented with advisory/write breadth clearly capability-gated.”
+- Domain `K` is implemented with set-family authored-policy coverage and capability-gated write breadth.
 
 ## Phase 4: Normalize Older/Core Models Around Shared Conventions
+
+Status: complete
 
 ### Goal
 
@@ -216,12 +210,13 @@ Reduce architectural drift in the model layer without changing user-facing behav
 - `netbox_rpki/tests/test_models.py`
 - possibly `netbox_rpki/tests/test_api.py` and `test_views.py` if serializer/form output changes
 
-### Risk
+### Outcome
 
-- This may require careful migration generation and surface regression checks.
-- It should be done as small batches, not a repo-wide mechanical rewrite.
+- The previously noted direct `NetBoxModel` convention drift is no longer an active implementation gap.
 
 ## Phase 5: Enforce Provider-Gated Test Separation More Explicitly
+
+Status: complete
 
 ### Goal
 
@@ -231,12 +226,12 @@ Make the documented local-fixture-first workflow mechanically visible in test co
 
 1. Define explicit test categories:
    - local fixture / structural
-   - live Krill backend
-   - provider-gated delta tests
+   - fixture-backed provider workflows
+   - opt-in live-provider backend workflows
 
-2. Ensure `devrun` command paths keep provider-gated lanes optional.
+2. Ensure `devrun` command paths keep live/provider-gated lanes optional.
 
-3. Document and, if useful, enforce skip behavior for unavailable live/provider credentials.
+3. Enforce default-skip behavior for unavailable live/provider credentials.
 
 ### Proposed code areas
 
@@ -249,78 +244,29 @@ Make the documented local-fixture-first workflow mechanically visible in test co
 ### Deliverables
 
 1. Clear lane names and explicit skip/opt-in behavior.
-2. Less ambiguity around what “full” means in local development.
+2. Less ambiguity around what `full` means in local development.
 3. Lower chance of accidental coupling between core development and provider-gated environments.
 
-## Concrete Delivery Sequence
+## Completion Sequence
 
-Recommended PR order:
+Implemented slice order:
 
-1. `PR1`: Domain N phase 1
-   Outcome:
-   delegated workflow posture becomes real and test-backed.
+1. Domain `N` operational delegated workflow services and summaries.
+2. Domain `K` route-set actionable drafting.
+3. Domain `K` authored AS-set model plus AS-set actionable drafting.
+4. Domain `N` delegated scope carry-through into intent and change-plan semantics.
+5. Domain `A` cleanup reclassified as closed after model inventory confirmed the earlier direct-`NetBoxModel` drift was no longer present.
+6. Domain `H` live-provider test-lane enforcement and documentation alignment.
 
-2. `PR2`: Domain K route-set coordination read path
-   Outcome:
-   IRR coordination covers another family without write-risk.
+## Validation
 
-3. `PR3`: Domain K AS-set coordination read path
-   Outcome:
-   broader IRR policy visibility.
+The plan was validated incrementally with:
 
-4. `PR4`: Domain N phase 2
-   Outcome:
-   delegated ownership starts affecting policy semantics.
+- `./dev.sh test fast`
+- `./dev.sh test contract`
+- focused delegated, IRR, and provider-lane tests for the touched slices
+- explicit live-provider helper tests and wrapper-lane verification
 
-5. `PR5`: Domain A convention cleanup batch 1
-   Outcome:
-   reduce oldest model-layer inconsistencies.
+## Current State
 
-6. `PR6`: Domain H test-lane enforcement/docs alignment
-   Outcome:
-   better development and CI discipline.
-
-## Test Strategy Per Phase
-
-Use the existing project workflow from `LOCAL_DEV_SETUP.md`:
-
-- structural and contract checks via `./dev.sh test fast`
-- registry/UI/API/GraphQL contract coverage via `./dev.sh test contract`
-- focused Django test labels for the touched domain
-- `./dev.sh test full` before merging larger service-layer phases
-
-Suggested focused lanes:
-
-- Phase 1 and 2:
-  `./dev.sh test netbox_rpki.tests.test_models netbox_rpki.tests.test_views netbox_rpki.tests.test_api`
-
-- Phase 3:
-  `./dev.sh test netbox_rpki.tests.test_irr_coordination netbox_rpki.tests.test_irr_change_plan netbox_rpki.tests.test_irr_write_execution`
-
-- Phase 4:
-  `./dev.sh test netbox_rpki.tests.test_models netbox_rpki.tests.test_api netbox_rpki.tests.test_views`
-
-- Phase 5:
-  targeted wrapper and lane verification, plus doc updates
-
-## Decision Points That Require Your Check-In
-
-Per your instruction, these are the points where implementation should pause for confirmation:
-
-1. Before Phase 1:
-   confirm the first operational meaning of delegated authorization.
-
-2. Before Phase 2:
-   confirm whether delegated ownership should first affect publication ownership or routing intent semantics.
-
-3. Before any Phase 4 refactor that changes inheritance on existing models:
-   confirm whether you want migration churn now or prefer exception documentation first.
-
-4. Before Phase 5 if CI changes are needed:
-   confirm whether you want only local wrapper/documentation changes or CI policy changes too.
-
-## Recommended Immediate Next Step
-
-Start with `PR1`: Domain N phase 1, using delegated publication workflows as the first operational slice.
-
-That is the smallest change that closes the largest remaining strategic gap without destabilizing the existing ROA/ASPA and IRR machinery.
+This document is now a completion record, not an active backlog. If new work is added later, it should start from a fresh gap analysis rather than reopening these already-closed plan items.

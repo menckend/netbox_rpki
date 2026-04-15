@@ -1884,6 +1884,54 @@ def create_test_imported_irr_as_set_member(
     )
 
 
+def create_test_authored_as_set(
+    name='Authored AS-Set 1',
+    organization=None,
+    provider_account=None,
+    delegated_entity=None,
+    managed_relationship=None,
+    set_name='AS64500:AS-AUTHORED',
+    enabled=True,
+    notes='',
+    **kwargs,
+):
+    if organization is None:
+        organization = create_test_organization()
+    return rpki_models.AuthoredAsSet.objects.create(
+        name=name,
+        organization=organization,
+        provider_account=provider_account,
+        delegated_entity=delegated_entity,
+        managed_relationship=managed_relationship,
+        set_name=set_name,
+        enabled=enabled,
+        notes=notes,
+        **kwargs,
+    )
+
+
+def create_test_authored_as_set_member(
+    name='Authored AS-Set Member 1',
+    authored_as_set=None,
+    member_type=None,
+    member_asn_value=64500,
+    nested_set_name='',
+    enabled=True,
+    **kwargs,
+):
+    if authored_as_set is None:
+        authored_as_set = create_test_authored_as_set()
+    return rpki_models.AuthoredAsSetMember.objects.create(
+        name=name,
+        authored_as_set=authored_as_set,
+        member_type=member_type or rpki_models.AuthoredAsSetMemberType.ASN,
+        member_asn_value=member_asn_value,
+        nested_set_name=nested_set_name,
+        enabled=enabled,
+        **kwargs,
+    )
+
+
 def create_test_imported_irr_aut_num(
     name='aut_num:AS64500',
     snapshot=None,

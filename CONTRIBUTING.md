@@ -81,6 +81,29 @@ Use the pinned NetBox virtualenv and the plugin's test settings when generating 
 
 If your local checkout or virtualenv uses a different pinned NetBox version, adjust the `netbox-v4.5.7` and `netbox-4.5.7` path segments accordingly.
 
+### Test lane expectations
+
+Use the `devrun` wrapper for all local test runs:
+
+```bash
+cd ~/src/netbox_rpki/devrun
+./dev.sh test fast
+./dev.sh test contract
+./dev.sh test provider
+./dev.sh test live-provider
+./dev.sh test full
+```
+
+Lane intent:
+
+- `fast`: low-cost structural smoke checks
+- `contract`: registry/UI/API/GraphQL contract coverage
+- `provider`: fixture-backed hosted-provider sync/write behavior
+- `live-provider`: opt-in real-backend integration tests only
+- `full`: the full suite, with any live-provider tests expected to self-skip unless explicitly enabled
+
+Live-provider tests must live in `netbox_rpki/tests/test_live_*.py` and must be guarded so they skip unless `NETBOX_RPKI_ENABLE_LIVE_PROVIDER_TESTS=1` is set. This keeps day-to-day development independent from external provider credentials or live backends.
+
 ## Pull Request Guidelines
 
 Before you submit a pull request, check that it meets these guidelines:

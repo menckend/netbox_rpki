@@ -13,7 +13,7 @@ Usage: ./dev.sh <start|stop|status|validator|irrd|seed|test|e2e>
         validator  Create or update the local Routinator validator instance inside NetBox
     irrd    Manage the local IRRd lab service (start|stop|status|logs|seed)
     seed    Populate the local dev database with reusable RPKI sample data
-    test    Run Python test lanes through the dedicated test wrapper (fast|contract|provider|full)
+    test    Run Python test lanes through the dedicated test wrapper (fast|contract|provider|live-provider|full)
     e2e     Run Playwright browser tests through the local WSL wrapper
 EOF
 }

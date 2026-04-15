@@ -50,10 +50,13 @@ roa_menu_items = navigation_groups.get('ROAs', ())
 plugin_settings = settings.PLUGINS_CONFIG.get('netbox_rpki', {})
 
 if plugin_settings.get('top_level_menu'):
-    menu = PluginMenu(
-        label="RPKI",
-        groups=menu_groups,
-        icon_class="mdi mdi-bootstrap"
+    menus = tuple(
+        PluginMenu(
+            label=f'RPKI {group_name}',
+            groups=[(group_name, items)],
+            icon_class='mdi mdi-bootstrap',
+        )
+        for group_name, items in menu_groups
     )
 else:
     menu_items = tuple(

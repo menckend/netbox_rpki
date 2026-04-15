@@ -37,13 +37,17 @@ PROVIDER_TEST_LABELS=(
     netbox_rpki.tests.test_rollback_bundle
 )
 
+LIVE_PROVIDER_TEST_GLOB='test_live_*.py'
+
 usage() {
     cat <<'EOF'
-Usage: ./test.sh [fast|contract|provider|full|<test labels...>] [extra manage.py test args]
+Usage: ./test.sh [fast|contract|provider|live-provider|full|<test labels...>] [extra manage.py test args]
 
   fast        Run the low-cost structural smoke lane under dedicated test settings
   contract    Run the registry/UI/API/GraphQL surface-contract lane (default)
-  provider    Run the provider-backed sync/write lane used for hosted-provider features
+  provider    Run the fixture-backed provider sync/write lane used for hosted-provider features
+  live-provider
+              Run opt-in real-backend integration tests discovered from netbox_rpki/tests/test_live_*.py
   full        Run the full plugin suite
   <labels>    Run explicit Django test labels under the same dedicated test settings
 
@@ -52,9 +56,30 @@ Examples:
   ./test.sh fast
   ./test.sh contract --verbosity 2
   ./test.sh provider
+  ./test.sh live-provider
   ./test.sh full
   ./test.sh netbox_rpki.tests.test_provider_sync --verbosity 2
 EOF
+}
+
+is_truthy() {
+    case "${1:-}" in
+        1|true|TRUE|True|yes|YES|Yes|on|ON|On)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+discover_live_provider_test_labels() {
+    find "$DEVRUN_DIR/../netbox_rpki/tests" -maxdepth 1 -type f -name "$LIVE_PROVIDER_TEST_GLOB" \
+        | sort \
+        | while IFS= read -r path; do
+            [ -n "$path" ] || continue
+            printf 'netbox_rpki.tests.%s\n' "$(basename "$path" .py)"
+        done
 }
 
 load_compose_env() {
@@ -124,6 +149,30 @@ run_django_tests() {
     )
 }
 
+run_live_provider_tests() {
+    local -a labels=()
+
+    if ! is_truthy "${NETBOX_RPKI_ENABLE_LIVE_PROVIDER_TESTS:-}"; then
+        printf '%s\n' \
+            "Skipping live-provider lane. Set NETBOX_RPKI_ENABLE_LIVE_PROVIDER_TESTS=1 to enable real-backend tests."
+        return 0
+    fi
+
+    if [ "$#" -gt 0 ]; then
+        run_django_tests "$@"
+        return 0
+    fi
+
+    mapfile -t labels < <(discover_live_provider_test_labels)
+    if [ "${#labels[@]}" -eq 0 ]; then
+        printf '%s\n' \
+            "No live-provider tests found under netbox_rpki/tests/${LIVE_PROVIDER_TEST_GLOB}."
+        return 0
+    fi
+
+    run_django_tests "${labels[@]}"
+}
+
 main() {
     case "${1:-contract}" in
         -h|--help|help)
@@ -152,6 +201,10 @@ main() {
         provider)
             shift || true
             run_django_tests "${PROVIDER_TEST_LABELS[@]}" "$@"
+            ;;
+        live-provider)
+            shift || true
+            run_live_provider_tests "$@"
             ;;
         full)
             shift || true

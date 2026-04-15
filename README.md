@@ -9,69 +9,66 @@ Netbox plugin for adding BGP RPKI elements.
 
 ## Features
 
-Implements NetBox models, forms, API endpoints, GraphQL types, tables, and standard UI views for modeling Resource Public Key Infrastructure (RPKI) data.
+Implements NetBox models, API endpoints, GraphQL types, tables, and UI views across the following functional areas:
 
-The plugin still covers the original core inventory objects for organizations, resource certificates, ROAs, and their prefix or ASN relationships, and now also includes the implemented standards-aligned data-model expansion for:
+**RPKI inventory** covers organizations, resource certificates, ROAs, ROA prefixes, certificate prefixes, and certificate ASNs. Resource certificates and ROAs carry optional links into the broader RPKI object hierarchy through trust-anchor, publication-point, and signed-object references.
 
-- repositories and publication points
-- trust anchors, trust anchor locators, and trust anchor keys
-- end-entity certificates and a generic signed-object layer
-- certificate revocation lists, revoked certificate references, manifests, and manifest entries
-- ASPAs, RSCs, and router certificates
-- validator instances, validation runs, object validation results, and validated ROA or ASPA payload views
-- routing-intent profiles, rules, overrides, and the initial ROA intent and reconciliation result model family
-- reusable routing-intent templates, template rules, template bindings, typed routing-intent exceptions, and bulk intent-run orchestration artifacts
+**Repository and publication infrastructure** models the full RPKI signed-object and publication hierarchy: repositories, publication points, trust anchors, trust anchor locators, trust anchor keys, end-entity certificates, a generic signed-object type, CRLs, revoked certificate references, manifests, manifest entries, ASPAs, ASPA providers, RSCs, RSC file hashes, and BGPsec router certificates.
 
-This newer model layer is implemented as schema plus registry-driven plugin surfaces. The writable intent-policy objects are available now, while derivation and reconciliation run or result objects are currently read-only reporting surfaces.
+**External validator import** captures and retains normalized output from external RPKI validators. Validator instances, validation runs, object validation results, and validated ROA and ASPA payload records hold imported observations. The included Routinator adapter ingests `jsonext` output from either the live API or exported snapshot files.
 
-The routing-intent workflow now also includes operator-facing template preview and regeneration actions, organization-scoped queued bulk regeneration, typed exception handling during derivation, and operations-dashboard rollups for stale bindings, expiring exceptions, and recent bulk-run health.
+**Routing intent** lets operators define and manage publication intent for ROAs and ASPAs. Routing intent profiles, rules, context groups, context criteria, and policy bundles express derivation policy. ROA intent overrides handle explicit per-prefix exceptions. Reusable templates, template rules, template bindings, and typed exceptions support scalable policy authoring across organizations. Bulk intent runs with per-scope results drive organization-scoped derivation, and the operations dashboard surfaces stale bindings, expiring exceptions, and recent bulk-run health.
 
-The plugin also includes hosted-provider synchronization and reporting surfaces for Krill and ARIN accounts, including imported publication points, signed-object inventory, certificate observations, provider snapshot or diff summaries, and provider-account rollups used by the API, GraphQL, detail views, and operations dashboard. Current hosted-provider coverage is intentionally limited to Krill and ARIN, and ARIN currently supports hosted ROA synchronization only while the shared reporting contract preserves that capability boundary explicitly.
+**ROA and ASPA reconciliation** compares derived intent against published objects. Intent derivation runs, ROA intent rows, match records, reconciliation runs, intent results, and published results form the ROA reconciliation pipeline. A parallel family covers ASPA reconciliation. All derivation and reconciliation run and result objects are read-only reporting surfaces.
 
-The latest provider-sync reporting work adds stable evidence summaries so imported publication-observation surfaces can explain publication linkage, authored linkage, source ambiguity, freshness, and family-level churn without creating false diffs across unchanged snapshots.
+**ROA lint** provides configurable quality analysis of locally recorded ROA inventory through lint runs, findings, acknowledgements, suppressions, and per-rule configurations.
 
-The first IRR coordination slice now adds source-backed IRR import surfaces for configured `IrrSource` records, retained `IrrSnapshot` history, and normalized imported IRR inventory for `route`, `route6`, `route-set`, `as-set`, `aut-num`, and `mntner` families. The initial live adapter targets IRRd-compatible sources through the local IRRd lab, while snapshot-file import remains available for deterministic tests and disconnected development.
+**ROA and ASPA change planning and write-back** supports reviewed, approved, and rollback-capable publication of ROA and ASPA changes to hosted providers. ROA change plans, change plan items, approval records, provider write executions, and rollback bundles implement the ROA write-back workflow. A parallel ASPA change plan family covers ASPA write-back. ROA validation simulation runs and results let operators preview approval impact before committing.
 
-The delegated-authorization slice now adds service-backed operator posture for delegated entities, managed authorization relationships, authored CA relationship linkage, and delegated publication workflows. Delegated publication workflows can now be approved through the API and web UI, and delegated detail surfaces expose readiness, approval, and authored-topology linkage summaries instead of remaining passive CRUD records.
+**Hosted provider synchronization** imports and tracks publication state for Krill and ARIN accounts. Provider accounts, sync runs, snapshots, snapshot diffs, and diff items manage import lifecycle. Imported families include ROA authorizations, ASPAs, CA metadata, parent and child CA links, resource entitlements, publication points, signed objects, and certificate observations. Stable evidence summaries on imported objects support publication-linkage, authored-linkage, freshness, and family-level churn reporting without generating false diffs across unchanged snapshots. ARIN currently supports ROA synchronization only; the shared reporting contract preserves that capability boundary explicitly.
 
-The external-validator import slice now extends the existing validation model family with run summaries, object-level evidence details, imported signed-object correlation, and unmatched payload retention. The first concrete adapter targets Routinator `jsonext` data through either the live API or exported snapshot files, and normalizes both validated ROA and ASPA observations into the shared validator run history.
+**IRR snapshot import** provides a read-only correlation substrate for validating plugin-managed RPKI intent against externally managed IRR/RPSL intent. IRR sources and retained snapshots hold normalized imported objects (`route`, `route6`, `route-set`, `as-set`, `aut-num`, `mntner`) from configured external IRR sources. Coordination runs and results compare RPKI-derived intent against observed IRR state. IRR change plans and write executions model planned corrections to external IRR records based on coordination findings. The included adapter targets IRRd-compatible sources; snapshot-file import is also supported.
 
-The telemetry substrate slice now adds `TelemetrySource`, retained `TelemetryRun` history, and `BgpPathObservation` persistence for imported MRT-derived JSON snapshots. Each observation preserves raw AS-path text, normalized ASN-sequence JSON, and a stable `path_hash`, so later overlay and historical-comparison slices can correlate route visibility without redesigning the storage contract.
+**Delegated authorization** models operator posture for delegated RPKI entities. Delegated authorization entities, managed authorization relationships, authored CA relationships, authored AS-sets, and delegated publication workflows track delegated topology and publication state. Delegation workflows support API and web-UI approval, and detail views expose readiness, approval state, and authored-topology linkage summaries.
+
+**BGP telemetry** captures imported MRT-derived route-visibility data through telemetry sources, telemetry runs, and BGP path observations. Each observation stores raw AS-path text, normalized ASN-sequence JSON, and a stable path hash for correlation and historical comparison against intent and reconciliation surfaces.
+
+**Lifecycle health** provides a structured event substrate for tracking certificate and object lifecycle health through policies, hooks, and events.
 
 ### Models / DB tables
 
 #### Core inventory models
 
 #### Organization
-   - Represents a customer or consumer of Regional Internet Registry (RIR) RPKI services.
+   - Represents a customer or consumer of RIR RPKI services.
    - Fields include `org_id`, `name`, `ext_url`, and `parent_rir`.
 
 #### Resource Certificate
-   - Represents the resource certificate element of the RPKI architecture.
-   - Tracks certificate identity and lifecycle fields such as `issuer`, `subject`, `serial`, `valid_from`, `valid_to`, `auto_renews`, `public_key`, `publication_url`, `ca_repository`, `self_hosted`, and `rpki_org`.
-   - Now links into the newer architecture through optional trust-anchor and publication-point references.
+   - Represents an RPKI resource certificate.
+   - Tracks identity and lifecycle fields including `issuer`, `subject`, `serial`, `valid_from`, `valid_to`, `auto_renews`, `public_key`, `publication_url`, `ca_repository`, `self_hosted`, and `rpki_org`.
+   - Links optionally to a trust anchor and a publication point.
 
 #### Route Origination Authorization (ROA)
    - Represents an RPKI ROA authorizing origination of one or more prefixes by an ASN.
    - Tracks `origin_as`, validity dates, `auto_renews`, and the signing resource certificate.
-   - Now links into the generic signed-object layer through an optional signed-object reference.
+   - Links optionally to a signed object record.
 
 #### ROA Prefix
    - Represents the attestation relationship between a ROA and a prefix, including `max_length`.
-   - This model is available through the plugin but is not a top-level menu item.
+   - Available through the plugin but not a top-level menu item.
 
 #### Certificate Prefix
    - Represents the relationship between a resource certificate and a prefix.
-   - This model is available through the plugin but is not a top-level menu item.
+   - Available through the plugin but not a top-level menu item.
 
 #### Certificate ASN
    - Represents the relationship between a resource certificate and an ASN.
-   - This model is available through the plugin but is not a top-level menu item.
+   - Available through the plugin but not a top-level menu item.
 
 #### Repository and publication models
 
 #### Repository
-   - Represents an rsync, RRDP, or mixed repository endpoint used to hold RPKI publication data.
+   - Represents an rsync, RRDP, or mixed repository endpoint.
 
 #### Publication Point
    - Represents a publication location within a repository and tracks retrieval and validation state.
@@ -85,7 +82,7 @@ The telemetry substrate slice now adds `TelemetrySource`, retained `TelemetryRun
    - Stores TAL-style discovery information for a trust anchor.
 
 #### Trust Anchor Key
-   - Represents a published trust-anchor key object and rollover relationships.
+   - Represents a published trust-anchor key object and its rollover relationships.
 
 #### End-Entity Certificate
    - Represents the EE certificate used to sign individual RPKI signed objects.
@@ -93,11 +90,11 @@ The telemetry substrate slice now adds `TelemetrySource`, retained `TelemetryRun
 #### Signed object and repository-integrity models
 
 #### Signed Object
-   - Generic model for published RPKI signed objects such as ROAs, manifests, ASPAs, RSCs, and trust-anchor keys.
+   - Generic record for published RPKI signed objects including ROAs, manifests, ASPAs, RSCs, and trust-anchor keys.
    - Tracks object type, publication metadata, manifest linkage, CMS metadata, validity, and validation state.
 
 #### Certificate Revocation List
-   - Represents a CRL issued by a resource certificate and linked to publication and manifest state.
+   - Represents a CRL issued by a resource certificate, linked to publication and manifest state.
 
 #### Revoked Certificate
    - Represents an individual revoked certificate or EE certificate reference carried by a CRL.
@@ -106,7 +103,7 @@ The telemetry substrate slice now adds `TelemetrySource`, retained `TelemetryRun
    - Represents an RPKI manifest object.
 
 #### Manifest Entry
-   - Represents an individual manifest member and can link to the referenced signed object, certificate, EE certificate, or CRL.
+   - Represents an individual manifest member, with optional links to the referenced signed object, certificate, EE certificate, or CRL.
 
 #### Additional signed-object families
 
@@ -128,7 +125,7 @@ The telemetry substrate slice now adds `TelemetrySource`, retained `TelemetryRun
 #### Validation and validated-payload models
 
 #### Validator Instance
-   - Represents an external validator and its current run state.
+   - Represents an external RPKI validator and its current run state.
 
 #### Validation Run
    - Represents one validation execution against repository content.
@@ -137,48 +134,288 @@ The telemetry substrate slice now adds `TelemetrySource`, retained `TelemetryRun
    - Stores validation outcome and disposition for an individual signed object.
 
 #### Validated ROA Payload
-   - Represents a validated prefix-origin payload produced from a ROA.
+   - Represents a validated prefix-origin payload imported from a validator run.
 
 #### Validated ASPA Payload
-   - Represents a validated customer-provider authorization payload produced from an ASPA.
+   - Represents a validated customer-provider authorization payload imported from a validator run.
 
-#### Intent and reconciliation models
+#### Routing intent authoring models
 
 #### Routing Intent Profile
-   - Defines routing-intent policy defaults and prefix or ASN selection behavior.
+   - Defines routing-intent policy defaults, derivation trigger mode, and prefix or ASN selection behavior for an organization.
 
 #### Routing Intent Rule
-   - Represents an ordered rule used to include, exclude, or modify derived ROA intent.
+   - Represents an ordered rule used to include, exclude, or modify ROA or ASPA intent during derivation.
+
+#### Routing Intent Context Group
+   - Groups related context criteria for scoped rule evaluation.
+
+#### Routing Intent Context Criterion
+   - Represents an individual matching criterion within a context group.
+
+#### Routing Intent Policy Bundle
+   - Collects a set of profiles and their associated rules into a reusable policy bundle.
 
 #### ROA Intent Override
    - Represents an explicit per-prefix or per-scope exception to derived ROA intent.
 
+#### Routing Intent Template
+   - Represents a reusable routing-intent template that can be bound to organizations to generate profiles and rules.
+
+#### Routing Intent Template Rule
+   - Represents an ordered rule within a routing intent template.
+
+#### Routing Intent Template Binding
+   - Represents the association between a template and a target organization, including binding state and generated profile references.
+
+#### Routing Intent Exception
+   - Represents a typed exception encountered during intent derivation, with configurable effect modes.
+
+#### Bulk Intent Run
+   - Represents an organization-scoped bulk derivation run, including trigger mode, target scope, and overall run health.
+
+#### Bulk Intent Run Scope Result
+   - Stores the per-scope result of a single organization within a bulk intent run.
+
+#### ROA reconciliation models
+
 #### Intent Derivation Run
    - Stores metadata for a derived-intent calculation run.
-   - This is currently exposed as a read-only reporting surface.
+   - Read-only reporting surface.
 
 #### ROA Intent
    - Represents a derived ROA intent row tied to a derivation run, profile, scope, and optional override.
-   - This is currently exposed as a read-only reporting surface.
+   - Read-only reporting surface.
 
 #### ROA Intent Match
    - Stores a candidate match between a derived intent row and a locally recorded ROA.
-   - This is currently exposed as a read-only reporting surface.
+   - Read-only reporting surface.
 
 #### ROA Reconciliation Run
-   - Stores metadata for a reconciliation comparison between intent and published ROA records.
-   - This is currently exposed as a read-only reporting surface.
+   - Stores metadata for a reconciliation comparison between ROA intent and published ROA records.
+   - Read-only reporting surface.
 
 #### ROA Intent Result
    - Stores the intent-side reconciliation result for a derived ROA intent row.
-   - This is currently exposed as a read-only reporting surface.
+   - Read-only reporting surface.
 
 #### Published ROA Result
    - Stores the published-side reconciliation result for a recorded ROA.
-   - This is currently exposed as a read-only reporting surface.
+   - Read-only reporting surface.
 
+#### ASPA reconciliation models
 
+#### ASPA Intent
+   - Represents a derived ASPA intent row tied to a derivation run, profile, and scope.
+   - Read-only reporting surface.
 
+#### ASPA Intent Match
+   - Stores a candidate match between a derived ASPA intent row and a locally recorded ASPA.
+   - Read-only reporting surface.
+
+#### ASPA Reconciliation Run
+   - Stores metadata for a reconciliation comparison between ASPA intent and published ASPA records.
+   - Read-only reporting surface.
+
+#### ASPA Intent Result
+   - Stores the intent-side reconciliation result for a derived ASPA intent row.
+   - Read-only reporting surface.
+
+#### Published ASPA Result
+   - Stores the published-side reconciliation result for a recorded ASPA.
+   - Read-only reporting surface.
+
+#### ROA lint models
+
+#### ROA Lint Run
+   - Represents one execution of the ROA lint analysis against locally recorded ROA inventory.
+
+#### ROA Lint Finding
+   - Represents an individual quality finding produced during a lint run.
+
+#### ROA Lint Acknowledgement
+   - Records an operator acknowledgement of a lint finding.
+
+#### ROA Lint Suppression
+   - Represents a configured suppression rule that mutes specific lint finding types.
+
+#### ROA Lint Rule Config
+   - Stores per-rule configuration controlling lint severity and enablement.
+
+#### ROA change plan and write-back models
+
+#### ROA Change Plan
+   - Represents a set of planned ROA create, update, or delete operations against a hosted provider, including approval and execution state.
+
+#### ROA Change Plan Item
+   - Represents an individual ROA operation within a change plan.
+
+#### Approval Record
+   - Records an approval decision for a change plan, including approver identity and timestamp.
+
+#### Provider Write Execution
+   - Represents one execution of a change plan against the target hosted provider, including per-item outcomes.
+
+#### ROA Change Plan Rollback Bundle
+   - Stores the rollback state for a completed ROA change plan execution.
+
+#### ASPA change plan and write-back models
+
+#### ASPA Change Plan
+   - Represents a set of planned ASPA create, update, or delete operations against a hosted provider, including approval and execution state.
+
+#### ASPA Change Plan Item
+   - Represents an individual ASPA operation within an ASPA change plan.
+
+#### ASPA Change Plan Rollback Bundle
+   - Stores the rollback state for a completed ASPA change plan execution.
+
+#### ROA validation simulation models
+
+#### ROA Validation Simulation Run
+   - Represents a simulation run that evaluates how a set of planned ROA changes would affect RPKI validation outcomes for observed routes.
+
+#### ROA Validation Simulation Result
+   - Stores the per-route validation outcome and approval impact produced by a simulation run.
+
+#### Provider account and sync models
+
+#### RPKI Provider Account
+   - Represents a Krill or ARIN hosted-provider account, including connection parameters, sync state, and capability metadata.
+
+#### Provider Sync Run
+   - Represents one import execution against a provider account.
+
+#### Provider Snapshot
+   - Represents the normalized state of a provider account's published objects at the time of a sync run, with family-level rollup summaries.
+
+#### Provider Snapshot Diff
+   - Represents the diff between two consecutive provider snapshots, with family-level churn summaries.
+
+#### Provider Snapshot Diff Item
+   - Represents an individual create, update, or delete change between two snapshots.
+
+#### Imported provider inventory models
+
+#### External Object Reference
+   - Stores a stable external identity reference linking an imported object to its provider-assigned identifier.
+
+#### Imported ROA Authorization
+   - Represents an imported ROA authorization record from a hosted provider, including evidence summaries for publication linkage, authored linkage, and source ambiguity.
+
+#### Imported ASPA
+   - Represents an imported ASPA record from a hosted provider.
+
+#### Imported ASPA Provider
+   - Represents an individual provider ASN within an imported ASPA.
+
+#### Imported CA Metadata
+   - Represents imported metadata about a CA instance within a hosted provider account.
+
+#### Imported Parent Link
+   - Represents an imported parent CA relationship observed on a provider account.
+
+#### Imported Child Link
+   - Represents an imported child CA relationship observed on a provider account.
+
+#### Imported Resource Entitlement
+   - Represents an imported IP prefix or ASN resource entitlement associated with a CA within a provider account.
+
+#### Imported Publication Point
+   - Represents an imported publication point observation from a hosted provider, with evidence summaries for publication linkage and freshness.
+
+#### Imported Signed Object
+   - Represents an imported signed object observation from a hosted provider, with evidence summaries for manifest linkage and publication state.
+
+#### Imported Certificate Observation
+   - Represents an imported certificate observation associated with a CA within a provider account.
+
+#### IRR import models
+
+#### IRR Source
+   - Represents a configured external IRR source used to import RPSL objects for RPKI intent correlation.
+
+#### IRR Snapshot
+   - Represents a retained snapshot of imported IRR data from a source, including import status and object counts by family.
+
+#### Imported IRR Route Object
+   - Represents an imported `route` or `route6` RPSL object from an IRR snapshot.
+
+#### Imported IRR Route Set
+   - Represents an imported `route-set` RPSL object from an IRR snapshot.
+
+#### Imported IRR Route Set Member
+   - Represents an individual member of an imported route set.
+
+#### Imported IRR AS Set
+   - Represents an imported `as-set` RPSL object from an IRR snapshot.
+
+#### Imported IRR AS Set Member
+   - Represents an individual ASN or nested set reference within an imported AS set.
+
+#### Imported IRR Aut-Num
+   - Represents an imported `aut-num` RPSL object from an IRR snapshot.
+
+#### Imported IRR Maintainer
+   - Represents an imported `mntner` RPSL object from an IRR snapshot.
+
+#### IRR Coordination Run
+   - Represents one execution of RPKI-vs-IRR coordination analysis, comparing plugin-managed RPKI intent against imported IRR data.
+
+#### IRR Coordination Result
+   - Stores the per-object comparison result from a coordination run.
+
+#### IRR Change Plan
+   - Represents a set of planned corrections to external IRR records based on coordination findings.
+
+#### IRR Change Plan Item
+   - Represents an individual IRR object operation within a change plan.
+
+#### IRR Write Execution
+   - Represents one execution of an IRR change plan against the target IRR source.
+
+#### Delegated authorization models
+
+#### Delegated Authorization Entity
+   - Represents an operator or organization that holds delegated RPKI authority, including posture and readiness state.
+
+#### Managed Authorization Relationship
+   - Represents a managed authorization relationship between a delegating authority and a delegated entity, including role and approval state.
+
+#### Delegated Publication Workflow
+   - Represents a publication workflow initiated by a delegated entity, including approval state and authored object references.
+
+#### Authored CA Relationship
+   - Represents a modeled CA relationship between two entities in the plugin's delegated topology, including relationship type and status.
+
+#### Authored AS Set
+   - Represents an AS-set authored by a delegated entity, used for routing-intent and delegation scope purposes.
+
+#### Authored AS Set Member
+   - Represents an individual ASN or nested set reference within an authored AS set.
+
+#### BGP telemetry models
+
+#### Telemetry Source
+   - Represents a configured source of MRT-derived BGP telemetry data.
+
+#### Telemetry Run
+   - Represents one import execution against a telemetry source.
+
+#### BGP Path Observation
+   - Represents an observed BGP path from an imported telemetry snapshot.
+   - Stores raw AS-path text, normalized ASN-sequence JSON, and a stable path hash for correlation and historical comparison.
+
+#### Lifecycle health models
+
+#### Lifecycle Health Policy
+   - Defines a set of lifecycle health rules applied to a monitored RPKI object family.
+
+#### Lifecycle Health Hook
+   - Represents a configured hook within a lifecycle health policy that triggers on specific lifecycle events or conditions.
+
+#### Lifecycle Health Event
+   - Represents a recorded lifecycle health event produced by a hook evaluation.
 
 
 ## Screencaps
@@ -206,15 +443,7 @@ The telemetry substrate slice now adds `TelemetrySource`, retained `TelemetryRun
 
 [netbox-plugin.yaml](netbox-plugin.yaml)
 
-The plugin currently declares NetBox compatibility for the 4.5.x release line.
-
-Validation completed against real development installs of:
-
-- NetBox 4.5.0
-- NetBox 4.5.7
-
-Validation evidence for both versions includes successful plugin bootstrap and `manage.py check` with the plugin enabled. Recent verification against NetBox 4.5.7 also covered the provider-sync, models, imported-provider-registry, API, GraphQL, and view suites together, and browser smoke coverage was run successfully against the NetBox 4.5.0 environment.
-Recent NetBox 4.5.7 verification also covers the routing-intent templating and bulk-authoring workflow through focused service, API, view, job, and dashboard tests plus the full plugin suite in the documented non-interactive environment.
+The plugin declares NetBox compatibility for the 4.5.x release line. Verification has been completed against real development installs of NetBox 4.5.0 and NetBox 4.5.7, covering plugin bootstrap, `manage.py check`, provider-sync, models, API, GraphQL, view, and navigation suites, browser smoke testing, and the full routing-intent and bulk-authoring workflow.
 
 
 ## Installing

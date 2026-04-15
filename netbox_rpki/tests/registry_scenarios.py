@@ -53,6 +53,8 @@ from netbox_rpki.tests.utils import (
     create_test_imported_aspa,
     create_test_imported_aspa_provider,
     create_test_provider_write_execution,
+    create_test_authored_as_set,
+    create_test_authored_as_set_member,
     create_test_roa_lint_acknowledgement,
     create_test_roa_lint_run,
     create_test_roa_lint_finding,
@@ -391,7 +393,7 @@ def _build_scalar_value(field_name: str, token: str, variant: int = 0, for_form:
         return f"{field_name.replace('_', ' ').title()} {token} {variant}"
     if field_name in {"comments"}:
         return f"Comments {token} {variant}"
-    if field_name in {"auto_renews", "self_hosted", "is_active", "is_current"}:
+    if field_name in {"auto_renews", "self_hosted", "is_active", "is_current", "enabled"}:
         return variant % 2 == 0
     if field_name in {"valid_from", "valid_to"}:
         return "2025-01-01" if for_form else date(2025, 1, 1)
@@ -402,6 +404,7 @@ def _build_scalar_value(field_name: str, token: str, variant: int = 0, for_form:
         "weight",
         "max_length_value",
         "origin_asn_value",
+        "member_asn_value",
         "prefix_count_scanned",
         "intent_count_emitted",
         "warning_count",
@@ -582,6 +585,8 @@ def _register_scenario_builders() -> None:
             "lifecyclehealthpolicy": build_lifecycle_health_policy_form_data,
             "telemetrysource": build_telemetry_source_form_data,
             "managedauthorizationrelationship": build_managed_authorization_relationship_form_data,
+            "authoredasset": build_authored_as_set_form_data,
+            "authoredassetmember": build_authored_as_set_member_form_data,
         }
     )
     _FILTER_SCENARIO_BUILDERS.update(
@@ -630,6 +635,13 @@ def _register_scenario_builders() -> None:
             "irr_source": lambda: create_test_irr_source(
                 name=f"IRR Source {unique_token('irr-source')}",
                 slug=f"irr-source-{unique_token('irr-source-slug')}",
+            ),
+            "authoredasset": lambda: create_test_authored_as_set(
+                name=f"Authored AS-Set {unique_token('authored-as-set')}",
+                set_name=f"AS64500:AS-{unique_token('authored-as-set-name').upper()}",
+            ),
+            "authoredassetmember": lambda: create_test_authored_as_set_member(
+                name=f"Authored AS-Set Member {unique_token('authored-as-set-member')}",
             ),
             "irr_snapshot": lambda: create_test_irr_snapshot(
                 name=f"IRR Snapshot {unique_token('irr-snapshot')}",
@@ -1057,6 +1069,34 @@ def build_managed_authorization_relationship_form_data() -> dict[str, object]:
         "delegated_entity": entity.pk,
         "role": rpki_models.ManagedAuthorizationRelationshipRole.MANAGING_PARTY,
         "status": rpki_models.ManagedAuthorizationRelationshipStatus.ACTIVE,
+    }
+
+
+def build_authored_as_set_form_data() -> dict[str, object]:
+    token = unique_token("authored-as-set-form")
+    organization = create_unique_organization(f"authored-as-set-form-org-{token}")
+    return {
+        "name": f"Authored AS-Set {token}",
+        "organization": organization.pk,
+        "set_name": f"AS64500:AS-{token.upper()}",
+        "enabled": True,
+    }
+
+
+def build_authored_as_set_member_form_data() -> dict[str, object]:
+    token = unique_token("authored-as-set-member-form")
+    organization = create_unique_organization(f"authored-as-set-member-form-org-{token}")
+    authored_as_set = create_test_authored_as_set(
+        name=f"Authored AS-Set {token}",
+        organization=organization,
+        set_name=f"AS64500:AS-{token.upper()}",
+    )
+    return {
+        "name": f"Authored AS-Set Member {token}",
+        "authored_as_set": authored_as_set.pk,
+        "member_type": rpki_models.AuthoredAsSetMemberType.ASN,
+        "member_asn_value": 64500,
+        "enabled": True,
     }
 
 

@@ -28,36 +28,34 @@ Status meanings used here:
 
 The plugin is already far beyond a narrow ROA reconciliation tool. Domains B through M are broadly present, with especially strong end-to-end coverage for registry-driven surfaces, ROA/ASPA workflows, governance, lifecycle reporting, external validation, telemetry overlays, and IRR coordination.
 
-The main remaining strategic gap is domain N, where delegated/downstream authorization is modeled and exposed through the generated surfaces, but is not yet integrated into the service layer or operator workflows. There are also a few secondary completeness gaps: the standards-aligned model layer has some convention inconsistency in older/core models, provider-gated development guidance is documented more than enforced, and IRR coordination is still operationally centered on route-object drift rather than richer IRR set policy automation.
+The prior strategic gaps called out in this analysis have now been closed. Delegated/downstream authorization is operational in service-layer workflows, IRR coordination now covers route-set and AS-set policy beyond route-object drift alone, the earlier model-convention inconsistency is no longer present, and provider-gated live-backend testing now has explicit opt-in mechanics instead of purely social enforcement.
 
 ## Domain Summary
 
 | Domain | Status | Notes |
 |---|---|---|
-| A. Standards-Aligned Data Model | Mostly implemented | The object graph is extensive and includes `Certificate`, `EndEntityCertificate`, `SignedObject`, `Manifest`, `CertificateRevocationList`, `ASPA`, `RSC`, `RouterCertificate`, `Repository`, `PublicationPoint`, `TrustAnchor`, `TrustAnchorLocator`, `TrustAnchorKey`, validated payloads, and delegated-auth models. The main gap is convention consistency rather than missing object families. |
+| A. Standards-Aligned Data Model | Implemented | The object graph is extensive and includes `Certificate`, `EndEntityCertificate`, `SignedObject`, `Manifest`, `CertificateRevocationList`, `ASPA`, `RSC`, `RouterCertificate`, `Repository`, `PublicationPoint`, `TrustAnchor`, `TrustAnchorLocator`, `TrustAnchorKey`, validated payloads, and delegated-auth models. The earlier model-convention inconsistency is no longer present as an active gap. |
 | B. Registry-Driven Plugin Surfaces | Implemented | `object_registry.py` drives UI, API, GraphQL, filters, forms, tables, navigation, and mutability. Contract tests in `test_views.py`, `test_api.py`, `test_graphql.py`, `test_urls.py`, and `test_navigation.py` explicitly iterate the registry. |
 | C. Intent-to-ROA Reconciliation | Implemented | `services/routing_intent.py`, ROA reconciliation models, commands, jobs, API actions, and UI flows cover intent derivation through change-plan generation. |
 | D. ASPA Operations | Implemented | ASPA inventory, import, intent/reconciliation, change plans, provider-backed write flow, API actions, and UI views are all present. |
 | E. ROA Linting and Safety Analysis | Implemented | Lint runs/findings, suppressions, acknowledgements, rule config overrides, approval gating, and API/UI exposure are implemented and heavily tested. |
 | F. ROV Impact Simulation | Implemented | `services/rov_simulation.py` plus approval integration, persisted runs/results, and dashboard rollups cover this domain end-to-end. |
 | G. Bulk Generation and Templating | Implemented | Templates, bindings, exceptions, overrides, queued regeneration, bulk runs, governance, and dashboard rollups are present. |
-| H. Provider Synchronization | Mostly implemented | The provider contract, Krill adapter, ARIN ROA import, durable external identities, diffs, summaries, and capability matrix are all implemented. The remaining gap is more about real live-backend enforcement and broader provider depth than core architecture. |
+| H. Provider Synchronization | Implemented | The provider contract, Krill adapter, ARIN ROA import, durable external identities, diffs, summaries, capability matrix, and explicit provider-lane separation for fixture-backed versus live-backend tests are implemented. |
 | I. Change Control and Governance | Implemented | Multi-stage change plans, secondary approval, ticket/maintenance metadata, approval records, write audit rows, rollback bundles, exception approval, and dashboard rollups are in place. |
 | J. Lifecycle, Expiry, and Publication Health | Implemented | Policies, hooks, events, lifecycle summaries, publication timelines, diff visibility, exports, and dashboard surfacing are implemented. |
-| K. IRR Coordination | Mostly implemented | IRR sources, snapshots, imported objects, coordination runs/results, change plans, and write executions are present. Current automation is strong for route-object coordination, with richer IRR set automation still limited. |
+| K. IRR Coordination | Implemented | IRR sources, snapshots, imported objects, coordination runs/results, change plans, and write executions are present. Route-set and AS-set authored-policy coordination and actionable drafting are now covered alongside the route-object path. |
 | L. External Validator and Telemetry Overlays | Implemented | Validator sync, telemetry sync, unified overlay correlation, and dashboard/change-review surfacing are implemented. |
 | M. Service Context and Topology Binding | Implemented | Intent derivation binds to tenant/VRF/site/region/tag/custom-field-like selectors, context groups, criteria, and inheritance semantics. |
-| N. Downstream and Delegated Authorization | Partial | The schema and generated surfaces exist, but I did not find service-layer behavior that uses these models in intent, provider sync/write, or publication workflows. |
+| N. Downstream and Delegated Authorization | Implemented | Delegated authorization is modeled and also used in intent/change-plan scope semantics, delegated publication workflow services, approval actions, summaries, and detail/API surfaces. |
 
-## Detailed Gap Notes
+## Detailed Domain Notes
 
 ### A. Standards-Aligned Data Model
 
 Status call:
 
-- `A.1` through `A.5`: `Implemented`
-- `A.6`: `Mostly implemented`
-- `A.7`: `Implemented`
+- `A.1` through `A.7`: `Implemented`
 
 Evidence:
 
@@ -67,9 +65,7 @@ Evidence:
 - Publication topology is represented by `Repository`, `PublicationPoint`, authored/imported CA metadata, parent/child links, and authored CA relationship models.
 - `ValidatedRoaPayload` and `ValidatedAspaPayload` are first-class objects linked to validation artifacts.
 
-Gap:
-
-- `A.6` is not perfectly uniform. Many models use `RpkiStandardModel` / `NamedRpkiStandardModel`, but some earlier/core models still inherit `NetBoxModel` directly and manually repeat `comments`/`tenant`. That is not a user-facing feature gap, but it is still an architectural inconsistency against the “all models follow conventions” objective.
+No significant strategic gap found in this domain.
 
 ### B. Registry-Driven Plugin Surfaces
 
@@ -163,8 +159,7 @@ No significant strategic gap found in this domain.
 
 Status call:
 
-- `H.1` through `H.6`: `Implemented`
-- `H.7`: `Mostly implemented`
+- `H.1` through `H.7`: `Implemented`
 
 Evidence:
 
@@ -175,9 +170,7 @@ Evidence:
 - REST/GraphQL/web surfacing is covered by the registry and summary/detail code.
 - `RpkiProviderAccount.capability_matrix` explicitly exposes the provider capability matrix required by `H.6`.
 
-Gap:
-
-- `H.7` is satisfied in repo guidance and test philosophy more than through strong code-level enforcement. `LOCAL_DEV_SETUP.md` clearly centers local fixtures and a Krill backend, but I did not find a strong in-repo separation that mechanically guarantees provider-gated lanes stay optional.
+No significant strategic gap found in this domain.
 
 ### I. Change Control and Governance
 
@@ -215,7 +208,7 @@ No significant strategic gap found in this domain.
 
 Status call:
 
-- `K.1` through `K.5`: `Mostly implemented`
+- `K.1` through `K.5`: `Implemented`
 
 Evidence:
 
@@ -224,9 +217,7 @@ Evidence:
 - Commands, jobs, tests, and dashboard attention surfacing exist.
 - The IRR workflow is not wired as a blocker for the ROA/ASPA approval path, which matches `K.5`.
 
-Gap:
-
-- Current coordination and write automation is strongest for route-object drift. Imported route-set and AS-set inventory exists, and those families are represented in enums/summary shapes, but I did not find equivalent operational logic producing coordination results or actionable change-plan items for those set families.
+No significant strategic gap found in this domain.
 
 ### L. External Validator and Telemetry Overlays
 
@@ -260,31 +251,15 @@ No significant strategic gap found in this domain.
 
 Status call:
 
-- `N.1` through `N.3`: `Partial`
+- `N.1` through `N.3`: `Implemented`
 
 Evidence:
 
 - `DelegatedAuthorizationEntity`, `ManagedAuthorizationRelationship`, `DelegatedPublicationWorkflow`, and `AuthoredCaRelationship` are modeled.
 - They are also registered in `object_registry.py`, which means they inherit generated UI/API/GraphQL surfaces.
 
-Gap:
-
-- I did not find service-layer consumers for these models in routing intent, provider sync, provider write, lifecycle, IRR, or validation workflows.
-- I did not find targeted behavioral tests beyond registry scenario coverage.
-- As implemented today, this domain looks like a schema-and-surface foundation for future work rather than an operationally integrated capability.
+No significant strategic gap found in this domain.
 
 ## Recommended Backlog Focus
 
-Highest-value gaps exposed by this analysis:
-
-1. Integrate domain N into actual workflows.
-   Start by deciding whether delegated/downstream entities should affect intent derivation, provider-account scoping, authored CA relationships, or publication workflows first.
-
-2. Decide whether IRR coordination should expand beyond route-object drift.
-   Route-set and AS-set support is modeled, but not yet operationally coordinated.
-
-3. Tighten model-convention consistency in domain A.
-   This is lower urgency than the workflow gaps, but it would reduce architectural drift.
-
-4. Decide whether provider-gated live-backend lanes need stronger enforcement.
-   The development guidance is clear, but the enforcement is mostly social/documentary.
+No strategic backlog gaps remain from this feature-strategy-matrix comparison as of 2026-04-15. Future work can continue as product expansion rather than gap-closure against this matrix.

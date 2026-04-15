@@ -55,7 +55,11 @@ class NavigationTestCase(SimpleTestCase):
             [link for _label, link in EXPECTED_NAVIGATION_LINKS['ROAs']],
         )
 
-    def test_default_navigation_exports_top_level_menu(self):
-        self.assertEqual(navigation.menu.label, 'RPKI')
-        self.assertEqual([group.label for group in navigation.menu.groups], [group_name for group_name, _ in EXPECTED_NAVIGATION_GROUPS])
-        self.assertEqual(navigation.menu.icon_class, 'mdi mdi-bootstrap')
+    def test_default_navigation_exports_top_level_menus(self):
+        self.assertEqual(
+            [m.label for m in navigation.menus],
+            [f'RPKI {group_name}' for group_name, _ in EXPECTED_NAVIGATION_GROUPS],
+        )
+        for m in navigation.menus:
+            with self.subTest(label=m.label):
+                self.assertEqual(m.icon_class, 'mdi mdi-bootstrap')
