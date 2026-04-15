@@ -272,7 +272,12 @@ def _serialize_imported_maintainer(imported_maintainer: rpki_models.ImportedIrrM
 
 def _build_request_payload(*, source, result, action, before_state_json, after_state_json) -> dict:
     if result.coordination_family == rpki_models.IrrCoordinationFamily.ROUTE_SET_MEMBERSHIP:
-        target = after_state_json or before_state_json
+        if action == rpki_models.IrrChangePlanAction.CREATE:
+            target = after_state_json
+        elif action == rpki_models.IrrChangePlanAction.DELETE:
+            target = before_state_json
+        else:
+            target = after_state_json or before_state_json
         if not target:
             return {}
         return {
@@ -353,12 +358,16 @@ def _build_item_name(*, result, action) -> str:
 
 def _build_item_reason(*, result, action) -> str:
     if result.coordination_family == rpki_models.IrrCoordinationFamily.ROUTE_SET_MEMBERSHIP:
+        if action == rpki_models.IrrChangePlanAction.CREATE:
+            return 'NetBox policy expects a route-set object that is currently missing from the target IRR source.'
         if action == rpki_models.IrrChangePlanAction.MODIFY:
             if result.result_type == rpki_models.IrrCoordinationResultType.MISSING_IN_SOURCE:
                 return 'Target IRR source route-set is missing a member implied by the coordinated route object.'
             if result.result_type == rpki_models.IrrCoordinationResultType.EXTRA_IN_SOURCE:
                 return 'Target IRR source route-set contains a member that is not declared by the coordinated route object.'
             return 'Target IRR source route-set membership needs an updated draft.'
+        if action == rpki_models.IrrChangePlanAction.DELETE:
+            return 'Target IRR source route-set no longer has any members implied by NetBox policy and can be removed.'
         return 'Route-set membership delta could not be synthesized automatically because no imported parent route-set object was available for a safe draft.'
     if result.coordination_family == rpki_models.IrrCoordinationFamily.AS_SET_MEMBERSHIP:
         if action == rpki_models.IrrChangePlanAction.CREATE:
@@ -624,10 +633,13 @@ def _build_item_operations(source: rpki_models.IrrSource, item: rpki_models.IrrC
     if item.action == rpki_models.IrrChangePlanAction.NOOP:
         return []
     if item.object_family == rpki_models.IrrCoordinationFamily.ROUTE_SET_MEMBERSHIP:
-        if item.action != rpki_models.IrrChangePlanAction.MODIFY:
-            return []
-        object_text = _render_route_set_object_text(source=source, state_json=item.after_state_json)
-        return [_build_submit_operation(source=source, method='POST', object_texts=[object_text])]
+        if item.action in {rpki_models.IrrChangePlanAction.CREATE, rpki_models.IrrChangePlanAction.MODIFY}:
+            object_text = _render_route_set_object_text(source=source, state_json=item.after_state_json)
+            return [_build_submit_operation(source=source, method='POST', object_texts=[object_text])]
+        if item.action == rpki_models.IrrChangePlanAction.DELETE:
+            object_text = _existing_route_set_object_text(item)
+            return [_build_submit_operation(source=source, method='DELETE', object_texts=[object_text], delete_reason=item.reason or 'Deleted by netbox_rpki IRR coordination.')]
+        return []
     if item.object_family == rpki_models.IrrCoordinationFamily.AS_SET_MEMBERSHIP:
         if item.action == rpki_models.IrrChangePlanAction.CREATE:
             object_text = _render_as_set_object_text(source=source, state_json=item.after_state_json)
@@ -693,7 +705,27 @@ def _derive_route_set_action(*, result, source):
         rpki_models.IrrCoordinationResultType.EXTRA_IN_SOURCE,
     }:
         return rpki_models.IrrChangePlanAction.NOOP
-    if _resolve_route_set_for_result(result) is None:
+    if not _is_primary_route_set_result(result):
+        return rpki_models.IrrChangePlanAction.NOOP
+    target_member = _route_set_target_member_text(result)
+    if not target_member:
+        return rpki_models.IrrChangePlanAction.NOOP
+    route_set = _resolve_route_set_for_result(result)
+    desired_state_json = _desired_route_set_state(result=result, route_set=route_set)
+    before_state_json = _serialize_imported_route_set(route_set) if route_set is not None else {}
+    if route_set is None:
+        return (
+            rpki_models.IrrChangePlanAction.CREATE
+            if desired_state_json
+            else rpki_models.IrrChangePlanAction.NOOP
+        )
+    if not desired_state_json:
+        return rpki_models.IrrChangePlanAction.DELETE
+    after_state_json = dict(desired_state_json)
+    if (
+        before_state_json.get('members') == after_state_json.get('members')
+        and before_state_json.get('mp_members') == after_state_json.get('mp_members')
+    ):
         return rpki_models.IrrChangePlanAction.NOOP
     return rpki_models.IrrChangePlanAction.MODIFY
 
@@ -718,31 +750,117 @@ def _derive_as_set_action(*, result, source):
 
 def _derive_route_set_plan_states(result) -> tuple[dict, dict]:
     route_set = _resolve_route_set_for_result(result)
-    if route_set is None:
-        return dict(result.summary_json or {}), {}
+    before_state_json = _serialize_imported_route_set(route_set) if route_set is not None else {}
+    desired_state_json = _desired_route_set_state(result=result, route_set=route_set)
+    after_state_json = dict(desired_state_json)
+    if route_set is None and not after_state_json:
+        return {}, {}
+    target_member = _route_set_target_member_text(result)
+    if target_member:
+        after_state_json['target_member_text'] = target_member
+        after_state_json['membership_change'] = (
+            'add'
+            if result.result_type == rpki_models.IrrCoordinationResultType.MISSING_IN_SOURCE
+            else 'remove'
+        )
+    return before_state_json, after_state_json
 
-    before_state_json = _serialize_imported_route_set(route_set)
-    after_state_json = dict(before_state_json)
-    after_state_json['members'] = list(before_state_json.get('members', []))
-    after_state_json['mp_members'] = list(before_state_json.get('mp_members', []))
+
+def _desired_route_set_state(*, result, route_set: rpki_models.ImportedIrrRouteSet | None) -> dict:
+    route_set_name = _route_set_name_for_result(result)
+    if not route_set_name:
+        return {}
+    members: list[str] = []
+    mp_members: list[str] = []
+    declared_member_found = False
+    canonical_set_name = route_set_name.strip().upper()
+    queryset = rpki_models.ImportedIrrRouteObject.objects.filter(source=result.source)
+    if result.snapshot_id is not None:
+        queryset = queryset.filter(snapshot_id=result.snapshot_id)
+    for imported_route in queryset.order_by('prefix', 'pk'):
+        declared_names = {
+            (name or '').strip().upper()
+            for name in imported_route.route_set_names_json or []
+            if (name or '').strip()
+        }
+        if canonical_set_name not in declared_names:
+            continue
+        prefix = (imported_route.prefix or '').strip()
+        if not prefix:
+            continue
+        declared_member_found = True
+        if _is_ipv6_member_text(prefix):
+            mp_members.append(prefix)
+        else:
+            members.append(prefix)
+    if not declared_member_found:
+        members, mp_members = _fallback_route_set_members(result=result, route_set=route_set)
+    members = sorted(dict.fromkeys(members), key=str.lower)
+    mp_members = sorted(dict.fromkeys(mp_members), key=str.lower)
+    if not members and not mp_members:
+        return {}
+    return {
+        'object_class': 'route-set',
+        'set_name': route_set_name,
+        'rpsl_pk': getattr(route_set, 'rpsl_pk', '') or route_set_name,
+        'stable_key': getattr(route_set, 'stable_key', '') or f'route_set:{route_set_name}',
+        'maintainer_names': (
+            list(getattr(route_set, 'maintainer_names_json', []) or [])
+            or ([result.source.maintainer_name] if result.source.maintainer_name else [])
+        ),
+        'source_database_label': (
+            getattr(route_set, 'source_database_label', '')
+            or result.source.default_database_label
+        ),
+        'member_count': len(members) + len(mp_members),
+        'members': members,
+        'mp_members': mp_members,
+        'existing_object_text': getattr(route_set, 'object_text', ''),
+    }
+
+
+def _fallback_route_set_members(
+    *,
+    result,
+    route_set: rpki_models.ImportedIrrRouteSet | None,
+) -> tuple[list[str], list[str]]:
+    before_state_json = _serialize_imported_route_set(route_set) if route_set is not None else {}
+    members = list(before_state_json.get('members', []))
+    mp_members = list(before_state_json.get('mp_members', []))
     target_member = _route_set_target_member_text(result)
     if not target_member:
-        return before_state_json, after_state_json
-
-    member_field = 'mp_members' if _is_ipv6_member_text(target_member) else 'members'
-    members = [member for member in after_state_json.get(member_field, []) if member.lower() != target_member.lower()]
+        return members, mp_members
+    member_list = mp_members if _is_ipv6_member_text(target_member) else members
+    member_list[:] = [member for member in member_list if member.lower() != target_member.lower()]
     if result.result_type == rpki_models.IrrCoordinationResultType.MISSING_IN_SOURCE:
-        members.append(target_member)
-        members = sorted(dict.fromkeys(members), key=str.lower)
-    after_state_json[member_field] = members
-    after_state_json['member_count'] = len(after_state_json.get('members', [])) + len(after_state_json.get('mp_members', []))
-    after_state_json['target_member_text'] = target_member
-    after_state_json['membership_change'] = (
-        'add'
-        if result.result_type == rpki_models.IrrCoordinationResultType.MISSING_IN_SOURCE
-        else 'remove'
+        member_list.append(target_member)
+    return members, mp_members
+
+
+def _route_set_name_for_result(result) -> str:
+    return ((result.summary_json or {}).get('route_set_name') or '').strip()
+
+
+def _is_primary_route_set_result(result) -> bool:
+    route_set_name = _route_set_name_for_result(result)
+    if not route_set_name:
+        return False
+    queryset = result.coordination_run.results.filter(
+        source=result.source,
+        coordination_family=rpki_models.IrrCoordinationFamily.ROUTE_SET_MEMBERSHIP,
     )
-    return before_state_json, after_state_json
+    if result.snapshot_id is None:
+        queryset = queryset.filter(snapshot__isnull=True)
+    else:
+        queryset = queryset.filter(snapshot_id=result.snapshot_id)
+    primary = None
+    canonical_target = route_set_name.upper()
+    for candidate in queryset.order_by('stable_object_key', 'pk'):
+        candidate_name = _route_set_name_for_result(candidate).upper()
+        if candidate_name == canonical_target:
+            primary = candidate
+            break
+    return primary is not None and primary.pk == result.pk
 
 
 def _derive_as_set_plan_states(result) -> tuple[dict, dict]:
@@ -915,6 +1033,14 @@ def _render_route_set_object_text(*, source: rpki_models.IrrSource, state_json: 
     if source.default_database_label:
         lines.append(f'source:          {source.default_database_label}')
     return '\n'.join(lines)
+
+
+def _existing_route_set_object_text(item: rpki_models.IrrChangePlanItem) -> str:
+    state_json = item.before_state_json or {}
+    existing_object_text = (state_json.get('existing_object_text') or '').strip()
+    if existing_object_text:
+        return existing_object_text
+    return _render_route_set_object_text(source=item.change_plan.source, state_json=state_json)
 
 
 def _render_as_set_object_text(*, source: rpki_models.IrrSource, state_json: dict) -> str:

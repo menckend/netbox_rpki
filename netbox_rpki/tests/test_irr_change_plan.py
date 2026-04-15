@@ -251,6 +251,71 @@ class IrrChangePlanServiceTestCase(TestCase):
             ['198.51.100.0/24', '203.0.113.0/24'],
         )
 
+    def test_create_irr_change_plans_builds_route_set_create_and_delete_drafts(self):
+        create_test_imported_irr_route_set(
+            snapshot=self.snapshot,
+            source=self.source,
+            stable_key='route_set:AS64500:RS-DELETE',
+            rpsl_pk='AS64500:RS-DELETE',
+            set_name='AS64500:RS-DELETE',
+            object_text=(
+                'route-set: AS64500:RS-DELETE\n'
+                'descr: Example delete route set\n'
+                'mnt-by: LOCAL-IRR-MNT\n'
+                'members: 198.51.100.0/24\n'
+                'source: LOCAL-IRR\n'
+            ),
+        )
+        create_test_irr_coordination_result(
+            name='Route-Set Create Gap',
+            coordination_run=self.coordination_run,
+            source=self.source,
+            snapshot=self.snapshot,
+            coordination_family=rpki_models.IrrCoordinationFamily.ROUTE_SET_MEMBERSHIP,
+            result_type=rpki_models.IrrCoordinationResultType.MISSING_IN_SOURCE,
+            severity=rpki_models.ReconciliationSeverity.WARNING,
+            stable_object_key='route:203.0.113.0/24AS64500|AS64500:RS-CREATE',
+            summary_json={
+                'route_stable_key': 'route:203.0.113.0/24AS64500',
+                'route_set_name': 'AS64500:RS-CREATE',
+                'route_prefix': '203.0.113.0/24',
+            },
+        )
+        create_test_irr_coordination_result(
+            name='Route-Set Delete Gap',
+            coordination_run=self.coordination_run,
+            source=self.source,
+            snapshot=self.snapshot,
+            coordination_family=rpki_models.IrrCoordinationFamily.ROUTE_SET_MEMBERSHIP,
+            result_type=rpki_models.IrrCoordinationResultType.EXTRA_IN_SOURCE,
+            severity=rpki_models.ReconciliationSeverity.WARNING,
+            stable_object_key='route:198.51.100.0/24AS64500|AS64500:RS-DELETE',
+            summary_json={
+                'route_stable_key': 'route:198.51.100.0/24AS64500',
+                'route_set_name': 'AS64500:RS-DELETE',
+                'route_set_stable_key': 'route_set:AS64500:RS-DELETE',
+                'route_prefix': '198.51.100.0/24',
+            },
+        )
+
+        plans = create_irr_change_plans(self.coordination_run)
+
+        self.assertEqual(len(plans), 1)
+        plan = plans[0]
+        items = {
+            item.after_state_json.get('set_name') or item.before_state_json.get('set_name'): item
+            for item in plan.items.order_by('pk')
+        }
+        create_item = items['AS64500:RS-CREATE']
+        delete_item = items['AS64500:RS-DELETE']
+        self.assertEqual(create_item.action, rpki_models.IrrChangePlanAction.CREATE)
+        self.assertEqual(create_item.after_state_json['members'], ['203.0.113.0/24'])
+        self.assertEqual(create_item.request_payload_json['operation'], rpki_models.IrrChangePlanAction.CREATE)
+        self.assertEqual(delete_item.action, rpki_models.IrrChangePlanAction.DELETE)
+        self.assertEqual(delete_item.before_state_json['set_name'], 'AS64500:RS-DELETE')
+        self.assertEqual(delete_item.after_state_json, {'target_member_text': '198.51.100.0/24', 'membership_change': 'remove'})
+        self.assertEqual(delete_item.request_payload_json['operation'], rpki_models.IrrChangePlanAction.DELETE)
+
 
 class CreateIrrChangePlansCommandTestCase(TestCase):
     def setUp(self):

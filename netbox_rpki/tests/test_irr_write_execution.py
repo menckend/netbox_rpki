@@ -314,6 +314,114 @@ class IrrWriteExecutionServiceTestCase(TestCase):
         self.assertEqual(posted_body['override'], 'override-pass')
         self.assertIn('route-set: AS64500:RS-EDGE', posted_body['objects'][0]['object_text'])
 
+    def test_preview_irr_change_plan_builds_route_set_create_and_delete_payloads(self):
+        create_test_irr_change_plan_item(
+            name='Create Route Set',
+            change_plan=self.plan,
+            object_family=rpki_models.IrrCoordinationFamily.ROUTE_SET_MEMBERSHIP,
+            action=rpki_models.IrrChangePlanAction.CREATE,
+            stable_object_key='route:203.0.113.0/24AS64500|AS64500:RS-CREATE',
+            after_state_json={
+                'object_class': 'route-set',
+                'set_name': 'AS64500:RS-CREATE',
+                'rpsl_pk': 'AS64500:RS-CREATE',
+                'stable_key': 'route_set:AS64500:RS-CREATE',
+                'members': ['203.0.113.0/24'],
+                'mp_members': [],
+                'maintainer_names': ['LOCAL-IRR-MNT'],
+            },
+        )
+        create_test_irr_change_plan_item(
+            name='Delete Route Set',
+            change_plan=self.plan,
+            object_family=rpki_models.IrrCoordinationFamily.ROUTE_SET_MEMBERSHIP,
+            action=rpki_models.IrrChangePlanAction.DELETE,
+            stable_object_key='route:198.51.100.0/24AS64500|AS64500:RS-DELETE',
+            before_state_json={
+                'object_class': 'route-set',
+                'set_name': 'AS64500:RS-DELETE',
+                'rpsl_pk': 'AS64500:RS-DELETE',
+                'stable_key': 'route_set:AS64500:RS-DELETE',
+                'members': ['198.51.100.0/24'],
+                'mp_members': [],
+                'existing_object_text': (
+                    'route-set: AS64500:RS-DELETE\n'
+                    'descr: Example delete route set\n'
+                    'mnt-by: LOCAL-IRR-MNT\n'
+                    'members: 198.51.100.0/24\n'
+                    'source: LOCAL-IRR\n'
+                ),
+            },
+        )
+
+        execution, payload = preview_irr_change_plan(self.plan, requested_by='preview-user')
+
+        self.assertEqual(execution.status, rpki_models.IrrWriteExecutionStatus.COMPLETED)
+        self.assertEqual(payload['actionable_item_count'], 2)
+        create_result = next(item for item in payload['item_results'] if item['action'] == rpki_models.IrrChangePlanAction.CREATE)
+        delete_result = next(item for item in payload['item_results'] if item['action'] == rpki_models.IrrChangePlanAction.DELETE)
+        self.assertEqual(create_result['operations'][0]['method'], 'POST')
+        self.assertEqual(delete_result['operations'][0]['method'], 'DELETE')
+        self.assertIn('route-set:       AS64500:RS-CREATE', create_result['operations'][0]['body']['objects'][0]['object_text'])
+        self.assertIn('route-set: AS64500:RS-DELETE', delete_result['operations'][0]['body']['objects'][0]['object_text'])
+
+    @patch('netbox_rpki.services.irr_write.urlopen')
+    def test_apply_irr_change_plan_submits_route_set_create_and_delete_payloads(self, urlopen_mock):
+        urlopen_mock.side_effect = [
+            _MockHttpResponse({'summary': {'objects_found': 1, 'successful': 1, 'failed': 0}}),
+            _MockHttpResponse({'summary': {'objects_found': 1, 'successful': 1, 'failed': 0}}),
+        ]
+        create_test_irr_change_plan_item(
+            name='Create Route Set',
+            change_plan=self.plan,
+            object_family=rpki_models.IrrCoordinationFamily.ROUTE_SET_MEMBERSHIP,
+            action=rpki_models.IrrChangePlanAction.CREATE,
+            stable_object_key='route:203.0.113.0/24AS64500|AS64500:RS-CREATE',
+            after_state_json={
+                'object_class': 'route-set',
+                'set_name': 'AS64500:RS-CREATE',
+                'rpsl_pk': 'AS64500:RS-CREATE',
+                'stable_key': 'route_set:AS64500:RS-CREATE',
+                'members': ['203.0.113.0/24'],
+                'mp_members': [],
+                'maintainer_names': ['LOCAL-IRR-MNT'],
+            },
+        )
+        create_test_irr_change_plan_item(
+            name='Delete Route Set',
+            change_plan=self.plan,
+            object_family=rpki_models.IrrCoordinationFamily.ROUTE_SET_MEMBERSHIP,
+            action=rpki_models.IrrChangePlanAction.DELETE,
+            stable_object_key='route:198.51.100.0/24AS64500|AS64500:RS-DELETE',
+            before_state_json={
+                'object_class': 'route-set',
+                'set_name': 'AS64500:RS-DELETE',
+                'rpsl_pk': 'AS64500:RS-DELETE',
+                'stable_key': 'route_set:AS64500:RS-DELETE',
+                'members': ['198.51.100.0/24'],
+                'mp_members': [],
+                'existing_object_text': (
+                    'route-set: AS64500:RS-DELETE\n'
+                    'descr: Example delete route set\n'
+                    'mnt-by: LOCAL-IRR-MNT\n'
+                    'members: 198.51.100.0/24\n'
+                    'source: LOCAL-IRR\n'
+                ),
+            },
+        )
+
+        execution, _response_payload = apply_irr_change_plan(self.plan, requested_by='apply-user')
+
+        self.assertEqual(execution.status, rpki_models.IrrWriteExecutionStatus.COMPLETED)
+        first_request = urlopen_mock.call_args_list[0].args[0]
+        second_request = urlopen_mock.call_args_list[1].args[0]
+        self.assertEqual(first_request.method, 'POST')
+        self.assertEqual(second_request.method, 'DELETE')
+        first_body = json.loads(first_request.data.decode('utf-8'))
+        second_body = json.loads(second_request.data.decode('utf-8'))
+        self.assertIn('route-set:       AS64500:RS-CREATE', first_body['objects'][0]['object_text'])
+        self.assertIn('route-set: AS64500:RS-DELETE', second_body['objects'][0]['object_text'])
+
     def test_preview_irr_change_plan_builds_as_set_create_payloads(self):
         authored_as_set = create_test_authored_as_set(
             name='Authored Customers',
