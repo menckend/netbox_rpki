@@ -1,4 +1,5 @@
 from datetime import timedelta
+from io import StringIO
 from unittest.mock import call, patch
 from unittest.mock import MagicMock
 import hashlib
@@ -181,6 +182,20 @@ class ProviderSyncServiceTestCase(TestCase):
         self.assertEqual(aspa_rollup['capability_status'], rpki_models.ProviderSyncFamilyStatus.NOT_IMPLEMENTED)
         self.assertEqual(aspa_rollup['capability_mode'], 'provider_limited')
         self.assertIn('hosted ROA authorizations only', aspa_rollup['capability_reason'])
+
+    def test_sync_provider_account_triggers_lifecycle_health_evaluation(self):
+        with patch(
+            'netbox_rpki.services.provider_sync._fetch_arin_roa_xml',
+            return_value=ARIN_ROA_XML,
+        ), patch('netbox_rpki.services.provider_sync.evaluate_lifecycle_health_events') as evaluate_mock:
+            sync_run, snapshot = sync_provider_account(self.provider_account)
+
+        evaluate_mock.assert_called_once()
+        call_args = evaluate_mock.call_args
+        self.assertEqual(call_args.args[0], self.provider_account)
+        self.assertEqual(call_args.kwargs['snapshot'], snapshot)
+        self.assertEqual(call_args.kwargs['snapshot_diff'], None)
+        self.assertEqual(call_args.kwargs['summary']['latest_snapshot_id'], snapshot.pk)
 
     def test_resolve_lifecycle_health_policy_falls_back_to_built_in_defaults(self):
         self.assertIsNone(resolve_lifecycle_health_policy(provider_account=self.provider_account))
@@ -2235,6 +2250,76 @@ class ProviderSyncSchedulingCommandTestCase(TestCase):
             call_command('sync_provider_accounts', '--dry-run')
 
         enqueue_mock.assert_not_called()
+
+
+class LifecycleHealthEvaluationCommandTestCase(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='lifecycle-health-command-org', name='Lifecycle Health Command Org')
+        cls.provider_account = create_test_provider_account(
+            name='Lifecycle Health Command Account',
+            organization=cls.organization,
+            org_handle='ORG-LIFECYCLE-HEALTH-COMMAND',
+        )
+        cls.second_provider_account = create_test_provider_account(
+            name='Lifecycle Health Command Account 2',
+            organization=cls.organization,
+            org_handle='ORG-LIFECYCLE-HEALTH-COMMAND-2',
+        )
+
+    def test_management_command_evaluates_requested_provider_account(self):
+        with patch(
+            'netbox_rpki.management.commands.evaluate_lifecycle_health.evaluate_lifecycle_health_events',
+            return_value={
+                'candidate_count': 1,
+                'event_count': 1,
+                'opened_count': 1,
+                'repeated_count': 0,
+                'resolved_count': 0,
+                'events': [],
+            },
+        ) as evaluate_mock:
+            call_command('evaluate_lifecycle_health', '--provider-account', str(self.provider_account.pk))
+
+        evaluate_mock.assert_called_once()
+        self.assertEqual(evaluate_mock.call_args.args[0], self.provider_account)
+
+    def test_management_command_dry_run_does_not_evaluate(self):
+        with patch('netbox_rpki.management.commands.evaluate_lifecycle_health.evaluate_lifecycle_health_events') as evaluate_mock:
+            out = StringIO()
+            call_command('evaluate_lifecycle_health', '--dry-run', stdout=out)
+
+        evaluate_mock.assert_not_called()
+        self.assertIn('Identified', out.getvalue())
+
+    def test_management_command_limit_caps_bulk_evaluation(self):
+        with patch(
+            'netbox_rpki.management.commands.evaluate_lifecycle_health.evaluate_lifecycle_health_events',
+            return_value={
+                'candidate_count': 1,
+                'event_count': 1,
+                'opened_count': 1,
+                'repeated_count': 0,
+                'resolved_count': 0,
+                'events': [],
+            },
+        ) as evaluate_mock:
+            call_command('evaluate_lifecycle_health', '--limit', '1')
+
+        self.assertEqual(evaluate_mock.call_count, 1)
+        self.assertEqual(evaluate_mock.call_args.args[0], self.provider_account)
+
+    def test_management_command_enqueue_uses_job_runner(self):
+        class StubJob:
+            pk = 991
+
+        with patch(
+            'netbox_rpki.management.commands.evaluate_lifecycle_health.EvaluateLifecycleHealthJob.enqueue_for_provider_account',
+            return_value=(StubJob(), True),
+        ) as enqueue_mock:
+            call_command('evaluate_lifecycle_health', '--provider-account', str(self.provider_account.pk), '--enqueue')
+
+        enqueue_mock.assert_called_once_with(self.provider_account)
 
 
 class ProviderAccountSyncActionAPITestCase(PluginAPITestCase):

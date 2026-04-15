@@ -5,6 +5,7 @@ from core.models import Job
 from netbox_rpki import models as rpki_models
 from netbox_rpki.services import (
     build_bulk_routing_intent_baseline_fingerprint,
+    evaluate_lifecycle_health_events,
     run_aspa_reconciliation_pipeline,
     run_bulk_routing_intent_pipeline,
     run_routing_intent_pipeline,
@@ -345,4 +346,69 @@ class SyncProviderAccountJob(JobRunner):
         self.job.save(update_fields=('data',))
         self.logger.info(
             f'Completed provider sync with sync run {sync_run.pk} and provider snapshot {snapshot.pk}'
+        )
+
+
+class EvaluateLifecycleHealthJob(JobRunner):
+    class Meta:
+        name = 'Lifecycle Health Evaluation'
+
+    @classmethod
+    def get_job_name(cls, provider_account: rpki_models.RpkiProviderAccount | int) -> str:
+        provider_account_pk = provider_account.pk if hasattr(provider_account, 'pk') else provider_account
+        return f'{cls.name} [{provider_account_pk}]'
+
+    @classmethod
+    def get_active_job_for_provider_account(cls, provider_account: rpki_models.RpkiProviderAccount | int):
+        return Job.objects.filter(
+            name=cls.get_job_name(provider_account),
+            status__in=JobStatusChoices.ENQUEUED_STATE_CHOICES,
+        ).order_by('created').first()
+
+    @classmethod
+    def enqueue_for_provider_account(
+        cls,
+        provider_account: rpki_models.RpkiProviderAccount | int,
+        *,
+        user=None,
+        schedule_at=None,
+    ):
+        if not isinstance(provider_account, rpki_models.RpkiProviderAccount):
+            provider_account = rpki_models.RpkiProviderAccount.objects.get(pk=provider_account)
+
+        existing_job = cls.get_active_job_for_provider_account(provider_account)
+        if existing_job is not None:
+            return existing_job, False
+
+        if rpki_models.LifecycleHealthEvent.objects.filter(
+            provider_account=provider_account,
+            status=rpki_models.LifecycleHealthEventStatus.OPEN,
+        ).exists():
+            return None, False
+
+        job = cls.enqueue(
+            name=cls.get_job_name(provider_account),
+            user=user,
+            schedule_at=schedule_at,
+            provider_account_pk=provider_account.pk,
+        )
+        return job, True
+
+    def run(self, provider_account_pk, *args, **kwargs):
+        provider_account = rpki_models.RpkiProviderAccount.objects.get(pk=provider_account_pk)
+        self.logger.info(
+            f'Evaluating lifecycle-health events for provider account {provider_account.name} ({provider_account.pk})'
+        )
+        result = evaluate_lifecycle_health_events(provider_account)
+        self.job.data = {
+            'provider_account_pk': provider_account.pk,
+            'candidate_count': result['candidate_count'],
+            'event_count': result['event_count'],
+            'opened_count': result['opened_count'],
+            'repeated_count': result['repeated_count'],
+            'resolved_count': result['resolved_count'],
+        }
+        self.job.save(update_fields=('data',))
+        self.logger.info(
+            f'Completed lifecycle-health evaluation with {result["event_count"]} event(s)'
         )

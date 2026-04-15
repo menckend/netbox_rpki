@@ -15,7 +15,10 @@ from ipam.models.asns import ASN
 from ipam.models.ip import Prefix
 
 from netbox_rpki import models as rpki_models
-from netbox_rpki.services.lifecycle_reporting import build_snapshot_publication_health_rollup
+from netbox_rpki.services.lifecycle_reporting import (
+    build_snapshot_publication_health_rollup,
+    evaluate_lifecycle_health_events,
+)
 from . import provider_sync_krill
 from .provider_sync_contract import build_family_summary, build_provider_sync_summary, family_capability_extra
 from .provider_sync_diff import build_latest_provider_snapshot_diff
@@ -1312,6 +1315,7 @@ def sync_provider_account(
     sync_run.provider_snapshot = snapshot
     sync_run.save(update_fields=('provider_snapshot',))
 
+    snapshot_diff = None
     try:
         if provider_account.provider_type == rpki_models.ProviderType.KRILL:
             family_summaries = _import_krill_records(provider_account, snapshot)
@@ -1355,6 +1359,12 @@ def sync_provider_account(
         provider_account.last_sync_summary_json = summary
         provider_account.save(
             update_fields=('last_successful_sync', 'last_sync_status', 'last_sync_summary_json')
+        )
+        evaluate_lifecycle_health_events(
+            provider_account,
+            summary=summary,
+            snapshot=snapshot,
+            snapshot_diff=snapshot_diff,
         )
         return sync_run, snapshot
     except Exception as exc:

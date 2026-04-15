@@ -56,6 +56,7 @@ from .routing_intent import (
     run_routing_intent_template_binding_pipeline,
     run_routing_intent_pipeline,
 )
+from .lifecycle_reporting import evaluate_lifecycle_health_events
 
 __all__ = (
     'ProviderSyncError',
@@ -102,4 +103,5 @@ __all__ = (
     'simulate_roa_change_plan',
     'suppress_roa_lint_finding',
     'sync_provider_account',
+    'evaluate_lifecycle_health_events',
 )
