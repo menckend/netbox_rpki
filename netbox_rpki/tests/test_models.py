@@ -1591,6 +1591,94 @@ class GovernanceModelBehaviorTestCase(TestCase):
         with self.assertRaises(ValidationError):
             approval_record.full_clean()
 
+    def test_roa_change_plan_rejects_mismatched_managed_relationship_scope(self):
+        provider_account = create_test_provider_account(
+            organization=self.organization,
+            provider_type=rpki_models.ProviderType.KRILL,
+            org_handle='ORG-GOV-ROA-SCOPE',
+            ca_handle='ca-gov-roa-scope',
+            api_base_url='https://krill.example.invalid',
+        )
+        delegated_entity = rpki_models.DelegatedAuthorizationEntity.objects.create(
+            name='Governance ROA Scope Entity',
+            organization=self.organization,
+            kind=rpki_models.DelegatedAuthorizationEntityKind.CUSTOMER,
+        )
+        other_entity = rpki_models.DelegatedAuthorizationEntity.objects.create(
+            name='Governance ROA Scope Other Entity',
+            organization=self.organization,
+            kind=rpki_models.DelegatedAuthorizationEntityKind.DOWNSTREAM,
+        )
+        managed_relationship = rpki_models.ManagedAuthorizationRelationship.objects.create(
+            name='Governance ROA Scope Relationship',
+            organization=self.organization,
+            delegated_entity=delegated_entity,
+            provider_account=provider_account,
+            status=rpki_models.ManagedAuthorizationRelationshipStatus.ACTIVE,
+        )
+        change_plan = rpki_models.ROAChangePlan(
+            name='Governance Scoped ROA Plan',
+            organization=self.organization,
+            source_reconciliation_run=self.reconciliation_run,
+            provider_account=provider_account,
+            delegated_entity=other_entity,
+            managed_relationship=managed_relationship,
+        )
+
+        with self.assertRaises(ValidationError) as context:
+            change_plan.full_clean()
+
+        self.assertEqual(
+            context.exception.message_dict,
+            {'managed_relationship': ['Managed relationship must reference the same delegated entity as this ROA change plan.']},
+        )
+
+    def test_aspa_change_plan_rejects_mismatched_managed_relationship_scope(self):
+        provider_account = create_test_provider_account(
+            organization=self.organization,
+            provider_type=rpki_models.ProviderType.KRILL,
+            org_handle='ORG-GOV-ASPA-SCOPE',
+            ca_handle='ca-gov-aspa-scope',
+            api_base_url='https://krill.example.invalid',
+        )
+        delegated_entity = rpki_models.DelegatedAuthorizationEntity.objects.create(
+            name='Governance ASPA Scope Entity',
+            organization=self.organization,
+            kind=rpki_models.DelegatedAuthorizationEntityKind.CUSTOMER,
+        )
+        other_entity = rpki_models.DelegatedAuthorizationEntity.objects.create(
+            name='Governance ASPA Scope Other Entity',
+            organization=self.organization,
+            kind=rpki_models.DelegatedAuthorizationEntityKind.DOWNSTREAM,
+        )
+        managed_relationship = rpki_models.ManagedAuthorizationRelationship.objects.create(
+            name='Governance ASPA Scope Relationship',
+            organization=self.organization,
+            delegated_entity=delegated_entity,
+            provider_account=provider_account,
+            status=rpki_models.ManagedAuthorizationRelationshipStatus.ACTIVE,
+        )
+        aspa_run = create_test_aspa_reconciliation_run(
+            organization=self.organization,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        change_plan = rpki_models.ASPAChangePlan(
+            name='Governance Scoped ASPA Plan',
+            organization=self.organization,
+            source_reconciliation_run=aspa_run,
+            provider_account=provider_account,
+            delegated_entity=other_entity,
+            managed_relationship=managed_relationship,
+        )
+
+        with self.assertRaises(ValidationError) as context:
+            change_plan.full_clean()
+
+        self.assertEqual(
+            context.exception.message_dict,
+            {'managed_relationship': ['Managed relationship must reference the same delegated entity as this ASPA change plan.']},
+        )
+
 
 class RoutingIntentTemplateModelBehaviorTestCase(TestCase):
     def test_template_version_must_be_positive(self):

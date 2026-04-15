@@ -211,6 +211,9 @@ class ASPAChangePlanServiceTestCase(TestCase):
         self.assertEqual(item.after_state_json['delegated_scope']['delegated_entity_id'], delegated_entity.pk)
         self.assertEqual(plan.summary_json['delegated_scoped_item_count'], 1)
         self.assertEqual(plan.summary_json['ownership_scope_conflict_customer_count'], 0)
+        self.assertEqual(plan.delegated_entity, delegated_entity)
+        self.assertEqual(plan.managed_relationship, managed_relationship)
+        self.assertEqual(plan.summary_json['delegated_scope_status'], 'managed_relationship')
 
     def test_plan_generation_skips_conflicting_customer_ownership(self):
         customer = create_test_asn(64660)
@@ -264,3 +267,60 @@ class ASPAChangePlanServiceTestCase(TestCase):
         self.assertEqual(plan.summary_json['skipped_counts']['ownership_scope_conflict'], 1)
         self.assertEqual(plan.summary_json['ownership_scope_conflict_customer_count'], 1)
         self.assertEqual(plan.summary_json['ownership_scope_conflict_customer_asns'], [customer.asn])
+        self.assertIsNone(plan.delegated_entity)
+        self.assertIsNone(plan.managed_relationship)
+        self.assertEqual(plan.summary_json['delegated_scope_status'], 'organization_only')
+
+    def test_plan_generation_marks_mixed_delegated_scope_for_multiple_subjects(self):
+        customer_a = create_test_asn(64670)
+        customer_b = create_test_asn(64672)
+        provider_a = create_test_asn(64671)
+        provider_b = create_test_asn(64673)
+        entity_a = rpki_models.DelegatedAuthorizationEntity.objects.create(
+            name='ASPA Mixed Scope Entity A',
+            organization=self.organization,
+            kind=rpki_models.DelegatedAuthorizationEntityKind.CUSTOMER,
+        )
+        entity_b = rpki_models.DelegatedAuthorizationEntity.objects.create(
+            name='ASPA Mixed Scope Entity B',
+            organization=self.organization,
+            kind=rpki_models.DelegatedAuthorizationEntityKind.DOWNSTREAM,
+        )
+        relationship_a = rpki_models.ManagedAuthorizationRelationship.objects.create(
+            name='ASPA Mixed Scope Relationship A',
+            organization=self.organization,
+            delegated_entity=entity_a,
+            provider_account=self.provider_account,
+            status=rpki_models.ManagedAuthorizationRelationshipStatus.ACTIVE,
+        )
+        relationship_b = rpki_models.ManagedAuthorizationRelationship.objects.create(
+            name='ASPA Mixed Scope Relationship B',
+            organization=self.organization,
+            delegated_entity=entity_b,
+            provider_account=self.provider_account,
+            status=rpki_models.ManagedAuthorizationRelationshipStatus.ACTIVE,
+        )
+        create_test_aspa_intent(
+            name='Mixed Scope Intent A',
+            organization=self.organization,
+            customer_as=customer_a,
+            provider_as=provider_a,
+            delegated_entity=entity_a,
+            managed_relationship=relationship_a,
+        )
+        create_test_aspa_intent(
+            name='Mixed Scope Intent B',
+            organization=self.organization,
+            customer_as=customer_b,
+            provider_as=provider_b,
+            delegated_entity=entity_b,
+            managed_relationship=relationship_b,
+        )
+
+        run = reconcile_aspa_intents(self.organization)
+        plan = create_aspa_change_plan(run)
+
+        self.assertEqual(plan.summary_json['delegated_scoped_item_count'], 2)
+        self.assertEqual(plan.summary_json['delegated_scope_status'], 'mixed')
+        self.assertIsNone(plan.delegated_entity)
+        self.assertIsNone(plan.managed_relationship)

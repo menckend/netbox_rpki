@@ -831,6 +831,11 @@ class ASPAProviderWriteServiceTestCase(TestCase):
         self.assertEqual(
             execution.response_payload_json['delegated_scope'],
             {
+                'delegated_scope_status': 'organization_only',
+                'delegated_entity_id': None,
+                'delegated_entity_name': '',
+                'managed_relationship_id': None,
+                'managed_relationship_name': '',
                 'delegated_scoped_item_count': 0,
                 'ownership_scope_conflict_customer_count': 0,
                 'ownership_scope_conflict_customer_asns': [],
@@ -954,6 +959,11 @@ class ASPAProviderWriteServiceTestCase(TestCase):
         self.assertEqual(
             execution.response_payload_json['delegated_scope'],
             {
+                'delegated_scope_status': 'organization_only',
+                'delegated_entity_id': None,
+                'delegated_entity_name': '',
+                'managed_relationship_id': None,
+                'managed_relationship_name': '',
                 'delegated_scoped_item_count': 0,
                 'ownership_scope_conflict_customer_count': 0,
                 'ownership_scope_conflict_customer_asns': [],

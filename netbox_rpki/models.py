@@ -6061,6 +6061,20 @@ class ROAChangePlan(NamedRpkiStandardModel):
         blank=True,
         null=True,
     )
+    delegated_entity = models.ForeignKey(
+        to='DelegatedAuthorizationEntity',
+        on_delete=models.PROTECT,
+        related_name='roa_change_plans',
+        blank=True,
+        null=True,
+    )
+    managed_relationship = models.ForeignKey(
+        to='ManagedAuthorizationRelationship',
+        on_delete=models.PROTECT,
+        related_name='roa_change_plans',
+        blank=True,
+        null=True,
+    )
     status = models.CharField(
         max_length=16,
         choices=ROAChangePlanStatus.choices,
@@ -6106,6 +6120,36 @@ class ROAChangePlan(NamedRpkiStandardModel):
             start_at=self.maintenance_window_start,
             end_at=self.maintenance_window_end,
         )
+        errors = {}
+        if (
+            self.delegated_entity_id is not None
+            and self.delegated_entity.organization_id != self.organization_id
+        ):
+            errors['delegated_entity'] = 'Delegated entity must belong to the same organization as this ROA change plan.'
+        if (
+            self.managed_relationship_id is not None
+            and self.managed_relationship.organization_id != self.organization_id
+        ):
+            errors['managed_relationship'] = (
+                'Managed relationship must belong to the same organization as this ROA change plan.'
+            )
+        if (
+            self.delegated_entity_id is not None
+            and self.managed_relationship_id is not None
+            and self.managed_relationship.delegated_entity_id != self.delegated_entity_id
+        ):
+            errors['managed_relationship'] = (
+                'Managed relationship must reference the same delegated entity as this ROA change plan.'
+            )
+        if (
+            self.provider_account_id is not None
+            and self.managed_relationship_id is not None
+            and self.managed_relationship.provider_account_id is not None
+            and self.managed_relationship.provider_account_id != self.provider_account_id
+        ):
+            errors['provider_account'] = (
+                'Provider account must match the managed relationship when both are set on this ROA change plan.'
+            )
         if self.pk:
             try:
                 original = type(self).objects.get(pk=self.pk)
@@ -6116,11 +6160,11 @@ class ROAChangePlan(NamedRpkiStandardModel):
                 and original.status != ROAChangePlanStatus.DRAFT
                 and original.requires_secondary_approval != self.requires_secondary_approval
             ):
-                raise ValidationError({
-                    'requires_secondary_approval': (
-                        'Cannot change dual-approval requirement after the plan has left DRAFT status.'
-                    )
-                })
+                errors['requires_secondary_approval'] = (
+                    'Cannot change dual-approval requirement after the plan has left DRAFT status.'
+                )
+        if errors:
+            raise ValidationError(errors)
 
     @property
     def has_governance_metadata(self) -> bool:
@@ -6441,6 +6485,20 @@ class ASPAChangePlan(NamedRpkiStandardModel):
         blank=True,
         null=True,
     )
+    delegated_entity = models.ForeignKey(
+        to='DelegatedAuthorizationEntity',
+        on_delete=models.PROTECT,
+        related_name='aspa_change_plans',
+        blank=True,
+        null=True,
+    )
+    managed_relationship = models.ForeignKey(
+        to='ManagedAuthorizationRelationship',
+        on_delete=models.PROTECT,
+        related_name='aspa_change_plans',
+        blank=True,
+        null=True,
+    )
     status = models.CharField(
         max_length=16,
         choices=ASPAChangePlanStatus.choices,
@@ -6490,6 +6548,36 @@ class ASPAChangePlan(NamedRpkiStandardModel):
             start_at=self.maintenance_window_start,
             end_at=self.maintenance_window_end,
         )
+        errors = {}
+        if (
+            self.delegated_entity_id is not None
+            and self.delegated_entity.organization_id != self.organization_id
+        ):
+            errors['delegated_entity'] = 'Delegated entity must belong to the same organization as this ASPA change plan.'
+        if (
+            self.managed_relationship_id is not None
+            and self.managed_relationship.organization_id != self.organization_id
+        ):
+            errors['managed_relationship'] = (
+                'Managed relationship must belong to the same organization as this ASPA change plan.'
+            )
+        if (
+            self.delegated_entity_id is not None
+            and self.managed_relationship_id is not None
+            and self.managed_relationship.delegated_entity_id != self.delegated_entity_id
+        ):
+            errors['managed_relationship'] = (
+                'Managed relationship must reference the same delegated entity as this ASPA change plan.'
+            )
+        if (
+            self.provider_account_id is not None
+            and self.managed_relationship_id is not None
+            and self.managed_relationship.provider_account_id is not None
+            and self.managed_relationship.provider_account_id != self.provider_account_id
+        ):
+            errors['provider_account'] = (
+                'Provider account must match the managed relationship when both are set on this ASPA change plan.'
+            )
         if self.pk:
             try:
                 original = type(self).objects.get(pk=self.pk)
@@ -6500,11 +6588,11 @@ class ASPAChangePlan(NamedRpkiStandardModel):
                 and original.status != ASPAChangePlanStatus.DRAFT
                 and original.requires_secondary_approval != self.requires_secondary_approval
             ):
-                raise ValidationError({
-                    'requires_secondary_approval': (
-                        'Cannot change dual-approval requirement after the plan has left DRAFT status.'
-                    )
-                })
+                errors['requires_secondary_approval'] = (
+                    'Cannot change dual-approval requirement after the plan has left DRAFT status.'
+                )
+        if errors:
+            raise ValidationError(errors)
         if self.provider_snapshot_id is not None and self.provider_account_id is None:
             raise ValidationError({'provider_account': 'Provider account is required when provider snapshot is set.'})
         if (

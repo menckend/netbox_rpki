@@ -424,6 +424,11 @@ def _get_plan_governance_metadata(plan) -> dict[str, str]:
 def _get_plan_delegated_scope_metadata(plan) -> dict:
     summary = dict(getattr(plan, 'summary_json', {}) or {})
     return {
+        'delegated_scope_status': summary.get('delegated_scope_status', 'organization_only'),
+        'delegated_entity_id': getattr(getattr(plan, 'delegated_entity', None), 'pk', None),
+        'delegated_entity_name': getattr(getattr(plan, 'delegated_entity', None), 'name', ''),
+        'managed_relationship_id': getattr(getattr(plan, 'managed_relationship', None), 'pk', None),
+        'managed_relationship_name': getattr(getattr(plan, 'managed_relationship', None), 'name', ''),
         'delegated_scoped_item_count': summary.get('delegated_scoped_item_count', 0),
         'ownership_scope_conflict_customer_count': summary.get('ownership_scope_conflict_customer_count', 0),
         'ownership_scope_conflict_customer_asns': list(summary.get('ownership_scope_conflict_customer_asns') or []),

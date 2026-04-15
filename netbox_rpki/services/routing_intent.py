@@ -2247,6 +2247,46 @@ def _serialize_provider_route_payload_for_imported(
     return payload
 
 
+def _delegated_scope_signature(summary: dict | None) -> tuple:
+    summary = dict(summary or {})
+    return (
+        summary.get('ownership_scope') or 'organization',
+        summary.get('delegated_entity_id'),
+        summary.get('managed_relationship_id'),
+    )
+
+
+def _resolve_plan_delegated_scope(scope_summaries: list[dict]) -> tuple[object | None, object | None, str]:
+    non_org_summaries = [
+        summary
+        for summary in scope_summaries
+        if summary and summary.get('ownership_scope') not in (None, '', 'organization')
+    ]
+    if not non_org_summaries:
+        return None, None, 'organization_only'
+
+    distinct_signatures = {
+        _delegated_scope_signature(summary)
+        for summary in non_org_summaries
+    }
+    if len(distinct_signatures) > 1:
+        return None, None, 'mixed'
+
+    summary = non_org_summaries[0]
+    managed_relationship = None
+    delegated_entity = None
+    managed_relationship_id = summary.get('managed_relationship_id')
+    delegated_entity_id = summary.get('delegated_entity_id')
+    if managed_relationship_id is not None:
+        managed_relationship = rpki_models.ManagedAuthorizationRelationship.objects.get(pk=managed_relationship_id)
+        delegated_entity = managed_relationship.delegated_entity
+        return delegated_entity, managed_relationship, 'managed_relationship'
+    if delegated_entity_id is not None:
+        delegated_entity = rpki_models.DelegatedAuthorizationEntity.objects.get(pk=delegated_entity_id)
+        return delegated_entity, None, 'delegated_entity'
+    return None, None, 'organization_only'
+
+
 def create_roa_change_plan(
     reconciliation_run: rpki_models.ROAReconciliationRun,
     *,
@@ -2290,6 +2330,7 @@ def create_roa_change_plan(
     skipped_counts: dict[str, int] = {}
     replacement_withdraw_sources: set[str] = set()
     delegated_scoped_item_count = 0
+    plan_scope_summaries: list[dict] = []
 
     for intent_result in reconciliation_run.intent_results.select_related(
         'roa_intent',
@@ -2298,11 +2339,13 @@ def create_roa_change_plan(
         'best_roa',
         'best_imported_authorization',
     ).all():
+        intent_scope_summary = _delegated_scope_summary_for_intent(intent_result.roa_intent)
         if (
             intent_result.roa_intent.delegated_entity_id is not None
             or intent_result.roa_intent.managed_relationship_id is not None
         ):
             delegated_scoped_item_count += 1
+            plan_scope_summaries.append(intent_scope_summary)
         if (
             intent_result.result_type == rpki_models.ROAIntentResultType.MISSING
             and intent_result.roa_intent.derived_state == rpki_models.ROAIntentDerivedState.ACTIVE
@@ -2448,7 +2491,13 @@ def create_roa_change_plan(
         'skipped_counts': skipped_counts,
         'delegated_scoped_item_count': delegated_scoped_item_count,
     }
-    plan.save(update_fields=('summary_json',))
+    delegated_entity, managed_relationship, delegated_scope_status = _resolve_plan_delegated_scope(plan_scope_summaries)
+    plan.delegated_entity = delegated_entity
+    plan.managed_relationship = managed_relationship
+    plan.summary_json['delegated_scope_status'] = delegated_scope_status
+    plan.summary_json['delegated_entity_id'] = getattr(delegated_entity, 'pk', None)
+    plan.summary_json['managed_relationship_id'] = getattr(managed_relationship, 'pk', None)
+    plan.save(update_fields=('delegated_entity', 'managed_relationship', 'summary_json'))
     from netbox_rpki.services.roa_lint import run_roa_lint
     from netbox_rpki.services.rov_simulation import simulate_roa_change_plan
 

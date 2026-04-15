@@ -554,6 +554,14 @@ class RpkiProviderAccountSerializerTestCase(TestCase):
             source=telemetry_source,
             status=rpki_models.ValidationRunStatus.COMPLETED,
         )
+        provider_account = create_test_provider_account(
+            name='Workflow Serializer Provider Account',
+            organization=organization,
+            provider_type=rpki_models.ProviderType.KRILL,
+            org_handle='ORG-WORKFLOW-SERIALIZER',
+            ca_handle='ca-workflow-serializer',
+            api_base_url='https://krill.example.invalid',
+        )
         create_test_bgp_path_observation(
             name='Workflow Serializer ROA Observation',
             telemetry_run=telemetry_run,
@@ -610,10 +618,24 @@ class RpkiProviderAccountSerializerTestCase(TestCase):
             organization=organization,
             status=rpki_models.ValidationRunStatus.COMPLETED,
         )
+        delegated_entity = rpki_models.DelegatedAuthorizationEntity.objects.create(
+            name='Workflow Serializer Delegated Entity',
+            organization=organization,
+            kind=rpki_models.DelegatedAuthorizationEntityKind.CUSTOMER,
+        )
+        managed_relationship = rpki_models.ManagedAuthorizationRelationship.objects.create(
+            name='Workflow Serializer Managed Relationship',
+            organization=organization,
+            delegated_entity=delegated_entity,
+            provider_account=provider_account,
+            status=rpki_models.ManagedAuthorizationRelationshipStatus.ACTIVE,
+        )
         aspa_plan = create_test_aspa_change_plan(
             name='Workflow Serializer ASPA Plan',
             organization=organization,
             source_reconciliation_run=aspa_run,
+            delegated_entity=delegated_entity,
+            managed_relationship=managed_relationship,
         )
         create_test_aspa_change_plan_item(
             name='Workflow Serializer ASPA Plan Item',
@@ -630,6 +652,8 @@ class RpkiProviderAccountSerializerTestCase(TestCase):
         self.assertEqual(roa_plan_data['external_overlay_summary']['referenced_object_count'], 1)
         self.assertIn('telemetry_status_counts', aspa_run_data['external_overlay_summary'])
         self.assertEqual(aspa_plan_data['external_overlay_summary']['object_family'], 'aspa')
+        self.assertEqual(aspa_plan_data['delegated_entity'], delegated_entity.pk)
+        self.assertEqual(aspa_plan_data['managed_relationship'], managed_relationship.pk)
 
 
 class RpkiProviderAccountSummaryAPITestCase(PluginAPITestCase):

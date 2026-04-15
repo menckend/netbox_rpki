@@ -515,6 +515,9 @@ class RoutingIntentServiceTestCase(TestCase):
             delegated_entity.pk,
         )
         self.assertEqual(plan.summary_json['delegated_scoped_item_count'], 1)
+        self.assertEqual(plan.delegated_entity, delegated_entity)
+        self.assertEqual(plan.managed_relationship, managed_relationship)
+        self.assertEqual(plan.summary_json['delegated_scope_status'], 'managed_relationship')
 
     def test_expired_exception_does_not_apply(self):
         create_test_routing_intent_exception(

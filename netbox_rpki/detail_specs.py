@@ -397,6 +397,21 @@ def get_plan_summary(plan: models.ROAChangePlan) -> str | None:
     return get_pretty_json(summary)
 
 
+def get_plan_delegated_scope_summary(plan) -> str | None:
+    summary = dict(plan.summary_json or {})
+    payload = {
+        'delegated_scope_status': summary.get('delegated_scope_status', 'organization_only'),
+        'delegated_entity_id': getattr(getattr(plan, 'delegated_entity', None), 'pk', None),
+        'delegated_entity_name': getattr(getattr(plan, 'delegated_entity', None), 'name', ''),
+        'managed_relationship_id': getattr(getattr(plan, 'managed_relationship', None), 'pk', None),
+        'managed_relationship_name': getattr(getattr(plan, 'managed_relationship', None), 'name', ''),
+        'delegated_scoped_item_count': summary.get('delegated_scoped_item_count', 0),
+        'ownership_scope_conflict_customer_count': summary.get('ownership_scope_conflict_customer_count', 0),
+        'ownership_scope_conflict_customer_asns': summary.get('ownership_scope_conflict_customer_asns', []),
+    }
+    return get_pretty_json(payload)
+
+
 def get_roa_change_plan_external_overlay_summary(plan: models.ROAChangePlan) -> str | None:
     return get_pretty_json(build_roa_change_plan_overlay_summary(plan))
 
@@ -1075,6 +1090,8 @@ ROA_CHANGE_PLAN_DETAIL_SPEC = DetailSpec(
             kind='link',
             empty_text='None',
         ),
+        DetailFieldSpec(label='Delegated Entity', value=lambda obj: obj.delegated_entity, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Managed Relationship', value=lambda obj: obj.managed_relationship, kind='link', empty_text='None'),
         DetailFieldSpec(label='Status', value=lambda obj: obj.status),
         DetailFieldSpec(
             label='Publication State',
@@ -1131,6 +1148,12 @@ ROA_CHANGE_PLAN_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(
             label='Plan Summary',
             value=get_plan_summary,
+            kind='code',
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='Delegated Scope Summary',
+            value=get_plan_delegated_scope_summary,
             kind='code',
             empty_text='None',
         ),
@@ -1936,6 +1959,8 @@ ASPA_CHANGE_PLAN_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(label='Source Reconciliation Run', value=lambda obj: obj.source_reconciliation_run, kind='link'),
         DetailFieldSpec(label='Provider Account', value=lambda obj: obj.provider_account, kind='link', empty_text='None'),
         DetailFieldSpec(label='Provider Snapshot', value=lambda obj: obj.provider_snapshot, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Delegated Entity', value=lambda obj: obj.delegated_entity, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Managed Relationship', value=lambda obj: obj.managed_relationship, kind='link', empty_text='None'),
         DetailFieldSpec(label='Status', value=lambda obj: obj.status),
         DetailFieldSpec(
             label='Publication State',
@@ -1963,6 +1988,12 @@ ASPA_CHANGE_PLAN_DETAIL_SPEC = DetailSpec(
             empty_text='None',
         ),
         DetailFieldSpec(label='Plan Summary', value=get_plan_summary, kind='code', empty_text='None'),
+        DetailFieldSpec(
+            label='Delegated Scope Summary',
+            value=get_plan_delegated_scope_summary,
+            kind='code',
+            empty_text='None',
+        ),
         DetailFieldSpec(
             label='External Overlay Summary',
             value=get_aspa_change_plan_external_overlay_summary,

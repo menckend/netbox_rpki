@@ -123,6 +123,34 @@ def _delegated_scope_signature(summary: dict) -> tuple:
     )
 
 
+def _resolve_plan_delegated_scope(scope_summaries: list[dict]) -> tuple[object | None, object | None, str]:
+    non_org_summaries = [
+        summary
+        for summary in scope_summaries
+        if summary and summary.get('ownership_scope') not in (None, '', 'organization')
+    ]
+    if not non_org_summaries:
+        return None, None, 'organization_only'
+
+    distinct_signatures = {
+        _delegated_scope_signature(summary)
+        for summary in non_org_summaries
+    }
+    if len(distinct_signatures) > 1:
+        return None, None, 'mixed'
+
+    summary = non_org_summaries[0]
+    managed_relationship_id = summary.get('managed_relationship_id')
+    delegated_entity_id = summary.get('delegated_entity_id')
+    if managed_relationship_id is not None:
+        managed_relationship = rpki_models.ManagedAuthorizationRelationship.objects.get(pk=managed_relationship_id)
+        return managed_relationship.delegated_entity, managed_relationship, 'managed_relationship'
+    if delegated_entity_id is not None:
+        delegated_entity = rpki_models.DelegatedAuthorizationEntity.objects.get(pk=delegated_entity_id)
+        return delegated_entity, None, 'delegated_entity'
+    return None, None, 'organization_only'
+
+
 def _serialize_target_state(
     customer_asn: int,
     provider_asns: tuple[int, ...],
@@ -332,6 +360,7 @@ def create_aspa_change_plan(
     plan_semantic_counts: Counter[str] = Counter()
     skipped_counts: Counter[str] = Counter()
     delegated_scoped_item_count = 0
+    plan_scope_summaries: list[dict] = []
 
     for customer_asn in sorted(set(expected_provider_sets) | set(observed_states)):
         expected_provider_asns = expected_provider_sets.get(customer_asn, ())
@@ -385,6 +414,7 @@ def create_aspa_change_plan(
             create_count += 1
             if delegated_scope and delegated_scope.get('ownership_scope') != 'organization':
                 delegated_scoped_item_count += 1
+                plan_scope_summaries.append(delegated_scope)
             plan_semantic_counts[rpki_models.ASPAChangePlanItemSemantic.CREATE] += 1
             continue
 
@@ -462,6 +492,7 @@ def create_aspa_change_plan(
             replacement_count += 1
         if delegated_scope and delegated_scope.get('ownership_scope') != 'organization':
             delegated_scoped_item_count += 1
+            plan_scope_summaries.append(delegated_scope)
         plan_semantic_counts[anchor_semantic] += 1
 
         for provider_asn in added_provider_asns:
@@ -495,6 +526,7 @@ def create_aspa_change_plan(
             provider_add_count += 1
             if delegated_scope and delegated_scope.get('ownership_scope') != 'organization':
                 delegated_scoped_item_count += 1
+                plan_scope_summaries.append(delegated_scope)
             plan_semantic_counts[rpki_models.ASPAChangePlanItemSemantic.ADD_PROVIDER] += 1
 
         for provider_asn in removed_provider_asns:
@@ -523,6 +555,7 @@ def create_aspa_change_plan(
             provider_remove_count += 1
             if delegated_scope and delegated_scope.get('ownership_scope') != 'organization':
                 delegated_scoped_item_count += 1
+                plan_scope_summaries.append(delegated_scope)
             plan_semantic_counts[rpki_models.ASPAChangePlanItemSemantic.REMOVE_PROVIDER] += 1
 
     plan.summary_json = {
@@ -541,5 +574,11 @@ def create_aspa_change_plan(
         'ownership_scope_conflict_customer_count': len(conflicting_customers),
         'ownership_scope_conflict_customer_asns': sorted(conflicting_customers),
     }
-    plan.save(update_fields=('summary_json',))
+    delegated_entity, managed_relationship, delegated_scope_status = _resolve_plan_delegated_scope(plan_scope_summaries)
+    plan.delegated_entity = delegated_entity
+    plan.managed_relationship = managed_relationship
+    plan.summary_json['delegated_scope_status'] = delegated_scope_status
+    plan.summary_json['delegated_entity_id'] = getattr(delegated_entity, 'pk', None)
+    plan.summary_json['managed_relationship_id'] = getattr(managed_relationship, 'pk', None)
+    plan.save(update_fields=('delegated_entity', 'managed_relationship', 'summary_json'))
     return plan
