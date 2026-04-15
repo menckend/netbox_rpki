@@ -34,6 +34,10 @@ from netbox_rpki.jobs import (
 )
 from netbox_rpki.object_registry import API_OBJECT_SPECS
 from netbox_rpki.object_specs import ObjectSpec
+from netbox_rpki.services.lifecycle_reporting import (
+    build_provider_lifecycle_timeline,
+    build_provider_publication_diff_timeline,
+)
 from netbox_rpki.services.provider_sync_contract import build_provider_account_summary
 from netbox_rpki.services.provider_sync_diff import (
     build_latest_provider_snapshot_diff,
@@ -384,6 +388,44 @@ class RpkiProviderAccountViewSet(VIEWSET_CLASS_MAP['rpkiprovideraccount']):
             }
         payload['sync_in_progress'] = not created
         return Response(payload)
+
+    def _visible_timeline_ids(self, request, provider_account):
+        visible_snapshot_ids = set(
+            rpki_models.ProviderSnapshot.objects.restrict(request.user, 'view')
+            .filter(provider_account=provider_account)
+            .values_list('pk', flat=True)
+        )
+        visible_diff_ids = set(
+            rpki_models.ProviderSnapshotDiff.objects.restrict(request.user, 'view')
+            .filter(provider_account=provider_account)
+            .values_list('pk', flat=True)
+        )
+        return visible_snapshot_ids, visible_diff_ids
+
+    @action(detail=True, methods=['get'])
+    def timeline(self, request, pk=None):
+        provider_account = self.get_object()
+        if not request.user.has_perm('netbox_rpki.view_rpkiprovideraccount', provider_account):
+            raise PermissionDenied('This user does not have permission to view this provider account.')
+
+        visible_snapshot_ids, visible_diff_ids = self._visible_timeline_ids(request, provider_account)
+        return Response(build_provider_lifecycle_timeline(
+            provider_account,
+            visible_snapshot_ids=visible_snapshot_ids,
+            visible_diff_ids=visible_diff_ids,
+        ))
+
+    @action(detail=True, methods=['get'], url_path='publication-diff-summary')
+    def publication_diff_summary(self, request, pk=None):
+        provider_account = self.get_object()
+        if not request.user.has_perm('netbox_rpki.view_rpkiprovideraccount', provider_account):
+            raise PermissionDenied('This user does not have permission to view this provider account.')
+
+        _, visible_diff_ids = self._visible_timeline_ids(request, provider_account)
+        return Response(build_provider_publication_diff_timeline(
+            provider_account,
+            visible_diff_ids=visible_diff_ids,
+        ))
 
     @action(detail=False, methods=['get'])
     def summary(self, request):

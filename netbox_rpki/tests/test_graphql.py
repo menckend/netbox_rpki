@@ -506,6 +506,12 @@ class ProviderReportingGraphQLTestCase(APITestCase):
             change_type='changed',
             provider_identity='graphql-provider-identity',
         )
+        create_test_provider_snapshot_diff_item(
+            name='GraphQL Publication Diff Item',
+            snapshot_diff=cls.snapshot_diff,
+            object_family=rpki_models.ProviderSyncFamily.PUBLICATION_POINTS,
+            change_type='changed',
+        )
         cls.provider_account.last_sync_summary_json = build_provider_sync_summary(
             cls.provider_account,
             status='completed',
@@ -618,11 +624,13 @@ class ProviderReportingGraphQLTestCase(APITestCase):
             f'''
             {{
                 netbox_rpki_provideraccount(id: {self.provider_account.pk}) {{
-                    id
-                    last_sync_rollup
-                    lifecycle_health_summary
-                    publication_health
-                }}
+                id
+                last_sync_rollup
+                lifecycle_health_summary
+                publication_health
+                health_timeline
+                publication_diff_timeline
+            }}
                 provider_account_summary
             }}
             '''
@@ -635,6 +643,12 @@ class ProviderReportingGraphQLTestCase(APITestCase):
         self.assertEqual(account['lifecycle_health_summary']['policy']['thresholds']['sync_stale_after_minutes'], 20)
         self.assertEqual(account['publication_health']['summary_schema_version'], 1)
         self.assertEqual(account['last_sync_rollup']['lifecycle_health_summary']['summary_schema_version'], 1)
+        self.assertEqual(account['health_timeline']['timeline_schema_version'], 1)
+        self.assertEqual(account['health_timeline']['item_count'], 2)
+        self.assertEqual(account['health_timeline']['items'][0]['latest_diff_id'], self.snapshot_diff.pk)
+        self.assertEqual(account['publication_diff_timeline']['timeline_schema_version'], 1)
+        self.assertEqual(account['publication_diff_timeline']['item_count'], 1)
+        self.assertEqual(account['publication_diff_timeline']['items'][0]['publication_changes'], 1)
         summary_account = next(
             row
             for row in data['data']['provider_account_summary']['accounts']
@@ -654,6 +668,8 @@ class ProviderReportingGraphQLTestCase(APITestCase):
                     id
                     last_sync_rollup
                     lifecycle_health_summary
+                    health_timeline
+                    publication_diff_timeline
                 }}
             }}
             '''
@@ -665,6 +681,8 @@ class ProviderReportingGraphQLTestCase(APITestCase):
         self.assertIsNone(account['last_sync_rollup']['latest_diff_id'])
         self.assertIsNone(account['lifecycle_health_summary']['diff']['latest_snapshot_id'])
         self.assertIsNone(account['lifecycle_health_summary']['diff']['latest_diff_id'])
+        self.assertEqual(account['health_timeline']['item_count'], 0)
+        self.assertEqual(account['publication_diff_timeline']['item_count'], 0)
 
     def test_provider_reporting_queries_expose_summary_and_diff_lookup(self):
         self.add_permissions(
@@ -816,7 +834,7 @@ class ProviderReportingGraphQLTestCase(APITestCase):
         self.assertEqual(data['data']['provider_snapshot_summary']['total_snapshots'], 3)
         self.assertEqual(data['data']['provider_snapshot_summary']['with_diff_count'], 1)
         self.assertEqual(data['data']['provider_snapshot_latest_diff']['id'], str(self.snapshot_diff.pk))
-        self.assertEqual(data['data']['provider_snapshot_latest_diff']['item_count'], 1)
+        self.assertEqual(data['data']['provider_snapshot_latest_diff']['item_count'], 2)
         self.assertEqual(data['data']['provider_snapshot_diff']['id'], str(self.snapshot_diff.pk))
         self.assertIn('family_rollups', data['data']['provider_snapshot_diff'])
         self.assertIn('family_status_counts', data['data']['provider_snapshot_diff'])

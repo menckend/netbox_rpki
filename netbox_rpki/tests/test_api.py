@@ -30,6 +30,10 @@ from netbox_rpki.models import (
     RoaPrefix,
 )
 from netbox_rpki.object_registry import API_OBJECT_SPECS, GRAPHQL_OBJECT_SPECS, get_object_spec
+from netbox_rpki.services.lifecycle_reporting import (
+    LIFECYCLE_TIMELINE_SCHEMA_VERSION,
+    PUBLICATION_DIFF_TIMELINE_SCHEMA_VERSION,
+)
 from netbox_rpki.services.provider_sync_contract import build_provider_sync_summary
 from netbox_rpki.services.rov_simulation import _build_plan_fingerprint
 from netbox_rpki.tests.base import PluginAPITestCase
@@ -57,6 +61,7 @@ from netbox_rpki.tests.utils import (
     create_test_provider_sync_run,
     create_test_provider_snapshot,
     create_test_provider_snapshot_diff,
+    create_test_provider_snapshot_diff_item,
     create_test_provider_write_execution,
     create_test_rir,
     create_test_roa,
@@ -1619,6 +1624,44 @@ class ProviderAccountSummaryAPITestCase(PluginAPITestCase):
         self.assertEqual(response.data['sync_due_count'], 2)
         self.assertEqual(response.data['roa_write_supported_count'], 1)
         self.assertEqual(response.data['aspa_write_supported_count'], 1)
+
+    def test_provider_account_timeline_actions_return_timeline_payloads(self):
+        self.add_permissions(
+            'netbox_rpki.view_rpkiprovideraccount',
+            'netbox_rpki.view_providersnapshot',
+            'netbox_rpki.view_providersnapshotdiff',
+        )
+        create_test_provider_snapshot_diff_item(
+            snapshot_diff=self.healthy_diff,
+            object_family=rpki_models.ProviderSyncFamily.PUBLICATION_POINTS,
+            change_type=rpki_models.ProviderSnapshotDiffChangeType.CHANGED,
+        )
+
+        timeline_response = self.client.get(
+            reverse('plugins-api:netbox_rpki-api:provideraccount-timeline', kwargs={'pk': self.healthy_account.pk}),
+            **self.header,
+        )
+        publication_diff_response = self.client.get(
+            reverse(
+                'plugins-api:netbox_rpki-api:provideraccount-publication-diff-summary',
+                kwargs={'pk': self.healthy_account.pk},
+            ),
+            **self.header,
+        )
+
+        self.assertHttpStatus(timeline_response, 200)
+        self.assertHttpStatus(publication_diff_response, 200)
+        self.assertEqual(timeline_response.data['timeline_schema_version'], LIFECYCLE_TIMELINE_SCHEMA_VERSION)
+        self.assertEqual(timeline_response.data['item_count'], 2)
+        self.assertEqual(timeline_response.data['items'][0]['latest_diff_id'], self.healthy_diff.pk)
+        self.assertEqual(timeline_response.data['items'][0]['publication_changes'], 1)
+        self.assertEqual(
+            publication_diff_response.data['timeline_schema_version'],
+            PUBLICATION_DIFF_TIMELINE_SCHEMA_VERSION,
+        )
+        self.assertEqual(publication_diff_response.data['item_count'], 1)
+        self.assertEqual(publication_diff_response.data['items'][0]['snapshot_diff_id'], self.healthy_diff.pk)
+        self.assertEqual(publication_diff_response.data['items'][0]['publication_changes'], 1)
 
 
 class ProviderSnapshotActionAPITestCase(PluginAPITestCase):

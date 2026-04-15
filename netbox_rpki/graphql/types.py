@@ -13,6 +13,8 @@ from netbox_rpki.object_registry import GRAPHQL_OBJECT_SPECS
 from netbox_rpki.object_specs import ObjectSpec
 from netbox_rpki.services.lifecycle_reporting import (
     build_provider_lifecycle_health_summary,
+    build_provider_lifecycle_timeline,
+    build_provider_publication_diff_timeline,
     build_snapshot_publication_health_rollup,
     build_diff_publication_health_rollup,
 )
@@ -113,6 +115,38 @@ class ProviderAccountReportingMixin:
     @strawberry.field
     def publication_health(self) -> JSON:
         return build_provider_account_rollup(self).get('publication_health') or {}
+
+    @strawberry.field
+    def health_timeline(self, info: Info) -> JSON:
+        visible_snapshot_ids = set(
+            models.ProviderSnapshot.objects.restrict(info.context.request.user, 'view')
+            .filter(provider_account=self)
+            .values_list('pk', flat=True)
+        )
+        visible_diff_ids = set(
+            models.ProviderSnapshotDiff.objects.restrict(info.context.request.user, 'view')
+            .filter(provider_account=self)
+            .values_list('pk', flat=True)
+        )
+
+        return build_provider_lifecycle_timeline(
+            self,
+            visible_snapshot_ids=visible_snapshot_ids,
+            visible_diff_ids=visible_diff_ids,
+        )
+
+    @strawberry.field
+    def publication_diff_timeline(self, info: Info) -> JSON:
+        visible_diff_ids = set(
+            models.ProviderSnapshotDiff.objects.restrict(info.context.request.user, 'view')
+            .filter(provider_account=self)
+            .values_list('pk', flat=True)
+        )
+
+        return build_provider_publication_diff_timeline(
+            self,
+            visible_diff_ids=visible_diff_ids,
+        )
 
 
 @strawberry.type
