@@ -35,6 +35,11 @@ from netbox_rpki.jobs import (
 from netbox_rpki.object_registry import API_OBJECT_SPECS
 from netbox_rpki.object_specs import ObjectSpec
 from netbox_rpki.services.lifecycle_reporting import (
+    LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_LIFECYCLE_SUMMARY,
+    LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_SUMMARY,
+    LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_TIMELINE,
+    build_lifecycle_export_response,
+    build_provider_lifecycle_health_summary,
     build_provider_lifecycle_timeline,
     build_provider_publication_diff_timeline,
 )
@@ -389,6 +394,12 @@ class RpkiProviderAccountViewSet(VIEWSET_CLASS_MAP['rpkiprovideraccount']):
         payload['sync_in_progress'] = not created
         return Response(payload)
 
+    def _get_export_format(self, request):
+        export_format = request.query_params.get('export_format', 'json').lower()
+        if export_format not in {'json', 'csv'}:
+            raise ValidationError({'format': 'Supported export formats are json and csv.'})
+        return export_format
+
     def _visible_timeline_ids(self, request, provider_account):
         visible_snapshot_ids = set(
             rpki_models.ProviderSnapshot.objects.restrict(request.user, 'view')
@@ -427,6 +438,54 @@ class RpkiProviderAccountViewSet(VIEWSET_CLASS_MAP['rpkiprovideraccount']):
             visible_diff_ids=visible_diff_ids,
         ))
 
+    @action(detail=True, methods=['get'], url_path='export/lifecycle')
+    def export_summary(self, request, pk=None):
+        provider_account = self.get_object()
+        if not request.user.has_perm('netbox_rpki.view_rpkiprovideraccount', provider_account):
+            raise PermissionDenied('This user does not have permission to view this provider account.')
+
+        export_format = self._get_export_format(request)
+        visible_snapshot_ids, visible_diff_ids = self._visible_timeline_ids(request, provider_account)
+        summary = build_provider_lifecycle_health_summary(
+            provider_account,
+            visible_snapshot_ids=visible_snapshot_ids,
+            visible_diff_ids=visible_diff_ids,
+        )
+        try:
+            return build_lifecycle_export_response(
+                LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_LIFECYCLE_SUMMARY,
+                summary,
+                export_format,
+                provider_account=provider_account,
+                filters={'provider_account_id': provider_account.pk},
+            )
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+
+    @action(detail=True, methods=['get'], url_path='export/timeline')
+    def export_timeline(self, request, pk=None):
+        provider_account = self.get_object()
+        if not request.user.has_perm('netbox_rpki.view_rpkiprovideraccount', provider_account):
+            raise PermissionDenied('This user does not have permission to view this provider account.')
+
+        export_format = self._get_export_format(request)
+        visible_snapshot_ids, visible_diff_ids = self._visible_timeline_ids(request, provider_account)
+        timeline = build_provider_lifecycle_timeline(
+            provider_account,
+            visible_snapshot_ids=visible_snapshot_ids,
+            visible_diff_ids=visible_diff_ids,
+        )
+        try:
+            return build_lifecycle_export_response(
+                LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_TIMELINE,
+                timeline,
+                export_format,
+                provider_account=provider_account,
+                filters={'provider_account_id': provider_account.pk},
+            )
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+
     @action(detail=False, methods=['get'])
     def summary(self, request):
         provider_accounts = list(self.filter_queryset(self.get_queryset()))
@@ -445,6 +504,35 @@ class RpkiProviderAccountViewSet(VIEWSET_CLASS_MAP['rpkiprovideraccount']):
             visible_snapshot_ids=visible_snapshot_ids,
             visible_diff_ids=visible_diff_ids,
         ))
+
+    @action(detail=False, methods=['get'], url_path='summary/export')
+    def summary_export(self, request):
+        provider_accounts = list(self.filter_queryset(self.get_queryset()))
+        visible_snapshot_ids = set(
+            rpki_models.ProviderSnapshot.objects.restrict(request.user, 'view')
+            .filter(provider_account__in=provider_accounts)
+            .values_list('pk', flat=True)
+        )
+        visible_diff_ids = set(
+            rpki_models.ProviderSnapshotDiff.objects.restrict(request.user, 'view')
+            .filter(provider_account__in=provider_accounts)
+            .values_list('pk', flat=True)
+        )
+        export_format = self._get_export_format(request)
+        summary = build_provider_account_summary(
+            provider_accounts,
+            visible_snapshot_ids=visible_snapshot_ids,
+            visible_diff_ids=visible_diff_ids,
+        )
+        try:
+            return build_lifecycle_export_response(
+                LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_SUMMARY,
+                summary,
+                export_format,
+                filters={'provider_account_ids': [provider_account.pk for provider_account in provider_accounts]},
+            )
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
 
 
 class ProviderSnapshotViewSet(VIEWSET_CLASS_MAP['providersnapshot']):

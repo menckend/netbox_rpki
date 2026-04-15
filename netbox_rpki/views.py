@@ -4,6 +4,7 @@ from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied
+from django.http import HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -52,11 +53,19 @@ from netbox_rpki.services import (
     suppress_roa_lint_finding,
 )
 from netbox_rpki.services.lifecycle_reporting import (
+    LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_LIFECYCLE_SUMMARY,
+    LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_SUMMARY,
+    LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_TIMELINE,
     build_provider_lifecycle_health_summary,
+    build_provider_lifecycle_timeline,
+    build_provider_publication_diff_timeline,
+    build_lifecycle_export_response,
     get_effective_lifecycle_thresholds,
+    get_lifecycle_export_filename,
     is_within_lifecycle_expiry_threshold,
 )
 from netbox_rpki.services.provider_sync_contract import build_provider_account_rollup
+from netbox_rpki.services.provider_sync_contract import build_provider_account_summary
 
 
 class MetadataDrivenDetailView(generic.ObjectView):
@@ -387,6 +396,144 @@ class ProviderAccountSyncView(generic.ObjectEditView):
                 f'Provider account {provider_account.name} already has a sync in progress.',
             )
         return redirect(provider_account.get_absolute_url())
+
+
+class LifecycleExportViewMixin:
+    export_formats = {'json', 'csv'}
+
+    def get_export_format(self, request):
+        export_format = request.GET.get('format', 'json').lower()
+        if export_format not in self.export_formats:
+            return None
+        return export_format
+
+    def export_response(self, *, kind, data, export_format, provider_account=None, filters=None):
+        try:
+            return build_lifecycle_export_response(
+                kind,
+                data,
+                export_format,
+                provider_account=provider_account,
+                filters=filters,
+            )
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+
+class OperationsDashboardExportView(LifecycleExportViewMixin, ContentTypePermissionRequiredMixin, View):
+    additional_permissions = [
+        'netbox_rpki.view_roa',
+        'netbox_rpki.view_certificate',
+        'netbox_rpki.view_routingintenttemplatebinding',
+        'netbox_rpki.view_routingintentexception',
+        'netbox_rpki.view_bulkintentrun',
+        'netbox_rpki.view_roareconciliationrun',
+        'netbox_rpki.view_roachangeplan',
+        'netbox_rpki.view_aspareconciliationrun',
+        'netbox_rpki.view_aspachangeplan',
+    ]
+
+    def get_required_permission(self):
+        return 'netbox_rpki.view_rpkiprovideraccount'
+
+    def get(self, request):
+        dashboard_view = OperationsDashboardView()
+        export_format = self.get_export_format(request)
+        if export_format is None:
+            return HttpResponseBadRequest('Unsupported export format.')
+
+        provider_accounts = dashboard_view.get_provider_accounts(request)
+        visible_snapshot_ids = set(
+            models.ProviderSnapshot.objects.restrict(request.user, 'view')
+            .filter(provider_account__in=[item.pk for item in provider_accounts])
+            .values_list('pk', flat=True)
+        )
+        visible_diff_ids = set(
+            models.ProviderSnapshotDiff.objects.restrict(request.user, 'view')
+            .filter(provider_account__in=[item.pk for item in provider_accounts])
+            .values_list('pk', flat=True)
+        )
+        summary = build_provider_account_summary(
+            provider_accounts,
+            visible_snapshot_ids=visible_snapshot_ids,
+            visible_diff_ids=visible_diff_ids,
+        )
+        return self.export_response(
+            kind=LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_SUMMARY,
+            data=summary,
+            export_format=export_format,
+            filters={'view': 'operations_dashboard'},
+        )
+
+
+class ProviderAccountLifecycleExportView(LifecycleExportViewMixin, View):
+    def get_provider_account(self, request, pk):
+        queryset = models.RpkiProviderAccount.objects.restrict(request.user, 'view').select_related('organization')
+        return get_object_or_404(queryset, pk=pk)
+
+    def get(self, request, pk):
+        export_format = self.get_export_format(request)
+        if export_format is None:
+            return HttpResponseBadRequest('Unsupported export format.')
+
+        provider_account = self.get_provider_account(request, pk)
+        visible_snapshot_ids = set(
+            models.ProviderSnapshot.objects.restrict(request.user, 'view')
+            .filter(provider_account=provider_account)
+            .values_list('pk', flat=True)
+        )
+        visible_diff_ids = set(
+            models.ProviderSnapshotDiff.objects.restrict(request.user, 'view')
+            .filter(provider_account=provider_account)
+            .values_list('pk', flat=True)
+        )
+        summary = build_provider_lifecycle_health_summary(
+            provider_account,
+            visible_snapshot_ids=visible_snapshot_ids,
+            visible_diff_ids=visible_diff_ids,
+        )
+        return self.export_response(
+            kind=LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_LIFECYCLE_SUMMARY,
+            data=summary,
+            export_format=export_format,
+            provider_account=provider_account,
+            filters={'provider_account_id': provider_account.pk},
+        )
+
+
+class ProviderAccountTimelineExportView(LifecycleExportViewMixin, View):
+    def get_provider_account(self, request, pk):
+        queryset = models.RpkiProviderAccount.objects.restrict(request.user, 'view').select_related('organization')
+        return get_object_or_404(queryset, pk=pk)
+
+    def get(self, request, pk):
+        export_format = self.get_export_format(request)
+        if export_format is None:
+            return HttpResponseBadRequest('Unsupported export format.')
+
+        provider_account = self.get_provider_account(request, pk)
+        visible_snapshot_ids = set(
+            models.ProviderSnapshot.objects.restrict(request.user, 'view')
+            .filter(provider_account=provider_account)
+            .values_list('pk', flat=True)
+        )
+        visible_diff_ids = set(
+            models.ProviderSnapshotDiff.objects.restrict(request.user, 'view')
+            .filter(provider_account=provider_account)
+            .values_list('pk', flat=True)
+        )
+        timeline = build_provider_lifecycle_timeline(
+            provider_account,
+            visible_snapshot_ids=visible_snapshot_ids,
+            visible_diff_ids=visible_diff_ids,
+        )
+        return self.export_response(
+            kind=LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_TIMELINE,
+            data=timeline,
+            export_format=export_format,
+            provider_account=provider_account,
+            filters={'provider_account_id': provider_account.pk},
+        )
 
 
 class RoutingIntentTemplateBindingActionView(generic.ObjectEditView):

@@ -2502,6 +2502,26 @@ PROVIDER_ACCOUNT_DETAIL_SPEC = DetailSpec(
             direct_url=lambda obj: reverse('plugins:netbox_rpki:provideraccount_sync', kwargs={'pk': obj.pk}),
             visible=lambda obj: obj.sync_enabled,
         ),
+        DetailActionSpec(
+            permission='netbox_rpki.view_rpkiprovideraccount',
+            label='Export Lifecycle JSON',
+            direct_url=lambda obj: f"{reverse('plugins:netbox_rpki:provideraccount_export_lifecycle', kwargs={'pk': obj.pk})}?format=json",
+        ),
+        DetailActionSpec(
+            permission='netbox_rpki.view_rpkiprovideraccount',
+            label='Export Lifecycle CSV',
+            direct_url=lambda obj: f"{reverse('plugins:netbox_rpki:provideraccount_export_lifecycle', kwargs={'pk': obj.pk})}?format=csv",
+        ),
+        DetailActionSpec(
+            permission='netbox_rpki.view_rpkiprovideraccount',
+            label='Export Timeline JSON',
+            direct_url=lambda obj: f"{reverse('plugins:netbox_rpki:provideraccount_export_timeline', kwargs={'pk': obj.pk})}?format=json",
+        ),
+        DetailActionSpec(
+            permission='netbox_rpki.view_rpkiprovideraccount',
+            label='Export Timeline CSV',
+            direct_url=lambda obj: f"{reverse('plugins:netbox_rpki:provideraccount_export_timeline', kwargs={'pk': obj.pk})}?format=csv",
+        ),
     ),
     bottom_tables=(
         DetailTableSpec(

@@ -1,3 +1,5 @@
+import csv
+import json
 from datetime import date, timedelta
 
 from django.test import SimpleTestCase, TestCase
@@ -11,8 +13,10 @@ from netbox_rpki.models import Certificate, CertificateAsn, CertificatePrefix, O
 from netbox_rpki.object_registry import SIMPLE_DETAIL_VIEW_OBJECT_SPECS, VIEW_OBJECT_SPECS, get_object_spec
 from netbox_rpki.services import create_roa_change_plan, derive_roa_intents, reconcile_roa_intents
 from netbox_rpki.services.lifecycle_reporting import (
+    LIFECYCLE_EXPORT_SCHEMA_VERSION,
     LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_LIFECYCLE_SUMMARY,
     LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_TIMELINE,
+    LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_SUMMARY,
     LIFECYCLE_EXPORT_KIND_PROVIDER_PUBLICATION_DIFF_TIMELINE,
     get_lifecycle_export_filename,
 )
@@ -215,6 +219,164 @@ class LifecycleExportFormatterViewTestCase(TestCase):
             ),
             'all-provider-accounts-provider-publication-diff-timeline.csv',
         )
+
+
+class LifecycleExportViewTestCase(PluginViewTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='lifecycle-export-ui-org', name='Lifecycle Export UI Org')
+        cls.provider_account = create_test_provider_account(
+            name='Lifecycle Export UI Account',
+            organization=cls.organization,
+            provider_type=rpki_models.ProviderType.KRILL,
+            ca_handle='export-ui-ca',
+            org_handle='ORG-LIFECYCLE-EXPORT-UI',
+            last_successful_sync=timezone.now() - timedelta(hours=3),
+        )
+        cls.base_snapshot = create_test_provider_snapshot(
+            name='Lifecycle Export UI Base Snapshot',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+            fetched_at=timezone.now() - timedelta(days=2),
+            completed_at=timezone.now() - timedelta(days=2, minutes=5),
+        )
+        cls.comparison_snapshot = create_test_provider_snapshot(
+            name='Lifecycle Export UI Comparison Snapshot',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+            fetched_at=timezone.now() - timedelta(days=1),
+            completed_at=timezone.now() - timedelta(days=1, minutes=5),
+        )
+        cls.snapshot_diff = create_test_provider_snapshot_diff(
+            name='Lifecycle Export UI Diff',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+            base_snapshot=cls.base_snapshot,
+            comparison_snapshot=cls.comparison_snapshot,
+            summary_json={
+                'status': rpki_models.ValidationRunStatus.COMPLETED,
+                'totals': {
+                    'records_added': 1,
+                    'records_removed': 2,
+                    'records_changed': 3,
+                    'records_stale': 1,
+                },
+            },
+        )
+        create_test_provider_snapshot_diff_item(
+            snapshot_diff=cls.snapshot_diff,
+            object_family=rpki_models.ProviderSyncFamily.PUBLICATION_POINTS,
+            change_type=rpki_models.ProviderSnapshotDiffChangeType.CHANGED,
+            is_stale=True,
+        )
+
+    def test_provider_account_detail_shows_export_buttons(self):
+        self.add_permissions('netbox_rpki.view_rpkiprovideraccount', 'netbox_rpki.change_rpkiprovideraccount')
+
+        response = self.client.get(self.provider_account.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, reverse('plugins:netbox_rpki:provideraccount_export_lifecycle', kwargs={'pk': self.provider_account.pk}) + '?format=json')
+        self.assertContains(response, reverse('plugins:netbox_rpki:provideraccount_export_lifecycle', kwargs={'pk': self.provider_account.pk}) + '?format=csv')
+        self.assertContains(response, reverse('plugins:netbox_rpki:provideraccount_export_timeline', kwargs={'pk': self.provider_account.pk}) + '?format=json')
+        self.assertContains(response, reverse('plugins:netbox_rpki:provideraccount_export_timeline', kwargs={'pk': self.provider_account.pk}) + '?format=csv')
+
+    def test_provider_account_lifecycle_export_json_has_envelope(self):
+        self.add_permissions('netbox_rpki.view_rpkiprovideraccount')
+
+        response = self.client.get(
+            reverse('plugins:netbox_rpki:provideraccount_export_lifecycle', kwargs={'pk': self.provider_account.pk}),
+            {'format': 'json'},
+        )
+
+        self.assertHttpStatus(response, 200)
+        self.assertEqual(
+            response['Content-Disposition'],
+            f'attachment; filename="{get_lifecycle_export_filename(LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_LIFECYCLE_SUMMARY, "json", provider_account=self.provider_account)}"',
+        )
+        payload = json.loads(response.content.decode())
+        self.assertEqual(payload['export_schema_version'], LIFECYCLE_EXPORT_SCHEMA_VERSION)
+        self.assertEqual(payload['kind'], LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_LIFECYCLE_SUMMARY)
+        self.assertEqual(payload['data']['provider_account_id'], self.provider_account.pk)
+
+    def test_provider_account_timeline_export_csv_has_stable_headers(self):
+        self.add_permissions(
+            'netbox_rpki.view_rpkiprovideraccount',
+            'netbox_rpki.view_providersnapshot',
+            'netbox_rpki.view_providersnapshotdiff',
+        )
+
+        response = self.client.get(
+            reverse('plugins:netbox_rpki:provideraccount_export_timeline', kwargs={'pk': self.provider_account.pk}),
+            {'format': 'csv'},
+        )
+
+        self.assertHttpStatus(response, 200)
+        self.assertEqual(
+            response['Content-Disposition'],
+            f'attachment; filename="{get_lifecycle_export_filename(LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_TIMELINE, "csv", provider_account=self.provider_account)}"',
+        )
+        rows = list(csv.DictReader(response.content.decode().splitlines()))
+        self.assertEqual(
+            tuple(rows[0].keys()),
+            (
+                'timeline_schema_version',
+                'snapshot_id',
+                'snapshot_name',
+                'snapshot_status',
+                'fetched_at',
+                'completed_at',
+                'lifecycle_status',
+                'publication_status',
+                'publication_attention_count',
+                'latest_diff_id',
+                'latest_diff_name',
+                'records_added',
+                'records_removed',
+                'records_changed',
+                'publication_changes',
+            ),
+        )
+        self.assertEqual(rows[0]['snapshot_id'], str(self.comparison_snapshot.pk))
+        self.assertEqual(rows[0]['latest_diff_id'], str(self.snapshot_diff.pk))
+
+    def test_provider_account_timeline_export_respects_visibility_filters(self):
+        self.add_permissions('netbox_rpki.view_rpkiprovideraccount')
+
+        response = self.client.get(
+            reverse('plugins:netbox_rpki:provideraccount_export_timeline', kwargs={'pk': self.provider_account.pk}),
+            {'format': 'json'},
+        )
+
+        self.assertHttpStatus(response, 200)
+        payload = json.loads(response.content.decode())
+        self.assertEqual(payload['data']['item_count'], 0)
+        self.assertEqual(payload['data']['items'], [])
+
+    def test_operations_dashboard_export_uses_shared_summary_contract(self):
+        self.add_permissions(
+            'netbox_rpki.view_rpkiprovideraccount',
+            'netbox_rpki.view_providersnapshot',
+            'netbox_rpki.view_providersnapshotdiff',
+            'netbox_rpki.view_roa',
+            'netbox_rpki.view_certificate',
+            'netbox_rpki.view_routingintenttemplatebinding',
+            'netbox_rpki.view_routingintentexception',
+            'netbox_rpki.view_bulkintentrun',
+            'netbox_rpki.view_roareconciliationrun',
+            'netbox_rpki.view_roachangeplan',
+            'netbox_rpki.view_aspareconciliationrun',
+            'netbox_rpki.view_aspachangeplan',
+        )
+
+        response = self.client.get(reverse('plugins:netbox_rpki:operations_export'), {'format': 'json'})
+
+        self.assertHttpStatus(response, 200)
+        payload = json.loads(response.content.decode())
+        self.assertEqual(payload['export_schema_version'], LIFECYCLE_EXPORT_SCHEMA_VERSION)
+        self.assertEqual(payload['kind'], LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_SUMMARY)
+        self.assertEqual(payload['data']['total_accounts'], 1)
+        self.assertEqual(payload['data']['accounts'][0]['provider_account_id'], self.provider_account.pk)
 
 
 class ProviderAccountSyncViewTestCase(PluginViewTestCase):
@@ -1945,6 +2107,28 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
         self.assertContains(response, '9 families: 1 pending, 8 not implemented')
         self.assertContains(response, 'Stale after 120 minute(s)')
         self.assertContains(response, 'Bulk Runs Requiring Attention')
+
+    def test_operations_dashboard_shows_export_buttons(self):
+        self.add_permissions(
+            'netbox_rpki.view_rpkiprovideraccount',
+            'netbox_rpki.view_providersnapshot',
+            'netbox_rpki.view_providersnapshotdiff',
+            'netbox_rpki.view_roa',
+            'netbox_rpki.view_certificate',
+            'netbox_rpki.view_routingintenttemplatebinding',
+            'netbox_rpki.view_routingintentexception',
+            'netbox_rpki.view_bulkintentrun',
+            'netbox_rpki.view_roareconciliationrun',
+            'netbox_rpki.view_roachangeplan',
+            'netbox_rpki.view_aspareconciliationrun',
+            'netbox_rpki.view_aspachangeplan',
+        )
+
+        response = self.client.get(reverse('plugins:netbox_rpki:operations_dashboard'))
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, reverse('plugins:netbox_rpki:operations_export') + '?format=json')
+        self.assertContains(response, reverse('plugins:netbox_rpki:operations_export') + '?format=csv')
 
 
 class GeneratedSurfaceContractTestCase(PluginViewTestCase):

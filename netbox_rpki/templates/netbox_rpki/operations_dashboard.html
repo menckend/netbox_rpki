@@ -12,6 +12,10 @@
             Read-only operational visibility for provider sync drift and upcoming certificate or ROA expiry.
             Thresholds follow the effective lifecycle policy for each organization or provider account.
           </p>
+          <div class="mb-3">
+            <a href="{% url 'plugins:netbox_rpki:operations_export' %}?format=json" class="btn btn-outline-primary btn-sm">Export JSON</a>
+            <a href="{% url 'plugins:netbox_rpki:operations_export' %}?format=csv" class="btn btn-outline-secondary btn-sm">Export CSV</a>
+          </div>
           <div class="row g-3">
             <div class="col col-md-3">
               <div class="border rounded p-3 h-100">

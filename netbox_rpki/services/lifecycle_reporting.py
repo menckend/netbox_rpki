@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 from collections import Counter
 from collections.abc import Mapping
 import hashlib
@@ -8,6 +10,7 @@ import json
 from datetime import date, datetime, time, timedelta
 from django.utils.text import slugify
 
+from django.http import HttpResponse, JsonResponse
 from django.db.models import Count, Q
 from django.utils import timezone
 from urllib.request import Request, urlopen
@@ -28,8 +31,82 @@ PUBLICATION_DIFF_TIMELINE_SCHEMA_VERSION = 1
 
 LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_LIFECYCLE_SUMMARY = 'provider_account_lifecycle_summary'
 LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_TIMELINE = 'provider_account_timeline'
+LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_SUMMARY = 'provider_account_summary'
 LIFECYCLE_EXPORT_KIND_PROVIDER_PUBLICATION_DIFF_TIMELINE = 'provider_publication_diff_timeline'
 LIFECYCLE_HOOK_PAYLOAD_SCHEMA_VERSION = 1
+
+LIFECYCLE_EXPORT_CSV_HEADERS = {
+    LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_LIFECYCLE_SUMMARY: (
+        'summary_schema_version',
+        'provider_account_id',
+        'policy_id',
+        'policy_source',
+        'sync_status',
+        'sync_status_display',
+        'publication_status',
+        'publication_attention_count',
+        'records_added',
+        'records_removed',
+        'records_changed',
+        'latest_snapshot_id',
+        'latest_diff_id',
+        'total_attention_count',
+    ),
+    LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_TIMELINE: (
+        'timeline_schema_version',
+        'snapshot_id',
+        'snapshot_name',
+        'snapshot_status',
+        'fetched_at',
+        'completed_at',
+        'lifecycle_status',
+        'publication_status',
+        'publication_attention_count',
+        'latest_diff_id',
+        'latest_diff_name',
+        'records_added',
+        'records_removed',
+        'records_changed',
+        'publication_changes',
+    ),
+    LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_SUMMARY: (
+        'provider_account_id',
+        'provider_account_name',
+        'organization_id',
+        'organization_name',
+        'provider_type',
+        'transport',
+        'sync_enabled',
+        'sync_health',
+        'sync_health_display',
+        'sync_due',
+        'summary_schema_version',
+        'summary_status',
+        'records_added',
+        'records_removed',
+        'records_changed',
+        'latest_snapshot_id',
+        'latest_snapshot_name',
+        'latest_diff_id',
+        'latest_diff_name',
+        'total_attention_count',
+    ),
+    LIFECYCLE_EXPORT_KIND_PROVIDER_PUBLICATION_DIFF_TIMELINE: (
+        'timeline_schema_version',
+        'snapshot_diff_id',
+        'snapshot_diff_name',
+        'status',
+        'compared_at',
+        'base_snapshot_id',
+        'comparison_snapshot_id',
+        'records_added',
+        'records_removed',
+        'records_changed',
+        'records_stale',
+        'publication_changes',
+        'item_count',
+    ),
+}
 
 LIFECYCLE_HEALTH_DEFAULTS = {
     'sync_stale_after_minutes': 120,
@@ -131,6 +208,33 @@ def _lifecycle_summary_export_row(summary: Mapping[str, object]) -> dict[str, ob
     }
 
 
+def _provider_account_summary_export_row(account: Mapping[str, object]) -> dict[str, object]:
+    lifecycle_summary = dict(account.get('lifecycle_health_summary') or {})
+    attention_summary = dict(lifecycle_summary.get('attention_summary') or {})
+    return {
+        'provider_account_id': account.get('provider_account_id'),
+        'provider_account_name': account.get('provider_account_name', ''),
+        'organization_id': account.get('organization_id'),
+        'organization_name': account.get('organization_name', ''),
+        'provider_type': account.get('provider_type', ''),
+        'transport': account.get('transport', ''),
+        'sync_enabled': bool(account.get('sync_enabled', False)),
+        'sync_health': account.get('sync_health', ''),
+        'sync_health_display': account.get('sync_health_display', ''),
+        'sync_due': bool(account.get('sync_due', False)),
+        'summary_schema_version': account.get('summary_schema_version'),
+        'summary_status': account.get('summary_status', ''),
+        'records_added': int(account.get('records_added', 0) or 0),
+        'records_removed': int(account.get('records_removed', 0) or 0),
+        'records_changed': int(account.get('records_changed', 0) or 0),
+        'latest_snapshot_id': account.get('latest_snapshot_id'),
+        'latest_snapshot_name': account.get('latest_snapshot_name', ''),
+        'latest_diff_id': account.get('latest_diff_id'),
+        'latest_diff_name': account.get('latest_diff_name', ''),
+        'total_attention_count': int(attention_summary.get('total_attention_count', 0) or 0),
+    }
+
+
 def _lifecycle_timeline_export_row(item: Mapping[str, object]) -> dict[str, object]:
     return {
         'timeline_schema_version': int(item.get('timeline_schema_version', 0) or 0),
@@ -195,6 +299,11 @@ def iter_lifecycle_export_rows(kind: str, data: Mapping[str, object]):
             yield _lifecycle_timeline_export_row(item)
         return
 
+    if kind == LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_SUMMARY:
+        for item in data.get('accounts') or []:
+            yield _provider_account_summary_export_row(item)
+        return
+
     if kind == LIFECYCLE_EXPORT_KIND_PROVIDER_PUBLICATION_DIFF_TIMELINE:
         for item in data.get('items') or []:
             yield _publication_diff_timeline_export_row(item)
@@ -210,6 +319,43 @@ def get_lifecycle_export_filename(
     provider_account: rpki_models.RpkiProviderAccount | None = None,
 ) -> str:
     return f"{_export_provider_account_slug(provider_account)}-{_export_kind_slug(kind)}.{fmt}"
+
+
+def build_lifecycle_export_response(
+    kind: str,
+    data: Mapping[str, object],
+    fmt: str,
+    *,
+    filters: Mapping[str, object] | None = None,
+    provider_account: rpki_models.RpkiProviderAccount | None = None,
+) -> HttpResponse:
+    fmt = fmt.lower()
+    if fmt not in {'json', 'csv'}:
+        raise ValueError(f'Unsupported export format: {fmt}')
+
+    filename = get_lifecycle_export_filename(kind, fmt, provider_account=provider_account)
+    if fmt == 'json':
+        response = JsonResponse(
+            build_lifecycle_export_payload(kind, data, filters=filters),
+            json_dumps_params={'indent': 2, 'sort_keys': True},
+        )
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
+    rows = list(iter_lifecycle_export_rows(kind, data))
+    header = LIFECYCLE_EXPORT_CSV_HEADERS.get(kind)
+    if header is None:
+        header = tuple(rows[0].keys()) if rows else ()
+
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=header)
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(row)
+
+    response = HttpResponse(buffer.getvalue(), content_type='text/csv; charset=utf-8')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
 
 
 def _copy_publication_health_summary(summary: Mapping[str, object] | None) -> dict[str, object] | None:

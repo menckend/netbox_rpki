@@ -24,6 +24,20 @@ def build_object_urlpatterns(spec):
                 name='provideraccount_sync',
             )
         )
+        urlpatterns.append(
+            path(
+                f'{path_prefix}/<int:pk>/export/lifecycle/',
+                views.ProviderAccountLifecycleExportView.as_view(),
+                name='provideraccount_export_lifecycle',
+            )
+        )
+        urlpatterns.append(
+            path(
+                f'{path_prefix}/<int:pk>/export/timeline/',
+                views.ProviderAccountTimelineExportView.as_view(),
+                name='provideraccount_export_timeline',
+            )
+        )
     if spec.registry_key == 'organization':
         urlpatterns.append(
             path(
@@ -209,6 +223,7 @@ def build_object_urlpatterns(spec):
     return urlpatterns
 urlpatterns = [
     path('operations/', views.OperationsDashboardView.as_view(), name='operations_dashboard'),
+    path('operations/export/', views.OperationsDashboardExportView.as_view(), name='operations_export'),
 ]
 for object_spec in VIEW_OBJECT_SPECS:
     urlpatterns.extend(build_object_urlpatterns(object_spec))
