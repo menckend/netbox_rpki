@@ -43,6 +43,12 @@ from netbox_rpki.services.overlay_correlation import (
     build_roa_overlay_summary,
     build_signed_object_overlay_summary,
 )
+from netbox_rpki.services.overlay_reporting import (
+    build_aspa_change_plan_overlay_summary,
+    build_aspa_reconciliation_overlay_summary,
+    build_roa_change_plan_overlay_summary,
+    build_roa_reconciliation_overlay_summary,
+)
 
 def _simulation_run_summary(run):
     summary = dict(run.summary_json or {})
@@ -348,12 +354,14 @@ class ROAReconciliationRunSerializer(SERIALIZER_CLASS_MAP['roareconciliationrun'
     latest_lint_run = serializers.SerializerMethodField()
     latest_lint_summary = serializers.SerializerMethodField()
     latest_lint_lifecycle_summary = serializers.SerializerMethodField()
+    external_overlay_summary = serializers.SerializerMethodField()
 
     class Meta(SERIALIZER_CLASS_MAP['roareconciliationrun'].Meta):
         fields = SERIALIZER_CLASS_MAP['roareconciliationrun'].Meta.fields + (
             'latest_lint_run',
             'latest_lint_summary',
             'latest_lint_lifecycle_summary',
+            'external_overlay_summary',
         )
 
     def get_latest_lint_run(self, obj):
@@ -375,9 +383,28 @@ class ROAReconciliationRunSerializer(SERIALIZER_CLASS_MAP['roareconciliationrun'
             return None
         return build_roa_lint_lifecycle_summary(lint_run)
 
+    def get_external_overlay_summary(self, obj):
+        return build_roa_reconciliation_overlay_summary(obj)
+
 
 SERIALIZER_CLASS_MAP['roareconciliationrun'] = ROAReconciliationRunSerializer
 globals()['ROAReconciliationRunSerializer'] = ROAReconciliationRunSerializer
+
+
+class ASPAReconciliationRunSerializer(SERIALIZER_CLASS_MAP['aspareconciliationrun']):
+    external_overlay_summary = serializers.SerializerMethodField()
+
+    class Meta(SERIALIZER_CLASS_MAP['aspareconciliationrun'].Meta):
+        fields = SERIALIZER_CLASS_MAP['aspareconciliationrun'].Meta.fields + (
+            'external_overlay_summary',
+        )
+
+    def get_external_overlay_summary(self, obj):
+        return build_aspa_reconciliation_overlay_summary(obj)
+
+
+SERIALIZER_CLASS_MAP['aspareconciliationrun'] = ASPAReconciliationRunSerializer
+globals()['ASPAReconciliationRunSerializer'] = ASPAReconciliationRunSerializer
 
 
 class ROAChangePlanSerializer(SERIALIZER_CLASS_MAP['roachangeplan']):
@@ -389,6 +416,7 @@ class ROAChangePlanSerializer(SERIALIZER_CLASS_MAP['roachangeplan']):
     latest_simulation_run = serializers.SerializerMethodField()
     latest_simulation_summary = serializers.SerializerMethodField()
     latest_simulation_posture = serializers.SerializerMethodField()
+    external_overlay_summary = serializers.SerializerMethodField()
 
     class Meta(SERIALIZER_CLASS_MAP['roachangeplan'].Meta):
         fields = SERIALIZER_CLASS_MAP['roachangeplan'].Meta.fields + (
@@ -400,6 +428,7 @@ class ROAChangePlanSerializer(SERIALIZER_CLASS_MAP['roachangeplan']):
             'latest_simulation_run',
             'latest_simulation_summary',
             'latest_simulation_posture',
+            'external_overlay_summary',
         )
 
     def get_latest_lint_run(self, obj):
@@ -455,6 +484,9 @@ class ROAChangePlanSerializer(SERIALIZER_CLASS_MAP['roachangeplan']):
     def get_publication_state(self, obj):
         return derive_change_plan_publication_state(obj).as_dict()
 
+    def get_external_overlay_summary(self, obj):
+        return build_roa_change_plan_overlay_summary(obj)
+
 
 SERIALIZER_CLASS_MAP['roachangeplan'] = ROAChangePlanSerializer
 globals()['ROAChangePlanSerializer'] = ROAChangePlanSerializer
@@ -462,14 +494,19 @@ globals()['ROAChangePlanSerializer'] = ROAChangePlanSerializer
 
 class ASPAChangePlanSerializer(SERIALIZER_CLASS_MAP['aspachangeplan']):
     publication_state = serializers.SerializerMethodField()
+    external_overlay_summary = serializers.SerializerMethodField()
 
     class Meta(SERIALIZER_CLASS_MAP['aspachangeplan'].Meta):
         fields = SERIALIZER_CLASS_MAP['aspachangeplan'].Meta.fields + (
             'publication_state',
+            'external_overlay_summary',
         )
 
     def get_publication_state(self, obj):
         return derive_change_plan_publication_state(obj).as_dict()
+
+    def get_external_overlay_summary(self, obj):
+        return build_aspa_change_plan_overlay_summary(obj)
 
 
 SERIALIZER_CLASS_MAP['aspachangeplan'] = ASPAChangePlanSerializer

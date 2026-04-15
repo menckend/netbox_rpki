@@ -18,6 +18,12 @@ from netbox_rpki.services.overlay_correlation import (
     build_roa_overlay_summary,
     build_signed_object_overlay_summary,
 )
+from netbox_rpki.services.overlay_reporting import (
+    build_aspa_change_plan_overlay_summary,
+    build_aspa_reconciliation_overlay_summary,
+    build_roa_change_plan_overlay_summary,
+    build_roa_reconciliation_overlay_summary,
+)
 from netbox_rpki.services.publication_state import (
     derive_change_plan_publication_state,
     derive_rollback_bundle_publication_state,
@@ -332,6 +338,14 @@ def get_aspa_run_result_summary(run: models.ASPAReconciliationRun) -> str | None
     return get_pretty_json(run.result_summary_json)
 
 
+def get_roa_reconciliation_external_overlay_summary(run: models.ROAReconciliationRun) -> str | None:
+    return get_pretty_json(build_roa_reconciliation_overlay_summary(run))
+
+
+def get_aspa_reconciliation_external_overlay_summary(run: models.ASPAReconciliationRun) -> str | None:
+    return get_pretty_json(build_aspa_reconciliation_overlay_summary(run))
+
+
 def get_aspa_result_details(result: models.ASPAIntentResult) -> str | None:
     return get_pretty_json(result.details_json)
 
@@ -373,6 +387,14 @@ def get_plan_summary(plan: models.ROAChangePlan) -> str | None:
     if isinstance(plan, models.ROAChangePlan):
         summary['lint_posture'] = build_roa_change_plan_lint_posture(plan)
     return get_pretty_json(summary)
+
+
+def get_roa_change_plan_external_overlay_summary(plan: models.ROAChangePlan) -> str | None:
+    return get_pretty_json(build_roa_change_plan_overlay_summary(plan))
+
+
+def get_aspa_change_plan_external_overlay_summary(plan: models.ASPAChangePlan) -> str | None:
+    return get_pretty_json(build_aspa_change_plan_overlay_summary(plan))
 
 
 def get_change_plan_publication_state(plan) -> str | None:
@@ -1105,6 +1127,12 @@ ROA_CHANGE_PLAN_DETAIL_SPEC = DetailSpec(
             empty_text='None',
         ),
         DetailFieldSpec(
+            label='External Overlay Summary',
+            value=get_roa_change_plan_external_overlay_summary,
+            kind='code',
+            empty_text='None',
+        ),
+        DetailFieldSpec(
             label='Lint Posture',
             value=get_plan_lint_posture,
             kind='code',
@@ -1663,6 +1691,12 @@ ROA_RECONCILIATION_RUN_DETAIL_SPEC = DetailSpec(
             kind='code',
             empty_text='None',
         ),
+        DetailFieldSpec(
+            label='External Overlay Summary',
+            value=get_roa_reconciliation_external_overlay_summary,
+            kind='code',
+            empty_text='None',
+        ),
     ),
     actions=(
         DetailActionSpec(
@@ -1787,6 +1821,12 @@ ASPA_RECONCILIATION_RUN_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(
             label='Result Summary',
             value=get_aspa_run_result_summary,
+            kind='code',
+            empty_text='None',
+        ),
+        DetailFieldSpec(
+            label='External Overlay Summary',
+            value=get_aspa_reconciliation_external_overlay_summary,
             kind='code',
             empty_text='None',
         ),
@@ -1915,6 +1955,12 @@ ASPA_CHANGE_PLAN_DETAIL_SPEC = DetailSpec(
             empty_text='None',
         ),
         DetailFieldSpec(label='Plan Summary', value=get_plan_summary, kind='code', empty_text='None'),
+        DetailFieldSpec(
+            label='External Overlay Summary',
+            value=get_aspa_change_plan_external_overlay_summary,
+            kind='code',
+            empty_text='None',
+        ),
     ),
     actions=(
         DetailActionSpec(

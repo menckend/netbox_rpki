@@ -39,6 +39,10 @@ from netbox_rpki.services import (
     build_aspa_change_plan_delta,
     build_roa_change_plan_lint_posture,
     build_roa_change_plan_simulation_posture,
+    build_external_mismatch_items,
+    build_telemetry_source_attention_items,
+    build_validation_run_attention_items,
+    build_validator_instance_attention_items,
     approve_roa_change_plan,
     approve_roa_change_plan_secondary,
     build_roa_change_plan_delta,
@@ -431,6 +435,9 @@ class OperationsDashboardExportView(LifecycleExportViewMixin, ContentTypePermiss
         'netbox_rpki.view_roachangeplan',
         'netbox_rpki.view_aspareconciliationrun',
         'netbox_rpki.view_aspachangeplan',
+        'netbox_rpki.view_validatorinstance',
+        'netbox_rpki.view_validationrun',
+        'netbox_rpki.view_telemetrysource',
         'netbox_rpki.view_irrsource',
         'netbox_rpki.view_irrcoordinationrun',
         'netbox_rpki.view_irrchangeplan',
@@ -897,6 +904,10 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
         change_plans_requiring_attention = self.get_change_plans_requiring_attention(request)
         aspa_reconciliation_attention_runs = self.get_aspa_reconciliation_attention_runs(request)
         aspa_change_plans_requiring_attention = self.get_aspa_change_plans_requiring_attention(request)
+        validator_instances_requiring_attention = self.get_validator_instances_requiring_attention(request)
+        validation_runs_requiring_attention = self.get_validation_runs_requiring_attention(request)
+        telemetry_sources_requiring_attention = self.get_telemetry_sources_requiring_attention(request)
+        external_mismatch_items = self.get_external_mismatch_items(request)
         irr_sources_requiring_attention = self.get_irr_sources_requiring_attention(request)
         irr_coordination_attention_runs = self.get_irr_coordination_attention_runs(request)
         irr_change_plans_requiring_attention = self.get_irr_change_plans_requiring_attention(request)
@@ -915,6 +926,10 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
             'change_plans_requiring_attention': change_plans_requiring_attention,
             'aspa_reconciliation_attention_runs': aspa_reconciliation_attention_runs,
             'aspa_change_plans_requiring_attention': aspa_change_plans_requiring_attention,
+            'validator_instances_requiring_attention': validator_instances_requiring_attention,
+            'validation_runs_requiring_attention': validation_runs_requiring_attention,
+            'telemetry_sources_requiring_attention': telemetry_sources_requiring_attention,
+            'external_mismatch_items': external_mismatch_items,
             'irr_sources_requiring_attention': irr_sources_requiring_attention,
             'irr_coordination_attention_runs': irr_coordination_attention_runs,
             'irr_change_plans_requiring_attention': irr_change_plans_requiring_attention,
@@ -1025,6 +1040,26 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
             last_successful_sync_timestamp,
             provider_account.name.lower(),
         )
+
+    def get_validator_instances_requiring_attention(self, request):
+        queryset = models.ValidatorInstance.objects.restrict(request.user, 'view').prefetch_related('validation_runs')
+        return build_validator_instance_attention_items(queryset)
+
+    def get_validation_runs_requiring_attention(self, request):
+        queryset = models.ValidationRun.objects.restrict(request.user, 'view').select_related('validator')
+        return build_validation_run_attention_items(queryset)
+
+    def get_telemetry_sources_requiring_attention(self, request):
+        queryset = models.TelemetrySource.objects.restrict(request.user, 'view').select_related(
+            'organization',
+            'last_successful_run',
+        ).order_by('organization__name', 'name')
+        return build_telemetry_source_attention_items(queryset)
+
+    def get_external_mismatch_items(self, request):
+        roas = models.Roa.objects.restrict(request.user, 'view').select_related('origin_as')[:50]
+        aspas = models.ASPA.objects.restrict(request.user, 'view').select_related('customer_as', 'signed_object')[:50]
+        return build_external_mismatch_items(roas, aspas)
 
     def get_irr_sources_requiring_attention(self, request):
         queryset = models.IrrSource.objects.restrict(request.user, 'view').select_related(

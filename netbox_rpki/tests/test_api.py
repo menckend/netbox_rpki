@@ -54,7 +54,9 @@ from netbox_rpki.tests.utils import (
     create_test_asn,
     create_test_aspa,
     create_test_aspa_change_plan,
+    create_test_aspa_change_plan_item,
     create_test_aspa_intent,
+    create_test_aspa_provider,
     create_test_aspa_reconciliation_run,
     create_test_certificate,
     create_test_certificate_asn,
@@ -427,6 +429,119 @@ class RpkiProviderAccountSerializerTestCase(TestCase):
         self.assertEqual(run_data['summary']['observation_count'], 1)
         self.assertEqual(observation_data['details']['collector'], 'route-views2')
         self.assertEqual(observation_data['path_asns_json'], [64496, 64510, 64500])
+
+    def test_workflow_serializers_expose_external_overlay_summaries(self):
+        organization = create_test_organization(org_id='workflow-serializer-org', name='Workflow Serializer Org')
+        validator = create_test_validator_instance(
+            name='Workflow Serializer Validator',
+            organization=organization,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        validation_run = create_test_validation_run(
+            name='Workflow Serializer Validation Run',
+            validator=validator,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        prefix = create_test_prefix('198.51.100.0/24')
+        origin_as = create_test_asn(64512)
+        provider_as = create_test_asn(64513)
+        roa = create_test_roa(name='Workflow Serializer ROA', origin_as=origin_as)
+        create_test_roa_prefix(roa=roa, prefix=prefix, max_length=24)
+        create_test_validated_roa_payload(
+            name='Workflow Serializer ROA Payload',
+            validation_run=validation_run,
+            roa=roa,
+            prefix=prefix,
+            origin_as=origin_as,
+            observed_prefix=str(prefix.prefix),
+            max_length=24,
+        )
+        telemetry_source = create_test_telemetry_source(
+            name='Workflow Serializer Telemetry Source',
+            organization=organization,
+            slug='workflow-serializer-telemetry',
+        )
+        telemetry_run = create_test_telemetry_run(
+            name='Workflow Serializer Telemetry Run',
+            source=telemetry_source,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        create_test_bgp_path_observation(
+            name='Workflow Serializer ROA Observation',
+            telemetry_run=telemetry_run,
+            source=telemetry_source,
+            prefix=prefix,
+            observed_prefix=str(prefix.prefix),
+            origin_as=origin_as,
+            observed_origin_asn=origin_as.asn,
+            raw_as_path=f'64496 {origin_as.asn}',
+            path_asns_json=[64496, origin_as.asn],
+        )
+        roa_run = create_test_roa_reconciliation_run(
+            name='Workflow Serializer ROA Reconciliation',
+            organization=organization,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        roa_plan = create_test_roa_change_plan(
+            name='Workflow Serializer ROA Plan',
+            organization=organization,
+            source_reconciliation_run=roa_run,
+        )
+        create_test_roa_change_plan_item(
+            name='Workflow Serializer ROA Plan Item',
+            change_plan=roa_plan,
+            roa=roa,
+        )
+
+        aspa = create_test_aspa(
+            name='Workflow Serializer ASPA',
+            organization=organization,
+            customer_as=origin_as,
+        )
+        create_test_aspa_provider(aspa=aspa, provider_as=provider_as)
+        create_test_validated_aspa_payload(
+            name='Workflow Serializer ASPA Payload',
+            validation_run=validation_run,
+            aspa=aspa,
+            customer_as=origin_as,
+            provider_as=provider_as,
+        )
+        create_test_bgp_path_observation(
+            name='Workflow Serializer ASPA Observation',
+            telemetry_run=telemetry_run,
+            source=telemetry_source,
+            prefix=prefix,
+            observed_prefix=str(prefix.prefix),
+            origin_as=origin_as,
+            observed_origin_asn=origin_as.asn,
+            raw_as_path=f'64496 {provider_as.asn} {origin_as.asn}',
+            path_asns_json=[64496, provider_as.asn, origin_as.asn],
+        )
+        aspa_run = create_test_aspa_reconciliation_run(
+            name='Workflow Serializer ASPA Reconciliation',
+            organization=organization,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        aspa_plan = create_test_aspa_change_plan(
+            name='Workflow Serializer ASPA Plan',
+            organization=organization,
+            source_reconciliation_run=aspa_run,
+        )
+        create_test_aspa_change_plan_item(
+            name='Workflow Serializer ASPA Plan Item',
+            change_plan=aspa_plan,
+            aspa=aspa,
+        )
+
+        roa_run_data = api_serializers.ROAReconciliationRunSerializer(roa_run, context={'request': None}).data
+        roa_plan_data = api_serializers.ROAChangePlanSerializer(roa_plan, context={'request': None}).data
+        aspa_run_data = api_serializers.ASPAReconciliationRunSerializer(aspa_run, context={'request': None}).data
+        aspa_plan_data = api_serializers.ASPAChangePlanSerializer(aspa_plan, context={'request': None}).data
+
+        self.assertIn('external_overlay_summary', roa_run_data)
+        self.assertEqual(roa_plan_data['external_overlay_summary']['referenced_object_count'], 1)
+        self.assertIn('telemetry_status_counts', aspa_run_data['external_overlay_summary'])
+        self.assertEqual(aspa_plan_data['external_overlay_summary']['object_family'], 'aspa')
 
 
 class RpkiProviderAccountSummaryAPITestCase(PluginAPITestCase):

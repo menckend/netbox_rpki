@@ -100,6 +100,16 @@ from .overlay_correlation import (
     build_roa_overlay_summary,
     build_signed_object_overlay_summary,
 )
+from .overlay_reporting import (
+    build_aspa_change_plan_overlay_summary,
+    build_aspa_reconciliation_overlay_summary,
+    build_external_mismatch_items,
+    build_roa_change_plan_overlay_summary,
+    build_roa_reconciliation_overlay_summary,
+    build_telemetry_source_attention_items,
+    build_validation_run_attention_items,
+    build_validator_instance_attention_items,
+)
 
 __all__ = (
     'ProviderSyncError',
@@ -178,4 +188,12 @@ __all__ = (
     'build_imported_signed_object_overlay_summary',
     'build_roa_overlay_summary',
     'build_signed_object_overlay_summary',
+    'build_aspa_change_plan_overlay_summary',
+    'build_aspa_reconciliation_overlay_summary',
+    'build_external_mismatch_items',
+    'build_roa_change_plan_overlay_summary',
+    'build_roa_reconciliation_overlay_summary',
+    'build_telemetry_source_attention_items',
+    'build_validation_run_attention_items',
+    'build_validator_instance_attention_items',
 )

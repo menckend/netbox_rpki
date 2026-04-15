@@ -27,6 +27,7 @@ from netbox_rpki.tests.utils import (
     create_test_asn,
     create_test_aspa,
     create_test_aspa_change_plan,
+    create_test_aspa_change_plan_item,
     create_test_aspa_intent,
     create_test_aspa_provider,
     create_test_bulk_intent_run,
@@ -88,6 +89,7 @@ from netbox_rpki.tests.utils import (
     create_test_validated_aspa_payload,
     create_test_validated_roa_payload,
     create_test_signed_object,
+    create_test_validator_instance,
     create_test_trust_anchor,
     create_test_validation_run,
 )
@@ -375,6 +377,9 @@ class LifecycleExportViewTestCase(PluginViewTestCase):
             'netbox_rpki.view_roachangeplan',
             'netbox_rpki.view_aspareconciliationrun',
             'netbox_rpki.view_aspachangeplan',
+            'netbox_rpki.view_validatorinstance',
+            'netbox_rpki.view_validationrun',
+            'netbox_rpki.view_telemetrysource',
             'netbox_rpki.view_irrsource',
             'netbox_rpki.view_irrcoordinationrun',
             'netbox_rpki.view_irrchangeplan',
@@ -2073,6 +2078,44 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
                 'provider_remove_count': 1,
             },
         )
+        cls.validator_attention = create_test_validator_instance(
+            name='Operations Validator',
+            organization=cls.organization,
+            status=rpki_models.ValidationRunStatus.FAILED,
+        )
+        cls.validation_run_attention = create_test_validation_run(
+            name='Operations Validation Run',
+            validator=cls.validator_attention,
+            status=rpki_models.ValidationRunStatus.FAILED,
+            started_at=timezone.now() - timedelta(days=2),
+            completed_at=timezone.now() - timedelta(days=2, minutes=-5),
+        )
+        cls.telemetry_source_attention = create_test_telemetry_source(
+            name='Operations Telemetry Source',
+            organization=cls.organization,
+            slug='operations-telemetry-source',
+            last_run_status=rpki_models.ValidationRunStatus.FAILED,
+            last_successful_run=None,
+        )
+        cls.mismatch_validation_run = create_test_validation_run(
+            name='Operations Mismatch Validation Run',
+            validator=cls.validator_attention,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        cls.mismatch_validation_result = create_test_object_validation_result(
+            name='Operations Mismatch Validation Result',
+            validation_run=cls.mismatch_validation_run,
+            signed_object=cls.expiring_roa.signed_object,
+            validation_state=rpki_models.ValidationState.INVALID,
+            disposition=rpki_models.ValidationDisposition.REJECTED,
+        )
+        create_test_validated_roa_payload(
+            name='Operations Mismatch ROA Payload',
+            validation_run=cls.mismatch_validation_run,
+            roa=cls.expiring_roa,
+            object_validation_result=cls.mismatch_validation_result,
+            observed_prefix='198.51.100.0/24',
+        )
         cls.irr_source_attention = create_test_irr_source(
             name='Operations IRR Source',
             slug='operations-irr-source',
@@ -2139,6 +2182,9 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
             'netbox_rpki.view_roachangeplan',
             'netbox_rpki.view_aspareconciliationrun',
             'netbox_rpki.view_aspachangeplan',
+            'netbox_rpki.view_validatorinstance',
+            'netbox_rpki.view_validationrun',
+            'netbox_rpki.view_telemetrysource',
             'netbox_rpki.view_irrsource',
             'netbox_rpki.view_irrcoordinationrun',
             'netbox_rpki.view_irrchangeplan',
@@ -2177,6 +2223,16 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
         self.assertContains(response, self.aspa_reconciliation_run.name)
         self.assertContains(response, 'Open ASPA Change Plans Requiring Attention')
         self.assertContains(response, self.aspa_change_plan.name)
+        self.assertContains(response, 'External Evidence Overview')
+        self.assertContains(response, 'Validator Instances Requiring Attention')
+        self.assertContains(response, self.validator_attention.name)
+        self.assertContains(response, 'Validation Runs Requiring Attention')
+        self.assertContains(response, self.validation_run_attention.name)
+        self.assertContains(response, 'Telemetry Sources Requiring Attention')
+        self.assertContains(response, self.telemetry_source_attention.name)
+        self.assertContains(response, 'Authored Objects With External Evidence Mismatches')
+        self.assertContains(response, self.expiring_roa.name)
+        self.assertContains(response, 'validator_invalid')
         self.assertContains(response, self.expiring_roa.name)
         self.assertNotContains(response, self.future_roa.name)
         self.assertContains(response, self.expiring_certificate.name)
@@ -2217,6 +2273,9 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
             'netbox_rpki.view_roachangeplan',
             'netbox_rpki.view_aspareconciliationrun',
             'netbox_rpki.view_aspachangeplan',
+            'netbox_rpki.view_validatorinstance',
+            'netbox_rpki.view_validationrun',
+            'netbox_rpki.view_telemetrysource',
             'netbox_rpki.view_irrsource',
             'netbox_rpki.view_irrcoordinationrun',
             'netbox_rpki.view_irrchangeplan',
@@ -2322,6 +2381,9 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
             'netbox_rpki.view_roachangeplan',
             'netbox_rpki.view_aspareconciliationrun',
             'netbox_rpki.view_aspachangeplan',
+            'netbox_rpki.view_validatorinstance',
+            'netbox_rpki.view_validationrun',
+            'netbox_rpki.view_telemetrysource',
             'netbox_rpki.view_irrsource',
             'netbox_rpki.view_irrcoordinationrun',
             'netbox_rpki.view_irrchangeplan',
@@ -2380,6 +2442,9 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
             'netbox_rpki.view_roachangeplan',
             'netbox_rpki.view_aspareconciliationrun',
             'netbox_rpki.view_aspachangeplan',
+            'netbox_rpki.view_validatorinstance',
+            'netbox_rpki.view_validationrun',
+            'netbox_rpki.view_telemetrysource',
             'netbox_rpki.view_irrsource',
             'netbox_rpki.view_irrcoordinationrun',
             'netbox_rpki.view_irrchangeplan',
@@ -2409,6 +2474,9 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
             'netbox_rpki.view_roachangeplan',
             'netbox_rpki.view_aspareconciliationrun',
             'netbox_rpki.view_aspachangeplan',
+            'netbox_rpki.view_validatorinstance',
+            'netbox_rpki.view_validationrun',
+            'netbox_rpki.view_telemetrysource',
             'netbox_rpki.view_irrsource',
             'netbox_rpki.view_irrcoordinationrun',
             'netbox_rpki.view_irrchangeplan',
@@ -2548,6 +2616,100 @@ class ReconciliationDetailViewTestCase(PluginViewTestCase):
             roa=cls.roa,
             details_json={'status': 'extra breadth'},
         )
+        cls.validator = create_test_validator_instance(
+            name='Reconciliation View Validator',
+            organization=cls.organization,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        cls.validation_run = create_test_validation_run(
+            name='Reconciliation View Validation Run',
+            validator=cls.validator,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        cls.roa_validation_result = create_test_object_validation_result(
+            name='Reconciliation View ROA Validation Result',
+            validation_run=cls.validation_run,
+            signed_object=cls.roa.signed_object,
+            validation_state=rpki_models.ValidationState.INVALID,
+            disposition=rpki_models.ValidationDisposition.REJECTED,
+        )
+        create_test_validated_roa_payload(
+            name='Reconciliation View ROA Payload',
+            validation_run=cls.validation_run,
+            roa=cls.roa,
+            object_validation_result=cls.roa_validation_result,
+            prefix=cls.prefix,
+            observed_prefix=str(cls.prefix.prefix),
+            origin_as=cls.origin_asn,
+            max_length=25,
+        )
+        cls.telemetry_source = create_test_telemetry_source(
+            name='Reconciliation View Telemetry Source',
+            organization=cls.organization,
+            slug='reconciliation-view-telemetry',
+        )
+        cls.telemetry_run = create_test_telemetry_run(
+            name='Reconciliation View Telemetry Run',
+            source=cls.telemetry_source,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        create_test_bgp_path_observation(
+            name='Reconciliation View ROA Observation',
+            telemetry_run=cls.telemetry_run,
+            source=cls.telemetry_source,
+            prefix=cls.prefix,
+            observed_prefix=str(cls.prefix.prefix),
+            origin_as=cls.origin_asn,
+            observed_origin_asn=cls.origin_asn.asn,
+            raw_as_path=f'64496 {cls.origin_asn.asn}',
+            path_asns_json=[64496, cls.origin_asn.asn],
+        )
+        cls.aspa = create_test_aspa(
+            name='Reconciliation View ASPA',
+            organization=cls.organization,
+            customer_as=cls.origin_asn,
+        )
+        cls.aspa_provider = create_test_aspa_provider(aspa=cls.aspa, provider_as=create_test_asn(64520))
+        create_test_validated_aspa_payload(
+            name='Reconciliation View ASPA Payload',
+            validation_run=cls.validation_run,
+            aspa=cls.aspa,
+            customer_as=cls.origin_asn,
+            provider_as=cls.aspa_provider.provider_as,
+        )
+        create_test_bgp_path_observation(
+            name='Reconciliation View ASPA Observation',
+            telemetry_run=cls.telemetry_run,
+            source=cls.telemetry_source,
+            prefix=cls.prefix,
+            observed_prefix=str(cls.prefix.prefix),
+            origin_as=cls.origin_asn,
+            observed_origin_asn=cls.origin_asn.asn,
+            raw_as_path=f'64496 {cls.aspa_provider.provider_as.asn} {cls.origin_asn.asn}',
+            path_asns_json=[64496, cls.aspa_provider.provider_as.asn, cls.origin_asn.asn],
+        )
+        cls.aspa_reconciliation_run = create_test_aspa_reconciliation_run(
+            name='Dashboard ASPA Reconciliation Run',
+            organization=cls.organization,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+            result_summary_json={'intent_result_types': {'match': 1}},
+        )
+        create_test_aspa_intent(
+            name='Dashboard ASPA Intent',
+            organization=cls.organization,
+            customer_as=cls.origin_asn,
+            provider_as=cls.aspa_provider.provider_as,
+        )
+        cls.aspa_plan = create_test_aspa_change_plan(
+            name='Dashboard ASPA Change Plan',
+            organization=cls.organization,
+            source_reconciliation_run=cls.aspa_reconciliation_run,
+        )
+        create_test_aspa_change_plan_item(
+            name='Dashboard ASPA Change Plan Item',
+            change_plan=cls.aspa_plan,
+            aspa=cls.aspa,
+        )
 
     def test_routing_intent_profile_detail_renders_dashboard_sections(self):
         self.add_permissions('netbox_rpki.view_routingintentprofile')
@@ -2603,10 +2765,49 @@ class ReconciliationDetailViewTestCase(PluginViewTestCase):
         self.assertContains(response, 'ROA Reconciliation Run')
         self.assertContains(response, 'Result Summary')
         self.assertContains(response, '&quot;overbroad&quot;: 1')
+        self.assertContains(response, 'External Overlay Summary')
+        self.assertContains(response, 'validator_invalid')
         self.assertContains(response, 'ROA Intent Results')
         self.assertContains(response, 'Published ROA Results')
         self.assertContains(response, 'Dashboard Intent Result')
         self.assertContains(response, 'Dashboard Published Result')
+
+    def test_change_plan_detail_renders_external_overlay_summary(self):
+        plan = create_test_roa_change_plan(
+            name='Reconciliation View Plan',
+            organization=self.organization,
+            source_reconciliation_run=self.reconciliation_run,
+        )
+        create_test_roa_change_plan_item(
+            name='Reconciliation View Plan Item',
+            change_plan=plan,
+            roa=self.roa,
+        )
+        self.add_permissions(
+            'netbox_rpki.view_roachangeplan',
+            'netbox_rpki.view_roalintrun',
+            'netbox_rpki.view_roavalidationsimulationrun',
+        )
+
+        response = self.client.get(plan.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'External Overlay Summary')
+        self.assertContains(response, 'validator_state_counts')
+
+    def test_aspa_reconciliation_and_plan_detail_render_external_overlay_summary(self):
+        self.add_permissions('netbox_rpki.view_aspareconciliationrun', 'netbox_rpki.view_aspachangeplan')
+
+        run_response = self.client.get(self.aspa_reconciliation_run.get_absolute_url())
+        plan_response = self.client.get(self.aspa_plan.get_absolute_url())
+
+        self.assertHttpStatus(run_response, 200)
+        self.assertContains(run_response, 'External Overlay Summary')
+        self.assertContains(run_response, 'telemetry_status_counts')
+
+        self.assertHttpStatus(plan_response, 200)
+        self.assertContains(plan_response, 'External Overlay Summary')
+        self.assertContains(plan_response, 'source_reconciliation_run_id')
 
     def test_reconciliation_run_detail_shows_create_plan_button(self):
         self.add_permissions('netbox_rpki.view_roareconciliationrun', 'netbox_rpki.change_routingintentprofile')

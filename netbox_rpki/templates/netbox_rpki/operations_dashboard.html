@@ -75,6 +75,34 @@
             </div>
             <div class="col col-md-3">
               <div class="border rounded p-3 h-100">
+                <div class="text-muted small text-uppercase">Validator Instances Requiring Attention</div>
+                <div class="fs-2 fw-semibold">{{ validator_instances_requiring_attention|length }}</div>
+                <div class="text-muted">Failed, missing, or stale external validation coverage</div>
+              </div>
+            </div>
+            <div class="col col-md-3">
+              <div class="border rounded p-3 h-100">
+                <div class="text-muted small text-uppercase">Validation Runs Requiring Attention</div>
+                <div class="fs-2 fw-semibold">{{ validation_runs_requiring_attention|length }}</div>
+                <div class="text-muted">Failed runs or stale validator evidence</div>
+              </div>
+            </div>
+            <div class="col col-md-3">
+              <div class="border rounded p-3 h-100">
+                <div class="text-muted small text-uppercase">Telemetry Sources Requiring Attention</div>
+                <div class="fs-2 fw-semibold">{{ telemetry_sources_requiring_attention|length }}</div>
+                <div class="text-muted">Failed, stale, or never-synced route telemetry sources</div>
+              </div>
+            </div>
+            <div class="col col-md-3">
+              <div class="border rounded p-3 h-100">
+                <div class="text-muted small text-uppercase">External Evidence Mismatches</div>
+                <div class="fs-2 fw-semibold">{{ external_mismatch_items|length }}</div>
+                <div class="text-muted">Authored ROA or ASPA objects with invalid or conflicting external posture</div>
+              </div>
+            </div>
+            <div class="col col-md-3">
+              <div class="border rounded p-3 h-100">
                 <div class="text-muted small text-uppercase">IRR Sources Requiring Attention</div>
                 <div class="fs-2 fw-semibold">{{ irr_sources_requiring_attention|length }}</div>
                 <div class="text-muted">Failed, stale, or never-synced IRR sources</div>
@@ -117,6 +145,170 @@
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row mb-4">
+    <div class="col col-md-12">
+      <div class="card">
+        <h5 class="card-header">External Evidence Overview</h5>
+        <div class="card-body">
+          <p class="mb-0 text-muted">
+            Validator and telemetry freshness are shown separately from provider sync health so operators can tell
+            whether publication drift or outside observation lag is driving the attention state.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row mb-4">
+    <div class="col col-md-6">
+      <div class="card h-100">
+        <h5 class="card-header">Validator Instances Requiring Attention</h5>
+        {% if validator_instances_requiring_attention %}
+          <div class="card-body table-responsive">
+            <table class="table table-hover align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Status</th>
+                  <th>Freshness</th>
+                  <th>Latest Run</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in validator_instances_requiring_attention %}
+                  <tr>
+                    <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
+                    <td>{{ item.status }}</td>
+                    <td>{{ item.freshness_status }}</td>
+                    <td>
+                      {% if item.latest_run %}
+                        <a href="{{ item.latest_run.get_absolute_url }}">{{ item.latest_run.name }}</a>
+                      {% else %}
+                        <span class="text-muted">None</span>
+                      {% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="card-body text-muted">No validator instances currently require attention.</div>
+        {% endif %}
+      </div>
+    </div>
+    <div class="col col-md-6">
+      <div class="card h-100">
+        <h5 class="card-header">Validation Runs Requiring Attention</h5>
+        {% if validation_runs_requiring_attention %}
+          <div class="card-body table-responsive">
+            <table class="table table-hover align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Validator</th>
+                  <th>Status</th>
+                  <th>Freshness</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in validation_runs_requiring_attention %}
+                  <tr>
+                    <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
+                    <td><a href="{{ item.validator.get_absolute_url }}">{{ item.validator.name }}</a></td>
+                    <td>{{ item.status }}</td>
+                    <td>{{ item.freshness_status }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="card-body text-muted">No validation runs currently require attention.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="row mb-4">
+    <div class="col col-md-6">
+      <div class="card h-100">
+        <h5 class="card-header">Telemetry Sources Requiring Attention</h5>
+        {% if telemetry_sources_requiring_attention %}
+          <div class="card-body table-responsive">
+            <table class="table table-hover align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Organization</th>
+                  <th>Sync Health</th>
+                  <th>Latest Run</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in telemetry_sources_requiring_attention %}
+                  <tr>
+                    <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
+                    <td><a href="{{ item.object.organization.get_absolute_url }}">{{ item.object.organization }}</a></td>
+                    <td>{{ item.sync_health_display }}</td>
+                    <td>
+                      {% if item.latest_run %}
+                        <a href="{{ item.latest_run.get_absolute_url }}">{{ item.latest_run.name }}</a>
+                      {% else %}
+                        <span class="text-muted">None</span>
+                      {% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="card-body text-muted">No telemetry sources currently require attention.</div>
+        {% endif %}
+      </div>
+    </div>
+    <div class="col col-md-6">
+      <div class="card h-100">
+        <h5 class="card-header">Authored Objects With External Evidence Mismatches</h5>
+        {% if external_mismatch_items %}
+          <div class="card-body table-responsive">
+            <table class="table table-hover align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Family</th>
+                  <th>Validator State</th>
+                  <th>Evidence Freshness</th>
+                  <th>Mismatches</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in external_mismatch_items %}
+                  <tr>
+                    <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
+                    <td>{{ item.object_family }}</td>
+                    <td>{{ item.validator_state|default:"unknown" }}</td>
+                    <td>{{ item.evidence_freshness }}</td>
+                    <td>
+                      {% if item.mismatch_categories %}
+                        {{ item.mismatch_categories|join:', ' }}
+                      {% else %}
+                        <span class="text-muted">Validator-only concern</span>
+                      {% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="card-body text-muted">No authored objects currently show conflicting external evidence.</div>
+        {% endif %}
       </div>
     </div>
   </div>
