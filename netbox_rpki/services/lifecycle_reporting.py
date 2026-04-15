@@ -2,11 +2,15 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Mapping
+import hashlib
+import hmac
+import json
 from datetime import date, datetime, time, timedelta
 from django.utils.text import slugify
 
 from django.db.models import Count, Q
 from django.utils import timezone
+from urllib.request import Request, urlopen
 
 from netbox_rpki import models as rpki_models
 from netbox_rpki.services.provider_sync_evidence import (
@@ -25,6 +29,7 @@ PUBLICATION_DIFF_TIMELINE_SCHEMA_VERSION = 1
 LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_LIFECYCLE_SUMMARY = 'provider_account_lifecycle_summary'
 LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_TIMELINE = 'provider_account_timeline'
 LIFECYCLE_EXPORT_KIND_PROVIDER_PUBLICATION_DIFF_TIMELINE = 'provider_publication_diff_timeline'
+LIFECYCLE_HOOK_PAYLOAD_SCHEMA_VERSION = 1
 
 LIFECYCLE_HEALTH_DEFAULTS = {
     'sync_stale_after_minutes': 120,
@@ -1229,7 +1234,8 @@ def evaluate_lifecycle_health_events(
                             'delivery_error',
                             'last_updated',
                         )
-                )
+                    )
+                deliver_lifecycle_health_event(event)
                 events.append(event)
                 continue
 
@@ -1249,6 +1255,7 @@ def evaluate_lifecycle_health_events(
                     'last_updated',
                 )
             )
+            deliver_lifecycle_health_event(active_event)
             resolved += 1
             events.append(active_event)
 
@@ -1260,6 +1267,80 @@ def evaluate_lifecycle_health_events(
         'resolved_count': resolved,
         'events': events,
     }
+
+
+def build_lifecycle_health_hook_payload(event: rpki_models.LifecycleHealthEvent) -> dict[str, object]:
+    payload_json = dict(event.payload_json or {})
+    summary = dict(payload_json.get('summary') or {})
+    provider_account = event.provider_account
+    policy = dict(summary.get('policy') or {})
+    links = dict(payload_json.get('links') or {})
+    if provider_account is not None:
+        links.setdefault('provider_account_url', provider_account.get_absolute_url())
+    if event.related_snapshot is not None:
+        links.setdefault('snapshot_url', event.related_snapshot.get_absolute_url())
+    if event.related_snapshot_diff is not None:
+        links.setdefault('snapshot_diff_url', event.related_snapshot_diff.get_absolute_url())
+
+    return {
+        'schema_version': LIFECYCLE_HOOK_PAYLOAD_SCHEMA_VERSION,
+        'event': {
+            'event_id': event.pk,
+            'name': event.name,
+            'event_kind': event.event_kind,
+            'severity': event.severity,
+            'status': event.status,
+            'dedupe_key': event.dedupe_key,
+            'first_seen_at': _datetime_text(event.first_seen_at),
+            'last_seen_at': _datetime_text(event.last_seen_at),
+            'last_emitted_at': _datetime_text(event.last_emitted_at),
+            'resolved_at': _datetime_text(event.resolved_at),
+        },
+        'organization': {
+            'organization_id': event.organization_id,
+            'name': event.organization.name,
+        },
+        'provider_account': {
+            'provider_account_id': provider_account.pk if provider_account is not None else None,
+            'name': provider_account.name if provider_account is not None else '',
+            'url': provider_account.get_absolute_url() if provider_account is not None else '',
+        },
+        'policy': policy,
+        'summary': summary,
+        'links': links,
+    }
+
+
+def deliver_lifecycle_health_event(event: rpki_models.LifecycleHealthEvent) -> dict[str, object]:
+    hook = event.hook
+    payload = build_lifecycle_health_hook_payload(event)
+    body = json.dumps(payload, sort_keys=True, default=str).encode('utf-8')
+    headers = {
+        'Content-Type': 'application/json',
+        'X-NetBox-RPKI-Event': event.event_kind,
+        'X-NetBox-RPKI-Signature': hmac.new(
+            (hook.secret or '').encode('utf-8'),
+            body,
+            hashlib.sha256,
+        ).hexdigest(),
+    }
+    request = Request(hook.target_url, data=body, headers=headers, method='POST')
+
+    if event.status == rpki_models.LifecycleHealthEventStatus.RESOLVED and not hook.send_resolved:
+        return {'delivered': False, 'skipped': True, 'error': ''}
+
+    try:
+        with urlopen(request, timeout=30):
+            pass
+    except Exception as exc:  # pragma: no cover - exercised via focused tests
+        event.delivery_error = str(exc)
+        event.save(update_fields=('delivery_error', 'last_updated'))
+        return {'delivered': False, 'skipped': False, 'error': event.delivery_error}
+
+    if event.delivery_error:
+        event.delivery_error = ''
+        event.save(update_fields=('delivery_error', 'last_updated'))
+    return {'delivered': True, 'skipped': False, 'error': ''}
 
 
 def _normalize_date_or_datetime(value: date | datetime | None) -> datetime | None:

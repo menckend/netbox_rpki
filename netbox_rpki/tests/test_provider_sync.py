@@ -1,5 +1,9 @@
 from datetime import timedelta
 from unittest.mock import call, patch
+from unittest.mock import MagicMock
+import hashlib
+import hmac
+import json
 
 from django.db import IntegrityError
 from django.core.management import call_command
@@ -14,10 +18,13 @@ from netbox_rpki.services.lifecycle_reporting import (
     LIFECYCLE_HEALTH_SUMMARY_SCHEMA_VERSION,
     LIFECYCLE_TIMELINE_SCHEMA_VERSION,
     PUBLICATION_DIFF_TIMELINE_SCHEMA_VERSION,
+    LIFECYCLE_HOOK_PAYLOAD_SCHEMA_VERSION,
     build_lifecycle_event_candidates,
+    build_lifecycle_health_hook_payload,
     build_provider_lifecycle_health_summary,
     build_provider_lifecycle_timeline,
     build_provider_publication_diff_timeline,
+    deliver_lifecycle_health_event,
     evaluate_lifecycle_health_events,
     resolve_lifecycle_health_policy,
     build_snapshot_publication_health_rollup,
@@ -63,6 +70,7 @@ from netbox_rpki.tests.utils import (
     create_test_imported_certificate_observation,
     create_test_imported_publication_point,
     create_test_imported_signed_object,
+    create_test_lifecycle_health_event,
     create_test_lifecycle_health_policy,
     create_test_lifecycle_health_hook,
     create_test_organization,
@@ -1029,6 +1037,12 @@ class LifecycleHealthEventEvaluationTestCase(TestCase):
         summary['attention_summary']['total_attention_count'] = 1
         return summary
 
+    def _mock_delivery_response(self):
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.__exit__.return_value = False
+        return response
+
     def test_build_lifecycle_event_candidates_derives_expected_kinds_and_dedupe_keys(self):
         summary = self._sync_stale_summary(self.provider_account)
         summary['expiry']['roas']['count'] = 2
@@ -1070,7 +1084,10 @@ class LifecycleHealthEventEvaluationTestCase(TestCase):
         self.org_hook.event_kinds_json = [rpki_models.LifecycleHealthEventKind.CERTIFICATE_EXPIRING]
         self.org_hook.save(update_fields=('event_kinds_json',))
 
-        with patch('netbox_rpki.services.lifecycle_reporting.timezone.now', return_value=timezone.now()):
+        with patch('netbox_rpki.services.lifecycle_reporting.timezone.now', return_value=timezone.now()), patch(
+            'netbox_rpki.services.lifecycle_reporting.urlopen',
+            return_value=self._mock_delivery_response(),
+        ):
             first_result = evaluate_lifecycle_health_events(
                 self.provider_account,
                 summary=summary,
@@ -1086,7 +1103,10 @@ class LifecycleHealthEventEvaluationTestCase(TestCase):
         self.assertIsNotNone(event.last_emitted_at)
         first_seen_at = event.first_seen_at
 
-        with patch('netbox_rpki.services.lifecycle_reporting.timezone.now', return_value=timezone.now() + timedelta(minutes=6)):
+        with patch('netbox_rpki.services.lifecycle_reporting.timezone.now', return_value=timezone.now() + timedelta(minutes=6)), patch(
+            'netbox_rpki.services.lifecycle_reporting.urlopen',
+            return_value=self._mock_delivery_response(),
+        ):
             second_result = evaluate_lifecycle_health_events(
                 self.provider_account,
                 summary=summary,
@@ -1106,7 +1126,10 @@ class LifecycleHealthEventEvaluationTestCase(TestCase):
         resolved_summary['sync']['is_attention'] = False
         resolved_summary['attention_summary']['total_attention_count'] = 0
 
-        with patch('netbox_rpki.services.lifecycle_reporting.timezone.now', return_value=timezone.now() + timedelta(minutes=12)):
+        with patch('netbox_rpki.services.lifecycle_reporting.timezone.now', return_value=timezone.now() + timedelta(minutes=12)), patch(
+            'netbox_rpki.services.lifecycle_reporting.urlopen',
+            return_value=self._mock_delivery_response(),
+        ):
             third_result = evaluate_lifecycle_health_events(
                 self.provider_account,
                 summary=resolved_summary,
@@ -1119,7 +1142,10 @@ class LifecycleHealthEventEvaluationTestCase(TestCase):
         self.assertEqual(event.status, rpki_models.LifecycleHealthEventStatus.RESOLVED)
         self.assertIsNotNone(event.resolved_at)
 
-        with patch('netbox_rpki.services.lifecycle_reporting.timezone.now', return_value=timezone.now() + timedelta(minutes=18)):
+        with patch('netbox_rpki.services.lifecycle_reporting.timezone.now', return_value=timezone.now() + timedelta(minutes=18)), patch(
+            'netbox_rpki.services.lifecycle_reporting.urlopen',
+            return_value=self._mock_delivery_response(),
+        ):
             fourth_result = evaluate_lifecycle_health_events(
                 self.provider_account,
                 summary=summary,
@@ -1139,10 +1165,14 @@ class LifecycleHealthEventEvaluationTestCase(TestCase):
     def test_evaluate_lifecycle_health_events_scopes_hooks_and_supports_expiry_only_evaluation(self):
         summary = self._sync_stale_summary(self.other_provider_account)
 
-        evaluate_lifecycle_health_events(
-            self.other_provider_account,
-            summary=summary,
-        )
+        with patch(
+            'netbox_rpki.services.lifecycle_reporting.urlopen',
+            return_value=self._mock_delivery_response(),
+        ):
+            evaluate_lifecycle_health_events(
+                self.other_provider_account,
+                summary=summary,
+            )
 
         self.assertEqual(
             rpki_models.LifecycleHealthEvent.objects.filter(
@@ -1163,10 +1193,14 @@ class LifecycleHealthEventEvaluationTestCase(TestCase):
         expiry_summary = self._certificate_expiry_summary()
         expiry_summary['publication']['snapshot_id'] = None
         expiry_summary['diff']['latest_diff_id'] = None
-        evaluate_lifecycle_health_events(
-            self.provider_account,
-            summary=expiry_summary,
-        )
+        with patch(
+            'netbox_rpki.services.lifecycle_reporting.urlopen',
+            return_value=self._mock_delivery_response(),
+        ):
+            evaluate_lifecycle_health_events(
+                self.provider_account,
+                summary=expiry_summary,
+            )
 
         self.assertEqual(
             rpki_models.LifecycleHealthEvent.objects.filter(
@@ -1176,6 +1210,86 @@ class LifecycleHealthEventEvaluationTestCase(TestCase):
             ).count(),
             1,
         )
+
+    def test_build_lifecycle_health_hook_payload_includes_identity_and_links(self):
+        event = create_test_lifecycle_health_event(
+            name='Lifecycle Payload Event',
+            organization=self.organization,
+            provider_account=self.provider_account,
+            policy=self.policy,
+            hook=self.provider_hook,
+            related_snapshot=self.comparison_snapshot,
+            related_snapshot_diff=self.snapshot_diff,
+            event_kind=rpki_models.LifecycleHealthEventKind.SYNC_STALE,
+            severity=rpki_models.LifecycleHealthEventSeverity.WARNING,
+            status=rpki_models.LifecycleHealthEventStatus.OPEN,
+            payload_json={'summary': self._sync_stale_summary(self.provider_account)},
+        )
+
+        payload = build_lifecycle_health_hook_payload(event)
+
+        self.assertEqual(payload['schema_version'], LIFECYCLE_HOOK_PAYLOAD_SCHEMA_VERSION)
+        self.assertEqual(payload['event']['event_kind'], rpki_models.LifecycleHealthEventKind.SYNC_STALE)
+        self.assertEqual(payload['organization']['organization_id'], self.organization.pk)
+        self.assertEqual(payload['provider_account']['provider_account_id'], self.provider_account.pk)
+        self.assertEqual(payload['policy']['policy_id'], self.policy.pk)
+        self.assertEqual(payload['links']['provider_account_url'], self.provider_account.get_absolute_url())
+        self.assertEqual(payload['links']['snapshot_url'], self.comparison_snapshot.get_absolute_url())
+        self.assertEqual(payload['links']['snapshot_diff_url'], self.snapshot_diff.get_absolute_url())
+
+    def test_deliver_lifecycle_health_event_records_failures_and_signs_requests(self):
+        event = create_test_lifecycle_health_event(
+            name='Lifecycle Delivery Event',
+            organization=self.organization,
+            provider_account=self.provider_account,
+            policy=self.policy,
+            hook=self.provider_hook,
+            event_kind=rpki_models.LifecycleHealthEventKind.SYNC_STALE,
+            severity=rpki_models.LifecycleHealthEventSeverity.WARNING,
+            status=rpki_models.LifecycleHealthEventStatus.OPEN,
+            payload_json={'summary': self._sync_stale_summary(self.provider_account)},
+        )
+
+        captured = {}
+
+        def _capture_request(request, timeout=30):
+            captured['request'] = request
+            return self._mock_delivery_response()
+
+        with patch('netbox_rpki.services.lifecycle_reporting.urlopen', side_effect=_capture_request):
+            result = deliver_lifecycle_health_event(event)
+
+        request = captured['request']
+        self.assertTrue(result['delivered'])
+        self.assertEqual(request.get_header('X-netbox-rpki-event'), event.event_kind)
+        self.assertEqual(
+            request.get_header('X-netbox-rpki-signature'),
+            hmac.new(
+                event.hook.secret.encode('utf-8'),
+                request.data,
+                hashlib.sha256,
+            ).hexdigest(),
+        )
+        self.assertEqual(json.loads(request.data.decode('utf-8')), build_lifecycle_health_hook_payload(event))
+
+        failure_event = create_test_lifecycle_health_event(
+            name='Lifecycle Delivery Failure Event',
+            organization=self.organization,
+            provider_account=self.provider_account,
+            policy=self.policy,
+            hook=self.provider_hook,
+            event_kind=rpki_models.LifecycleHealthEventKind.SYNC_STALE,
+            severity=rpki_models.LifecycleHealthEventSeverity.WARNING,
+            status=rpki_models.LifecycleHealthEventStatus.OPEN,
+            payload_json={'summary': self._sync_stale_summary(self.provider_account)},
+        )
+
+        with patch('netbox_rpki.services.lifecycle_reporting.urlopen', side_effect=RuntimeError('delivery boom')):
+            failure_result = deliver_lifecycle_health_event(failure_event)
+
+        failure_event.refresh_from_db()
+        self.assertFalse(failure_result['delivered'])
+        self.assertIn('delivery boom', failure_event.delivery_error)
 
     def test_build_provider_snapshot_diff_preserves_certificate_observation_linkage_state(self):
         provider_account = create_test_provider_account(
