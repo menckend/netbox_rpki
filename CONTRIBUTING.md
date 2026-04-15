@@ -62,6 +62,25 @@ If you are proposing a feature:
 
 For local development setup instructions, see [LOCAL_DEV_SETUP.md](LOCAL_DEV_SETUP.md).
 
+### Generating Migrations Locally
+
+In the standard local workspace layout from [LOCAL_DEV_SETUP.md](LOCAL_DEV_SETUP.md), NetBox's management entry point lives at:
+
+```bash
+~/src/netbox-v4.5.7/netbox/manage.py
+```
+
+Use the pinned NetBox virtualenv and the plugin's test settings when generating plugin migrations:
+
+```bash
+~/.virtualenvs/netbox-4.5.7/bin/python \
+    ~/src/netbox-v4.5.7/netbox/manage.py \
+    makemigrations netbox_rpki \
+    --settings=netbox_rpki.tests.netbox_configuration
+```
+
+If your local checkout or virtualenv uses a different pinned NetBox version, adjust the `netbox-v4.5.7` and `netbox-4.5.7` path segments accordingly.
+
 ## Pull Request Guidelines
 
 Before you submit a pull request, check that it meets these guidelines:
