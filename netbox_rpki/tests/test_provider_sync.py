@@ -14,9 +14,11 @@ from netbox_rpki.services.lifecycle_reporting import (
     LIFECYCLE_HEALTH_SUMMARY_SCHEMA_VERSION,
     LIFECYCLE_TIMELINE_SCHEMA_VERSION,
     PUBLICATION_DIFF_TIMELINE_SCHEMA_VERSION,
+    build_lifecycle_event_candidates,
     build_provider_lifecycle_health_summary,
     build_provider_lifecycle_timeline,
     build_provider_publication_diff_timeline,
+    evaluate_lifecycle_health_events,
     resolve_lifecycle_health_policy,
     build_snapshot_publication_health_rollup,
     build_diff_publication_health_rollup,
@@ -62,6 +64,7 @@ from netbox_rpki.tests.utils import (
     create_test_imported_publication_point,
     create_test_imported_signed_object,
     create_test_lifecycle_health_policy,
+    create_test_lifecycle_health_hook,
     create_test_organization,
     create_test_prefix,
     create_test_publication_point,
@@ -900,6 +903,279 @@ class ProviderSyncServiceTestCase(TestCase):
         self.assertEqual(summary['diff']['records_added'], 4)
         self.assertEqual(summary['diff']['records_removed'], 2)
         self.assertEqual(summary['diff']['records_changed'], 1)
+
+
+class LifecycleHealthEventEvaluationTestCase(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='lifecycle-event-org', name='Lifecycle Event Org')
+        cls.provider_account = create_test_provider_account(
+            name='Lifecycle Event Provider',
+            organization=cls.organization,
+            provider_type=rpki_models.ProviderType.ARIN,
+            sync_enabled=True,
+            last_successful_sync=timezone.now() - timedelta(hours=3),
+            last_sync_status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        cls.other_provider_account = create_test_provider_account(
+            name='Lifecycle Event Other Provider',
+            organization=cls.organization,
+            provider_type=rpki_models.ProviderType.ARIN,
+            org_handle='ORG-LIFECYCLE-EVENT-OTHER',
+            sync_enabled=True,
+            last_successful_sync=timezone.now() - timedelta(minutes=5),
+            last_sync_status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        cls.policy = create_test_lifecycle_health_policy(
+            name='Lifecycle Event Policy',
+            organization=cls.organization,
+            alert_repeat_after_minutes=5,
+            sync_stale_after_minutes=120,
+            certificate_expiry_warning_days=30,
+        )
+        cls.base_snapshot = create_test_provider_snapshot(
+            name='Lifecycle Event Base Snapshot',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+            fetched_at=timezone.now() - timedelta(days=2),
+            completed_at=timezone.now() - timedelta(days=2),
+        )
+        cls.comparison_snapshot = create_test_provider_snapshot(
+            name='Lifecycle Event Comparison Snapshot',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+            fetched_at=timezone.now() - timedelta(days=1),
+            completed_at=timezone.now() - timedelta(days=1),
+        )
+        cls.snapshot_diff = create_test_provider_snapshot_diff(
+            name='Lifecycle Event Diff',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+            base_snapshot=cls.base_snapshot,
+            comparison_snapshot=cls.comparison_snapshot,
+            summary_json={
+                'status': rpki_models.ValidationRunStatus.COMPLETED,
+                'totals': {
+                    'records_added': 0,
+                    'records_removed': 0,
+                    'records_changed': 1,
+                    'records_stale': 1,
+                },
+            },
+        )
+        create_test_provider_snapshot_diff_item(
+            snapshot_diff=cls.snapshot_diff,
+            object_family=rpki_models.ProviderSyncFamily.PUBLICATION_POINTS,
+            change_type=rpki_models.ProviderSnapshotDiffChangeType.CHANGED,
+            is_stale=True,
+        )
+        cls.expiring_certificate = create_test_certificate(
+            name='Lifecycle Event Expiring Certificate',
+            rpki_org=cls.organization,
+            valid_to=(timezone.now() + timedelta(days=1)).date(),
+        )
+        cls.org_hook = create_test_lifecycle_health_hook(
+            name='Lifecycle Event Org Hook',
+            organization=cls.organization,
+            event_kinds_json=[rpki_models.LifecycleHealthEventKind.SYNC_STALE],
+            target_url='https://hooks.example.invalid/org',
+        )
+        cls.provider_hook = create_test_lifecycle_health_hook(
+            name='Lifecycle Event Provider Hook',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+            event_kinds_json=[rpki_models.LifecycleHealthEventKind.SYNC_STALE],
+            target_url='https://hooks.example.invalid/provider',
+        )
+        cls.expiry_hook = create_test_lifecycle_health_hook(
+            name='Lifecycle Event Expiry Hook',
+            organization=cls.organization,
+            event_kinds_json=[rpki_models.LifecycleHealthEventKind.CERTIFICATE_EXPIRING],
+            target_url='https://hooks.example.invalid/expiry',
+        )
+
+    def _sync_stale_summary(self, provider_account):
+        summary = build_provider_lifecycle_health_summary(provider_account)
+        summary['policy']['thresholds']['alert_repeat_after_minutes'] = 5
+        summary['sync']['status'] = rpki_models.ProviderSyncHealth.STALE
+        summary['sync']['status_display'] = rpki_models.ProviderSyncHealth.STALE.label
+        summary['sync']['is_attention'] = True
+        summary['expiry']['roas']['count'] = 0
+        summary['expiry']['certificates']['count'] = 0
+        summary['expiry']['exceptions']['count'] = 0
+        summary['publication']['attention_count'] = 0
+        summary['diff']['records_added'] = 0
+        summary['diff']['records_removed'] = 0
+        summary['diff']['records_changed'] = 0
+        summary['attention_summary']['diff_attention_count'] = 0
+        summary['attention_summary']['publication_attention_count'] = 0
+        summary['attention_summary']['total_attention_count'] = 1
+        return summary
+
+    def _certificate_expiry_summary(self):
+        summary = build_provider_lifecycle_health_summary(self.provider_account)
+        summary['policy']['thresholds']['alert_repeat_after_minutes'] = 5
+        summary['sync']['status'] = rpki_models.ProviderSyncHealth.HEALTHY
+        summary['sync']['is_attention'] = False
+        summary['expiry']['certificates']['count'] = 1
+        summary['expiry']['roas']['count'] = 0
+        summary['expiry']['exceptions']['count'] = 0
+        summary['publication']['attention_count'] = 0
+        summary['diff']['records_added'] = 0
+        summary['diff']['records_removed'] = 0
+        summary['diff']['records_changed'] = 0
+        summary['attention_summary']['diff_attention_count'] = 0
+        summary['attention_summary']['publication_attention_count'] = 0
+        summary['attention_summary']['total_attention_count'] = 1
+        return summary
+
+    def test_build_lifecycle_event_candidates_derives_expected_kinds_and_dedupe_keys(self):
+        summary = self._sync_stale_summary(self.provider_account)
+        summary['expiry']['roas']['count'] = 2
+        summary['expiry']['certificates']['count'] = 3
+        summary['publication']['attention_count'] = 4
+        summary['publication']['snapshot_id'] = self.comparison_snapshot.pk
+        summary['diff']['latest_diff_id'] = self.snapshot_diff.pk
+        summary['diff']['records_changed'] = 1
+        summary['attention_summary']['diff_attention_count'] = 1
+        summary['attention_summary']['publication_attention_count'] = 4
+        summary['attention_summary']['total_attention_count'] = 5
+
+        candidates = build_lifecycle_event_candidates(
+            self.provider_account,
+            summary=summary,
+            snapshot=self.comparison_snapshot,
+            snapshot_diff=self.snapshot_diff,
+        )
+
+        self.assertEqual(
+            [candidate['event_kind'] for candidate in candidates],
+            [
+                rpki_models.LifecycleHealthEventKind.SYNC_STALE,
+                rpki_models.LifecycleHealthEventKind.ROA_EXPIRING,
+                rpki_models.LifecycleHealthEventKind.CERTIFICATE_EXPIRING,
+                rpki_models.LifecycleHealthEventKind.PUBLICATION_ATTENTION,
+                rpki_models.LifecycleHealthEventKind.PUBLICATION_DIFF,
+            ],
+        )
+        self.assertEqual(
+            candidates[0]['dedupe_key'],
+            f'provider-account:{self.provider_account.pk}:sync:stale',
+        )
+        self.assertEqual(candidates[2]['related_snapshot_id'], self.comparison_snapshot.pk)
+        self.assertEqual(candidates[4]['related_snapshot_diff_id'], self.snapshot_diff.pk)
+
+    def test_evaluate_lifecycle_health_events_opens_repeats_resolves_and_reopens(self):
+        summary = self._sync_stale_summary(self.provider_account)
+        self.org_hook.event_kinds_json = [rpki_models.LifecycleHealthEventKind.CERTIFICATE_EXPIRING]
+        self.org_hook.save(update_fields=('event_kinds_json',))
+
+        with patch('netbox_rpki.services.lifecycle_reporting.timezone.now', return_value=timezone.now()):
+            first_result = evaluate_lifecycle_health_events(
+                self.provider_account,
+                summary=summary,
+                snapshot=self.comparison_snapshot,
+                snapshot_diff=self.snapshot_diff,
+            )
+
+        self.assertEqual(first_result['opened_count'], 1)
+        self.assertEqual(first_result['repeated_count'], 0)
+        self.assertEqual(first_result['resolved_count'], 0)
+        event = rpki_models.LifecycleHealthEvent.objects.get(hook=self.provider_hook, dedupe_key=f'provider-account:{self.provider_account.pk}:sync:stale')
+        self.assertEqual(event.status, rpki_models.LifecycleHealthEventStatus.OPEN)
+        self.assertIsNotNone(event.last_emitted_at)
+        first_seen_at = event.first_seen_at
+
+        with patch('netbox_rpki.services.lifecycle_reporting.timezone.now', return_value=timezone.now() + timedelta(minutes=6)):
+            second_result = evaluate_lifecycle_health_events(
+                self.provider_account,
+                summary=summary,
+                snapshot=self.comparison_snapshot,
+                snapshot_diff=self.snapshot_diff,
+            )
+
+        event.refresh_from_db()
+        self.assertEqual(second_result['opened_count'], 0)
+        self.assertEqual(second_result['repeated_count'], 1)
+        self.assertEqual(event.status, rpki_models.LifecycleHealthEventStatus.REPEATED)
+        self.assertEqual(event.first_seen_at, first_seen_at)
+
+        resolved_summary = self._sync_stale_summary(self.provider_account)
+        resolved_summary['sync']['status'] = rpki_models.ProviderSyncHealth.HEALTHY
+        resolved_summary['sync']['status_display'] = rpki_models.ProviderSyncHealth.HEALTHY.label
+        resolved_summary['sync']['is_attention'] = False
+        resolved_summary['attention_summary']['total_attention_count'] = 0
+
+        with patch('netbox_rpki.services.lifecycle_reporting.timezone.now', return_value=timezone.now() + timedelta(minutes=12)):
+            third_result = evaluate_lifecycle_health_events(
+                self.provider_account,
+                summary=resolved_summary,
+                snapshot=self.comparison_snapshot,
+                snapshot_diff=self.snapshot_diff,
+            )
+
+        event.refresh_from_db()
+        self.assertEqual(third_result['resolved_count'], 1)
+        self.assertEqual(event.status, rpki_models.LifecycleHealthEventStatus.RESOLVED)
+        self.assertIsNotNone(event.resolved_at)
+
+        with patch('netbox_rpki.services.lifecycle_reporting.timezone.now', return_value=timezone.now() + timedelta(minutes=18)):
+            fourth_result = evaluate_lifecycle_health_events(
+                self.provider_account,
+                summary=summary,
+                snapshot=self.comparison_snapshot,
+                snapshot_diff=self.snapshot_diff,
+            )
+
+        self.assertEqual(fourth_result['opened_count'], 1)
+        self.assertEqual(
+            rpki_models.LifecycleHealthEvent.objects.filter(
+                hook=self.provider_hook,
+                dedupe_key=f'provider-account:{self.provider_account.pk}:sync:stale',
+            ).count(),
+            2,
+        )
+
+    def test_evaluate_lifecycle_health_events_scopes_hooks_and_supports_expiry_only_evaluation(self):
+        summary = self._sync_stale_summary(self.other_provider_account)
+
+        evaluate_lifecycle_health_events(
+            self.other_provider_account,
+            summary=summary,
+        )
+
+        self.assertEqual(
+            rpki_models.LifecycleHealthEvent.objects.filter(
+                hook=self.org_hook,
+                provider_account=self.other_provider_account,
+                dedupe_key=f'provider-account:{self.other_provider_account.pk}:sync:stale',
+            ).count(),
+            1,
+        )
+        self.assertEqual(
+            rpki_models.LifecycleHealthEvent.objects.filter(
+                hook=self.provider_hook,
+                provider_account=self.other_provider_account,
+            ).count(),
+            0,
+        )
+
+        expiry_summary = self._certificate_expiry_summary()
+        expiry_summary['publication']['snapshot_id'] = None
+        expiry_summary['diff']['latest_diff_id'] = None
+        evaluate_lifecycle_health_events(
+            self.provider_account,
+            summary=expiry_summary,
+        )
+
+        self.assertEqual(
+            rpki_models.LifecycleHealthEvent.objects.filter(
+                hook=self.expiry_hook,
+                provider_account=self.provider_account,
+                event_kind=rpki_models.LifecycleHealthEventKind.CERTIFICATE_EXPIRING,
+            ).count(),
+            1,
+        )
 
     def test_build_provider_snapshot_diff_preserves_certificate_observation_linkage_state(self):
         provider_account = create_test_provider_account(

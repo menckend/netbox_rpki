@@ -308,6 +308,24 @@ def get_lint_run_summary(run: models.ROALintRun) -> str | None:
     return get_pretty_json(run.summary_json)
 
 
+def get_lint_run_lifecycle_summary(run: models.ROALintRun) -> str | None:
+    from netbox_rpki.services.roa_lint import build_roa_lint_lifecycle_summary
+    return get_pretty_json(build_roa_lint_lifecycle_summary(run))
+
+
+def get_latest_reconciliation_lint_lifecycle_summary(run: models.ROAReconciliationRun) -> str | None:
+    lint_run = run.lint_runs.order_by('-started_at', '-created').first()
+    if lint_run is None:
+        return None
+    from netbox_rpki.services.roa_lint import build_roa_lint_lifecycle_summary
+    return get_pretty_json(build_roa_lint_lifecycle_summary(lint_run))
+
+
+def get_plan_lint_posture(plan: models.ROAChangePlan) -> str | None:
+    from netbox_rpki.services.roa_lint import build_roa_change_plan_lint_posture
+    return get_pretty_json(build_roa_change_plan_lint_posture(plan))
+
+
 def get_lint_finding_details(finding: models.ROALintFinding) -> str | None:
     return get_pretty_json(finding.details_json)
 
@@ -334,6 +352,10 @@ def get_lint_finding_operator_action(finding: models.ROALintFinding) -> str | No
 
 def get_lint_suppression_fact_context(suppression: models.ROALintSuppression) -> str | None:
     return get_pretty_json(suppression.fact_context_json)
+
+
+def get_lint_suppression_is_active(suppression: models.ROALintSuppression) -> str:
+    return 'Yes' if suppression.is_active else 'No'
 
 
 def get_simulation_run_summary(run: models.ROAValidationSimulationRun) -> str | None:
@@ -977,6 +999,12 @@ ROA_CHANGE_PLAN_DETAIL_SPEC = DetailSpec(
             kind='code',
             empty_text='None',
         ),
+        DetailFieldSpec(
+            label='Lint Posture',
+            value=get_plan_lint_posture,
+            kind='code',
+            empty_text='None',
+        ),
     ),
     actions=(
         DetailActionSpec(
@@ -1450,6 +1478,12 @@ ROA_RECONCILIATION_RUN_DETAIL_SPEC = DetailSpec(
             kind='code',
             empty_text='None',
         ),
+        DetailFieldSpec(
+            label='Latest Lint Lifecycle Summary',
+            value=get_latest_reconciliation_lint_lifecycle_summary,
+            kind='code',
+            empty_text='None',
+        ),
     ),
     actions=(
         DetailActionSpec(
@@ -1830,6 +1864,7 @@ ROA_LINT_RUN_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(label='Error Count', value=lambda obj: obj.error_count),
         DetailFieldSpec(label='Critical Count', value=lambda obj: obj.critical_count),
         DetailFieldSpec(label='Summary', value=get_lint_run_summary, kind='code', empty_text='None'),
+        DetailFieldSpec(label='Lifecycle Summary', value=get_lint_run_lifecycle_summary, kind='code', empty_text='None'),
     ),
     bottom_tables=(
         DetailTableSpec(
@@ -1886,6 +1921,7 @@ ROA_LINT_SUPPRESSION_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(label='Name', value=lambda obj: obj.name),
         DetailFieldSpec(label='Finding Code', value=lambda obj: obj.finding_code),
         DetailFieldSpec(label='Scope Type', value=lambda obj: obj.scope_type),
+        DetailFieldSpec(label='Is Active', value=get_lint_suppression_is_active),
         DetailFieldSpec(label='Intent Profile', value=lambda obj: obj.intent_profile, kind='link', empty_text='None'),
         DetailFieldSpec(label='ROA Intent', value=lambda obj: obj.roa_intent, kind='link', empty_text='None'),
         DetailFieldSpec(label='Prefix CIDR', value=lambda obj: obj.prefix_cidr_text or None, empty_text='None'),
@@ -1933,6 +1969,16 @@ ROA_LINT_RULE_CONFIG_DETAIL_SPEC = DetailSpec(
 )
 
 
+def get_lint_acknowledgement_carries_forward(ack: models.ROALintAcknowledgement) -> str:
+    """Return whether this acknowledgement is from the latest lint run on its change plan."""
+    latest_run = ack.change_plan.lint_runs.order_by('-started_at', '-created').first()
+    if latest_run is None:
+        return 'No current lint run'
+    if ack.lint_run_id == latest_run.pk:
+        return 'Current run — acknowledgement is active'
+    return f'Prior run (latest run is {latest_run.name}) — may carry forward as previously acknowledged'
+
+
 ROA_LINT_ACKNOWLEDGEMENT_DETAIL_SPEC = DetailSpec(
     model=models.ROALintAcknowledgement,
     list_url_name='plugins:netbox_rpki:roalintacknowledgement_list',
@@ -1946,6 +1992,11 @@ ROA_LINT_ACKNOWLEDGEMENT_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(label='Finding', value=lambda obj: obj.finding, kind='link'),
         DetailFieldSpec(label='Acknowledged By', value=lambda obj: obj.acknowledged_by, empty_text='None'),
         DetailFieldSpec(label='Acknowledged At', value=lambda obj: obj.acknowledged_at, empty_text='None'),
+        DetailFieldSpec(
+            label='Acknowledgement Status',
+            value=get_lint_acknowledgement_carries_forward,
+            empty_text='None',
+        ),
         DetailFieldSpec(label='Ticket Reference', value=lambda obj: obj.ticket_reference, empty_text='None'),
         DetailFieldSpec(label='Change Reference', value=lambda obj: obj.change_reference, empty_text='None'),
         DetailFieldSpec(label='Notes', value=lambda obj: obj.notes, empty_text='None'),

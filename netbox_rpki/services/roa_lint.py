@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 import hashlib
 import json
 from ipaddress import ip_network
@@ -44,6 +45,7 @@ LINT_RULE_PLAN_CROSS_ORG_AUTHORIZATION = 'plan_creates_cross_org_authorization'
 
 LINT_SUMMARY_SCHEMA_VERSION = 3
 LINT_POSTURE_SCHEMA_VERSION = 2
+LINT_LIFECYCLE_SUMMARY_SCHEMA_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -518,10 +520,167 @@ def _normalize_change_plan(
     return rpki_models.ROAChangePlan.objects.get(pk=change_plan)
 
 
+def _normalize_lint_run(
+    lint_run: rpki_models.ROALintRun | int,
+) -> rpki_models.ROALintRun:
+    if isinstance(lint_run, rpki_models.ROALintRun):
+        return lint_run
+    return rpki_models.ROALintRun.objects.get(pk=lint_run)
+
+
 def _latest_plan_lint_run(
     change_plan: rpki_models.ROAChangePlan,
 ) -> rpki_models.ROALintRun | None:
     return change_plan.lint_runs.order_by('-started_at', '-created').first()
+
+
+def build_roa_lint_lifecycle_summary(
+    lint_run: rpki_models.ROALintRun | int,
+    *,
+    change_plan: rpki_models.ROAChangePlan | int | None = None,
+    acknowledged_finding_ids: list[int] | None = None,
+) -> dict[str, object]:
+    lint_run = _normalize_lint_run(lint_run)
+    change_plan = _normalize_change_plan(change_plan)
+
+    impact_keys = (
+        LINT_APPROVAL_IMPACT_INFORMATIONAL,
+        LINT_APPROVAL_IMPACT_ACKNOWLEDGEMENT_REQUIRED,
+        LINT_APPROVAL_IMPACT_BLOCKING,
+    )
+
+    acknowledged_ids: set[int] = set()
+    prior_acked_pairs: set[tuple[str, str]] = set()
+    prior_acked_at_by: dict[tuple[str, str], list[tuple]] = {}
+    current_run_latest_ack_at = None
+    current_run_latest_ack_by = ''
+
+    if change_plan is not None:
+        acknowledged_ids = set(
+            change_plan.lint_acknowledgements.filter(lint_run=lint_run).values_list('finding_id', flat=True)
+        )
+        acknowledged_ids.update(int(pk) for pk in (acknowledged_finding_ids or []))
+
+        current_acks = list(
+            rpki_models.ROALintAcknowledgement.objects
+            .filter(change_plan=change_plan, lint_run=lint_run)
+            .order_by('-acknowledged_at')
+            .values('acknowledged_at', 'acknowledged_by')
+        )
+        if current_acks:
+            latest = current_acks[0]
+            if latest['acknowledged_at'] is not None:
+                current_run_latest_ack_at = latest['acknowledged_at'].isoformat()
+            current_run_latest_ack_by = latest['acknowledged_by'] or ''
+
+        for finding_code, details_json, acked_at, acked_by in (
+            rpki_models.ROALintAcknowledgement.objects
+            .filter(change_plan=change_plan)
+            .exclude(lint_run_id=lint_run.pk)
+            .values_list('finding__finding_code', 'finding__details_json', 'acknowledged_at', 'acknowledged_by')
+        ):
+            fact_fingerprint = (details_json or {}).get('fact_fingerprint', '')
+            if fact_fingerprint:
+                pair = (finding_code, fact_fingerprint)
+                prior_acked_pairs.add(pair)
+                prior_acked_at_by.setdefault(pair, []).append((acked_at, acked_by or ''))
+
+    total_counts = {key: 0 for key in impact_keys}
+    active_counts = {key: 0 for key in impact_keys}
+    suppressed_counts = {key: 0 for key in impact_keys}
+    acknowledged_counts = {key: 0 for key in impact_keys}
+    unresolved_counts = {key: 0 for key in impact_keys}
+    suppressed_finding_count = 0
+    acknowledged_finding_count = 0
+    previously_acknowledged_finding_count = 0
+    previously_acknowledged_finding_ids: set[int] = set()
+    active_by_family: dict[str, int] = {}
+    suppressed_by_scope: dict[str, int] = {}
+    carried_forward_contributing_pairs: set[tuple[str, str]] = set()
+    finding_count = 0
+
+    for finding in lint_run.findings.all():
+        finding_count += 1
+        impact = finding.details_json.get('approval_impact') or LINT_APPROVAL_IMPACT_INFORMATIONAL
+        if impact not in total_counts:
+            total_counts[impact] = 0
+            active_counts[impact] = 0
+            suppressed_counts[impact] = 0
+            acknowledged_counts[impact] = 0
+            unresolved_counts[impact] = 0
+        total_counts[impact] += 1
+        if finding.details_json.get('suppressed'):
+            suppressed_counts[impact] += 1
+            suppressed_finding_count += 1
+            scope_type = finding.details_json.get('suppression_scope_type')
+            if scope_type:
+                suppressed_by_scope[scope_type] = suppressed_by_scope.get(scope_type, 0) + 1
+            continue
+        active_counts[impact] += 1
+        family = finding.details_json.get('rule_family', '')
+        if family:
+            active_by_family[family] = active_by_family.get(family, 0) + 1
+        if (
+            impact == LINT_APPROVAL_IMPACT_ACKNOWLEDGEMENT_REQUIRED
+            and finding.pk in acknowledged_ids
+        ):
+            acknowledged_counts[impact] += 1
+            acknowledged_finding_count += 1
+            continue
+        if impact == LINT_APPROVAL_IMPACT_ACKNOWLEDGEMENT_REQUIRED:
+            fact_fingerprint = finding.details_json.get('fact_fingerprint', '')
+            if fact_fingerprint and (finding.finding_code, fact_fingerprint) in prior_acked_pairs:
+                previously_acknowledged_finding_count += 1
+                previously_acknowledged_finding_ids.add(finding.pk)
+                carried_forward_contributing_pairs.add((finding.finding_code, fact_fingerprint))
+                continue
+        unresolved_counts[impact] += 1
+
+    carried_forward_latest_at = None
+    carried_forward_latest_by = ''
+    if carried_forward_contributing_pairs:
+        all_acks = []
+        for pair in carried_forward_contributing_pairs:
+            for acked_at, acked_by in prior_acked_at_by.get(pair, []):
+                all_acks.append((acked_at, acked_by))
+        valid_acks = [(at, by) for at, by in all_acks if at is not None]
+        if valid_acks:
+            valid_acks.sort(key=lambda x: x[0], reverse=True)
+            carried_forward_latest_at = valid_acks[0][0].isoformat()
+            carried_forward_latest_by = valid_acks[0][1]
+
+    now = timezone.now()
+    expiring_suppression_count = rpki_models.ROALintSuppression.objects.filter(
+        organization=lint_run.reconciliation_run.organization,
+        lifted_at__isnull=True,
+        expires_at__isnull=False,
+        expires_at__lte=now + timedelta(days=30),
+    ).count()
+
+    return {
+        'lifecycle_summary_schema_version': LINT_LIFECYCLE_SUMMARY_SCHEMA_VERSION,
+        'lint_run_id': lint_run.pk,
+        'change_plan_id': change_plan.pk if change_plan is not None else None,
+        'finding_count': finding_count,
+        'active_finding_count': finding_count - suppressed_finding_count,
+        'suppressed_finding_count': suppressed_finding_count,
+        'acknowledged_finding_count': acknowledged_finding_count,
+        'previously_acknowledged_finding_count': previously_acknowledged_finding_count,
+        'previously_acknowledged_finding_ids': sorted(previously_acknowledged_finding_ids),
+        'approval_impact_counts': total_counts,
+        'active_approval_impact_counts': active_counts,
+        'suppressed_approval_impact_counts': suppressed_counts,
+        'acknowledged_approval_impact_counts': acknowledged_counts,
+        'unresolved_approval_impact_counts': unresolved_counts,
+        'active_by_family': active_by_family,
+        'suppressed_by_scope': suppressed_by_scope,
+        'expiring_suppression_count': expiring_suppression_count,
+        'carried_forward_count': previously_acknowledged_finding_count,
+        'carried_forward_latest_at': carried_forward_latest_at,
+        'carried_forward_latest_by': carried_forward_latest_by,
+        'current_run_latest_ack_at': current_run_latest_ack_at,
+        'current_run_latest_ack_by': current_run_latest_ack_by,
+    }
 
 
 def build_roa_change_plan_lint_posture(
@@ -564,66 +723,26 @@ def build_roa_change_plan_lint_posture(
             'acknowledged_acknowledgement_required_finding_count': 0,
             'unresolved_acknowledgement_required_finding_count': 0,
             'informational_finding_count': 0,
+            'latest_lint_ack_at': None,
+            'latest_lint_ack_by': '',
+            'carried_forward_count': 0,
+            'carried_forward_latest_at': None,
+            'carried_forward_latest_by': '',
         }
 
-    acknowledged_ids = set(
-        change_plan.lint_acknowledgements.filter(lint_run=lint_run).values_list('finding_id', flat=True)
+    summary = build_roa_lint_lifecycle_summary(
+        lint_run,
+        change_plan=change_plan,
+        acknowledged_finding_ids=acknowledged_finding_ids,
     )
-    acknowledged_ids.update(int(pk) for pk in (acknowledged_finding_ids or []))
-    prior_acked_pairs: set[tuple[str, str]] = set()
-    for finding_code, details_json in (
-        rpki_models.ROALintAcknowledgement.objects
-        .filter(change_plan=change_plan)
-        .exclude(lint_run_id=lint_run.pk)
-        .values_list('finding__finding_code', 'finding__details_json')
-    ):
-        fact_fingerprint = (details_json or {}).get('fact_fingerprint', '')
-        if fact_fingerprint:
-            prior_acked_pairs.add((finding_code, fact_fingerprint))
 
-    total_counts = {key: 0 for key in impact_keys}
-    active_counts = {key: 0 for key in impact_keys}
-    suppressed_counts = {key: 0 for key in impact_keys}
-    acknowledged_counts = {key: 0 for key in impact_keys}
-    unresolved_counts = {key: 0 for key in impact_keys}
-    suppressed_finding_count = 0
-    acknowledged_finding_count = 0
-    previously_acknowledged_finding_count = 0
-    previously_acknowledged_finding_ids: set[int] = set()
-    finding_count = 0
-
-    for finding in lint_run.findings.all():
-        finding_count += 1
-        impact = finding.details_json.get('approval_impact') or LINT_APPROVAL_IMPACT_INFORMATIONAL
-        if impact not in total_counts:
-            total_counts[impact] = 0
-            active_counts[impact] = 0
-            suppressed_counts[impact] = 0
-            acknowledged_counts[impact] = 0
-            unresolved_counts[impact] = 0
-        total_counts[impact] += 1
-        if finding.details_json.get('suppressed'):
-            suppressed_counts[impact] += 1
-            suppressed_finding_count += 1
-            continue
-        active_counts[impact] += 1
-        if (
-            impact == LINT_APPROVAL_IMPACT_ACKNOWLEDGEMENT_REQUIRED
-            and finding.pk in acknowledged_ids
-        ):
-            acknowledged_counts[impact] += 1
-            acknowledged_finding_count += 1
-            continue
-        if impact == LINT_APPROVAL_IMPACT_ACKNOWLEDGEMENT_REQUIRED:
-            fact_fingerprint = finding.details_json.get('fact_fingerprint', '')
-            if fact_fingerprint and (finding.finding_code, fact_fingerprint) in prior_acked_pairs:
-                previously_acknowledged_finding_count += 1
-                previously_acknowledged_finding_ids.add(finding.pk)
-                continue
-        unresolved_counts[impact] += 1
-
+    active_counts = summary['active_approval_impact_counts']
+    acknowledged_counts = summary['acknowledged_approval_impact_counts']
+    unresolved_counts = summary['unresolved_approval_impact_counts']
     unresolved_blocking = unresolved_counts[LINT_APPROVAL_IMPACT_BLOCKING]
     unresolved_ack_required = unresolved_counts[LINT_APPROVAL_IMPACT_ACKNOWLEDGEMENT_REQUIRED]
+    previously_acknowledged_finding_count = summary['previously_acknowledged_finding_count']
+
     if unresolved_blocking > 0:
         status = 'blocked'
     elif unresolved_ack_required > 0:
@@ -644,15 +763,15 @@ def build_roa_change_plan_lint_posture(
             and unresolved_ack_required == 0
             and previously_acknowledged_finding_count == 0
         ),
-        'finding_count': finding_count,
-        'active_finding_count': finding_count - suppressed_finding_count,
-        'suppressed_finding_count': suppressed_finding_count,
-        'acknowledged_finding_count': acknowledged_finding_count,
+        'finding_count': summary['finding_count'],
+        'active_finding_count': summary['active_finding_count'],
+        'suppressed_finding_count': summary['suppressed_finding_count'],
+        'acknowledged_finding_count': summary['acknowledged_finding_count'],
         'previously_acknowledged_finding_count': previously_acknowledged_finding_count,
-        'previously_acknowledged_finding_ids': sorted(previously_acknowledged_finding_ids),
-        'approval_impact_counts': total_counts,
+        'previously_acknowledged_finding_ids': summary['previously_acknowledged_finding_ids'],
+        'approval_impact_counts': summary['approval_impact_counts'],
         'active_approval_impact_counts': active_counts,
-        'suppressed_approval_impact_counts': suppressed_counts,
+        'suppressed_approval_impact_counts': summary['suppressed_approval_impact_counts'],
         'acknowledged_approval_impact_counts': acknowledged_counts,
         'unresolved_approval_impact_counts': unresolved_counts,
         'blocking_finding_count': active_counts[LINT_APPROVAL_IMPACT_BLOCKING],
@@ -663,6 +782,11 @@ def build_roa_change_plan_lint_posture(
         ),
         'unresolved_acknowledgement_required_finding_count': unresolved_ack_required,
         'informational_finding_count': active_counts[LINT_APPROVAL_IMPACT_INFORMATIONAL],
+        'latest_lint_ack_at': summary['current_run_latest_ack_at'],
+        'latest_lint_ack_by': summary['current_run_latest_ack_by'],
+        'carried_forward_count': previously_acknowledged_finding_count,
+        'carried_forward_latest_at': summary['carried_forward_latest_at'],
+        'carried_forward_latest_by': summary['carried_forward_latest_by'],
     }
 
 

@@ -5,6 +5,7 @@ from rest_framework import serializers
 
 from netbox_rpki import models
 from netbox_rpki.services import build_roa_change_plan_lint_posture
+from netbox_rpki.services.roa_lint import build_roa_lint_lifecycle_summary
 from netbox_rpki.object_registry import API_OBJECT_SPECS
 from netbox_rpki.object_specs import ObjectSpec
 from netbox_rpki.services.lifecycle_reporting import (
@@ -174,11 +175,13 @@ globals()['RpkiProviderAccountSerializer'] = RpkiProviderAccountSerializer
 class ROAReconciliationRunSerializer(SERIALIZER_CLASS_MAP['roareconciliationrun']):
     latest_lint_run = serializers.SerializerMethodField()
     latest_lint_summary = serializers.SerializerMethodField()
+    latest_lint_lifecycle_summary = serializers.SerializerMethodField()
 
     class Meta(SERIALIZER_CLASS_MAP['roareconciliationrun'].Meta):
         fields = SERIALIZER_CLASS_MAP['roareconciliationrun'].Meta.fields + (
             'latest_lint_run',
             'latest_lint_summary',
+            'latest_lint_lifecycle_summary',
         )
 
     def get_latest_lint_run(self, obj):
@@ -194,6 +197,12 @@ class ROAReconciliationRunSerializer(SERIALIZER_CLASS_MAP['roareconciliationrun'
             return None
         return lint_run.summary_json
 
+    def get_latest_lint_lifecycle_summary(self, obj):
+        lint_run = obj.lint_runs.order_by('-started_at', '-created').first()
+        if lint_run is None:
+            return None
+        return build_roa_lint_lifecycle_summary(lint_run)
+
 
 SERIALIZER_CLASS_MAP['roareconciliationrun'] = ROAReconciliationRunSerializer
 globals()['ROAReconciliationRunSerializer'] = ROAReconciliationRunSerializer
@@ -203,6 +212,7 @@ class ROAChangePlanSerializer(SERIALIZER_CLASS_MAP['roachangeplan']):
     latest_lint_run = serializers.SerializerMethodField()
     latest_lint_summary = serializers.SerializerMethodField()
     latest_lint_posture = serializers.SerializerMethodField()
+    latest_lint_lifecycle_summary = serializers.SerializerMethodField()
     latest_simulation_run = serializers.SerializerMethodField()
     latest_simulation_summary = serializers.SerializerMethodField()
     latest_simulation_posture = serializers.SerializerMethodField()
@@ -212,6 +222,7 @@ class ROAChangePlanSerializer(SERIALIZER_CLASS_MAP['roachangeplan']):
             'latest_lint_run',
             'latest_lint_summary',
             'latest_lint_posture',
+            'latest_lint_lifecycle_summary',
             'latest_simulation_run',
             'latest_simulation_summary',
             'latest_simulation_posture',
@@ -232,6 +243,12 @@ class ROAChangePlanSerializer(SERIALIZER_CLASS_MAP['roachangeplan']):
 
     def get_latest_lint_posture(self, obj):
         return build_roa_change_plan_lint_posture(obj)
+
+    def get_latest_lint_lifecycle_summary(self, obj):
+        lint_run = obj.lint_runs.order_by('-started_at', '-created').first()
+        if lint_run is None:
+            return None
+        return build_roa_lint_lifecycle_summary(lint_run, change_plan=obj)
 
     def get_latest_simulation_run(self, obj):
         simulation_run = obj.simulation_runs.order_by('-started_at', '-created').first()

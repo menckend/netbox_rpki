@@ -1,5 +1,7 @@
 from django.core.exceptions import ValidationError
+from datetime import timedelta
 from django.test import TestCase
+from django.utils import timezone
 from tenancy.models import Tenant
 
 from netbox_rpki import models as rpki_models
@@ -12,6 +14,7 @@ from netbox_rpki.services.roa_lint import (
     LINT_RULE_PLAN_BROADENS_AUTHORIZATION,
     LINT_RULE_PUBLISHED_CROSS_ORG_ORIGIN,
     build_roa_change_plan_lint_posture,
+    build_roa_lint_lifecycle_summary,
     run_roa_lint,
     suppress_roa_lint_finding,
 )
@@ -24,6 +27,7 @@ from netbox_rpki.tests.utils import (
     create_test_roa_change_plan_item,
     create_test_roa_intent,
     create_test_roa_intent_result,
+    create_test_roa_lint_acknowledgement,
     create_test_roa_lint_finding,
     create_test_roa_lint_run,
     create_test_roa_lint_rule_config,
@@ -679,3 +683,480 @@ class ROALintOwnershipContextTestCase(TestCase):
 
         finding = lint_run.findings.get(finding_code=LINT_RULE_PUBLISHED_CROSS_ORG_ORIGIN)
         self.assertEqual(finding.details_json['origin_asn'], 65309)
+
+
+class ROALintLifecycleSummaryTestCase(TestCase):
+    def _build_reconciliation_context(self, *, org_id: str, name: str, prefix_text: str, asn_value: int):
+        organization = create_test_organization(org_id=org_id, name=name)
+        profile = create_test_routing_intent_profile(name=f'{name} Profile', organization=organization)
+        derivation_run = create_test_intent_derivation_run(
+            name=f'{name} Derivation',
+            organization=organization,
+            intent_profile=profile,
+        )
+        roa_intent = create_test_roa_intent(
+            name=f'{name} Intent {prefix_text}',
+            organization=organization,
+            derivation_run=derivation_run,
+            intent_profile=profile,
+            prefix=create_test_prefix(prefix_text, status='active'),
+            origin_asn=create_test_asn(asn_value),
+            origin_asn_value=asn_value,
+            max_length=24,
+        )
+        reconciliation_run = create_test_roa_reconciliation_run(
+            name=f'{name} Reconciliation',
+            organization=organization,
+            intent_profile=profile,
+            basis_derivation_run=derivation_run,
+        )
+        return organization, profile, roa_intent, reconciliation_run
+
+    def test_lifecycle_summary_count_partitioning(self):
+        organization, profile, _, reconciliation_run = self._build_reconciliation_context(
+            org_id='lc-summary-org-a',
+            name='LC Summary Org A',
+            prefix_text='10.10.0.0/24',
+            asn_value=65400,
+        )
+        change_plan = create_test_roa_change_plan(
+            name='LC Summary Plan A',
+            organization=organization,
+            source_reconciliation_run=reconciliation_run,
+        )
+        lint_run = create_test_roa_lint_run(
+            name='LC Summary Lint A',
+            reconciliation_run=reconciliation_run,
+            change_plan=change_plan,
+        )
+        # Suppressed finding (org-scope suppression indicator in details_json)
+        create_test_roa_lint_finding(
+            name='LC Summary Finding Suppressed',
+            lint_run=lint_run,
+            finding_code='replacement_required',
+            details_json={
+                'suppressed': True,
+                'suppression_scope_type': rpki_models.ROALintSuppressionScope.ORG,
+                'approval_impact': 'informational',
+                'rule_family': 'plan_risk',
+                'fact_fingerprint': 'fp-suppressed-a',
+            },
+        )
+        # Active blocking finding
+        create_test_roa_lint_finding(
+            name='LC Summary Finding Blocking',
+            lint_run=lint_run,
+            finding_code='intent_inconsistent_with_published',
+            details_json={
+                'suppressed': False,
+                'approval_impact': 'blocking',
+                'rule_family': 'intent_safety',
+                'fact_fingerprint': 'fp-blocking-a',
+            },
+        )
+        # Active acknowledgement_required finding — acknowledged on this change plan
+        ack_finding = create_test_roa_lint_finding(
+            name='LC Summary Finding Acked',
+            lint_run=lint_run,
+            finding_code='plan_broadens_authorization',
+            details_json={
+                'suppressed': False,
+                'approval_impact': 'acknowledgement_required',
+                'rule_family': 'plan_risk',
+                'fact_fingerprint': 'fp-acked-a',
+            },
+        )
+        create_test_roa_lint_acknowledgement(
+            name='LC Summary Ack A',
+            change_plan=change_plan,
+            lint_run=lint_run,
+            finding=ack_finding,
+            acknowledged_by='test-user',
+            acknowledged_at=timezone.now(),
+        )
+        # Active acknowledgement_required finding — unresolved
+        create_test_roa_lint_finding(
+            name='LC Summary Finding Unresolved',
+            lint_run=lint_run,
+            finding_code='plan_broadens_authorization',
+            details_json={
+                'suppressed': False,
+                'approval_impact': 'acknowledgement_required',
+                'rule_family': 'plan_risk',
+                'fact_fingerprint': 'fp-unresolved-a',
+            },
+        )
+
+        summary = build_roa_lint_lifecycle_summary(lint_run, change_plan=change_plan)
+
+        self.assertEqual(summary['suppressed_finding_count'], 1)
+        self.assertEqual(summary['active_finding_count'], 3)
+        self.assertEqual(summary['acknowledged_finding_count'], 1)
+        self.assertEqual(summary['unresolved_approval_impact_counts']['acknowledgement_required'], 1)
+        self.assertEqual(summary['unresolved_approval_impact_counts']['blocking'], 1)
+        self.assertIn('plan_risk', summary['active_by_family'])
+        self.assertGreater(summary['active_by_family']['plan_risk'], 0)
+
+    def test_lifecycle_summary_suppressed_by_scope(self):
+        organization, profile, _, reconciliation_run = self._build_reconciliation_context(
+            org_id='lc-summary-org-b',
+            name='LC Summary Org B',
+            prefix_text='10.20.0.0/24',
+            asn_value=65401,
+        )
+        lint_run = create_test_roa_lint_run(
+            name='LC Summary Lint B',
+            reconciliation_run=reconciliation_run,
+        )
+        create_test_roa_lint_finding(
+            name='LC Summary Suppressed ORG',
+            lint_run=lint_run,
+            finding_code='replacement_required',
+            details_json={
+                'suppressed': True,
+                'suppression_scope_type': rpki_models.ROALintSuppressionScope.ORG,
+                'approval_impact': 'informational',
+                'rule_family': 'plan_risk',
+                'fact_fingerprint': 'fp-scope-org-b',
+            },
+        )
+        create_test_roa_lint_finding(
+            name='LC Summary Suppressed PREFIX',
+            lint_run=lint_run,
+            finding_code='replacement_required',
+            details_json={
+                'suppressed': True,
+                'suppression_scope_type': rpki_models.ROALintSuppressionScope.PREFIX,
+                'approval_impact': 'informational',
+                'rule_family': 'plan_risk',
+                'fact_fingerprint': 'fp-scope-prefix-b',
+            },
+        )
+
+        summary = build_roa_lint_lifecycle_summary(lint_run)
+
+        self.assertIn(rpki_models.ROALintSuppressionScope.ORG, summary['suppressed_by_scope'])
+        self.assertIn(rpki_models.ROALintSuppressionScope.PREFIX, summary['suppressed_by_scope'])
+        self.assertEqual(summary['suppressed_by_scope'][rpki_models.ROALintSuppressionScope.ORG], 1)
+        self.assertEqual(summary['suppressed_by_scope'][rpki_models.ROALintSuppressionScope.PREFIX], 1)
+
+    def test_lifecycle_summary_expiring_suppression_count(self):
+        organization, profile, _, reconciliation_run = self._build_reconciliation_context(
+            org_id='lc-summary-org-c',
+            name='LC Summary Org C',
+            prefix_text='10.30.0.0/24',
+            asn_value=65402,
+        )
+        lint_run = create_test_roa_lint_run(
+            name='LC Summary Lint C',
+            reconciliation_run=reconciliation_run,
+        )
+        now = timezone.now()
+        # Active suppression expiring within 10 days — should be counted
+        create_test_roa_lint_suppression(
+            name='LC Suppression Expiring Soon',
+            organization=organization,
+            scope_type=rpki_models.ROALintSuppressionScope.ORG,
+            finding_code='replacement_required',
+            fact_fingerprint='',
+            fact_context_json={},
+            expires_at=now + timedelta(days=10),
+        )
+        # Active suppression expiring in 60 days — should NOT be counted
+        create_test_roa_lint_suppression(
+            name='LC Suppression Expiring Later',
+            organization=organization,
+            scope_type=rpki_models.ROALintSuppressionScope.ORG,
+            finding_code='intent_stale',
+            fact_fingerprint='',
+            fact_context_json={},
+            expires_at=now + timedelta(days=60),
+        )
+
+        summary = build_roa_lint_lifecycle_summary(lint_run)
+
+        self.assertEqual(summary['expiring_suppression_count'], 1)
+
+    def test_lifecycle_summary_carried_forward_semantics(self):
+        organization, profile, _, reconciliation_run = self._build_reconciliation_context(
+            org_id='lc-summary-org-d',
+            name='LC Summary Org D',
+            prefix_text='10.40.0.0/24',
+            asn_value=65403,
+        )
+        change_plan = create_test_roa_change_plan(
+            name='LC Carried Forward Plan D',
+            organization=organization,
+            source_reconciliation_run=reconciliation_run,
+        )
+        prior_lint_run = create_test_roa_lint_run(
+            name='LC Prior Lint D',
+            reconciliation_run=reconciliation_run,
+            change_plan=change_plan,
+        )
+        shared_fingerprint = 'fp-carried-forward-d'
+        prior_finding = create_test_roa_lint_finding(
+            name='LC Prior Finding D',
+            lint_run=prior_lint_run,
+            finding_code='plan_broadens_authorization',
+            details_json={
+                'suppressed': False,
+                'approval_impact': 'acknowledgement_required',
+                'rule_family': 'plan_risk',
+                'fact_fingerprint': shared_fingerprint,
+            },
+        )
+        prior_ack_at = timezone.now()
+        create_test_roa_lint_acknowledgement(
+            name='LC Prior Ack D',
+            change_plan=change_plan,
+            lint_run=prior_lint_run,
+            finding=prior_finding,
+            acknowledged_by='prior-reviewer',
+            acknowledged_at=prior_ack_at,
+        )
+
+        new_lint_run = create_test_roa_lint_run(
+            name='LC New Lint D',
+            reconciliation_run=reconciliation_run,
+            change_plan=change_plan,
+        )
+        create_test_roa_lint_finding(
+            name='LC New Finding D',
+            lint_run=new_lint_run,
+            finding_code='plan_broadens_authorization',
+            details_json={
+                'suppressed': False,
+                'approval_impact': 'acknowledgement_required',
+                'rule_family': 'plan_risk',
+                'fact_fingerprint': shared_fingerprint,
+            },
+        )
+
+        summary = build_roa_lint_lifecycle_summary(new_lint_run, change_plan=change_plan)
+
+        self.assertEqual(summary['carried_forward_count'], 1)
+        self.assertEqual(summary['carried_forward_latest_by'], 'prior-reviewer')
+        self.assertIsNotNone(summary['carried_forward_latest_at'])
+        self.assertIsInstance(summary['carried_forward_latest_at'], str)
+
+    def test_posture_includes_governance_fields(self):
+        organization, profile, _, reconciliation_run = self._build_reconciliation_context(
+            org_id='lc-summary-org-e',
+            name='LC Summary Org E',
+            prefix_text='10.50.0.0/24',
+            asn_value=65404,
+        )
+        change_plan = create_test_roa_change_plan(
+            name='LC Posture Plan E',
+            organization=organization,
+            source_reconciliation_run=reconciliation_run,
+        )
+        lint_run = create_test_roa_lint_run(
+            name='LC Posture Lint E',
+            reconciliation_run=reconciliation_run,
+            change_plan=change_plan,
+        )
+        create_test_roa_lint_finding(
+            name='LC Posture Finding E',
+            lint_run=lint_run,
+            finding_code='replacement_required',
+            details_json={
+                'suppressed': False,
+                'approval_impact': 'informational',
+                'rule_family': 'plan_risk',
+                'fact_fingerprint': 'fp-posture-e',
+            },
+        )
+
+        posture = build_roa_change_plan_lint_posture(change_plan)
+
+        self.assertIn('latest_lint_ack_at', posture)
+        self.assertIn('latest_lint_ack_by', posture)
+        self.assertIn('carried_forward_count', posture)
+        self.assertIn('carried_forward_latest_at', posture)
+        self.assertIn('carried_forward_latest_by', posture)
+
+    def test_posture_no_lint_run_includes_governance_fields(self):
+        organization, profile, _, reconciliation_run = self._build_reconciliation_context(
+            org_id='lc-summary-org-f',
+            name='LC Summary Org F',
+            prefix_text='10.60.0.0/24',
+            asn_value=65405,
+        )
+        change_plan = create_test_roa_change_plan(
+            name='LC No Lint Plan F',
+            organization=organization,
+            source_reconciliation_run=reconciliation_run,
+        )
+
+        posture = build_roa_change_plan_lint_posture(change_plan)
+
+        self.assertEqual(posture['has_lint_run'], False)
+        self.assertIsNone(posture['latest_lint_ack_at'])
+        self.assertEqual(posture['latest_lint_ack_by'], '')
+        self.assertEqual(posture['carried_forward_count'], 0)
+        self.assertIsNone(posture['carried_forward_latest_at'])
+        self.assertEqual(posture['carried_forward_latest_by'], '')
+
+
+class ROALintSuppressionFilterTestCase(TestCase):
+    def setUp(self):
+        from netbox_rpki.filtersets import ROALintSuppressionFilterSet as _F
+        self.filterset_class = _F
+
+    def _qs(self):
+        from netbox_rpki import models as m
+        return m.ROALintSuppression.objects.all()
+
+    def test_filter_is_active_true(self):
+        now = timezone.now()
+        org_a = create_test_organization(org_id='filter-active-org-1a', name='Filter Active Org 1a')
+        org_b = create_test_organization(org_id='filter-active-org-1b', name='Filter Active Org 1b')
+        active = create_test_roa_lint_suppression(
+            name='Active Suppression 1',
+            organization=org_a,
+            scope_type=rpki_models.ROALintSuppressionScope.ORG,
+        )
+        lifted = create_test_roa_lint_suppression(
+            name='Lifted Suppression 1',
+            organization=org_b,
+            scope_type=rpki_models.ROALintSuppressionScope.ORG,
+        )
+        rpki_models.ROALintSuppression.objects.filter(pk=lifted.pk).update(lifted_at=now)
+
+        fs = self.filterset_class({'is_active': True}, queryset=self._qs())
+        pks = list(fs.qs.values_list('pk', flat=True))
+        self.assertIn(active.pk, pks)
+        self.assertNotIn(lifted.pk, pks)
+
+    def test_filter_is_lifted_true(self):
+        now = timezone.now()
+        org_a = create_test_organization(org_id='filter-lifted-org-1a', name='Filter Lifted Org 1a')
+        org_b = create_test_organization(org_id='filter-lifted-org-1b', name='Filter Lifted Org 1b')
+        active = create_test_roa_lint_suppression(
+            name='Active Suppression 2',
+            organization=org_a,
+            scope_type=rpki_models.ROALintSuppressionScope.ORG,
+        )
+        lifted = create_test_roa_lint_suppression(
+            name='Lifted Suppression 2',
+            organization=org_b,
+            scope_type=rpki_models.ROALintSuppressionScope.ORG,
+        )
+        rpki_models.ROALintSuppression.objects.filter(pk=lifted.pk).update(lifted_at=now)
+
+        fs = self.filterset_class({'is_lifted': True}, queryset=self._qs())
+        pks = list(fs.qs.values_list('pk', flat=True))
+        self.assertNotIn(active.pk, pks)
+        self.assertIn(lifted.pk, pks)
+
+    def test_filter_expiring_within_days(self):
+        now = timezone.now()
+        org_a = create_test_organization(org_id='filter-expiring-org-1a', name='Filter Expiring Org 1a')
+        org_b = create_test_organization(org_id='filter-expiring-org-1b', name='Filter Expiring Org 1b')
+        soon = create_test_roa_lint_suppression(
+            name='Expiring Soon Suppression 1',
+            organization=org_a,
+            scope_type=rpki_models.ROALintSuppressionScope.ORG,
+            expires_at=now + timedelta(days=5),
+        )
+        later = create_test_roa_lint_suppression(
+            name='Expiring Later Suppression 1',
+            organization=org_b,
+            scope_type=rpki_models.ROALintSuppressionScope.ORG,
+            expires_at=now + timedelta(days=60),
+        )
+
+        fs = self.filterset_class({'expiring_within_days': 30}, queryset=self._qs())
+        pks = list(fs.qs.values_list('pk', flat=True))
+        self.assertIn(soon.pk, pks)
+        self.assertNotIn(later.pk, pks)
+
+    def test_filter_is_expired(self):
+        now = timezone.now()
+        org_a = create_test_organization(org_id='filter-expired-org-1a', name='Filter Expired Org 1a')
+        org_b = create_test_organization(org_id='filter-expired-org-1b', name='Filter Expired Org 1b')
+        expired = create_test_roa_lint_suppression(
+            name='Expired Suppression 1',
+            organization=org_a,
+            scope_type=rpki_models.ROALintSuppressionScope.ORG,
+        )
+        rpki_models.ROALintSuppression.objects.filter(pk=expired.pk).update(
+            expires_at=now - timedelta(days=1)
+        )
+        future = create_test_roa_lint_suppression(
+            name='Future Suppression 1',
+            organization=org_b,
+            scope_type=rpki_models.ROALintSuppressionScope.ORG,
+            expires_at=now + timedelta(days=30),
+        )
+
+        fs = self.filterset_class({'is_expired': True}, queryset=self._qs())
+        pks = list(fs.qs.values_list('pk', flat=True))
+        self.assertIn(expired.pk, pks)
+        self.assertNotIn(future.pk, pks)
+
+
+class ROALintFindingFilterTestCase(TestCase):
+    def setUp(self):
+        from netbox_rpki.filtersets import ROALintFindingFilterSet as _F
+        self.filterset_class = _F
+
+    def _qs(self):
+        return rpki_models.ROALintFinding.objects.all()
+
+    def test_filter_rule_family(self):
+        lint_run = create_test_roa_lint_run()
+        intent_safety = create_test_roa_lint_finding(
+            name='Finding Rule Family Intent Safety 1',
+            lint_run=lint_run,
+            details_json={'rule_family': 'intent_safety', 'approval_impact': 'informational'},
+        )
+        plan_risk = create_test_roa_lint_finding(
+            name='Finding Rule Family Plan Risk 1',
+            lint_run=lint_run,
+            details_json={'rule_family': 'plan_risk', 'approval_impact': 'blocking'},
+        )
+
+        fs = self.filterset_class({'rule_family': 'intent_safety'}, queryset=self._qs())
+        pks = list(fs.qs.values_list('pk', flat=True))
+        self.assertIn(intent_safety.pk, pks)
+        self.assertNotIn(plan_risk.pk, pks)
+
+    def test_filter_is_suppressed(self):
+        lint_run = create_test_roa_lint_run()
+        suppressed = create_test_roa_lint_finding(
+            name='Finding Suppressed True 1',
+            lint_run=lint_run,
+            details_json={'suppressed': True, 'rule_family': 'intent_safety', 'approval_impact': 'informational'},
+        )
+        not_suppressed = create_test_roa_lint_finding(
+            name='Finding Suppressed False 1',
+            lint_run=lint_run,
+            details_json={'suppressed': False, 'rule_family': 'plan_risk', 'approval_impact': 'blocking'},
+        )
+
+        fs = self.filterset_class({'is_suppressed': True}, queryset=self._qs())
+        pks = list(fs.qs.values_list('pk', flat=True))
+        self.assertIn(suppressed.pk, pks)
+        self.assertNotIn(not_suppressed.pk, pks)
+
+    def test_filter_approval_impact(self):
+        lint_run = create_test_roa_lint_run()
+        blocking = create_test_roa_lint_finding(
+            name='Finding Approval Impact Blocking 1',
+            lint_run=lint_run,
+            details_json={'rule_family': 'plan_risk', 'approval_impact': 'blocking'},
+        )
+        informational = create_test_roa_lint_finding(
+            name='Finding Approval Impact Informational 1',
+            lint_run=lint_run,
+            details_json={'rule_family': 'intent_safety', 'approval_impact': 'informational'},
+        )
+
+        fs = self.filterset_class({'approval_impact': 'blocking'}, queryset=self._qs())
+        pks = list(fs.qs.values_list('pk', flat=True))
+        self.assertIn(blocking.pk, pks)
+        self.assertNotIn(informational.pk, pks)
+

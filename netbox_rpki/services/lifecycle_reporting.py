@@ -948,6 +948,324 @@ def build_provider_lifecycle_health_summary(
     return summary
 
 
+_LIFECYCLE_EVENT_ACTIVE_STATUSES = {
+    rpki_models.LifecycleHealthEventStatus.OPEN,
+    rpki_models.LifecycleHealthEventStatus.REPEATED,
+}
+
+
+def _lifecycle_event_summary_excerpt(summary: Mapping[str, object]) -> dict[str, object]:
+    return {
+        'summary_schema_version': int(summary.get('summary_schema_version', 0) or 0),
+        'policy': dict(summary.get('policy') or {}),
+        'sync': dict(summary.get('sync') or {}),
+        'expiry': dict(summary.get('expiry') or {}),
+        'publication': dict(summary.get('publication') or {}),
+        'publication_health': dict(summary.get('publication_health') or {}),
+        'diff': dict(summary.get('diff') or {}),
+        'attention_summary': dict(summary.get('attention_summary') or {}),
+    }
+
+
+def _lifecycle_event_candidate(
+    *,
+    provider_account: rpki_models.RpkiProviderAccount,
+    event_kind: str,
+    severity: str,
+    dedupe_suffix: str,
+    title: str,
+    details: Mapping[str, object],
+    active: bool,
+    summary: Mapping[str, object],
+    related_snapshot_id=None,
+    related_snapshot_diff_id=None,
+) -> dict[str, object]:
+    summary_excerpt = _lifecycle_event_summary_excerpt(summary)
+    return {
+        'provider_account_id': provider_account.pk,
+        'organization_id': provider_account.organization_id,
+        'policy_id': summary_excerpt['policy'].get('policy_id'),
+        'event_kind': event_kind,
+        'severity': severity,
+        'dedupe_key': f'provider-account:{provider_account.pk}:{dedupe_suffix}',
+        'title': title,
+        'details': dict(details),
+        'active': bool(active),
+        'related_snapshot_id': related_snapshot_id,
+        'related_snapshot_diff_id': related_snapshot_diff_id,
+        'summary_excerpt': summary_excerpt,
+        'payload_json': {
+            'schema_version': 1,
+            'event': {
+                'event_kind': event_kind,
+                'severity': severity,
+                'dedupe_key': f'provider-account:{provider_account.pk}:{dedupe_suffix}',
+                'title': title,
+                'active': bool(active),
+                'details': dict(details),
+            },
+            'provider_account': {
+                'provider_account_id': provider_account.pk,
+                'organization_id': provider_account.organization_id,
+                'name': provider_account.name,
+            },
+            'policy': dict(summary_excerpt['policy']),
+            'summary': summary_excerpt,
+            'links': {
+                'provider_account_url': provider_account.get_absolute_url(),
+            },
+        },
+    }
+
+
+def build_lifecycle_event_candidates(
+    provider_account: rpki_models.RpkiProviderAccount,
+    *,
+    summary: Mapping[str, object],
+    snapshot: rpki_models.ProviderSnapshot | None = None,
+    snapshot_diff: rpki_models.ProviderSnapshotDiff | None = None,
+) -> list[dict[str, object]]:
+    sync = dict(summary.get('sync') or {})
+    expiry = dict(summary.get('expiry') or {})
+    publication = dict(summary.get('publication') or {})
+    diff = dict(summary.get('diff') or {})
+
+    publication_snapshot_id = publication.get('snapshot_id')
+    if snapshot is not None:
+        publication_snapshot_id = snapshot.pk
+
+    latest_diff_id = diff.get('latest_diff_id')
+    if snapshot_diff is not None:
+        latest_diff_id = snapshot_diff.pk
+
+    candidates: list[dict[str, object]] = []
+
+    sync_status = sync.get('status', '')
+    if sync_status in {rpki_models.ProviderSyncHealth.FAILED, rpki_models.ProviderSyncHealth.STALE, rpki_models.ProviderSyncHealth.NEVER_SYNCED}:
+        event_kind = (
+            rpki_models.LifecycleHealthEventKind.SYNC_FAILED
+            if sync_status == rpki_models.ProviderSyncHealth.FAILED
+            else rpki_models.LifecycleHealthEventKind.SYNC_STALE
+        )
+        candidates.append(
+            _lifecycle_event_candidate(
+                provider_account=provider_account,
+                event_kind=event_kind,
+                severity=(
+                    rpki_models.LifecycleHealthEventSeverity.CRITICAL
+                    if sync_status == rpki_models.ProviderSyncHealth.FAILED
+                    else rpki_models.LifecycleHealthEventSeverity.WARNING
+                ),
+                dedupe_suffix=f"sync:{sync_status}",
+                title=sync.get('status_display', 'Provider sync attention'),
+                details=sync,
+                active=True,
+                summary=summary,
+            )
+        )
+
+    for expiry_kind, event_kind in (
+        ('roas', rpki_models.LifecycleHealthEventKind.ROA_EXPIRING),
+        ('certificates', rpki_models.LifecycleHealthEventKind.CERTIFICATE_EXPIRING),
+        ('exceptions', rpki_models.LifecycleHealthEventKind.EXCEPTION_EXPIRING),
+    ):
+        section = dict(expiry.get(expiry_kind) or {})
+        count = int(section.get('count', 0) or 0)
+        if count <= 0:
+            continue
+        candidates.append(
+            _lifecycle_event_candidate(
+                provider_account=provider_account,
+                event_kind=event_kind,
+                severity=rpki_models.LifecycleHealthEventSeverity.WARNING,
+                dedupe_suffix=f'expiry:{expiry_kind}',
+                title=f'{expiry_kind.title()} nearing expiry',
+                details=section,
+                active=True,
+                summary=summary,
+                related_snapshot_id=publication_snapshot_id,
+            )
+        )
+
+    publication_attention_count = int(publication.get('attention_count', 0) or 0)
+    if publication_attention_count > 0:
+        candidates.append(
+            _lifecycle_event_candidate(
+                provider_account=provider_account,
+                event_kind=rpki_models.LifecycleHealthEventKind.PUBLICATION_ATTENTION,
+                severity=rpki_models.LifecycleHealthEventSeverity.WARNING,
+                dedupe_suffix=f'publication:{publication_snapshot_id or "none"}',
+                title='Publication health attention',
+                details=publication,
+                active=True,
+                summary=summary,
+                related_snapshot_id=publication_snapshot_id,
+            )
+        )
+
+    diff_attention_count = int(summary.get('attention_summary', {}).get('diff_attention_count', 0) or 0)
+    if diff_attention_count > 0 or any(int(diff.get(key, 0) or 0) > 0 for key in ('records_added', 'records_removed', 'records_changed')):
+        candidates.append(
+            _lifecycle_event_candidate(
+                provider_account=provider_account,
+                event_kind=rpki_models.LifecycleHealthEventKind.PUBLICATION_DIFF,
+                severity=rpki_models.LifecycleHealthEventSeverity.WARNING,
+                dedupe_suffix=f'diff:{latest_diff_id or "none"}',
+                title='Publication diff attention',
+                details=diff,
+                active=True,
+                summary=summary,
+                related_snapshot_diff_id=latest_diff_id,
+            )
+        )
+
+    return candidates
+
+
+def evaluate_lifecycle_health_events(
+    provider_account: rpki_models.RpkiProviderAccount,
+    *,
+    summary: Mapping[str, object] | None = None,
+    snapshot: rpki_models.ProviderSnapshot | None = None,
+    snapshot_diff: rpki_models.ProviderSnapshotDiff | None = None,
+) -> dict[str, object]:
+    if summary is None:
+        visible_snapshot_ids = {snapshot.pk} if snapshot is not None else None
+        visible_diff_ids = {snapshot_diff.pk} if snapshot_diff is not None else None
+        summary = build_provider_lifecycle_health_summary(
+            provider_account,
+            visible_snapshot_ids=visible_snapshot_ids,
+            visible_diff_ids=visible_diff_ids,
+        )
+
+    now = timezone.now()
+    candidates = build_lifecycle_event_candidates(
+        provider_account,
+        summary=summary,
+        snapshot=snapshot,
+        snapshot_diff=snapshot_diff,
+    )
+    repeat_after_minutes = int(((summary.get('policy') or {}).get('thresholds') or {}).get('alert_repeat_after_minutes', 0) or 0)
+    repeat_after_delta = timedelta(minutes=repeat_after_minutes)
+    hooks = list(
+        rpki_models.LifecycleHealthHook.objects.filter(
+            organization=provider_account.organization,
+            enabled=True,
+        )
+        .select_related('organization', 'provider_account', 'policy')
+        .order_by('name', 'pk')
+    )
+
+    opened = repeated = resolved = 0
+    events: list[rpki_models.LifecycleHealthEvent] = []
+    for hook in hooks:
+        if hook.provider_account_id is not None and hook.provider_account_id != provider_account.pk:
+            continue
+        if hook.policy_id is not None and hook.policy_id != ((summary.get('policy') or {}).get('policy_id')):
+            continue
+        allowed_kinds = set(hook.event_kinds_json or [])
+        for candidate in candidates:
+            if allowed_kinds and candidate['event_kind'] not in allowed_kinds:
+                continue
+
+            active_event = (
+                hook.events.filter(
+                    dedupe_key=candidate['dedupe_key'],
+                    status__in=_LIFECYCLE_EVENT_ACTIVE_STATUSES,
+                )
+                .order_by('-last_seen_at', '-created')
+                .first()
+            )
+
+            if candidate['active']:
+                if active_event is None:
+                    event = rpki_models.LifecycleHealthEvent.objects.create(
+                        name=candidate['title'],
+                        organization=provider_account.organization,
+                        provider_account=provider_account,
+                        policy=hook.policy,
+                        hook=hook,
+                        related_snapshot_id=candidate['related_snapshot_id'],
+                        related_snapshot_diff_id=candidate['related_snapshot_diff_id'],
+                        event_kind=candidate['event_kind'],
+                        severity=candidate['severity'],
+                        status=rpki_models.LifecycleHealthEventStatus.OPEN,
+                        dedupe_key=candidate['dedupe_key'],
+                        first_seen_at=now,
+                        last_seen_at=now,
+                        last_emitted_at=now,
+                        payload_json=candidate['payload_json'],
+                    )
+                    opened += 1
+                else:
+                    event = active_event
+                    status = rpki_models.LifecycleHealthEventStatus.OPEN
+                    if event.last_emitted_at is None or now - event.last_emitted_at >= repeat_after_delta:
+                        status = rpki_models.LifecycleHealthEventStatus.REPEATED
+                        event.last_emitted_at = now
+                        repeated += 1
+                    event.name = candidate['title']
+                    event.event_kind = candidate['event_kind']
+                    event.severity = candidate['severity']
+                    event.status = status
+                    event.last_seen_at = now
+                    event.related_snapshot_id = candidate['related_snapshot_id']
+                    event.related_snapshot_diff_id = candidate['related_snapshot_diff_id']
+                    event.payload_json = candidate['payload_json']
+                    event.delivery_error = ''
+                    event.save(
+                        update_fields=(
+                            'name',
+                            'event_kind',
+                            'severity',
+                            'status',
+                            'last_seen_at',
+                            'last_emitted_at',
+                            'related_snapshot',
+                            'related_snapshot_diff',
+                            'payload_json',
+                            'delivery_error',
+                            'last_updated',
+                        )
+                    )
+                events.append(event)
+                continue
+
+            if active_event is None:
+                continue
+
+            active_event.status = rpki_models.LifecycleHealthEventStatus.RESOLVED
+            active_event.resolved_at = now
+            active_event.last_seen_at = now
+            active_event.related_snapshot_id = candidate['related_snapshot_id']
+            active_event.related_snapshot_diff_id = candidate['related_snapshot_diff_id']
+            active_event.payload_json = candidate['payload_json']
+            active_event.delivery_error = ''
+            active_event.save(
+                update_fields=(
+                    'status',
+                    'resolved_at',
+                    'last_seen_at',
+                    'related_snapshot',
+                    'related_snapshot_diff',
+                    'payload_json',
+                    'delivery_error',
+                    'last_updated',
+                )
+            )
+            resolved += 1
+            events.append(active_event)
+
+    return {
+        'candidate_count': len(candidates),
+        'event_count': len(events),
+        'opened_count': opened,
+        'repeated_count': repeated,
+        'resolved_count': resolved,
+        'events': events,
+    }
+
+
 def _normalize_date_or_datetime(value: date | datetime | None) -> datetime | None:
     if value is None:
         return None

@@ -2816,6 +2816,10 @@ class LifecycleHealthEvent(NamedRpkiStandardModel):
         constraints = (
             models.UniqueConstraint(
                 fields=('hook', 'dedupe_key'),
+                condition=Q(status__in=(
+                    LifecycleHealthEventStatus.OPEN,
+                    LifecycleHealthEventStatus.REPEATED,
+                )),
                 name='nb_rpki_lchevent_hook_dedupe_unique',
             ),
         )

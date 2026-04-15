@@ -800,6 +800,7 @@ class ROAChangePlanViewSet(VIEWSET_CLASS_MAP['roachangeplan']):
         lint_ack_required_total = 0
         lint_acknowledged_total = 0
         lint_suppressed_total = 0
+        lint_previously_acknowledged_total = 0
         lint_status_counts: dict[str, int] = {}
         for plan in queryset.prefetch_related('simulation_runs', 'lint_runs'):
             by_status[plan.status] = by_status.get(plan.status, 0) + 1
@@ -838,6 +839,7 @@ class ROAChangePlanViewSet(VIEWSET_CLASS_MAP['roachangeplan']):
             lint_ack_required_total += lint_posture['unresolved_acknowledgement_required_finding_count']
             lint_acknowledged_total += lint_posture['acknowledged_finding_count']
             lint_suppressed_total += lint_posture['suppressed_finding_count']
+            lint_previously_acknowledged_total += lint_posture.get('previously_acknowledged_finding_count', 0)
             lint_status = lint_posture['status']
             lint_status_counts[lint_status] = lint_status_counts.get(lint_status, 0) + 1
         return Response({
@@ -862,6 +864,7 @@ class ROAChangePlanViewSet(VIEWSET_CLASS_MAP['roachangeplan']):
             'lint_acknowledgement_required_total': lint_ack_required_total,
             'lint_acknowledged_total': lint_acknowledged_total,
             'lint_suppressed_total': lint_suppressed_total,
+            'lint_previously_acknowledged_total': lint_previously_acknowledged_total,
             'lint_status_counts': lint_status_counts,
         })
 
