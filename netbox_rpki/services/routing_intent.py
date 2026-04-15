@@ -13,6 +13,11 @@ from ipam.filtersets import ASNFilterSet, PrefixFilterSet
 from ipam.models import ASN, Prefix
 
 from netbox_rpki import models as rpki_models
+from netbox_rpki.services.external_management import (
+    list_active_external_management_exceptions,
+    match_published_roa_exception,
+    match_roa_intent_exception,
+)
 
 
 class RoutingIntentExecutionError(ValueError):
@@ -1961,6 +1966,10 @@ def reconcile_roa_intents(
     best_match_kind_summary: dict[str, int] = {}
     best_results_by_source: dict[str, list[dict]] = {}
     active_intents = 0
+    external_management_exceptions = list_active_external_management_exceptions(profile.organization)
+    matched_external_intent_count = 0
+    matched_external_published_count = 0
+    matched_external_review_due_count = 0
 
     intents = derivation_run.roa_intents.select_related(
         'origin_asn',
@@ -2014,6 +2023,17 @@ def reconcile_roa_intents(
         intent_result_summary[result_type] = intent_result_summary.get(result_type, 0) + 1
         best_match_details = dict(getattr(best_match, 'details_json', {}) or {})
         delegated_scope = _delegated_scope_summary_for_intent(intent)
+        external_management_exception = match_roa_intent_exception(
+            profile.organization,
+            prefix_cidr_text=intent.prefix_cidr_text,
+            origin_asn_value=intent.origin_asn_value,
+            max_length=intent.max_length,
+            exceptions=external_management_exceptions,
+        )
+        if external_management_exception:
+            matched_external_intent_count += 1
+            if external_management_exception.get('is_review_due'):
+                matched_external_review_due_count += 1
         intent_result = rpki_models.ROAIntentResult.objects.create(
             name=f'{intent.name} Result',
             reconciliation_run=reconciliation_run,
@@ -2040,6 +2060,7 @@ def reconcile_roa_intents(
                 'replacement_reason_code': best_match_details.get('replacement_reason_code'),
                 'published_source': _serialize_match_source(best_match),
                 'delegated_scope': delegated_scope,
+                'external_management_exception': external_management_exception,
             },
             computed_at=now,
         )
@@ -2060,6 +2081,19 @@ def reconcile_roa_intents(
         row_matches = best_results_by_source.get(source_key, [])
         result_type, severity, published_details = _published_result_from_matches(row_matches)
         published_result_summary[result_type] = published_result_summary.get(result_type, 0) + 1
+        external_management_exception = match_published_roa_exception(
+            profile.organization,
+            roa_id=getattr(representative.roa, 'pk', None),
+            imported_authorization_id=getattr(representative.imported_authorization, 'pk', None),
+            prefix_cidr_text=representative.prefix_cidr_text,
+            origin_asn_value=representative.origin_asn_value,
+            max_length=representative.max_length,
+            exceptions=external_management_exceptions,
+        )
+        if external_management_exception:
+            matched_external_published_count += 1
+            if external_management_exception.get('is_review_due'):
+                matched_external_review_due_count += 1
 
         rpki_models.PublishedROAResult.objects.create(
             name=f'{representative.source_name} Published Result',
@@ -2083,6 +2117,7 @@ def reconcile_roa_intents(
                     for match_info in row_matches
                     if match_info.get('delegated_scope')
                 ],
+                'external_management_exception': external_management_exception,
                 **published_details,
             },
             computed_at=now,
@@ -2111,6 +2146,9 @@ def reconcile_roa_intents(
                 rpki_models.PublishedROAResultType.STALE,
             }
         ),
+        'external_management_matched_intent_count': matched_external_intent_count,
+        'external_management_matched_published_count': matched_external_published_count,
+        'external_management_review_due_match_count': matched_external_review_due_count,
     }
     reconciliation_run.save(update_fields=(
         'status',

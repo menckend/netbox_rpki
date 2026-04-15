@@ -31,6 +31,7 @@ from netbox_rpki.tests.base import PluginAPITestCase
 from netbox_rpki.tests.utils import (
     create_test_asn,
     create_test_certificate,
+    create_test_external_management_exception,
     create_test_imported_roa_authorization,
     create_test_organization,
     create_test_prefix,
@@ -1177,6 +1178,31 @@ class RoutingIntentServiceTestCase(TestCase):
         self.assertEqual(intent_result.best_imported_authorization, imported_authorization)
         self.assertEqual(best_match.imported_authorization, imported_authorization)
         self.assertEqual(published_result.result_type, rpki_models.PublishedROAResultType.MATCHED)
+
+    def test_reconciliation_records_matching_external_management_exception_without_hiding_result(self):
+        derivation_run = derive_roa_intents(self.profile)
+        create_test_external_management_exception(
+            name='Primary Prefix Managed Elsewhere',
+            organization=self.organization,
+            scope_type=rpki_models.ExternalManagementScope.ROA_PREFIX,
+            prefix=self.primary_prefix,
+            origin_asn=self.origin_asn,
+            max_length=24,
+            owner='adoption-owner',
+            reason='Still managed through the legacy provider workflow.',
+            starts_at=timezone.now() - timedelta(days=2),
+            review_at=timezone.now() + timedelta(days=7),
+        )
+
+        reconciliation_run = reconcile_roa_intents(derivation_run)
+        intent_result = reconciliation_run.intent_results.get(roa_intent__prefix=self.primary_prefix)
+
+        self.assertEqual(intent_result.result_type, rpki_models.ROAIntentResultType.MISSING)
+        self.assertEqual(
+            intent_result.details_json['external_management_exception']['owner'],
+            'adoption-owner',
+        )
+        self.assertEqual(reconciliation_run.result_summary_json['external_management_matched_intent_count'], 1)
 
     def test_reconciliation_marks_same_prefix_provider_mismatch_as_replacement(self):
         derivation_run = derive_roa_intents(self.profile)

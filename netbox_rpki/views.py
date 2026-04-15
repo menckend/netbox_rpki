@@ -439,6 +439,7 @@ class OperationsDashboardExportView(LifecycleExportViewMixin, ContentTypePermiss
         'netbox_rpki.view_certificate',
         'netbox_rpki.view_routingintenttemplatebinding',
         'netbox_rpki.view_routingintentexception',
+        'netbox_rpki.view_externalmanagementexception',
         'netbox_rpki.view_bulkintentrun',
         'netbox_rpki.view_roareconciliationrun',
         'netbox_rpki.view_roachangeplan',
@@ -1856,6 +1857,7 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
         expiring_certificates = self.get_expiring_certificates(request)
         stale_bindings = self.get_stale_bindings(request)
         expiring_exceptions = self.get_expiring_exceptions(request)
+        external_management_exceptions_requiring_review = self.get_external_management_exceptions_requiring_review(request)
         bulk_run_rollup = self.get_bulk_run_rollup(request)
         roa_reconciliation_summary = self.get_roa_reconciliation_summary(request)
         roa_change_plan_summary = self.get_roa_change_plan_summary(request)
@@ -1878,6 +1880,7 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
             'expiring_certificates': expiring_certificates,
             'stale_bindings': stale_bindings,
             'expiring_exceptions': expiring_exceptions,
+            'external_management_exceptions_requiring_review': external_management_exceptions_requiring_review,
             'bulk_run_rollup': bulk_run_rollup,
             'roa_reconciliation_summary': roa_reconciliation_summary,
             'roa_change_plan_summary': roa_change_plan_summary,
@@ -2221,6 +2224,33 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
                 'expiry_text': self.get_expiry_text(timezone.localtime(exception.ends_at).date(), today=now.date()),
                 'expiry_badge_class': self.get_expiry_badge_class(timezone.localtime(exception.ends_at).date(), today=now.date()),
                 'lifecycle_text': self.get_exception_lifecycle_text(exception),
+            })
+        return items[:10]
+
+    def get_external_management_exceptions_requiring_review(self, request):
+        now = timezone.now()
+        queryset = (
+            models.ExternalManagementException.objects.restrict(request.user, 'view')
+            .select_related('organization', 'prefix', 'roa', 'imported_authorization', 'aspa', 'imported_aspa')
+            .filter(enabled=True)
+            .order_by('review_at', 'ends_at', 'name')
+        )
+        items = []
+        for exception in queryset:
+            if not exception.is_review_due and not exception.is_expired:
+                continue
+            if exception.is_expired:
+                status_text = 'Expired'
+                status_badge_class = 'danger'
+            else:
+                status_text = 'Review Due'
+                status_badge_class = 'warning'
+            items.append({
+                'object': exception,
+                'organization': exception.organization,
+                'scope_text': exception.get_scope_type_display(),
+                'status_text': status_text,
+                'status_badge_class': status_badge_class,
             })
         return items[:10]
 

@@ -19,7 +19,7 @@ Implements NetBox models, API endpoints, GraphQL types, tables, and UI views acr
 
 **Routing intent** lets operators define and manage publication intent for ROAs and ASPAs. Routing intent profiles, rules, context groups, context criteria, and policy bundles express derivation policy. ROA intent overrides handle explicit per-prefix exceptions. Reusable templates, template rules, template bindings, and typed exceptions support scalable policy authoring across organizations. Bulk intent runs with per-scope results drive organization-scoped derivation, and the operations dashboard surfaces stale bindings, expiring exceptions, and recent bulk-run health.
 
-**ROA and ASPA reconciliation** compares derived intent against published objects. Intent derivation runs, ROA intent rows, match records, reconciliation runs, intent results, and published results form the ROA reconciliation pipeline. A parallel family covers ASPA reconciliation. All derivation and reconciliation run and result objects are read-only reporting surfaces.
+**ROA and ASPA reconciliation** compares derived intent against published objects. Intent derivation runs, ROA intent rows, match records, reconciliation runs, intent results, and published results form the ROA reconciliation pipeline. A parallel family covers ASPA reconciliation. External management exceptions let operators record approved, time-bounded exceptions for prefixes or objects that remain intentionally managed outside the plugin, while keeping those results visible in reconciliation. All derivation and reconciliation run and result objects are read-only reporting surfaces.
 
 **ROA lint** provides configurable quality analysis of locally recorded ROA inventory through lint runs, findings, acknowledgements, suppressions, and per-rule configurations.
 
@@ -241,6 +241,9 @@ Implements NetBox models, API endpoints, GraphQL types, tables, and UI views acr
 
 #### ROA Lint Rule Config
    - Stores per-rule configuration controlling lint severity and enablement.
+
+#### External Management Exception
+   - Records an approved external-management exception for a ROA prefix, ROA object, ASPA customer scope, or imported/local published object, including owner, reason, start, review, and end dates.
 
 #### ROA change plan and write-back models
 

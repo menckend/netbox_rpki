@@ -38,6 +38,7 @@ from netbox_rpki.tests.utils import (
     create_test_certificate_asn,
     create_test_certificate_prefix,
     create_test_end_entity_certificate,
+    create_test_external_management_exception,
     create_test_external_object_reference,
     create_test_organization,
     create_test_manifest,
@@ -581,6 +582,7 @@ def _register_scenario_builders() -> None:
             "routingintenttemplaterule": build_routing_intent_template_rule_form_data,
             "routingintenttemplatebinding": build_routing_intent_template_binding_form_data,
             "routingintentexception": build_routing_intent_exception_form_data,
+            "externalmanagementexception": build_external_management_exception_form_data,
             "roalintruleconfig": build_roa_lint_rule_config_form_data,
             "lifecyclehealthpolicy": build_lifecycle_health_policy_form_data,
             "telemetrysource": build_telemetry_source_form_data,
@@ -628,6 +630,9 @@ def _register_scenario_builders() -> None:
             ),
             "routingintentexception": lambda: build_routing_intent_exception_instance(
                 unique_token("routing-intent-exception-instance")
+            ),
+            "externalmanagementexception": lambda: build_external_management_exception_instance(
+                unique_token("external-management-exception-instance")
             ),
             "lifecyclehealthevent": lambda: build_lifecycle_health_event_instance(
                 unique_token("lifecycle-health-event-instance")
@@ -1007,6 +1012,23 @@ def build_routing_intent_exception_form_data() -> dict[str, object]:
     }
 
 
+def build_external_management_exception_form_data() -> dict[str, object]:
+    organization = create_unique_organization("external-management-exception-form-org")
+    prefix = create_unique_prefix()
+    origin_asn = create_unique_asn()
+    return {
+        "name": f"External Management Exception {unique_token('external-management-exception-form')}",
+        "organization": organization.pk,
+        "scope_type": rpki_models.ExternalManagementScope.ROA_PREFIX,
+        "prefix": prefix.pk,
+        "origin_asn": origin_asn.pk,
+        "max_length": 24,
+        "owner": "rpki-ops",
+        "reason": "Managed outside the plugin while onboarding.",
+        "enabled": True,
+    }
+
+
 def build_roa_lint_rule_config_form_data() -> dict[str, object]:
     organization = create_unique_organization("roa-lint-rule-config-form-org")
     return {
@@ -1189,6 +1211,21 @@ def build_routing_intent_exception_instance(token: str, variant: int = 0):
             if variant % 2 == 0
             else rpki_models.RoutingIntentExceptionEffectMode.FORCE_INCLUDE
         ),
+        enabled=variant % 2 == 0,
+    )
+
+
+def build_external_management_exception_instance(token: str, variant: int = 0):
+    organization = create_unique_organization(f"{token}-org")
+    prefix = create_unique_prefix()
+    return create_test_external_management_exception(
+        name=f"External Management Exception {token}",
+        organization=organization,
+        scope_type=rpki_models.ExternalManagementScope.ROA_PREFIX,
+        prefix=prefix,
+        origin_asn=create_unique_asn(),
+        max_length=24 + variant,
+        owner=f"owner-{token}",
         enabled=variant % 2 == 0,
     )
 

@@ -7,6 +7,11 @@ from functools import lru_cache
 from django.utils import timezone
 
 from netbox_rpki import models as rpki_models
+from netbox_rpki.services.external_management import (
+    list_active_external_management_exceptions,
+    match_aspa_intent_exception,
+    match_published_aspa_exception,
+)
 
 
 ASPA_COMPARISON_SCOPE_LOCAL = 'local_aspa_records'
@@ -445,6 +450,10 @@ def reconcile_aspa_intents(
     active_intents = 0
     published_records_seen: set[str] = set()
     intent_records = list(_intent_queryset(intent_profile).order_by('pk'))
+    external_management_exceptions = list_active_external_management_exceptions(organization)
+    matched_external_intent_count = 0
+    matched_external_published_count = 0
+    matched_external_review_due_count = 0
     intent_provider_values_by_customer: dict[int | None, set[int]] = defaultdict(set)
     delegated_scope_counts: Counter[str] = Counter()
     customer_scope_signatures: dict[int | None, set[tuple]] = defaultdict(set)
@@ -491,6 +500,17 @@ def reconcile_aspa_intents(
             'delegated_scope': delegated_scope,
             'ownership_scope_conflict_for_customer': customer_value in ownership_scope_conflict_customer_asns,
         }
+        external_management_exception = match_aspa_intent_exception(
+            organization,
+            customer_asn_value=customer_value,
+            provider_asn_value=provider_value,
+            exceptions=external_management_exceptions,
+        )
+        if external_management_exception:
+            matched_external_intent_count += 1
+            if external_management_exception.get('is_review_due'):
+                matched_external_review_due_count += 1
+            details_json['external_management_exception'] = external_management_exception
         result_kwargs = {
             'name': f'{getattr(intent, "name", "ASPA Intent")} Result',
             'reconciliation_run': run,
@@ -515,6 +535,18 @@ def reconcile_aspa_intents(
                 desired_provider_values,
                 published_record,
             )
+            external_management_exception = match_published_aspa_exception(
+                organization,
+                aspa_id=getattr(published_record.aspa, 'pk', None),
+                imported_aspa_id=getattr(published_record.imported_aspa, 'pk', None),
+                customer_asn_value=customer_value,
+                provider_values=tuple(published_record.provider_values),
+                exceptions=external_management_exceptions,
+            )
+            if external_management_exception:
+                matched_external_published_count += 1
+                if external_management_exception.get('is_review_due'):
+                    matched_external_review_due_count += 1
             published_result_counts[result_type] += 1
             _create_record(
                 'PublishedASPAResult',
@@ -535,6 +567,7 @@ def reconcile_aspa_intents(
                         for intent in intent_records
                         if _intent_is_active(intent) and _intent_customer_asn_value(intent) == customer_value
                     ],
+                    'external_management_exception': external_management_exception,
                     **details_json,
                 },
                 summary_json={
@@ -547,6 +580,7 @@ def reconcile_aspa_intents(
                         for intent in intent_records
                         if _intent_is_active(intent) and _intent_customer_asn_value(intent) == customer_value
                     ],
+                    'external_management_exception': external_management_exception,
                     **details_json,
                 },
                 computed_at=now,
@@ -568,6 +602,9 @@ def reconcile_aspa_intents(
             'delegated_scope_counts': dict(delegated_scope_counts),
             'ownership_scope_conflict_customer_asns': ownership_scope_conflict_customer_asns,
             'ownership_scope_conflict_customer_count': len(ownership_scope_conflict_customer_asns),
+            'external_management_matched_intent_count': matched_external_intent_count,
+            'external_management_matched_published_count': matched_external_published_count,
+            'external_management_review_due_match_count': matched_external_review_due_count,
         },
         'summary_json': {
             'comparison_scope': comparison_scope,
@@ -580,6 +617,9 @@ def reconcile_aspa_intents(
             'delegated_scope_counts': dict(delegated_scope_counts),
             'ownership_scope_conflict_customer_asns': ownership_scope_conflict_customer_asns,
             'ownership_scope_conflict_customer_count': len(ownership_scope_conflict_customer_asns),
+            'external_management_matched_intent_count': matched_external_intent_count,
+            'external_management_matched_published_count': matched_external_published_count,
+            'external_management_review_due_match_count': matched_external_review_due_count,
         },
     }
     for field_name, value in run_kwargs.items():

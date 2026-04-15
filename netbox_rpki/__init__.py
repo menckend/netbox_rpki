@@ -1,6 +1,6 @@
 from importlib.metadata import PackageNotFoundError, version
 
-from netbox import __version__ as netbox_version
+from django.conf import settings
 from netbox.plugins import PluginConfig
 
 from .compatibility import emit_runtime_compatibility_warning
@@ -38,7 +38,7 @@ class RpkiConfig(PluginConfig):
         from netbox.plugins import register_menu as _register_menu
         for _m in getattr(_nav, 'menus', ()):
             _register_menu(_m)
-        emit_runtime_compatibility_warning(netbox_version=netbox_version)
+        emit_runtime_compatibility_warning(netbox_version=getattr(settings, 'VERSION', self.min_version))
 
 
 config = RpkiConfig

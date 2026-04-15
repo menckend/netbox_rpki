@@ -29,6 +29,7 @@ from netbox_rpki.tests.utils import (
     create_test_certificate_asn,
     create_test_certificate_prefix,
     create_test_end_entity_certificate,
+    create_test_external_management_exception,
     create_test_model,
     create_test_object_validation_result,
     create_test_intent_derivation_run,
@@ -1746,6 +1747,48 @@ class RoutingIntentTemplateModelBehaviorTestCase(TestCase):
 
         with self.assertRaises(ValidationError):
             exception.full_clean()
+
+    def test_external_management_exception_requires_target_for_scope(self):
+        exception = rpki_models.ExternalManagementException(
+            name='Missing External Target',
+            organization=create_test_organization(org_id='external-org', name='External Org'),
+            scope_type=rpki_models.ExternalManagementScope.ROA_OBJECT,
+            owner='rpki-ops',
+            reason='Managed elsewhere.',
+        )
+
+        with self.assertRaises(ValidationError):
+            exception.full_clean()
+
+    def test_external_management_exception_validates_roa_organization_alignment(self):
+        organization = create_test_organization(org_id='external-aligned-org', name='External Aligned Org')
+        other_organization = create_test_organization(org_id='external-other-org', name='External Other Org')
+        certificate = create_test_certificate(name='External ROA Cert', rpki_org=other_organization)
+        roa = create_test_roa(name='External Managed ROA', signed_by=certificate, origin_as=create_test_asn(65100))
+        exception = create_test_external_management_exception(
+            organization=organization,
+            scope_type=rpki_models.ExternalManagementScope.ROA_OBJECT,
+            roa=roa,
+        )
+
+        with self.assertRaises(ValidationError):
+            exception.full_clean()
+
+    def test_external_management_exception_exposes_lifecycle_flags(self):
+        prefix = create_test_prefix('10.250.0.0/24')
+        origin_asn = create_test_asn(65250)
+        exception = create_test_external_management_exception(
+            scope_type=rpki_models.ExternalManagementScope.ROA_PREFIX,
+            prefix=prefix,
+            origin_asn=origin_asn,
+            starts_at=timezone.now() - timedelta(days=5),
+            review_at=timezone.now() - timedelta(days=1),
+            ends_at=timezone.now() + timedelta(days=2),
+        )
+
+        self.assertTrue(exception.is_active)
+        self.assertTrue(exception.is_review_due)
+        self.assertFalse(exception.is_expired)
 
     def test_bulk_scope_result_validates_binding_and_bulk_run_organization(self):
         organization = create_test_organization(org_id='bulk-org', name='Bulk Org')

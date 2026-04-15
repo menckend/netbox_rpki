@@ -36,6 +36,7 @@ from netbox_rpki.tests.utils import (
     create_test_certificate_prefix,
     create_test_certificate_revocation_list,
     create_test_end_entity_certificate,
+    create_test_external_management_exception,
     create_test_imported_roa_authorization,
     create_test_irr_change_plan,
     create_test_irr_change_plan_item,
@@ -372,6 +373,7 @@ class LifecycleExportViewTestCase(PluginViewTestCase):
             'netbox_rpki.view_certificate',
             'netbox_rpki.view_routingintenttemplatebinding',
             'netbox_rpki.view_routingintentexception',
+            'netbox_rpki.view_externalmanagementexception',
             'netbox_rpki.view_bulkintentrun',
             'netbox_rpki.view_roareconciliationrun',
             'netbox_rpki.view_roachangeplan',
@@ -2063,6 +2065,21 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
             effect_mode=rpki_models.RoutingIntentExceptionEffectMode.SUPPRESS,
             ends_at=timezone.now() + timedelta(days=60),
         )
+        cls.external_management_prefix = create_test_prefix('10.201.0.0/24', status='active')
+        cls.external_management_origin_asn = create_test_asn(65201)
+        cls.review_due_external_management_exception = create_test_external_management_exception(
+            name='Operations Review-Due External Exception',
+            organization=cls.organization,
+            scope_type=rpki_models.ExternalManagementScope.ROA_PREFIX,
+            prefix=cls.external_management_prefix,
+            origin_asn=cls.external_management_origin_asn,
+            max_length=24,
+            owner='dashboard-owner',
+            reason='Managed externally during adoption.',
+            starts_at=timezone.now() - timedelta(days=10),
+            review_at=timezone.now() - timedelta(days=1),
+            ends_at=timezone.now() + timedelta(days=10),
+        )
         cls.failed_bulk_run = create_test_bulk_intent_run(
             name='Operations Failed Bulk Run',
             organization=cls.organization,
@@ -2244,6 +2261,7 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
             'netbox_rpki.view_certificate',
             'netbox_rpki.view_routingintenttemplatebinding',
             'netbox_rpki.view_routingintentexception',
+            'netbox_rpki.view_externalmanagementexception',
             'netbox_rpki.view_bulkintentrun',
             'netbox_rpki.view_roareconciliationrun',
             'netbox_rpki.view_roachangeplan',
@@ -2275,6 +2293,9 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
         self.assertContains(response, self.expiring_exception.name)
         self.assertNotContains(response, self.future_exception.name)
         self.assertContains(response, 'Expires in 5 day(s)')
+        self.assertContains(response, 'External Management Exceptions Requiring Review')
+        self.assertContains(response, self.review_due_external_management_exception.name)
+        self.assertContains(response, 'Review Due')
         self.assertContains(response, 'Pending Approval')
         self.assertContains(response, 'Recent Bulk Intent Runs')
         self.assertContains(response, self.failed_bulk_run.name)

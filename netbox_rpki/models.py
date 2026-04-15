@@ -545,6 +545,15 @@ class ROALintSuppressionScope(models.TextChoices):
     PREFIX = "prefix", "Prefix"
 
 
+class ExternalManagementScope(models.TextChoices):
+    ROA_PREFIX = "roa_prefix", "ROA Prefix"
+    ROA_OBJECT = "roa_object", "ROA Object"
+    ROA_IMPORTED = "roa_imported", "Imported ROA Object"
+    ASPA_CUSTOMER = "aspa_customer", "ASPA Customer"
+    ASPA_OBJECT = "aspa_object", "ASPA Object"
+    ASPA_IMPORTED = "aspa_imported", "Imported ASPA Object"
+
+
 class ProviderWriteOperation(models.TextChoices):
     ADD_ROUTE = "add_route", "Add Route"
     REMOVE_ROUTE = "remove_route", "Remove Route"
@@ -2586,6 +2595,202 @@ class RoutingIntentException(NamedRpkiStandardModel):
                 raise ValidationError({'template_binding': ['Template binding organization must match the exception organization.']})
             if self.intent_profile_id and binding_profile_id is not None and binding_profile_id != self.intent_profile_id:
                 raise ValidationError({'template_binding': ['Template binding must belong to the selected intent profile.']})
+
+
+class ExternalManagementException(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='external_management_exceptions',
+    )
+    scope_type = models.CharField(
+        max_length=32,
+        choices=ExternalManagementScope.choices,
+        default=ExternalManagementScope.ROA_PREFIX,
+    )
+    prefix = models.ForeignKey(
+        to=Prefix,
+        on_delete=models.PROTECT,
+        related_name='external_management_exceptions',
+        blank=True,
+        null=True,
+    )
+    prefix_cidr_text = models.CharField(max_length=64, blank=True)
+    origin_asn = models.ForeignKey(
+        to=ASN,
+        on_delete=models.PROTECT,
+        related_name='external_management_exceptions',
+        blank=True,
+        null=True,
+    )
+    origin_asn_value = models.PositiveBigIntegerField(blank=True, null=True)
+    max_length = models.PositiveSmallIntegerField(blank=True, null=True)
+    roa = models.ForeignKey(
+        to='Roa',
+        on_delete=models.PROTECT,
+        related_name='external_management_exceptions',
+        blank=True,
+        null=True,
+    )
+    imported_authorization = models.ForeignKey(
+        to='ImportedRoaAuthorization',
+        on_delete=models.PROTECT,
+        related_name='external_management_exceptions',
+        blank=True,
+        null=True,
+    )
+    customer_asn = models.ForeignKey(
+        to=ASN,
+        on_delete=models.PROTECT,
+        related_name='external_management_customer_exceptions',
+        blank=True,
+        null=True,
+    )
+    customer_asn_value = models.PositiveBigIntegerField(blank=True, null=True)
+    provider_asn = models.ForeignKey(
+        to=ASN,
+        on_delete=models.PROTECT,
+        related_name='external_management_provider_exceptions',
+        blank=True,
+        null=True,
+    )
+    provider_asn_value = models.PositiveBigIntegerField(blank=True, null=True)
+    aspa = models.ForeignKey(
+        to='ASPA',
+        on_delete=models.PROTECT,
+        related_name='external_management_exceptions',
+        blank=True,
+        null=True,
+    )
+    imported_aspa = models.ForeignKey(
+        to='ImportedAspa',
+        on_delete=models.PROTECT,
+        related_name='external_management_exceptions',
+        blank=True,
+        null=True,
+    )
+    owner = models.CharField(max_length=150)
+    reason = models.TextField()
+    starts_at = models.DateTimeField(blank=True, null=True)
+    review_at = models.DateTimeField(blank=True, null=True)
+    ends_at = models.DateTimeField(blank=True, null=True)
+    approved_by = models.CharField(max_length=200, blank=True)
+    approved_at = models.DateTimeField(blank=True, null=True)
+    enabled = models.BooleanField(default=True)
+    summary_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ('organization', 'scope_type', 'name')
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_rpki:externalmanagementexception", args=[self.pk])
+
+    def clean(self):
+        super().clean()
+        errors = {}
+
+        if self.prefix_id and not self.prefix_cidr_text:
+            self.prefix_cidr_text = str(self.prefix.prefix)
+        if self.origin_asn_id and self.origin_asn_value is None:
+            self.origin_asn_value = self.origin_asn.asn
+        if self.customer_asn_id and self.customer_asn_value is None:
+            self.customer_asn_value = self.customer_asn.asn
+        if self.provider_asn_id and self.provider_asn_value is None:
+            self.provider_asn_value = self.provider_asn.asn
+
+        if self.ends_at and self.starts_at and self.ends_at < self.starts_at:
+            errors['ends_at'] = 'End time must be on or after the start time.'
+        if self.review_at and self.starts_at and self.review_at < self.starts_at:
+            errors['review_at'] = 'Review date must be on or after the start time.'
+        if self.approved_at and not self.approved_by:
+            errors['approved_by'] = 'Approved-by is required when approved-at is set.'
+
+        if self.prefix_id and self.prefix_cidr_text and self.prefix_cidr_text != str(self.prefix.prefix):
+            errors['prefix_cidr_text'] = 'Prefix CIDR must match the selected prefix.'
+        if self.origin_asn_id and self.origin_asn_value is not None and self.origin_asn_value != self.origin_asn.asn:
+            errors['origin_asn_value'] = 'Origin ASN value must match the selected origin ASN.'
+        if self.customer_asn_id and self.customer_asn_value is not None and self.customer_asn_value != self.customer_asn.asn:
+            errors['customer_asn_value'] = 'Customer ASN value must match the selected customer ASN.'
+        if self.provider_asn_id and self.provider_asn_value is not None and self.provider_asn_value != self.provider_asn.asn:
+            errors['provider_asn_value'] = 'Provider ASN value must match the selected provider ASN.'
+
+        scope_fields = {
+            ExternalManagementScope.ROA_PREFIX: (
+                bool(self.prefix_id or self.prefix_cidr_text),
+                ('roa', 'imported_authorization', 'customer_asn', 'customer_asn_value', 'provider_asn', 'provider_asn_value', 'aspa', 'imported_aspa'),
+            ),
+            ExternalManagementScope.ROA_OBJECT: (
+                self.roa_id is not None,
+                ('prefix', 'prefix_cidr_text', 'origin_asn', 'origin_asn_value', 'max_length', 'imported_authorization', 'customer_asn', 'customer_asn_value', 'provider_asn', 'provider_asn_value', 'aspa', 'imported_aspa'),
+            ),
+            ExternalManagementScope.ROA_IMPORTED: (
+                self.imported_authorization_id is not None,
+                ('prefix', 'prefix_cidr_text', 'origin_asn', 'origin_asn_value', 'max_length', 'roa', 'customer_asn', 'customer_asn_value', 'provider_asn', 'provider_asn_value', 'aspa', 'imported_aspa'),
+            ),
+            ExternalManagementScope.ASPA_CUSTOMER: (
+                bool(self.customer_asn_id or self.customer_asn_value is not None),
+                ('prefix', 'prefix_cidr_text', 'origin_asn', 'origin_asn_value', 'max_length', 'roa', 'imported_authorization', 'aspa', 'imported_aspa'),
+            ),
+            ExternalManagementScope.ASPA_OBJECT: (
+                self.aspa_id is not None,
+                ('prefix', 'prefix_cidr_text', 'origin_asn', 'origin_asn_value', 'max_length', 'roa', 'imported_authorization', 'customer_asn', 'customer_asn_value', 'provider_asn', 'provider_asn_value', 'imported_aspa'),
+            ),
+            ExternalManagementScope.ASPA_IMPORTED: (
+                self.imported_aspa_id is not None,
+                ('prefix', 'prefix_cidr_text', 'origin_asn', 'origin_asn_value', 'max_length', 'roa', 'imported_authorization', 'customer_asn', 'customer_asn_value', 'provider_asn', 'provider_asn_value', 'aspa'),
+            ),
+        }
+
+        scope_is_valid, forbidden_fields = scope_fields[self.scope_type]
+        if not scope_is_valid:
+            errors['scope_type'] = 'The selected scope type requires a matching target.'
+
+        for field_name in forbidden_fields:
+            value = getattr(self, field_name)
+            if value not in (None, ''):
+                errors[field_name] = f'Must be empty for {self.get_scope_type_display().lower()} exceptions.'
+
+        if self.scope_type == ExternalManagementScope.ROA_PREFIX and not (self.prefix_id or self.prefix_cidr_text):
+            errors['prefix_cidr_text'] = 'A prefix-scoped exception requires a prefix or prefix CIDR text.'
+
+        if self.scope_type == ExternalManagementScope.ROA_OBJECT and self.roa_id is not None:
+            organization_id = getattr(getattr(self.roa, 'signed_by', None), 'rpki_org_id', None)
+            if organization_id is not None and organization_id != self.organization_id:
+                errors['organization'] = 'Organization must match the selected ROA.'
+        if self.scope_type == ExternalManagementScope.ROA_IMPORTED and self.imported_authorization_id is not None:
+            if self.imported_authorization.organization_id != self.organization_id:
+                errors['organization'] = 'Organization must match the selected imported authorization.'
+        if self.scope_type == ExternalManagementScope.ASPA_OBJECT and self.aspa_id is not None:
+            if self.aspa.organization_id != self.organization_id:
+                errors['organization'] = 'Organization must match the selected ASPA.'
+        if self.scope_type == ExternalManagementScope.ASPA_IMPORTED and self.imported_aspa_id is not None:
+            if self.imported_aspa.organization_id != self.organization_id:
+                errors['organization'] = 'Organization must match the selected imported ASPA.'
+
+        if errors:
+            raise ValidationError(errors)
+
+    @property
+    def is_active(self) -> bool:
+        now = timezone.now()
+        if not self.enabled:
+            return False
+        if self.starts_at is not None and self.starts_at > now:
+            return False
+        if self.ends_at is not None and self.ends_at <= now:
+            return False
+        return True
+
+    @property
+    def is_expired(self) -> bool:
+        return self.ends_at is not None and self.ends_at <= timezone.now()
+
+    @property
+    def is_review_due(self) -> bool:
+        return self.review_at is not None and self.review_at <= timezone.now()
 
 
 class BulkIntentRun(NamedRpkiStandardModel):

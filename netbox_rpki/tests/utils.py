@@ -1301,6 +1301,75 @@ def create_test_routing_intent_exception(
     )
 
 
+def create_test_external_management_exception(
+    name='External Management Exception 1',
+    organization=None,
+    scope_type=None,
+    prefix=None,
+    prefix_cidr_text='',
+    origin_asn=None,
+    origin_asn_value=None,
+    max_length=None,
+    roa=None,
+    imported_authorization=None,
+    customer_asn=None,
+    customer_asn_value=None,
+    provider_asn=None,
+    provider_asn_value=None,
+    aspa=None,
+    imported_aspa=None,
+    owner='rpki-ops',
+    reason='Externally managed during staged adoption.',
+    starts_at=None,
+    review_at=None,
+    ends_at=None,
+    approved_by='',
+    approved_at=None,
+    enabled=True,
+    summary_json=None,
+    **kwargs,
+):
+    if organization is None:
+        if roa is not None:
+            organization = roa.signed_by.rpki_org
+        elif imported_authorization is not None:
+            organization = imported_authorization.organization
+        elif aspa is not None:
+            organization = aspa.organization
+        elif imported_aspa is not None:
+            organization = imported_aspa.organization
+        else:
+            organization = create_test_organization()
+    return rpki_models.ExternalManagementException.objects.create(
+        name=name,
+        organization=organization,
+        scope_type=scope_type or rpki_models.ExternalManagementScope.ROA_PREFIX,
+        prefix=prefix,
+        prefix_cidr_text=prefix_cidr_text,
+        origin_asn=origin_asn,
+        origin_asn_value=origin_asn_value,
+        max_length=max_length,
+        roa=roa,
+        imported_authorization=imported_authorization,
+        customer_asn=customer_asn,
+        customer_asn_value=customer_asn_value,
+        provider_asn=provider_asn,
+        provider_asn_value=provider_asn_value,
+        aspa=aspa,
+        imported_aspa=imported_aspa,
+        owner=owner,
+        reason=reason,
+        starts_at=starts_at,
+        review_at=review_at,
+        ends_at=ends_at,
+        approved_by=approved_by,
+        approved_at=approved_at,
+        enabled=enabled,
+        summary_json=summary_json or {},
+        **kwargs,
+    )
+
+
 def create_test_bulk_intent_run(
     name='Bulk Intent Run 1',
     organization=None,

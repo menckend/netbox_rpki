@@ -40,6 +40,13 @@
             </div>
             <div class="col col-md-3">
               <div class="border rounded p-3 h-100">
+                <div class="text-muted small text-uppercase">External Management Exceptions Due</div>
+                <div class="fs-2 fw-semibold">{{ external_management_exceptions_requiring_review|length }}</div>
+                <div class="text-muted">Review-due or expired externally managed exceptions</div>
+              </div>
+            </div>
+            <div class="col col-md-3">
+              <div class="border rounded p-3 h-100">
                 <div class="text-muted small text-uppercase">Bulk Runs Requiring Attention</div>
                 <div class="fs-2 fw-semibold">{{ bulk_run_rollup.attention_count }}</div>
                 <div class="text-muted">{{ bulk_run_rollup.running_count }} active, {{ bulk_run_rollup.failed_count }} failed</div>
@@ -576,6 +583,46 @@
           </div>
         {% else %}
           <div class="card-body text-muted">No enabled intent exceptions are currently within the effective lifecycle policy threshold.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="row mb-4">
+    <div class="col col-md-12">
+      <div class="card">
+        <h5 class="card-header">External Management Exceptions Requiring Review</h5>
+        {% if external_management_exceptions_requiring_review %}
+          <div class="card-body table-responsive">
+            <table class="table table-hover align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Organization</th>
+                  <th>Scope</th>
+                  <th>Owner</th>
+                  <th>Review At</th>
+                  <th>Ends At</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in external_management_exceptions_requiring_review %}
+                  <tr>
+                    <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
+                    <td><a href="{{ item.organization.get_absolute_url }}">{{ item.organization }}</a></td>
+                    <td>{{ item.scope_text }}</td>
+                    <td>{{ item.object.owner }}</td>
+                    <td>{{ item.object.review_at|default:'-' }}</td>
+                    <td>{{ item.object.ends_at|default:'-' }}</td>
+                    <td><span class="badge bg-{{ item.status_badge_class }}">{{ item.status_text }}</span></td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="card-body text-muted">No external management exceptions are currently review-due or expired.</div>
         {% endif %}
       </div>
     </div>

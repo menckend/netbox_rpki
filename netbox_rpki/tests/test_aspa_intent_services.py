@@ -12,6 +12,7 @@ from netbox_rpki.tests.utils import (
     create_test_aspa,
     create_test_aspa_intent,
     create_test_aspa_provider,
+    create_test_external_management_exception,
     create_test_imported_aspa,
     create_test_imported_aspa_provider,
     create_test_organization,
@@ -174,6 +175,34 @@ class ASPAIntentServiceTestCase(TestCase):
         self.assertEqual(published_result.result_type, 'stale')
         run_summary = _get_first_attr(run, 'result_summary_json', 'summary_json') or {}
         self.assertEqual(run_summary['provider_snapshot_id'], snapshot.pk)
+
+    def test_reconcile_records_matching_external_management_exception(self):
+        create_test_aspa_intent(
+            name='Externally Managed Intent',
+            organization=self.organization,
+            customer_as=self.customer_a,
+            provider_as=self.provider_b,
+        )
+        create_test_external_management_exception(
+            name='Externally Managed Customer',
+            organization=self.organization,
+            scope_type=rpki_models.ExternalManagementScope.ASPA_CUSTOMER,
+            customer_asn=self.customer_a,
+            provider_asn=self.provider_b,
+            owner='external-owner',
+            reason='ASPA publication remains external during onboarding.',
+        )
+
+        run = reconcile_aspa_intents(self.organization)
+        intent_result = rpki_models.ASPAIntentResult.objects.get(
+            reconciliation_run=run,
+            name='Externally Managed Intent Result',
+        )
+
+        self.assertEqual(intent_result.result_type, 'missing')
+        self.assertEqual(intent_result.details_json['external_management_exception']['owner'], 'external-owner')
+        run_summary = _get_first_attr(run, 'result_summary_json', 'summary_json') or {}
+        self.assertEqual(run_summary['external_management_matched_intent_count'], 1)
 
     def test_reconcile_records_delegated_scope_metadata(self):
         delegated_entity = rpki_models.DelegatedAuthorizationEntity.objects.create(
