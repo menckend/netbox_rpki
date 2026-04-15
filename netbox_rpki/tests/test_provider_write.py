@@ -828,6 +828,14 @@ class ASPAProviderWriteServiceTestCase(TestCase):
         self.assertEqual(execution.status, rpki_models.ValidationRunStatus.COMPLETED)
         self.assertEqual(execution.requested_by, 'preview-user')
         self.assertEqual(execution.request_payload_json, delta)
+        self.assertEqual(
+            execution.response_payload_json['delegated_scope'],
+            {
+                'delegated_scoped_item_count': 0,
+                'ownership_scope_conflict_customer_count': 0,
+                'ownership_scope_conflict_customer_asns': [],
+            },
+        )
         self.plan.refresh_from_db()
         self.assertEqual(self.plan.status, rpki_models.ASPAChangePlanStatus.DRAFT)
 
@@ -941,6 +949,14 @@ class ASPAProviderWriteServiceTestCase(TestCase):
                 'withdraw_count': len(delta['removed']),
                 'provider_add_count': sum(len(entry.get('provider_asns') or []) for entry in delta['added']),
                 'provider_remove_count': sum(len(entry.get('provider_asns') or []) for entry in delta['removed']),
+            },
+        )
+        self.assertEqual(
+            execution.response_payload_json['delegated_scope'],
+            {
+                'delegated_scoped_item_count': 0,
+                'ownership_scope_conflict_customer_count': 0,
+                'ownership_scope_conflict_customer_asns': [],
             },
         )
         submit_mock.assert_called_once_with(self.provider_account, delta)

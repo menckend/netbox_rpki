@@ -421,6 +421,15 @@ def _get_plan_governance_metadata(plan) -> dict[str, str]:
     return plan.get_governance_metadata()
 
 
+def _get_plan_delegated_scope_metadata(plan) -> dict:
+    summary = dict(getattr(plan, 'summary_json', {}) or {})
+    return {
+        'delegated_scoped_item_count': summary.get('delegated_scoped_item_count', 0),
+        'ownership_scope_conflict_customer_count': summary.get('ownership_scope_conflict_customer_count', 0),
+        'ownership_scope_conflict_customer_asns': list(summary.get('ownership_scope_conflict_customer_asns') or []),
+    }
+
+
 def _build_approval_record_name(plan, approved_at) -> str:
     return f'{plan.name} Approval {approved_at:%Y-%m-%d %H:%M:%S}'
 
@@ -918,6 +927,7 @@ def preview_aspa_change_plan_provider_write(
             'preview_only': True,
             'aspa_write_mode': provider_account.aspa_write_mode,
             'governance': _get_plan_governance_metadata(plan),
+            'delegated_scope': _get_plan_delegated_scope_metadata(plan),
         },
     )
     return execution, delta
@@ -1129,6 +1139,7 @@ def apply_aspa_change_plan_provider_write(
             'provider_response': provider_response,
             'aspa_write_mode': provider_account.aspa_write_mode,
             'governance': _get_plan_governance_metadata(plan),
+            'delegated_scope': _get_plan_delegated_scope_metadata(plan),
             'delta_summary': {
                 'customer_count': len(delta.get('added', [])) + len(delta.get('removed', [])),
                 'create_count': len(delta.get('added', [])),
@@ -1184,6 +1195,7 @@ def apply_aspa_change_plan_provider_write(
         execution.response_payload_json = {
             'aspa_write_mode': provider_account.aspa_write_mode,
             'governance': _get_plan_governance_metadata(plan),
+            'delegated_scope': _get_plan_delegated_scope_metadata(plan),
         }
         execution.save(update_fields=('status', 'completed_at', 'error', 'response_payload_json'))
         raise ProviderWriteError(str(exc)) from exc

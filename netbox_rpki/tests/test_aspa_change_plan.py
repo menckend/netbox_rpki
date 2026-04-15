@@ -178,3 +178,89 @@ class ASPAChangePlanServiceTestCase(TestCase):
         self.assertEqual(replace_item.provider_operation, rpki_models.ProviderWriteOperation.ADD_PROVIDER_SET)
         self.assertEqual(replace_item.provider_payload_json['provider_asns'], [64641])
         self.assertEqual(plan.summary_json['replacement_count'], 1)
+
+    def test_plan_generation_carries_delegated_scope_metadata(self):
+        customer = create_test_asn(64650)
+        provider = create_test_asn(64651)
+        delegated_entity = rpki_models.DelegatedAuthorizationEntity.objects.create(
+            name='ASPA Plan Delegated Entity',
+            organization=self.organization,
+            kind=rpki_models.DelegatedAuthorizationEntityKind.CUSTOMER,
+        )
+        managed_relationship = rpki_models.ManagedAuthorizationRelationship.objects.create(
+            name='ASPA Plan Delegated Relationship',
+            organization=self.organization,
+            delegated_entity=delegated_entity,
+            provider_account=self.provider_account,
+            status=rpki_models.ManagedAuthorizationRelationshipStatus.ACTIVE,
+        )
+        create_test_aspa_intent(
+            name='Scoped Missing Customer Intent',
+            organization=self.organization,
+            customer_as=customer,
+            provider_as=provider,
+            delegated_entity=delegated_entity,
+            managed_relationship=managed_relationship,
+        )
+
+        run = reconcile_aspa_intents(self.organization)
+        plan = create_aspa_change_plan(run)
+        item = plan.items.get(plan_semantic=rpki_models.ASPAChangePlanItemSemantic.CREATE)
+
+        self.assertEqual(item.after_state_json['delegated_scope']['managed_relationship_id'], managed_relationship.pk)
+        self.assertEqual(item.after_state_json['delegated_scope']['delegated_entity_id'], delegated_entity.pk)
+        self.assertEqual(plan.summary_json['delegated_scoped_item_count'], 1)
+        self.assertEqual(plan.summary_json['ownership_scope_conflict_customer_count'], 0)
+
+    def test_plan_generation_skips_conflicting_customer_ownership(self):
+        customer = create_test_asn(64660)
+        provider_a = create_test_asn(64661)
+        provider_b = create_test_asn(64662)
+        entity_a = rpki_models.DelegatedAuthorizationEntity.objects.create(
+            name='ASPA Conflict Plan Entity A',
+            organization=self.organization,
+            kind=rpki_models.DelegatedAuthorizationEntityKind.CUSTOMER,
+        )
+        entity_b = rpki_models.DelegatedAuthorizationEntity.objects.create(
+            name='ASPA Conflict Plan Entity B',
+            organization=self.organization,
+            kind=rpki_models.DelegatedAuthorizationEntityKind.DOWNSTREAM,
+        )
+        relationship_a = rpki_models.ManagedAuthorizationRelationship.objects.create(
+            name='ASPA Conflict Plan Relationship A',
+            organization=self.organization,
+            delegated_entity=entity_a,
+            provider_account=self.provider_account,
+            status=rpki_models.ManagedAuthorizationRelationshipStatus.ACTIVE,
+        )
+        relationship_b = rpki_models.ManagedAuthorizationRelationship.objects.create(
+            name='ASPA Conflict Plan Relationship B',
+            organization=self.organization,
+            delegated_entity=entity_b,
+            provider_account=self.provider_account,
+            status=rpki_models.ManagedAuthorizationRelationshipStatus.ACTIVE,
+        )
+        create_test_aspa_intent(
+            name='Conflict Plan Intent A',
+            organization=self.organization,
+            customer_as=customer,
+            provider_as=provider_a,
+            delegated_entity=entity_a,
+            managed_relationship=relationship_a,
+        )
+        create_test_aspa_intent(
+            name='Conflict Plan Intent B',
+            organization=self.organization,
+            customer_as=customer,
+            provider_as=provider_b,
+            delegated_entity=entity_b,
+            managed_relationship=relationship_b,
+        )
+
+        run = reconcile_aspa_intents(self.organization)
+        plan = create_aspa_change_plan(run)
+
+        self.assertEqual(plan.items.count(), 0)
+        self.assertEqual(plan.summary_json['skipped_counts']['ownership_scope_conflict'], 1)
+        self.assertEqual(plan.summary_json['ownership_scope_conflict_customer_count'], 1)
+        self.assertEqual(plan.summary_json['ownership_scope_conflict_customer_asns'], [customer.asn])

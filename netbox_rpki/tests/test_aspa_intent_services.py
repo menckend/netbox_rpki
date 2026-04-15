@@ -175,6 +175,85 @@ class ASPAIntentServiceTestCase(TestCase):
         run_summary = _get_first_attr(run, 'result_summary_json', 'summary_json') or {}
         self.assertEqual(run_summary['provider_snapshot_id'], snapshot.pk)
 
+    def test_reconcile_records_delegated_scope_metadata(self):
+        delegated_entity = rpki_models.DelegatedAuthorizationEntity.objects.create(
+            name='ASPA Delegated Entity',
+            organization=self.organization,
+            kind=rpki_models.DelegatedAuthorizationEntityKind.CUSTOMER,
+        )
+        managed_relationship = rpki_models.ManagedAuthorizationRelationship.objects.create(
+            name='ASPA Delegated Relationship',
+            organization=self.organization,
+            delegated_entity=delegated_entity,
+            provider_account=self.provider_account,
+            status=rpki_models.ManagedAuthorizationRelationshipStatus.ACTIVE,
+        )
+        create_test_aspa_intent(
+            name='Scoped ASPA Intent',
+            organization=self.organization,
+            customer_as=self.customer_a,
+            provider_as=self.provider_b,
+            delegated_entity=delegated_entity,
+            managed_relationship=managed_relationship,
+        )
+
+        run = reconcile_aspa_intents(self.organization)
+        intent_result = rpki_models.ASPAIntentResult.objects.get(reconciliation_run=run, name='Scoped ASPA Intent Result')
+        run_summary = _get_first_attr(run, 'result_summary_json', 'summary_json') or {}
+
+        self.assertEqual(intent_result.details_json['delegated_scope']['managed_relationship_id'], managed_relationship.pk)
+        self.assertEqual(intent_result.details_json['delegated_scope']['delegated_entity_id'], delegated_entity.pk)
+        self.assertEqual(run_summary['delegated_scope_counts']['managed_relationship'], 1)
+        self.assertEqual(run_summary['ownership_scope_conflict_customer_count'], 0)
+
+    def test_reconcile_summarizes_customer_scope_conflicts(self):
+        entity_a = rpki_models.DelegatedAuthorizationEntity.objects.create(
+            name='ASPA Conflict Entity A',
+            organization=self.organization,
+            kind=rpki_models.DelegatedAuthorizationEntityKind.CUSTOMER,
+        )
+        entity_b = rpki_models.DelegatedAuthorizationEntity.objects.create(
+            name='ASPA Conflict Entity B',
+            organization=self.organization,
+            kind=rpki_models.DelegatedAuthorizationEntityKind.DOWNSTREAM,
+        )
+        relationship_a = rpki_models.ManagedAuthorizationRelationship.objects.create(
+            name='ASPA Conflict Relationship A',
+            organization=self.organization,
+            delegated_entity=entity_a,
+            provider_account=self.provider_account,
+            status=rpki_models.ManagedAuthorizationRelationshipStatus.ACTIVE,
+        )
+        relationship_b = rpki_models.ManagedAuthorizationRelationship.objects.create(
+            name='ASPA Conflict Relationship B',
+            organization=self.organization,
+            delegated_entity=entity_b,
+            provider_account=self.provider_account,
+            status=rpki_models.ManagedAuthorizationRelationshipStatus.ACTIVE,
+        )
+        create_test_aspa_intent(
+            name='Conflict Intent A',
+            organization=self.organization,
+            customer_as=self.customer_a,
+            provider_as=self.provider_b,
+            delegated_entity=entity_a,
+            managed_relationship=relationship_a,
+        )
+        create_test_aspa_intent(
+            name='Conflict Intent B',
+            organization=self.organization,
+            customer_as=self.customer_a,
+            provider_as=self.provider_c,
+            delegated_entity=entity_b,
+            managed_relationship=relationship_b,
+        )
+
+        run = reconcile_aspa_intents(self.organization)
+        run_summary = _get_first_attr(run, 'result_summary_json', 'summary_json') or {}
+
+        self.assertEqual(run_summary['ownership_scope_conflict_customer_count'], 1)
+        self.assertEqual(run_summary['ownership_scope_conflict_customer_asns'], [self.customer_a.asn])
+
     def test_pipeline_entry_point_delegates_to_reconciliation(self):
         run = run_aspa_reconciliation_pipeline(self.organization)
         self.assertIsNotNone(run.pk)
