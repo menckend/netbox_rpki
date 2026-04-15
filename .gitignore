@@ -10,6 +10,7 @@ playwright-report/
 test-results/
 tests/e2e/.auth/
 tests/e2e/.state/
+deprecated_junk/
 
 
 # General
