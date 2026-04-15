@@ -1275,7 +1275,6 @@ def _build_form_scenario(spec):
     return FormScenario(object_key=spec.registry_key, required_fields=required_fields, build_valid_data=build_valid_data)
 
 
-FORM_SCENARIOS = tuple(_build_form_scenario(spec) for spec in FORM_OBJECT_SPECS)
 
 
 def build_organization_filter_cases() -> tuple[FilterCase, ...]:
@@ -1456,7 +1455,6 @@ def _build_filterset_scenario(spec):
     return FilterSetScenario(object_key=spec.registry_key, build_filter_cases=builder)
 
 
-FILTERSET_SCENARIOS = tuple(_build_filterset_scenario(spec) for spec in FILTERSET_OBJECT_SPECS)
 
 
 def build_organization_table_rows() -> None:

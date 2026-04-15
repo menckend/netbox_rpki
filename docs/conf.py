@@ -6,8 +6,8 @@
 import os
 import sys
 
+sys.path.insert(0, os.path.abspath('..'))
 sys.path.insert(0, os.path.abspath('../images/'))
-sys.path.insert(0, os.path.abspath('../netbox_rpki/'))
 
 
 # -- Project information -----------------------------------------------------
@@ -36,7 +36,6 @@ extensions = [
     'autoapi.extension',
     'myst_parser',
     'sphinx.ext.autodoc',  # Core Sphinx library for auto html doc generation from docstrings
-    'sphinx.ext.autodoc.typehints',
     'sphinx.ext.autosummary',  # Create neat summary tables for modules/classes/methods etc
     'sphinx.ext.intersphinx',  # Link to other project's documentation (see mapping below)
     'sphinx.ext.napoleon',
@@ -48,15 +47,16 @@ autodoc_typehints = "description"
 autoapi_template_dir = "_templates/autoapi"
 autoapi_own_page_level = "module"
 autoapi_dirs = ['../netbox_rpki/']
+autoapi_ignore = ['*/tests/*', '*/migrations/*', '**/tests/*', '**/migrations/*']
 autoapi_type = "python"
 autoapi_options = [
     "members",
     "undoc-members",
     "show-inheritance",
     "show-module-summary",
-    "imported-members",
     "show-inheritance-diagram",
 ]
+myst_heading_anchors = 5
 
 #--RTD theme configuration ----------------------------------------------------------------------------
 html_theme_options = {
@@ -98,7 +98,5 @@ def linkcode_resolve(domain, info):
         return None
     filename = info['module'].replace('.', '/')
     return "https://github.com/menckend/netbox_rpki/blob/main/%s.py" % filename
-
-
 
 

@@ -183,26 +183,14 @@ Notes:
 
 ##### Using REST API
 
-Endpoint:
-
 - `POST /api/plugins/netbox-rpki/organization/`
 
-Minimal request body:
-
-```json
-{
-	"org_id": "cust-001",
-	"name": "Customer 001"
-}
-```
-
-Example request body with optional fields:
+Example request body:
 
 ```json
 {
 	"org_id": "cust-001",
 	"name": "Customer 001",
-	"parent_rir": 1,
 	"ext_url": "https://example.invalid/customers/cust-001"
 }
 ```
@@ -259,36 +247,18 @@ Notes:
 
 ##### Using REST API
 
-Endpoint:
-
 - `POST /api/plugins/netbox-rpki/certificate/`
 
-Minimal request body:
-
-```json
-{
-	"name": "Customer 001 Certificate A",
-	"rpki_org": 1,
-	"auto_renews": true,
-	"self_hosted": false
-}
-```
-
-Example request body with additional fields:
+Example request body:
 
 ```json
 {
 	"name": "Customer 001 Certificate A",
 	"issuer": "Issuer A",
-	"subject": "CN=Customer 001 Certificate A",
-	"serial": "SERIAL-001-A",
-	"valid_from": "2026-01-01",
-	"valid_to": "2026-12-31",
+	"rpki_org": 1,
 	"auto_renews": true,
 	"self_hosted": false,
-	"rpki_org": 1,
-	"trust_anchor": 2,
-	"publication_point": 3
+	"valid_to": "2026-12-31"
 }
 ```
 
@@ -334,11 +304,9 @@ Notes:
 
 ##### Using REST API
 
-Endpoint:
-
 - `POST /api/plugins/netbox-rpki/certificateprefix/`
 
-Minimal request body:
+Example request body:
 
 ```json
 {
@@ -389,11 +357,9 @@ Notes:
 
 ##### Using REST API
 
-Endpoint:
-
 - `POST /api/plugins/netbox-rpki/certificateasn/`
 
-Minimal request body:
+Example request body:
 
 ```json
 {
@@ -442,11 +408,9 @@ Notes:
 
 ##### Using REST API
 
-Endpoint:
-
 - `PATCH /api/plugins/netbox-rpki/certificate/<certificate_id>/`
 
-Minimal request body:
+Example request body:
 
 ```json
 {
@@ -494,11 +458,9 @@ Notes:
 
 ##### Using REST API
 
-Endpoint:
-
 - `PATCH /api/plugins/netbox-rpki/certificate/<certificate_id>/`
 
-Minimal request body:
+Example request body:
 
 ```json
 {
@@ -545,19 +507,10 @@ Notes:
 
 ##### Using REST API
 
-Endpoint:
-
 - `GET /api/plugins/netbox-rpki/certificate/`
+- Optional organization filter: `GET /api/plugins/netbox-rpki/certificate/?rpki_org=1`
 
-Typical usage:
-
-1. Request the certificate list, optionally filtered by organization.
-2. Review the returned `valid_to` values.
-3. Compare those dates against the lifecycle threshold used by your deployment.
-
-Example:
-
-- `GET /api/plugins/netbox-rpki/certificate/?rpki_org=1`
+Review the returned `valid_to` values against the lifecycle threshold used by your deployment.
 
 ##### Using GraphQL API
 
@@ -601,8 +554,6 @@ Notes:
 
 ##### Using REST API
 
-Endpoint:
-
 - `POST /api/plugins/netbox-rpki/certificate/`
 
 Example request body:
@@ -614,9 +565,7 @@ Example request body:
 	"valid_from": "2026-10-01",
 	"valid_to": "2027-09-30",
 	"auto_renews": true,
-	"self_hosted": false,
-	"trust_anchor": 2,
-	"publication_point": 3
+	"self_hosted": false
 }
 ```
 
@@ -667,11 +616,9 @@ Notes:
 
 ##### Using REST API
 
-Endpoint:
-
 - `POST /api/plugins/netbox-rpki/roaobject/`
 
-Minimal request body:
+Example request body:
 
 ```json
 {
@@ -728,11 +675,9 @@ Notes:
 
 ##### Using REST API
 
-Endpoint:
-
 - `POST /api/plugins/netbox-rpki/roaobjectprefix/`
 
-Minimal request body:
+Example request body:
 
 ```json
 {
@@ -783,11 +728,9 @@ Notes:
 
 ##### Using REST API
 
-Endpoint:
-
 - `PATCH /api/plugins/netbox-rpki/roaobjectprefix/<roa_object_prefix_id>/`
 
-Minimal request body:
+Example request body:
 
 ```json
 {

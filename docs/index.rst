@@ -6,8 +6,7 @@
    How To <HOW_TO.rst>
    Local Development Setup <LOCAL_DEV_SETUP.rst>
    Changelog <CHANGELOG.rst>
-   ...
-   autoapi/index
+   API Reference <api.rst>
 
 
 .. include:: ../README.md

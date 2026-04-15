@@ -650,20 +650,6 @@ class AuthoredAsSetMemberType(models.TextChoices):
     AS_SET = "as_set", "AS-Set"
 
 
-class PublicationState(models.TextChoices):
-    DRAFT = "draft", "Draft"
-    AWAITING_SECONDARY_APPROVAL = "awaiting_secondary_approval", "Awaiting Secondary Approval"
-    APPROVED_PENDING_APPLY = "approved_pending_apply", "Approved — Pending Apply"
-    APPLY_IN_PROGRESS = "apply_in_progress", "Apply In Progress"
-    APPLY_FAILED = "apply_failed", "Apply Failed"
-    APPLIED_AWAITING_VERIFICATION = "applied_awaiting_verification", "Applied — Awaiting Verification"
-    VERIFIED = "verified", "Verified"
-    VERIFIED_WITH_DRIFT = "verified_with_drift", "Verified With Drift"
-    VERIFICATION_FAILED = "verification_failed", "Verification Failed"
-    ROLLED_BACK = "rolled_back", "Rolled Back"
-    SUPERSEDED = "superseded", "Superseded"
-
-
 def validate_maintenance_window_bounds(*, start_at, end_at):
     if start_at is None or end_at is None:
         return

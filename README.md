@@ -444,7 +444,7 @@ Implements NetBox models, API endpoints, GraphQL types, tables, and UI views acr
 
 ## Compatibility
 
-[netbox-plugin.yaml](netbox-plugin.yaml)
+`netbox-plugin.yaml`
 
 The plugin declares NetBox compatibility for the 4.5.x release line. Verification has been completed against real development installs of NetBox 4.5.0 and NetBox 4.5.7, covering plugin bootstrap, `manage.py check`, provider-sync, models, API, GraphQL, view, and navigation suites, browser smoke testing, and the full routing-intent and bulk-authoring workflow.
 

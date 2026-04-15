@@ -60,11 +60,11 @@ If you are proposing a feature:
 
 ## Get Started!
 
-For local development setup instructions, see [LOCAL_DEV_SETUP.md](LOCAL_DEV_SETUP.md).
+For local development setup instructions, see `LOCAL_DEV_SETUP.md`.
 
 ### Generating Migrations Locally
 
-In the standard local workspace layout from [LOCAL_DEV_SETUP.md](LOCAL_DEV_SETUP.md), NetBox's management entry point lives at:
+In the standard local workspace layout from `LOCAL_DEV_SETUP.md`, NetBox's management entry point lives at:
 
 ```bash
 ~/src/netbox-v4.5.7/netbox/manage.py
