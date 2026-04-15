@@ -807,6 +807,11 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
             f"Stale after {lifecycle_summary['policy']['thresholds']['sync_stale_after_minutes']} minute(s)"
         )
         rollup['attention_summary'] = lifecycle_summary['attention_summary']
+        rollup['publication_health'] = lifecycle_summary['publication_health']
+        rollup['publication_health_text'] = (
+            f"{lifecycle_summary['publication_health']['status']} "
+            f"({lifecycle_summary['publication_health']['attention_item_count']} attention items)"
+        )
         rollup['latest_snapshot_url'] = self.get_summary_url('plugins:netbox_rpki:providersnapshot', rollup['latest_snapshot_id'])
         rollup['latest_diff_url'] = self.get_summary_url('plugins:netbox_rpki:providersnapshotdiff', rollup['latest_diff_id'])
         rollup['latest_snapshot_label'] = rollup['latest_snapshot_name'] or 'Latest snapshot'

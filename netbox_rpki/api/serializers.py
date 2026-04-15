@@ -7,7 +7,11 @@ from netbox_rpki import models
 from netbox_rpki.services import build_roa_change_plan_lint_posture
 from netbox_rpki.object_registry import API_OBJECT_SPECS
 from netbox_rpki.object_specs import ObjectSpec
-from netbox_rpki.services.lifecycle_reporting import build_provider_lifecycle_health_summary
+from netbox_rpki.services.lifecycle_reporting import (
+    build_provider_lifecycle_health_summary,
+    build_diff_publication_health_rollup,
+    build_snapshot_publication_health_rollup,
+)
 from netbox_rpki.services.provider_sync_contract import (
     build_provider_account_rollup,
     build_provider_snapshot_diff_rollup,
@@ -84,6 +88,7 @@ class RpkiProviderAccountSerializer(SERIALIZER_CLASS_MAP['rpkiprovideraccount'])
     sync_health_display = serializers.ReadOnlyField()
     last_sync_rollup = serializers.SerializerMethodField()
     lifecycle_health_summary = serializers.SerializerMethodField()
+    publication_health = serializers.SerializerMethodField()
     next_sync_due_at = serializers.DateTimeField(read_only=True)
 
     class Meta(SERIALIZER_CLASS_MAP['rpkiprovideraccount'].Meta):
@@ -98,6 +103,7 @@ class RpkiProviderAccountSerializer(SERIALIZER_CLASS_MAP['rpkiprovideraccount'])
             'sync_health_display',
             'last_sync_rollup',
             'lifecycle_health_summary',
+            'publication_health',
             'next_sync_due_at',
         )
 
@@ -156,6 +162,9 @@ class RpkiProviderAccountSerializer(SERIALIZER_CLASS_MAP['rpkiprovideraccount'])
             visible_snapshot_ids=visible_snapshot_ids,
             visible_diff_ids=visible_diff_ids,
         )
+
+    def get_publication_health(self, obj):
+        return build_provider_account_rollup(obj).get('publication_health') or {}
 
 
 SERIALIZER_CLASS_MAP['rpkiprovideraccount'] = RpkiProviderAccountSerializer
@@ -380,6 +389,7 @@ class ProviderSnapshotSerializer(SERIALIZER_CLASS_MAP['providersnapshot']):
     latest_diff_summary = serializers.SerializerMethodField()
     family_rollups = serializers.SerializerMethodField()
     family_status_counts = serializers.SerializerMethodField()
+    publication_health = serializers.SerializerMethodField()
     imported_publication_points = serializers.SerializerMethodField()
     imported_signed_objects = serializers.SerializerMethodField()
     imported_certificate_observations = serializers.SerializerMethodField()
@@ -390,6 +400,7 @@ class ProviderSnapshotSerializer(SERIALIZER_CLASS_MAP['providersnapshot']):
             'latest_diff_summary',
             'family_rollups',
             'family_status_counts',
+            'publication_health',
             'imported_publication_points',
             'imported_signed_objects',
             'imported_certificate_observations',
@@ -439,6 +450,9 @@ class ProviderSnapshotSerializer(SERIALIZER_CLASS_MAP['providersnapshot']):
 
     def get_family_status_counts(self, obj):
         return build_provider_snapshot_rollup(obj)['family_status_counts']
+
+    def get_publication_health(self, obj):
+        return build_snapshot_publication_health_rollup(obj)
 
     def get_imported_publication_points(self, obj):
         return self._serialize_nested_collection(
@@ -548,11 +562,13 @@ globals()['ProviderSnapshotSerializer'] = ProviderSnapshotSerializer
 class ProviderSnapshotDiffSerializer(SERIALIZER_CLASS_MAP['providersnapshotdiff']):
     family_rollups = serializers.SerializerMethodField()
     family_status_counts = serializers.SerializerMethodField()
+    publication_diff_summary = serializers.SerializerMethodField()
 
     class Meta(SERIALIZER_CLASS_MAP['providersnapshotdiff'].Meta):
         fields = SERIALIZER_CLASS_MAP['providersnapshotdiff'].Meta.fields + (
             'family_rollups',
             'family_status_counts',
+            'publication_diff_summary',
         )
 
     def get_family_rollups(self, obj):
@@ -560,6 +576,9 @@ class ProviderSnapshotDiffSerializer(SERIALIZER_CLASS_MAP['providersnapshotdiff'
 
     def get_family_status_counts(self, obj):
         return build_provider_snapshot_diff_rollup(obj)['family_status_counts']
+
+    def get_publication_diff_summary(self, obj):
+        return build_diff_publication_health_rollup(obj)
 
 
 SERIALIZER_CLASS_MAP['providersnapshotdiff'] = ProviderSnapshotDiffSerializer

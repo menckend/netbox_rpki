@@ -478,6 +478,11 @@ def build_provider_account_rollup(
     latest_snapshot_name = summary.get('latest_snapshot_name', '') if latest_snapshot_id is not None else ''
     latest_snapshot_completed_at = summary.get('latest_snapshot_completed_at', '') if latest_snapshot_id is not None else ''
     latest_diff_name = summary.get('latest_diff_name', '') if latest_diff_id is not None else ''
+    publication_health = dict(summary.get('publication_health') or {})
+    if not publication_health:
+        publication_rollup = build_publication_health_rollup(provider_account)
+        if publication_rollup is not None:
+            publication_health = dict(publication_rollup['publication_health'])
 
     return {
         'provider_account_id': provider_account.pk,
@@ -519,7 +524,7 @@ def build_provider_account_rollup(
         'latest_snapshot_completed_at': latest_snapshot_completed_at,
         'latest_diff_id': latest_diff_id,
         'latest_diff_name': latest_diff_name,
-        'publication_health': dict(summary.get('publication_health') or {}),
+        'publication_health': publication_health,
         'lifecycle_health_summary': build_provider_lifecycle_health_summary(
             provider_account,
             visible_snapshot_ids=visible_snapshot_ids,

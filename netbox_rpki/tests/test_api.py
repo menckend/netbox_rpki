@@ -195,6 +195,7 @@ class RpkiProviderAccountSerializerTestCase(TestCase):
             serializer.data['lifecycle_health_summary']['policy']['thresholds']['sync_stale_after_minutes'],
             45,
         )
+        self.assertIn('publication_health', serializer.data)
 
     def test_provider_account_serializer_exposes_arin_rollup_capabilities_and_transport(self):
         organization = create_test_organization(org_id='provider-serializer-arin-org', name='Provider Serializer ARIN Org')
@@ -1614,6 +1615,7 @@ class ProviderAccountSummaryAPITestCase(PluginAPITestCase):
         self.assertTrue(any(account['latest_diff_id'] == self.healthy_diff.pk for account in response.data['accounts']))
         self.assertTrue(any('family_rollups' in account for account in response.data['accounts']))
         self.assertEqual(response.data['accounts'][0]['lifecycle_health_summary']['summary_schema_version'], 1)
+        self.assertIn('publication_health', response.data['accounts'][0])
         self.assertEqual(response.data['sync_due_count'], 2)
         self.assertEqual(response.data['roa_write_supported_count'], 1)
         self.assertEqual(response.data['aspa_write_supported_count'], 1)
@@ -1701,6 +1703,7 @@ class ProviderSnapshotActionAPITestCase(PluginAPITestCase):
         self.assertEqual(response.data['item_count'], 3)
         self.assertIn('family_rollups', response.data)
         self.assertIn('family_status_counts', response.data)
+        self.assertIn('publication_diff_summary', response.data)
         publication_points_rollup = next(
             row for row in response.data['family_rollups'] if row['family'] == 'publication_points'
         )
@@ -1753,8 +1756,12 @@ class ProviderSnapshotActionAPITestCase(PluginAPITestCase):
         self.assertEqual(response.data['latest_diff']['id'], snapshot_diff.pk)
         self.assertIn('family_rollups', response.data)
         self.assertIn('family_status_counts', response.data)
+        self.assertIn('publication_health', response.data)
+        self.assertEqual(response.data['publication_health']['summary_schema_version'], 1)
         self.assertEqual(response.data['latest_diff_summary']['snapshot_diff_id'], snapshot_diff.pk)
+        self.assertEqual(response.data['latest_diff']['publication_diff_summary']['summary_schema_version'], 1)
         self.assertTrue(any(row['family'] == 'roa_authorizations' for row in response.data['family_rollups']))
+        self.assertEqual(response.data['publication_health']['summary_schema_version'], 1)
         self.assertEqual(
             [row['id'] for row in response.data['imported_publication_points']],
             [self.imported_publication_point.pk],

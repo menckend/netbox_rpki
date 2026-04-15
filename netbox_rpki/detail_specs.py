@@ -503,6 +503,12 @@ def get_provider_snapshot_latest_diff_summary(snapshot: models.ProviderSnapshot)
     return get_pretty_json(build_provider_snapshot_rollup(snapshot)['latest_diff_summary'])
 
 
+def get_provider_snapshot_publication_health(snapshot: models.ProviderSnapshot) -> str | None:
+    from netbox_rpki.services.lifecycle_reporting import build_snapshot_publication_health_rollup
+
+    return get_pretty_json(build_snapshot_publication_health_rollup(snapshot))
+
+
 def get_provider_snapshot_diff_summary(snapshot_diff: models.ProviderSnapshotDiff) -> str | None:
     return get_pretty_json(snapshot_diff.summary_json)
 
@@ -511,6 +517,12 @@ def get_provider_snapshot_diff_family_rollups(snapshot_diff: models.ProviderSnap
     from netbox_rpki.services.provider_sync_contract import build_provider_snapshot_diff_rollup
 
     return get_pretty_json(build_provider_snapshot_diff_rollup(snapshot_diff)['family_rollups'])
+
+
+def get_provider_snapshot_diff_publication_health(snapshot_diff: models.ProviderSnapshotDiff) -> str | None:
+    from netbox_rpki.services.lifecycle_reporting import build_diff_publication_health_rollup
+
+    return get_pretty_json(build_diff_publication_health_rollup(snapshot_diff))
 
 
 def get_provider_snapshot_diff_before_state(item: models.ProviderSnapshotDiffItem) -> str | None:
@@ -2485,6 +2497,12 @@ PROVIDER_SNAPSHOT_DETAIL_SPEC = DetailSpec(
             kind='code',
             empty_text='None',
         ),
+        DetailFieldSpec(
+            label='Publication Health',
+            value=get_provider_snapshot_publication_health,
+            kind='code',
+            empty_text='None',
+        ),
         DetailFieldSpec(label='Summary', value=get_provider_snapshot_summary, kind='code', empty_text='None'),
     ),
     bottom_tables=(
@@ -2569,6 +2587,12 @@ PROVIDER_SNAPSHOT_DIFF_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(label='Compared At', value=lambda obj: obj.compared_at, empty_text='None'),
         DetailFieldSpec(label='Error', value=lambda obj: obj.error, empty_text='None'),
         DetailFieldSpec(label='Family Rollups', value=get_provider_snapshot_diff_family_rollups, kind='code', empty_text='None'),
+        DetailFieldSpec(
+            label='Publication Diff Summary',
+            value=get_provider_snapshot_diff_publication_health,
+            kind='code',
+            empty_text='None',
+        ),
         DetailFieldSpec(label='Summary', value=get_provider_snapshot_diff_summary, kind='code', empty_text='None'),
     ),
     bottom_tables=(

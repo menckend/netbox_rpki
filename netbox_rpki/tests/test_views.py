@@ -1705,6 +1705,7 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
         self.assertContains(response, 'Template binding regeneration failed.')
         self.assertContains(response, 'Freshness')
         self.assertContains(response, 'Family Coverage')
+        self.assertContains(response, 'Publication Health')
         self.assertContains(response, self.failed_comparison_snapshot.name)
         self.assertContains(response, self.failed_snapshot_diff.name)
         self.assertContains(response, 'ASPA Reconciliation Runs Requiring Attention')

@@ -621,6 +621,7 @@ class ProviderReportingGraphQLTestCase(APITestCase):
                     id
                     last_sync_rollup
                     lifecycle_health_summary
+                    publication_health
                 }}
                 provider_account_summary
             }}
@@ -632,6 +633,7 @@ class ProviderReportingGraphQLTestCase(APITestCase):
         self.assertEqual(account['lifecycle_health_summary']['summary_schema_version'], 1)
         self.assertEqual(account['lifecycle_health_summary']['policy']['source'], 'provider_account_override')
         self.assertEqual(account['lifecycle_health_summary']['policy']['thresholds']['sync_stale_after_minutes'], 20)
+        self.assertEqual(account['publication_health']['summary_schema_version'], 1)
         self.assertEqual(account['last_sync_rollup']['lifecycle_health_summary']['summary_schema_version'], 1)
         summary_account = next(
             row
@@ -691,6 +693,7 @@ class ProviderReportingGraphQLTestCase(APITestCase):
                 aspa_write_mode
                 last_sync_rollup
                 lifecycle_health_summary
+                publication_health
             }}
             provider_snapshot_latest_diff(snapshot_id: "{self.comparison_snapshot.pk}") {{
                 id
@@ -703,6 +706,7 @@ class ProviderReportingGraphQLTestCase(APITestCase):
                 item_count
                 family_rollups
                 family_status_counts
+                publication_diff_summary
             }}
             netbox_rpki_providersnapshot(id: {self.comparison_snapshot.pk}) {{
                 id
@@ -710,10 +714,12 @@ class ProviderReportingGraphQLTestCase(APITestCase):
                 summary
                 family_rollups
                 family_status_counts
+                publication_health
                 latest_diff_summary
                 latest_diff {{
                     id
                     name
+                    publication_diff_summary
                 }}
                 imported_roa_authorizations {{
                     id
@@ -803,6 +809,10 @@ class ProviderReportingGraphQLTestCase(APITestCase):
             data['data']['netbox_rpki_provideraccount']['lifecycle_health_summary']['summary_schema_version'],
             1,
         )
+        self.assertEqual(
+            data['data']['netbox_rpki_provideraccount']['publication_health']['summary_schema_version'],
+            1,
+        )
         self.assertEqual(data['data']['provider_snapshot_summary']['total_snapshots'], 3)
         self.assertEqual(data['data']['provider_snapshot_summary']['with_diff_count'], 1)
         self.assertEqual(data['data']['provider_snapshot_latest_diff']['id'], str(self.snapshot_diff.pk))
@@ -811,13 +821,25 @@ class ProviderReportingGraphQLTestCase(APITestCase):
         self.assertIn('family_rollups', data['data']['provider_snapshot_diff'])
         self.assertIn('family_status_counts', data['data']['provider_snapshot_diff'])
         self.assertEqual(
+            data['data']['provider_snapshot_diff']['publication_diff_summary']['summary_schema_version'],
+            1,
+        )
+        self.assertEqual(
             data['data']['netbox_rpki_providersnapshot']['latest_diff_summary']['snapshot_diff_id'],
             self.snapshot_diff.pk,
+        )
+        self.assertEqual(
+            data['data']['netbox_rpki_providersnapshot']['publication_health']['summary_schema_version'],
+            1,
         )
         self.assertTrue(
             any(row['family'] == 'roa_authorizations' for row in data['data']['netbox_rpki_providersnapshot']['family_rollups'])
         )
         self.assertEqual(data['data']['netbox_rpki_providersnapshot']['latest_diff']['id'], str(self.snapshot_diff.pk))
+        self.assertEqual(
+            data['data']['netbox_rpki_providersnapshot']['latest_diff']['publication_diff_summary']['summary_schema_version'],
+            1,
+        )
         self.assertEqual(
             [row['id'] for row in data['data']['netbox_rpki_providersnapshot']['imported_roa_authorizations']],
             [str(self.imported_roa.pk)],

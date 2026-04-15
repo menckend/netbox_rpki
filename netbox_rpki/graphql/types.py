@@ -11,7 +11,11 @@ from netbox_rpki import models
 from netbox_rpki.detail_specs import get_latest_provider_snapshot_diff
 from netbox_rpki.object_registry import GRAPHQL_OBJECT_SPECS
 from netbox_rpki.object_specs import ObjectSpec
-from netbox_rpki.services.lifecycle_reporting import build_provider_lifecycle_health_summary
+from netbox_rpki.services.lifecycle_reporting import (
+    build_provider_lifecycle_health_summary,
+    build_snapshot_publication_health_rollup,
+    build_diff_publication_health_rollup,
+)
 from netbox_rpki.services.provider_sync_contract import (
     build_provider_account_rollup,
     build_provider_snapshot_diff_rollup,
@@ -106,6 +110,10 @@ class ProviderAccountReportingMixin:
             visible_diff_ids=visible_diff_ids,
         )
 
+    @strawberry.field
+    def publication_health(self) -> JSON:
+        return build_provider_account_rollup(self).get('publication_health') or {}
+
 
 @strawberry.type
 class ProviderSnapshotReportingMixin:
@@ -134,6 +142,10 @@ class ProviderSnapshotReportingMixin:
     @strawberry.field
     def family_status_counts(self) -> JSON:
         return build_provider_snapshot_rollup(self)['family_status_counts']
+
+    @strawberry.field
+    def publication_health(self) -> JSON:
+        return build_snapshot_publication_health_rollup(self)
 
     @strawberry.field(name='imported_roa_authorizations')
     def imported_roa_authorizations_query(self) -> list[Annotated["ImportedRoaAuthorizationType", strawberry.lazy('.types')]]:
@@ -190,6 +202,10 @@ class ProviderSnapshotDiffReportingMixin:
     @strawberry.field
     def family_status_counts(self) -> JSON:
         return build_provider_snapshot_diff_rollup(self)['family_status_counts']
+
+    @strawberry.field
+    def publication_diff_summary(self) -> JSON:
+        return build_diff_publication_health_rollup(self)
 
 
 @strawberry.type

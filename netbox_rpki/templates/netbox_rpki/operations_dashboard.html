@@ -240,6 +240,7 @@
                   <th>Last Sync Status</th>
                   <th>Freshness</th>
                   <th>Family Coverage</th>
+                  <th>Publication Health</th>
                   <th>Latest Snapshot</th>
                   <th>Latest Diff</th>
                 </tr>
@@ -258,6 +259,9 @@
                     </td>
                     <td>
                       <div>{{ provider_account.last_sync_rollup.family_status_text }}</div>
+                    </td>
+                    <td>
+                      <div>{{ provider_account.last_sync_rollup.publication_health_text }}</div>
                     </td>
                     <td>
                       {% if provider_account.last_sync_rollup.latest_snapshot_url %}
