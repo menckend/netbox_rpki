@@ -81,6 +81,9 @@ from netbox_rpki.tests.utils import (
     create_test_irr_write_execution,
     create_test_irr_snapshot,
     create_test_irr_source,
+    create_test_telemetry_source,
+    create_test_telemetry_run,
+    create_test_bgp_path_observation,
     create_test_lifecycle_health_event,
     create_test_lifecycle_health_hook,
     create_test_lifecycle_health_policy,
@@ -657,6 +660,16 @@ def _register_scenario_builders() -> None:
             ),
             "irr_write_execution": lambda: create_test_irr_write_execution(
                 name=f"IRR Write Execution {unique_token('irr-write-execution')}"
+            ),
+            "telemetrysource": lambda: create_test_telemetry_source(
+                name=f"Telemetry Source {unique_token('telemetry-source')}",
+                slug=f"telemetry-source-{unique_token('telemetry-source-slug')}",
+            ),
+            "telemetryrun": lambda: create_test_telemetry_run(
+                name=f"Telemetry Run {unique_token('telemetry-run')}",
+            ),
+            "bgppathobservation": lambda: create_test_bgp_path_observation(
+                name=f"BGP Path Observation {unique_token('bgp-path-observation')}",
             ),
             "bulkintentrun": lambda: create_test_bulk_intent_run(name=f"Bulk Intent Run {unique_token('bulk-intent-run')}"),
             "bulkintentrunscoperesult": lambda: create_test_bulk_intent_run_scope_result(
@@ -1661,6 +1674,44 @@ def build_validated_aspa_payload_instance():
     )
 
 
+def build_telemetry_source_instance():
+    organization = create_unique_organization("telemetry-source-org")
+    return create_test_telemetry_source(
+        name=f"Telemetry Source {unique_token('telemetry-source')}",
+        organization=organization,
+        slug=f"telemetry-source-{unique_token('telemetry-source-slug')}",
+    )
+
+
+def build_telemetry_run_instance():
+    source = build_telemetry_source_instance()
+    return create_test_telemetry_run(
+        name=f"Telemetry Run {unique_token('telemetry-run')}",
+        source=source,
+        status=rpki_models.ValidationRunStatus.RUNNING,
+    )
+
+
+def build_bgp_path_observation_instance():
+    telemetry_run = build_telemetry_run_instance()
+    prefix = create_unique_prefix()
+    origin_as = create_unique_asn()
+    peer_as = create_unique_asn()
+    return create_test_bgp_path_observation(
+        name=f"BGP Path Observation {unique_token('bgp-path-observation')}",
+        telemetry_run=telemetry_run,
+        source=telemetry_run.source,
+        prefix=prefix,
+        observed_prefix=str(prefix.prefix),
+        origin_as=origin_as,
+        observed_origin_asn=origin_as.asn,
+        peer_as=peer_as,
+        observed_peer_asn=peer_as.asn,
+        raw_as_path=f"{peer_as.asn} 64510 {origin_as.asn}",
+        path_asns_json=[peer_as.asn, 64510, origin_as.asn],
+    )
+
+
 def build_revoked_certificate_instance():
     revocation_list = build_certificate_revocation_list_instance()
     certificate = create_unique_certificate("revoked-certificate", rpki_org=create_unique_organization("revoked-org"))
@@ -1735,6 +1786,9 @@ SECTION_9_MODEL_SCENARIOS = (
     ModelScenario("ObjectValidationResult", build_object_validation_result_instance),
     ModelScenario("ValidatedRoaPayload", build_validated_roa_payload_instance),
     ModelScenario("ValidatedAspaPayload", build_validated_aspa_payload_instance),
+    ModelScenario("TelemetrySource", build_telemetry_source_instance),
+    ModelScenario("TelemetryRun", build_telemetry_run_instance),
+    ModelScenario("BgpPathObservation", build_bgp_path_observation_instance),
 )
 
 SECTION_9_SUPPORT_MODEL_SCENARIOS = (

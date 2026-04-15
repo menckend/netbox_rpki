@@ -1,0 +1,32 @@
+{
+  "metadata": {
+    "observed_window_start": "2026-04-15T00:00:00+00:00",
+    "observed_window_end": "2026-04-15T00:05:00+00:00",
+    "source_fingerprint": "mrt-snapshot-20260415-0005",
+    "collector_label": "route-views2"
+  },
+  "observations": [
+    {
+      "prefix": "203.0.113.0/24",
+      "origin_asn": 64500,
+      "peer_asn": 64496,
+      "collector_id": "route-views2",
+      "vantage_point_label": "rv2",
+      "as_path_text": "64496 64510 64500",
+      "first_observed_at": "2026-04-15T00:00:30+00:00",
+      "last_observed_at": "2026-04-15T00:04:30+00:00",
+      "visibility_status": "visible"
+    },
+    {
+      "prefix": "2001:db8:100::/48",
+      "origin_asn": 64501,
+      "peer_asn": 64497,
+      "collector_id": "route-views6",
+      "vantage_point_label": "rv6",
+      "as_path": [64497, 64520, 64501],
+      "first_observed_at": "2026-04-15T00:01:00+00:00",
+      "last_observed_at": "2026-04-15T00:04:45+00:00",
+      "visibility_status": "visible"
+    }
+  ]
+}

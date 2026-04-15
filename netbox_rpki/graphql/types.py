@@ -283,6 +283,38 @@ class ValidatedAspaPayloadReportingMixin:
 
 
 @strawberry.type
+class TelemetrySourceReportingMixin:
+
+    @strawberry.field
+    def summary(self) -> JSON:
+        return self.summary_json or {}
+
+    @strawberry.field
+    def sync_health(self) -> str:
+        return models.TelemetrySource.sync_health.fget(self)
+
+    @strawberry.field
+    def sync_health_display(self) -> str:
+        return models.TelemetrySource.sync_health_display.fget(self)
+
+
+@strawberry.type
+class TelemetryRunReportingMixin:
+
+    @strawberry.field
+    def summary(self) -> JSON:
+        return self.summary_json or {}
+
+
+@strawberry.type
+class BgpPathObservationReportingMixin:
+
+    @strawberry.field
+    def details(self) -> JSON:
+        return self.details_json or {}
+
+
+@strawberry.type
 class SignedObjectSurfaceMixin:
 
     @strawberry.field
@@ -398,6 +430,9 @@ REPORTING_MIXINS = {
     'objectvalidationresult': ObjectValidationResultReportingMixin,
     'validatedroapayload': ValidatedRoaPayloadReportingMixin,
     'validatedaspapayload': ValidatedAspaPayloadReportingMixin,
+    'telemetrysource': TelemetrySourceReportingMixin,
+    'telemetryrun': TelemetryRunReportingMixin,
+    'bgppathobservation': BgpPathObservationReportingMixin,
     'rpkiprovideraccount': ProviderAccountReportingMixin,
     'providersnapshot': ProviderSnapshotReportingMixin,
     'providersnapshotdiff': ProviderSnapshotDiffReportingMixin,

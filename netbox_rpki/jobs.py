@@ -4,6 +4,7 @@ from core.models import Job
 
 from netbox_rpki import models as rpki_models
 from netbox_rpki.services import (
+    TELEMETRY_FETCH_MODE_SNAPSHOT_IMPORT,
     VALIDATOR_FETCH_MODE_LIVE_API,
     apply_irr_change_plan,
     build_bulk_routing_intent_baseline_fingerprint,
@@ -14,6 +15,7 @@ from netbox_rpki.services import (
     run_bulk_routing_intent_pipeline,
     run_irr_coordination,
     run_routing_intent_pipeline,
+    sync_telemetry_source,
     sync_irr_source,
     sync_provider_account,
     sync_validator_instance,
@@ -540,6 +542,88 @@ class SyncValidatorInstanceJob(JobRunner):
         }
         self.job.save(update_fields=('data',))
         self.logger.info(f'Completed validator import with validation run {run.pk}')
+
+
+class SyncTelemetrySourceJob(JobRunner):
+    class Meta:
+        name = 'Telemetry Import'
+
+    @classmethod
+    def get_job_name(
+        cls,
+        source: rpki_models.TelemetrySource | int,
+        *,
+        snapshot_file: str,
+    ) -> str:
+        source_pk = source.pk if hasattr(source, 'pk') else source
+        return f'{cls.name} [{source_pk}:{snapshot_file}]'
+
+    @classmethod
+    def get_active_job_for_source(
+        cls,
+        source: rpki_models.TelemetrySource | int,
+        *,
+        snapshot_file: str,
+    ):
+        return Job.objects.filter(
+            name=cls.get_job_name(source, snapshot_file=snapshot_file),
+            status__in=JobStatusChoices.ENQUEUED_STATE_CHOICES,
+        ).order_by('created').first()
+
+    @classmethod
+    def enqueue_for_source(
+        cls,
+        source: rpki_models.TelemetrySource | int,
+        *,
+        snapshot_file: str,
+        user=None,
+        schedule_at=None,
+    ):
+        if not isinstance(source, rpki_models.TelemetrySource):
+            source = rpki_models.TelemetrySource.objects.get(pk=source)
+
+        if not source.enabled:
+            raise ValueError(f'Telemetry source {source.name} is disabled.')
+
+        existing_job = cls.get_active_job_for_source(source, snapshot_file=snapshot_file)
+        if existing_job is not None:
+            return existing_job, False
+
+        if rpki_models.TelemetryRun.objects.filter(
+            source=source,
+            status=rpki_models.ValidationRunStatus.RUNNING,
+        ).exists():
+            return None, False
+
+        job = cls.enqueue(
+            name=cls.get_job_name(source, snapshot_file=snapshot_file),
+            user=user,
+            schedule_at=schedule_at,
+            telemetry_source_pk=source.pk,
+            fetch_mode=TELEMETRY_FETCH_MODE_SNAPSHOT_IMPORT,
+            snapshot_file=snapshot_file,
+        )
+        return job, True
+
+    def run(
+        self,
+        telemetry_source_pk,
+        fetch_mode=TELEMETRY_FETCH_MODE_SNAPSHOT_IMPORT,
+        snapshot_file=None,
+        *args,
+        **kwargs,
+    ):
+        source = rpki_models.TelemetrySource.objects.get(pk=telemetry_source_pk)
+        self.logger.info(f'Running telemetry import for source {source.name} ({source.pk})')
+        run = sync_telemetry_source(source, snapshot_file=snapshot_file)
+        self.job.data = {
+            'telemetry_source_pk': source.pk,
+            'telemetry_run_pk': run.pk,
+            'fetch_mode': fetch_mode,
+            'snapshot_file': snapshot_file,
+        }
+        self.job.save(update_fields=('data',))
+        self.logger.info(f'Completed telemetry import with run {run.pk}')
 
 
 class RunIrrCoordinationJob(JobRunner):

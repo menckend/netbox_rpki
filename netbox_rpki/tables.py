@@ -108,6 +108,28 @@ class IrrSourceTable(_BaseIrrSourceTable):
         )
 
 
+_BaseTelemetrySourceTable = TelemetrySourceTable
+
+
+class TelemetrySourceTable(_BaseTelemetrySourceTable):
+    sync_health = tables.Column(accessor='sync_health_display', verbose_name='Sync Health')
+
+    class Meta(_BaseTelemetrySourceTable.Meta):
+        fields = _BaseTelemetrySourceTable.Meta.fields + ('sync_health',)
+        default_columns = (
+            'name',
+            'organization',
+            'slug',
+            'source_type',
+            'enabled',
+            'sync_health',
+            'last_run_status',
+            'comments',
+            'tenant',
+            'tags',
+        )
+
+
 _BaseRoutingIntentProfileTable = RoutingIntentProfileTable
 
 

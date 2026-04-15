@@ -61,6 +61,9 @@ from netbox_rpki.tests.utils import (
     create_test_provider_snapshot_diff_item,
     create_test_router_certificate,
     create_test_signed_object,
+    create_test_telemetry_source,
+    create_test_telemetry_run,
+    create_test_bgp_path_observation,
     create_test_trust_anchor,
     create_test_validated_aspa_payload,
     create_test_validated_roa_payload,
@@ -1156,6 +1159,64 @@ class ValidationReportingGraphQLTestCase(APITestCase):
             data['data']['netbox_rpki_validatorinstance']['summary']['adapter'],
             'routinator',
         )
+
+
+class TelemetryReportingGraphQLTestCase(APITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(name='Telemetry GraphQL Org')
+        cls.source = create_test_telemetry_source(
+            name='Telemetry GraphQL Source',
+            organization=cls.organization,
+            summary_json={'adapter': 'imported_mrt'},
+        )
+        cls.telemetry_run = create_test_telemetry_run(
+            name='Telemetry GraphQL Run',
+            source=cls.source,
+            summary_json={'observation_count': 1},
+        )
+        cls.observation = create_test_bgp_path_observation(
+            name='Telemetry GraphQL Observation',
+            telemetry_run=cls.telemetry_run,
+            source=cls.source,
+            details_json={'collector': 'route-views2'},
+        )
+
+    def graphql_request(self, query):
+        response = self.client.post(reverse('graphql'), data={'query': query}, format='json', **self.header)
+        self.assertHttpStatus(response, 200)
+        return json.loads(response.content)
+
+    def test_telemetry_objects_expose_summary_and_detail_fields(self):
+        self.add_permissions(
+            'netbox_rpki.view_telemetrysource',
+            'netbox_rpki.view_telemetryrun',
+            'netbox_rpki.view_bgppathobservation',
+        )
+
+        query = f'''
+        {{
+          netbox_rpki_telemetrysource(id: {self.source.pk}) {{
+            id
+            sync_health
+            summary
+          }}
+          netbox_rpki_telemetryrun(id: {self.telemetry_run.pk}) {{
+            id
+            summary
+          }}
+          netbox_rpki_bgppathobservation(id: {self.observation.pk}) {{
+            id
+            details
+          }}
+        }}
+        '''
+        data = self.graphql_request(query)
+
+        self.assertNotIn('errors', data)
+        self.assertEqual(data['data']['netbox_rpki_telemetrysource']['summary']['adapter'], 'imported_mrt')
+        self.assertEqual(data['data']['netbox_rpki_telemetryrun']['summary']['observation_count'], 1)
+        self.assertEqual(data['data']['netbox_rpki_bgppathobservation']['details']['collector'], 'route-views2')
 
 
 class RouterCertificateGraphQLTestCase(PluginGraphQLTestMixin, APITestCase):

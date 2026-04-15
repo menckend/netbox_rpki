@@ -1,3 +1,4 @@
+import hashlib
 from dataclasses import dataclass
 from uuid import uuid4
 
@@ -2165,6 +2166,128 @@ def create_test_irr_write_execution(
         request_payload_json=request_payload_json or {},
         response_payload_json=response_payload_json or {},
         error=error,
+        **kwargs,
+    )
+
+
+def create_test_telemetry_source(
+    name='Telemetry Source 1',
+    organization=None,
+    slug='telemetry-source-1',
+    enabled=True,
+    source_type=None,
+    endpoint_label='route-views2',
+    collector_scope='route-views',
+    import_interval=None,
+    last_successful_run=None,
+    last_attempted_at=None,
+    last_run_status=None,
+    summary_json=None,
+    last_run_summary_json=None,
+    **kwargs,
+):
+    if organization is None:
+        organization = create_test_organization()
+    return rpki_models.TelemetrySource.objects.create(
+        name=name,
+        organization=organization,
+        slug=slug,
+        enabled=enabled,
+        source_type=source_type or rpki_models.TelemetrySourceType.IMPORTED_MRT,
+        endpoint_label=endpoint_label,
+        collector_scope=collector_scope,
+        import_interval=import_interval,
+        last_successful_run=last_successful_run,
+        last_attempted_at=last_attempted_at,
+        last_run_status=last_run_status or rpki_models.ValidationRunStatus.PENDING,
+        summary_json=summary_json or {},
+        last_run_summary_json=last_run_summary_json or {},
+        **kwargs,
+    )
+
+
+def create_test_telemetry_run(
+    name='Telemetry Run 1',
+    source=None,
+    status=None,
+    started_at=None,
+    completed_at=None,
+    observed_window_start=None,
+    observed_window_end=None,
+    source_fingerprint='',
+    summary_json=None,
+    error_text='',
+    **kwargs,
+):
+    if source is None:
+        source = create_test_telemetry_source()
+    return rpki_models.TelemetryRun.objects.create(
+        name=name,
+        source=source,
+        status=status or rpki_models.ValidationRunStatus.COMPLETED,
+        started_at=started_at,
+        completed_at=completed_at,
+        observed_window_start=observed_window_start,
+        observed_window_end=observed_window_end,
+        source_fingerprint=source_fingerprint,
+        summary_json=summary_json or {},
+        error_text=error_text,
+        **kwargs,
+    )
+
+
+def create_test_bgp_path_observation(
+    name='BGP Path Observation 1',
+    telemetry_run=None,
+    source=None,
+    prefix=None,
+    observed_prefix='203.0.113.0/24',
+    origin_as=None,
+    observed_origin_asn=64500,
+    peer_as=None,
+    observed_peer_asn=64496,
+    collector_id='route-views2',
+    vantage_point_label='rv2',
+    raw_as_path='64496 64510 64500',
+    path_hash='',
+    path_asns_json=None,
+    first_observed_at=None,
+    last_observed_at=None,
+    visibility_status='visible',
+    details_json=None,
+    **kwargs,
+):
+    if telemetry_run is None:
+        telemetry_run = create_test_telemetry_run()
+    if source is None:
+        source = telemetry_run.source
+    if prefix is None and observed_prefix:
+        prefix = Prefix.objects.filter(prefix=IPNetwork(observed_prefix)).first()
+    if origin_as is None and observed_origin_asn is not None:
+        origin_as = create_test_asn(asn=observed_origin_asn)
+    if peer_as is None and observed_peer_asn is not None:
+        peer_as = create_test_asn(asn=observed_peer_asn)
+    if not path_hash:
+        path_hash = hashlib.sha256(raw_as_path.encode('utf-8')).hexdigest()
+    return rpki_models.BgpPathObservation.objects.create(
+        name=name,
+        telemetry_run=telemetry_run,
+        source=source,
+        prefix=prefix,
+        observed_prefix=observed_prefix,
+        origin_as=origin_as,
+        observed_origin_asn=observed_origin_asn,
+        peer_as=peer_as,
+        observed_peer_asn=observed_peer_asn,
+        collector_id=collector_id,
+        vantage_point_label=vantage_point_label,
+        raw_as_path=raw_as_path,
+        path_hash=path_hash,
+        path_asns_json=path_asns_json or [64496, 64510, 64500],
+        first_observed_at=first_observed_at,
+        last_observed_at=last_observed_at,
+        visibility_status=visibility_status,
+        details_json=details_json or {},
         **kwargs,
     )
 

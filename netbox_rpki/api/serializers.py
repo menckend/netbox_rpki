@@ -196,6 +196,53 @@ SERIALIZER_CLASS_MAP['validatedaspapayload'] = ValidatedAspaPayloadSerializer
 globals()['ValidatedAspaPayloadSerializer'] = ValidatedAspaPayloadSerializer
 
 
+class TelemetrySourceSerializer(SERIALIZER_CLASS_MAP['telemetrysource']):
+    sync_health = serializers.ReadOnlyField()
+    sync_health_display = serializers.ReadOnlyField()
+
+    class Meta(SERIALIZER_CLASS_MAP['telemetrysource'].Meta):
+        fields = SERIALIZER_CLASS_MAP['telemetrysource'].Meta.fields + (
+            'sync_health',
+            'sync_health_display',
+        )
+
+
+SERIALIZER_CLASS_MAP['telemetrysource'] = TelemetrySourceSerializer
+globals()['TelemetrySourceSerializer'] = TelemetrySourceSerializer
+
+
+class TelemetryRunSerializer(SERIALIZER_CLASS_MAP['telemetryrun']):
+    summary = serializers.SerializerMethodField()
+
+    class Meta(SERIALIZER_CLASS_MAP['telemetryrun'].Meta):
+        fields = SERIALIZER_CLASS_MAP['telemetryrun'].Meta.fields + (
+            'summary',
+        )
+
+    def get_summary(self, obj):
+        return obj.summary_json or {}
+
+
+SERIALIZER_CLASS_MAP['telemetryrun'] = TelemetryRunSerializer
+globals()['TelemetryRunSerializer'] = TelemetryRunSerializer
+
+
+class BgpPathObservationSerializer(SERIALIZER_CLASS_MAP['bgppathobservation']):
+    details = serializers.SerializerMethodField()
+
+    class Meta(SERIALIZER_CLASS_MAP['bgppathobservation'].Meta):
+        fields = SERIALIZER_CLASS_MAP['bgppathobservation'].Meta.fields + (
+            'details',
+        )
+
+    def get_details(self, obj):
+        return obj.details_json or {}
+
+
+SERIALIZER_CLASS_MAP['bgppathobservation'] = BgpPathObservationSerializer
+globals()['BgpPathObservationSerializer'] = BgpPathObservationSerializer
+
+
 class RpkiProviderAccountSerializer(SERIALIZER_CLASS_MAP['rpkiprovideraccount']):
     supports_roa_write = serializers.ReadOnlyField()
     roa_write_mode = serializers.ReadOnlyField()

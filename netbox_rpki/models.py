@@ -359,6 +359,19 @@ class IrrWriteExecutionStatus(models.TextChoices):
     PARTIAL = "partial", "Partial"
 
 
+class TelemetrySourceType(models.TextChoices):
+    IMPORTED_MRT = "imported_mrt", "Imported MRT Snapshot"
+
+
+class TelemetrySyncHealth(models.TextChoices):
+    DISABLED = "disabled", "Disabled"
+    NEVER_SYNCED = "never_synced", "Never Synced"
+    IN_PROGRESS = "in_progress", "In Progress"
+    FAILED = "failed", "Failed"
+    STALE = "stale", "Stale"
+    HEALTHY = "healthy", "Healthy"
+
+
 class ProviderSyncFamily(models.TextChoices):
     ROA_AUTHORIZATIONS = "roa_authorizations", "ROA Authorizations"
     ASPAS = "aspas", "ASPAs"
@@ -3678,6 +3691,174 @@ class IrrWriteExecution(NamedRpkiStandardModel):
                 errors['change_plan'] = 'IRR change plan must belong to the same organization as the IRR write execution.'
             if self.source_id is not None and self.change_plan.source_id != self.source_id:
                 errors['source'] = 'IRR write execution source must match the IRR change plan source.'
+        if errors:
+            raise ValidationError(errors)
+
+
+class TelemetrySource(NamedRpkiStandardModel):
+    DEFAULT_SYNC_HEALTH_INTERVAL_MINUTES = 24 * 60
+
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='telemetry_sources',
+    )
+    slug = models.SlugField(max_length=100)
+    enabled = models.BooleanField(default=True)
+    source_type = models.CharField(
+        max_length=32,
+        choices=TelemetrySourceType.choices,
+        default=TelemetrySourceType.IMPORTED_MRT,
+    )
+    endpoint_label = models.CharField(max_length=255, blank=True)
+    collector_scope = models.CharField(max_length=255, blank=True)
+    import_interval = models.PositiveIntegerField(blank=True, null=True)
+    last_successful_run = models.ForeignKey(
+        to='TelemetryRun',
+        on_delete=models.SET_NULL,
+        related_name='successful_for_sources',
+        blank=True,
+        null=True,
+    )
+    last_attempted_at = models.DateTimeField(blank=True, null=True)
+    last_run_status = models.CharField(
+        max_length=32,
+        choices=ValidationRunStatus.choices,
+        default=ValidationRunStatus.PENDING,
+    )
+    summary_json = models.JSONField(default=dict, blank=True)
+    last_run_summary_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ('organization__name', 'name')
+        constraints = (
+            models.UniqueConstraint(
+                fields=('organization', 'slug'),
+                name='nb_rpki_telemetrysource_org_slug_unique',
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return _plugin_get_action_url(type(self), kwargs={'pk': self.pk})
+
+    @property
+    def sync_health_interval(self) -> timedelta:
+        interval_minutes = self.import_interval or self.DEFAULT_SYNC_HEALTH_INTERVAL_MINUTES
+        return timedelta(minutes=interval_minutes)
+
+    @property
+    def sync_health(self) -> str:
+        if not self.enabled:
+            return TelemetrySyncHealth.DISABLED
+        if self.last_run_status == ValidationRunStatus.RUNNING:
+            return TelemetrySyncHealth.IN_PROGRESS
+        if self.last_run_status == ValidationRunStatus.FAILED:
+            return TelemetrySyncHealth.FAILED
+        if self.last_successful_run_id is None:
+            return TelemetrySyncHealth.NEVER_SYNCED
+        reference_time = self.last_successful_run.completed_at or self.last_successful_run.started_at
+        if reference_time is None:
+            return TelemetrySyncHealth.NEVER_SYNCED
+        if reference_time + self.sync_health_interval <= timezone.now():
+            return TelemetrySyncHealth.STALE
+        return TelemetrySyncHealth.HEALTHY
+
+    @property
+    def sync_health_display(self) -> str:
+        return TelemetrySyncHealth(self.sync_health).label
+
+
+class TelemetryRun(NamedRpkiStandardModel):
+    source = models.ForeignKey(
+        to='TelemetrySource',
+        on_delete=models.PROTECT,
+        related_name='telemetry_runs',
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=ValidationRunStatus.choices,
+        default=ValidationRunStatus.PENDING,
+    )
+    started_at = models.DateTimeField(blank=True, null=True)
+    completed_at = models.DateTimeField(blank=True, null=True)
+    observed_window_start = models.DateTimeField(blank=True, null=True)
+    observed_window_end = models.DateTimeField(blank=True, null=True)
+    source_fingerprint = models.CharField(max_length=255, blank=True)
+    summary_json = models.JSONField(default=dict, blank=True)
+    error_text = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ('-started_at', 'name')
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return _plugin_get_action_url(type(self), kwargs={'pk': self.pk})
+
+
+class BgpPathObservation(NamedRpkiStandardModel):
+    telemetry_run = models.ForeignKey(
+        to='TelemetryRun',
+        on_delete=models.PROTECT,
+        related_name='path_observations',
+    )
+    source = models.ForeignKey(
+        to='TelemetrySource',
+        on_delete=models.PROTECT,
+        related_name='path_observations',
+    )
+    prefix = models.ForeignKey(
+        to=Prefix,
+        on_delete=models.PROTECT,
+        related_name='bgp_path_observations',
+        blank=True,
+        null=True,
+    )
+    observed_prefix = models.CharField(max_length=64, blank=True)
+    origin_as = models.ForeignKey(
+        to=ASN,
+        on_delete=models.PROTECT,
+        related_name='origin_bgp_path_observations',
+        blank=True,
+        null=True,
+    )
+    observed_origin_asn = models.PositiveIntegerField(blank=True, null=True)
+    peer_as = models.ForeignKey(
+        to=ASN,
+        on_delete=models.PROTECT,
+        related_name='peer_bgp_path_observations',
+        blank=True,
+        null=True,
+    )
+    observed_peer_asn = models.PositiveIntegerField(blank=True, null=True)
+    collector_id = models.CharField(max_length=255, blank=True)
+    vantage_point_label = models.CharField(max_length=255, blank=True)
+    raw_as_path = models.TextField(blank=True)
+    path_hash = models.CharField(max_length=64, blank=True)
+    path_asns_json = models.JSONField(default=list, blank=True)
+    first_observed_at = models.DateTimeField(blank=True, null=True)
+    last_observed_at = models.DateTimeField(blank=True, null=True)
+    visibility_status = models.CharField(max_length=64, blank=True)
+    details_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ('-last_observed_at', 'name')
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return _plugin_get_action_url(type(self), kwargs={'pk': self.pk})
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self.telemetry_run_id is not None and self.source_id is not None and self.telemetry_run.source_id != self.source_id:
+            errors['source'] = 'Telemetry source must match the telemetry run source.'
         if errors:
             raise ValidationError(errors)
 

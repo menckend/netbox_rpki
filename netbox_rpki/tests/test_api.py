@@ -94,6 +94,9 @@ from netbox_rpki.tests.utils import (
     create_test_routing_intent_template_rule,
     create_test_router_certificate,
     create_test_signed_object,
+    create_test_telemetry_source,
+    create_test_telemetry_run,
+    create_test_bgp_path_observation,
     create_test_trust_anchor,
     create_test_validated_aspa_payload,
     create_test_validated_roa_payload,
@@ -400,6 +403,30 @@ class RpkiProviderAccountSerializerTestCase(TestCase):
         self.assertEqual(result_data['details']['match_status_reason'], 'exact_uri_match')
         self.assertEqual(payload_data['details']['ta'], 'test-ta')
         self.assertEqual(payload_data['observed_prefix'], '198.51.100.0/24')
+
+    def test_telemetry_serializers_expose_summary_and_detail_fields(self):
+        source = create_test_telemetry_source(
+            name='Serializer Telemetry Source',
+            summary_json={'adapter': 'imported_mrt'},
+        )
+        run = create_test_telemetry_run(
+            source=source,
+            summary_json={'observation_count': 1},
+        )
+        observation = create_test_bgp_path_observation(
+            telemetry_run=run,
+            source=source,
+            details_json={'collector': 'route-views2'},
+        )
+
+        source_data = api_serializers.TelemetrySourceSerializer(source, context={'request': None}).data
+        run_data = api_serializers.TelemetryRunSerializer(run, context={'request': None}).data
+        observation_data = api_serializers.BgpPathObservationSerializer(observation, context={'request': None}).data
+
+        self.assertEqual(source_data['sync_health'], source.sync_health)
+        self.assertEqual(run_data['summary']['observation_count'], 1)
+        self.assertEqual(observation_data['details']['collector'], 'route-views2')
+        self.assertEqual(observation_data['path_asns_json'], [64496, 64510, 64500])
 
 
 class RpkiProviderAccountSummaryAPITestCase(PluginAPITestCase):

@@ -88,6 +88,11 @@ from .external_validation import (
     VALIDATOR_FETCH_MODES,
     sync_validator_instance,
 )
+from .bgp_telemetry import (
+    BgpTelemetryError,
+    TELEMETRY_FETCH_MODE_SNAPSHOT_IMPORT,
+    sync_telemetry_source,
+)
 
 __all__ = (
     'ProviderSyncError',
@@ -158,4 +163,7 @@ __all__ = (
     'VALIDATOR_FETCH_MODE_SNAPSHOT_IMPORT',
     'VALIDATOR_FETCH_MODES',
     'sync_validator_instance',
+    'BgpTelemetryError',
+    'TELEMETRY_FETCH_MODE_SNAPSHOT_IMPORT',
+    'sync_telemetry_source',
 )

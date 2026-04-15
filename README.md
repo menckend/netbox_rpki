@@ -34,6 +34,8 @@ The first IRR coordination slice now adds source-backed IRR import surfaces for 
 
 The external-validator import slice now extends the existing validation model family with run summaries, object-level evidence details, imported signed-object correlation, and unmatched payload retention. The first concrete adapter targets Routinator `jsonext` data through either the live API or exported snapshot files, and normalizes both validated ROA and ASPA observations into the shared validator run history.
 
+The telemetry substrate slice now adds `TelemetrySource`, retained `TelemetryRun` history, and `BgpPathObservation` persistence for imported MRT-derived JSON snapshots. Each observation preserves raw AS-path text, normalized ASN-sequence JSON, and a stable `path_hash`, so later overlay and historical-comparison slices can correlate route visibility without redesigning the storage contract.
+
 ### Models / DB tables
 
 #### Core inventory models
