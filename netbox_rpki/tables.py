@@ -85,6 +85,29 @@ class RpkiProviderAccountTable(_BaseRpkiProviderAccountTable):
         )
 
 
+_BaseIrrSourceTable = IrrSourceTable
+
+
+class IrrSourceTable(_BaseIrrSourceTable):
+    sync_health = tables.Column(accessor='sync_health_display', verbose_name='Sync Health')
+
+    class Meta(_BaseIrrSourceTable.Meta):
+        fields = _BaseIrrSourceTable.Meta.fields + ('sync_health',)
+        default_columns = (
+            'name',
+            'organization',
+            'slug',
+            'source_family',
+            'write_support_mode',
+            'enabled',
+            'sync_health',
+            'last_sync_status',
+            'comments',
+            'tenant',
+            'tags',
+        )
+
+
 _BaseRoutingIntentProfileTable = RoutingIntentProfileTable
 
 

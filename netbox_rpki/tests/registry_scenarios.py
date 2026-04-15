@@ -67,6 +67,15 @@ from netbox_rpki.tests.utils import (
     create_test_imported_parent_link,
     create_test_imported_child_link,
     create_test_imported_resource_entitlement,
+    create_test_imported_irr_as_set,
+    create_test_imported_irr_as_set_member,
+    create_test_imported_irr_aut_num,
+    create_test_imported_irr_maintainer,
+    create_test_imported_irr_route_object,
+    create_test_imported_irr_route_set,
+    create_test_imported_irr_route_set_member,
+    create_test_irr_snapshot,
+    create_test_irr_source,
     create_test_lifecycle_health_event,
     create_test_lifecycle_health_hook,
     create_test_lifecycle_health_policy,
@@ -543,6 +552,7 @@ def _register_scenario_builders() -> None:
         {
             "organization": build_organization_form_data,
             "certificate": build_certificate_form_data,
+            "irr_source": build_irr_source_form_data,
             "roa": build_roa_form_data,
             "roaprefix": build_roa_prefix_form_data,
             "certificateprefix": build_certificate_prefix_form_data,
@@ -599,6 +609,34 @@ def _register_scenario_builders() -> None:
             ),
             "lifecyclehealthevent": lambda: build_lifecycle_health_event_instance(
                 unique_token("lifecycle-health-event-instance")
+            ),
+            "irr_source": lambda: create_test_irr_source(
+                name=f"IRR Source {unique_token('irr-source')}",
+                slug=f"irr-source-{unique_token('irr-source-slug')}",
+            ),
+            "irr_snapshot": lambda: create_test_irr_snapshot(
+                name=f"IRR Snapshot {unique_token('irr-snapshot')}",
+            ),
+            "imported_irr_route_object": lambda: create_test_imported_irr_route_object(
+                name=f"Route Object {unique_token('imported-irr-route-object')}"
+            ),
+            "imported_irr_route_set": lambda: create_test_imported_irr_route_set(
+                name=f"Route Set {unique_token('imported-irr-route-set')}"
+            ),
+            "imported_irr_route_set_member": lambda: create_test_imported_irr_route_set_member(
+                name=f"Route Set Member {unique_token('imported-irr-route-set-member')}"
+            ),
+            "imported_irr_as_set": lambda: create_test_imported_irr_as_set(
+                name=f"AS Set {unique_token('imported-irr-as-set')}"
+            ),
+            "imported_irr_as_set_member": lambda: create_test_imported_irr_as_set_member(
+                name=f"AS Set Member {unique_token('imported-irr-as-set-member')}"
+            ),
+            "imported_irr_aut_num": lambda: create_test_imported_irr_aut_num(
+                name=f"Aut Num {unique_token('imported-irr-aut-num')}"
+            ),
+            "imported_irr_maintainer": lambda: create_test_imported_irr_maintainer(
+                name=f"Maintainer {unique_token('imported-irr-maintainer')}"
             ),
             "bulkintentrun": lambda: create_test_bulk_intent_run(name=f"Bulk Intent Run {unique_token('bulk-intent-run')}"),
             "bulkintentrunscoperesult": lambda: create_test_bulk_intent_run_scope_result(
@@ -754,6 +792,29 @@ def build_certificate_form_data() -> dict[str, object]:
         "auto_renews": True,
         "self_hosted": False,
         "rpki_org": organization.pk,
+    }
+
+
+def build_irr_source_form_data() -> dict[str, object]:
+    token = unique_token("irr-source-form")
+    organization = create_unique_organization("irr-source-form-org")
+    return {
+        "name": f"IRR Source {token}",
+        "organization": organization.pk,
+        "slug": f"irr-source-{token}",
+        "enabled": True,
+        "source_family": rpki_models.IrrSourceFamily.IRRD_COMPATIBLE,
+        "write_support_mode": rpki_models.IrrWriteSupportMode.APPLY_SUPPORTED,
+        "default_database_label": "LOCAL-IRR",
+        "query_base_url": f"https://{token}.invalid",
+        "whois_host": "whois.example.invalid",
+        "whois_port": 43,
+        "http_username": "tester",
+        "http_password": "secret",
+        "api_key": "api-key",
+        "maintainer_name": "LOCAL-IRR-MNT",
+        "sync_interval": 60,
+        "summary_json": "{}",
     }
 
 

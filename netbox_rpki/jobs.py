@@ -9,6 +9,7 @@ from netbox_rpki.services import (
     run_aspa_reconciliation_pipeline,
     run_bulk_routing_intent_pipeline,
     run_routing_intent_pipeline,
+    sync_irr_source,
     sync_provider_account,
 )
 
@@ -347,6 +348,101 @@ class SyncProviderAccountJob(JobRunner):
         self.logger.info(
             f'Completed provider sync with sync run {sync_run.pk} and provider snapshot {snapshot.pk}'
         )
+
+
+class SyncIrrSourceJob(JobRunner):
+    class Meta:
+        name = 'IRR Source Import'
+
+    @classmethod
+    def get_job_name(
+        cls,
+        irr_source: rpki_models.IrrSource | int,
+        *,
+        fetch_mode: str = rpki_models.IrrFetchMode.LIVE_QUERY,
+        snapshot_file: str | None = None,
+    ) -> str:
+        irr_source_pk = irr_source.pk if hasattr(irr_source, 'pk') else irr_source
+        suffix = f':{snapshot_file}' if snapshot_file else ''
+        return f'{cls.name} [{irr_source_pk}:{fetch_mode}{suffix}]'
+
+    @classmethod
+    def get_active_job_for_source(
+        cls,
+        irr_source: rpki_models.IrrSource | int,
+        *,
+        fetch_mode: str = rpki_models.IrrFetchMode.LIVE_QUERY,
+        snapshot_file: str | None = None,
+    ):
+        return Job.objects.filter(
+            name=cls.get_job_name(irr_source, fetch_mode=fetch_mode, snapshot_file=snapshot_file),
+            status__in=JobStatusChoices.ENQUEUED_STATE_CHOICES,
+        ).order_by('created').first()
+
+    @classmethod
+    def enqueue_for_source(
+        cls,
+        irr_source: rpki_models.IrrSource | int,
+        *,
+        fetch_mode: str = rpki_models.IrrFetchMode.LIVE_QUERY,
+        snapshot_file: str | None = None,
+        user=None,
+        schedule_at=None,
+    ):
+        if not isinstance(irr_source, rpki_models.IrrSource):
+            irr_source = rpki_models.IrrSource.objects.get(pk=irr_source)
+
+        if not irr_source.enabled:
+            raise ValueError(f'IRR source {irr_source.name} is disabled.')
+
+        existing_job = cls.get_active_job_for_source(
+            irr_source,
+            fetch_mode=fetch_mode,
+            snapshot_file=snapshot_file,
+        )
+        if existing_job is not None:
+            return existing_job, False
+
+        if rpki_models.IrrSnapshot.objects.filter(
+            source=irr_source,
+            status=rpki_models.IrrSnapshotStatus.RUNNING,
+            fetch_mode=fetch_mode,
+        ).exists():
+            return None, False
+
+        job = cls.enqueue(
+            name=cls.get_job_name(irr_source, fetch_mode=fetch_mode, snapshot_file=snapshot_file),
+            user=user,
+            schedule_at=schedule_at,
+            irr_source_pk=irr_source.pk,
+            fetch_mode=fetch_mode,
+            snapshot_file=snapshot_file,
+        )
+        return job, True
+
+    def run(
+        self,
+        irr_source_pk,
+        fetch_mode=rpki_models.IrrFetchMode.LIVE_QUERY,
+        snapshot_file=None,
+        *args,
+        **kwargs,
+    ):
+        irr_source = rpki_models.IrrSource.objects.get(pk=irr_source_pk)
+        self.logger.info(f'Running IRR import for source {irr_source.name} ({irr_source.pk})')
+        snapshot = sync_irr_source(
+            irr_source,
+            fetch_mode=fetch_mode,
+            snapshot_file=snapshot_file,
+        )
+        self.job.data = {
+            'irr_source_pk': irr_source.pk,
+            'irr_snapshot_pk': snapshot.pk,
+            'fetch_mode': fetch_mode,
+            'snapshot_file': snapshot_file,
+        }
+        self.job.save(update_fields=('data',))
+        self.logger.info(f'Completed IRR import with snapshot {snapshot.pk}')
 
 
 class EvaluateLifecycleHealthJob(JobRunner):

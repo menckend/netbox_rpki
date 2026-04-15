@@ -259,6 +259,49 @@ class ProviderSyncHealth(models.TextChoices):
     HEALTHY = "healthy", "Healthy"
 
 
+class IrrSourceFamily(models.TextChoices):
+    IRRD_COMPATIBLE = "irrd_compatible", "IRRd-Compatible"
+    RIPE_REST = "ripe_rest", "RIPE REST"
+
+
+class IrrWriteSupportMode(models.TextChoices):
+    UNSUPPORTED = "unsupported", "Unsupported"
+    PREVIEW_ONLY = "preview_only", "Preview Only"
+    APPLY_SUPPORTED = "apply_supported", "Apply Supported"
+
+
+class IrrFetchMode(models.TextChoices):
+    LIVE_QUERY = "live_query", "Live Query"
+    SNAPSHOT_IMPORT = "snapshot_import", "Snapshot Import"
+
+
+class IrrSnapshotStatus(models.TextChoices):
+    PENDING = "pending", "Pending"
+    RUNNING = "running", "Running"
+    COMPLETED = "completed", "Completed"
+    FAILED = "failed", "Failed"
+    PARTIAL = "partial", "Partial"
+
+
+class IrrSyncHealth(models.TextChoices):
+    DISABLED = "disabled", "Disabled"
+    NEVER_SYNCED = "never_synced", "Never Synced"
+    IN_PROGRESS = "in_progress", "In Progress"
+    FAILED = "failed", "Failed"
+    STALE = "stale", "Stale"
+    HEALTHY = "healthy", "Healthy"
+
+
+class IrrMemberType(models.TextChoices):
+    PREFIX = "prefix", "Prefix"
+    PREFIX_RANGE = "prefix_range", "Prefix Range"
+    ROUTE_SET = "route_set", "Route-Set"
+    AS_SET = "as_set", "AS-Set"
+    ASN = "asn", "ASN"
+    SET_NAME = "set_name", "Set Name"
+    UNKNOWN = "unknown", "Unknown"
+
+
 class ProviderSyncFamily(models.TextChoices):
     ROA_AUTHORIZATIONS = "roa_authorizations", "ROA Authorizations"
     ASPAS = "aspas", "ASPAs"
@@ -2901,6 +2944,292 @@ class RpkiProviderAccount(NamedRpkiStandardModel):
     @property
     def sync_health_display(self) -> str:
         return ProviderSyncHealth(self.sync_health).label
+
+
+class IrrSource(NamedRpkiStandardModel):
+    DEFAULT_SYNC_HEALTH_INTERVAL_MINUTES = 24 * 60
+
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='irr_sources',
+    )
+    slug = models.SlugField(max_length=100)
+    enabled = models.BooleanField(default=True)
+    source_family = models.CharField(
+        max_length=32,
+        choices=IrrSourceFamily.choices,
+        default=IrrSourceFamily.IRRD_COMPATIBLE,
+    )
+    write_support_mode = models.CharField(
+        max_length=32,
+        choices=IrrWriteSupportMode.choices,
+        default=IrrWriteSupportMode.UNSUPPORTED,
+    )
+    default_database_label = models.CharField(max_length=100, blank=True)
+    query_base_url = models.CharField(max_length=255, blank=True)
+    whois_host = models.CharField(max_length=255, blank=True)
+    whois_port = models.PositiveIntegerField(blank=True, null=True)
+    http_username = models.CharField(max_length=255, blank=True)
+    http_password = models.CharField(max_length=255, blank=True)
+    api_key = models.CharField(max_length=255, blank=True)
+    maintainer_name = models.CharField(max_length=255, blank=True)
+    sync_interval = models.PositiveIntegerField(blank=True, null=True)
+    last_successful_snapshot = models.ForeignKey(
+        to='IrrSnapshot',
+        on_delete=models.SET_NULL,
+        related_name='successful_for_sources',
+        blank=True,
+        null=True,
+    )
+    last_attempted_at = models.DateTimeField(blank=True, null=True)
+    last_sync_status = models.CharField(
+        max_length=32,
+        choices=IrrSnapshotStatus.choices,
+        default=IrrSnapshotStatus.PENDING,
+    )
+    summary_json = models.JSONField(default=dict, blank=True)
+    last_sync_summary_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ('organization__name', 'name')
+        constraints = (
+            models.UniqueConstraint(
+                fields=('organization', 'slug'),
+                name='nb_rpki_irrsource_org_slug_unique',
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return _plugin_get_action_url(type(self), kwargs={'pk': self.pk})
+
+    @property
+    def supports_preview(self) -> bool:
+        return self.write_support_mode in {
+            IrrWriteSupportMode.PREVIEW_ONLY,
+            IrrWriteSupportMode.APPLY_SUPPORTED,
+        }
+
+    @property
+    def supports_apply(self) -> bool:
+        return self.write_support_mode == IrrWriteSupportMode.APPLY_SUPPORTED
+
+    @property
+    def sync_health_interval(self) -> timedelta:
+        interval_minutes = self.sync_interval or self.DEFAULT_SYNC_HEALTH_INTERVAL_MINUTES
+        return timedelta(minutes=interval_minutes)
+
+    @property
+    def sync_health(self) -> str:
+        if not self.enabled:
+            return IrrSyncHealth.DISABLED
+        if self.last_sync_status == IrrSnapshotStatus.RUNNING:
+            return IrrSyncHealth.IN_PROGRESS
+        if self.last_sync_status == IrrSnapshotStatus.FAILED:
+            return IrrSyncHealth.FAILED
+        if self.last_successful_snapshot_id is None:
+            return IrrSyncHealth.NEVER_SYNCED
+        reference_time = self.last_successful_snapshot.completed_at or self.last_successful_snapshot.started_at
+        if reference_time is None:
+            return IrrSyncHealth.NEVER_SYNCED
+        if reference_time + self.sync_health_interval <= timezone.now():
+            return IrrSyncHealth.STALE
+        return IrrSyncHealth.HEALTHY
+
+    @property
+    def sync_health_display(self) -> str:
+        return IrrSyncHealth(self.sync_health).label
+
+
+class IrrSnapshot(NamedRpkiStandardModel):
+    source = models.ForeignKey(
+        to='IrrSource',
+        on_delete=models.PROTECT,
+        related_name='snapshots',
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=IrrSnapshotStatus.choices,
+        default=IrrSnapshotStatus.PENDING,
+    )
+    fetch_mode = models.CharField(
+        max_length=32,
+        choices=IrrFetchMode.choices,
+        default=IrrFetchMode.LIVE_QUERY,
+    )
+    started_at = models.DateTimeField(blank=True, null=True)
+    completed_at = models.DateTimeField(blank=True, null=True)
+    source_serial = models.CharField(max_length=100, blank=True)
+    source_last_modified = models.DateTimeField(blank=True, null=True)
+    source_fingerprint = models.CharField(max_length=255, blank=True)
+    error_text = models.TextField(blank=True)
+    summary_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ('-started_at', '-created')
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return _plugin_get_action_url(type(self), kwargs={'pk': self.pk})
+
+
+class ImportedIrrObjectBase(NamedRpkiStandardModel):
+    snapshot = models.ForeignKey(
+        to='IrrSnapshot',
+        on_delete=models.PROTECT,
+        related_name='%(class)s_rows',
+    )
+    source = models.ForeignKey(
+        to='IrrSource',
+        on_delete=models.PROTECT,
+        related_name='%(class)s_rows',
+    )
+    rpsl_object_class = models.CharField(max_length=32)
+    rpsl_pk = models.CharField(max_length=255)
+    stable_key = models.CharField(max_length=255)
+    object_text = models.TextField(blank=True)
+    payload_json = models.JSONField(default=dict, blank=True)
+    source_database_label = models.CharField(max_length=100, blank=True)
+
+    class Meta:
+        abstract = True
+        ordering = ('name',)
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return _plugin_get_action_url(type(self), kwargs={'pk': self.pk})
+
+
+class ImportedIrrRouteObject(ImportedIrrObjectBase):
+    address_family = models.CharField(max_length=16, choices=AddressFamily.choices)
+    prefix = models.CharField(max_length=64)
+    origin_asn = models.CharField(max_length=32)
+    route_set_names_json = models.JSONField(default=list, blank=True)
+    maintainer_names_json = models.JSONField(default=list, blank=True)
+
+    class Meta(ImportedIrrObjectBase.Meta):
+        constraints = (
+            models.UniqueConstraint(
+                fields=('snapshot', 'stable_key'),
+                name='nb_rpki_iirrouteobj_snapshot_stable_key_unique',
+            ),
+        )
+
+
+class ImportedIrrRouteSet(ImportedIrrObjectBase):
+    set_name = models.CharField(max_length=255)
+    maintainer_names_json = models.JSONField(default=list, blank=True)
+    member_count = models.PositiveIntegerField(default=0)
+
+    class Meta(ImportedIrrObjectBase.Meta):
+        constraints = (
+            models.UniqueConstraint(
+                fields=('snapshot', 'stable_key'),
+                name='nb_rpki_iirrouteset_snapshot_stable_key_unique',
+            ),
+        )
+
+
+class ImportedIrrRouteSetMember(ImportedIrrObjectBase):
+    parent_route_set = models.ForeignKey(
+        to='ImportedIrrRouteSet',
+        on_delete=models.PROTECT,
+        related_name='members',
+    )
+    member_text = models.CharField(max_length=255)
+    member_type = models.CharField(
+        max_length=32,
+        choices=IrrMemberType.choices,
+        default=IrrMemberType.UNKNOWN,
+    )
+    normalized_prefix = models.CharField(max_length=64, blank=True)
+    normalized_set_name = models.CharField(max_length=255, blank=True)
+
+    class Meta(ImportedIrrObjectBase.Meta):
+        constraints = (
+            models.UniqueConstraint(
+                fields=('snapshot', 'stable_key'),
+                name='nb_rpki_iirroutesetmember_snapshot_stable_key_unique',
+            ),
+        )
+
+
+class ImportedIrrAsSet(ImportedIrrObjectBase):
+    set_name = models.CharField(max_length=255)
+    maintainer_names_json = models.JSONField(default=list, blank=True)
+    member_count = models.PositiveIntegerField(default=0)
+
+    class Meta(ImportedIrrObjectBase.Meta):
+        constraints = (
+            models.UniqueConstraint(
+                fields=('snapshot', 'stable_key'),
+                name='nb_rpki_iirasset_snapshot_stable_key_unique',
+            ),
+        )
+
+
+class ImportedIrrAsSetMember(ImportedIrrObjectBase):
+    parent_as_set = models.ForeignKey(
+        to='ImportedIrrAsSet',
+        on_delete=models.PROTECT,
+        related_name='members',
+    )
+    member_text = models.CharField(max_length=255)
+    member_type = models.CharField(
+        max_length=32,
+        choices=IrrMemberType.choices,
+        default=IrrMemberType.UNKNOWN,
+    )
+    normalized_asn = models.CharField(max_length=32, blank=True)
+    normalized_set_name = models.CharField(max_length=255, blank=True)
+
+    class Meta(ImportedIrrObjectBase.Meta):
+        constraints = (
+            models.UniqueConstraint(
+                fields=('snapshot', 'stable_key'),
+                name='nb_rpki_iirassetmember_snapshot_stable_key_unique',
+            ),
+        )
+
+
+class ImportedIrrAutNum(ImportedIrrObjectBase):
+    asn = models.CharField(max_length=32)
+    as_name = models.CharField(max_length=255, blank=True)
+    import_policy_summary = models.TextField(blank=True)
+    export_policy_summary = models.TextField(blank=True)
+    maintainer_names_json = models.JSONField(default=list, blank=True)
+    admin_contact_handles_json = models.JSONField(default=list, blank=True)
+    tech_contact_handles_json = models.JSONField(default=list, blank=True)
+
+    class Meta(ImportedIrrObjectBase.Meta):
+        constraints = (
+            models.UniqueConstraint(
+                fields=('snapshot', 'stable_key'),
+                name='nb_rpki_iirautnum_snapshot_stable_key_unique',
+            ),
+        )
+
+
+class ImportedIrrMaintainer(ImportedIrrObjectBase):
+    maintainer_name = models.CharField(max_length=255)
+    auth_summary_json = models.JSONField(default=list, blank=True)
+    admin_contact_handles_json = models.JSONField(default=list, blank=True)
+    upd_to_addresses_json = models.JSONField(default=list, blank=True)
+
+    class Meta(ImportedIrrObjectBase.Meta):
+        constraints = (
+            models.UniqueConstraint(
+                fields=('snapshot', 'stable_key'),
+                name='nb_rpki_iirmaintainer_snapshot_stable_key_unique',
+            ),
+        )
 
 
 class LifecycleHealthPolicy(NamedRpkiStandardModel):

@@ -1572,6 +1572,359 @@ def create_test_provider_account(
     )
 
 
+def create_test_irr_source(
+    name='IRR Source 1',
+    organization=None,
+    slug='irr-source-1',
+    enabled=True,
+    source_family=None,
+    write_support_mode=None,
+    default_database_label='LOCAL-IRR',
+    query_base_url='http://127.0.0.1:6080',
+    whois_host='127.0.0.1',
+    whois_port=6043,
+    http_username='',
+    http_password='',
+    api_key='',
+    maintainer_name='LOCAL-IRR-MNT',
+    sync_interval=None,
+    last_successful_snapshot=None,
+    last_attempted_at=None,
+    last_sync_status=None,
+    summary_json=None,
+    last_sync_summary_json=None,
+    **kwargs,
+):
+    if organization is None:
+        organization = create_test_organization()
+    return rpki_models.IrrSource.objects.create(
+        name=name,
+        organization=organization,
+        slug=slug,
+        enabled=enabled,
+        source_family=source_family or rpki_models.IrrSourceFamily.IRRD_COMPATIBLE,
+        write_support_mode=write_support_mode or rpki_models.IrrWriteSupportMode.APPLY_SUPPORTED,
+        default_database_label=default_database_label,
+        query_base_url=query_base_url,
+        whois_host=whois_host,
+        whois_port=whois_port,
+        http_username=http_username,
+        http_password=http_password,
+        api_key=api_key,
+        maintainer_name=maintainer_name,
+        sync_interval=sync_interval,
+        last_successful_snapshot=last_successful_snapshot,
+        last_attempted_at=last_attempted_at,
+        last_sync_status=last_sync_status or rpki_models.IrrSnapshotStatus.PENDING,
+        summary_json=summary_json or {},
+        last_sync_summary_json=last_sync_summary_json or {},
+        **kwargs,
+    )
+
+
+def create_test_irr_snapshot(
+    name='IRR Snapshot 1',
+    source=None,
+    status=None,
+    fetch_mode=None,
+    started_at=None,
+    completed_at=None,
+    source_serial='10',
+    source_last_modified=None,
+    source_fingerprint='',
+    error_text='',
+    summary_json=None,
+    **kwargs,
+):
+    if source is None:
+        source = create_test_irr_source()
+    return rpki_models.IrrSnapshot.objects.create(
+        name=name,
+        source=source,
+        status=status or rpki_models.IrrSnapshotStatus.COMPLETED,
+        fetch_mode=fetch_mode or rpki_models.IrrFetchMode.LIVE_QUERY,
+        started_at=started_at,
+        completed_at=completed_at,
+        source_serial=source_serial,
+        source_last_modified=source_last_modified,
+        source_fingerprint=source_fingerprint,
+        error_text=error_text,
+        summary_json=summary_json or {},
+        **kwargs,
+    )
+
+
+def create_test_imported_irr_route_object(
+    name='route:203.0.113.0/24AS64500',
+    snapshot=None,
+    source=None,
+    rpsl_object_class='route',
+    rpsl_pk='203.0.113.0/24AS64500',
+    stable_key='route:203.0.113.0/24AS64500',
+    address_family=None,
+    prefix='203.0.113.0/24',
+    origin_asn='AS64500',
+    route_set_names_json=None,
+    maintainer_names_json=None,
+    source_database_label='LOCAL-IRR',
+    payload_json=None,
+    **kwargs,
+):
+    if source is None:
+        source = create_test_irr_source()
+    if snapshot is None:
+        snapshot = create_test_irr_snapshot(source=source)
+    return rpki_models.ImportedIrrRouteObject.objects.create(
+        name=name,
+        snapshot=snapshot,
+        source=source,
+        rpsl_object_class=rpsl_object_class,
+        rpsl_pk=rpsl_pk,
+        stable_key=stable_key,
+        object_text=kwargs.pop('object_text', ''),
+        payload_json=payload_json or {},
+        source_database_label=source_database_label,
+        address_family=address_family or rpki_models.AddressFamily.IPV4,
+        prefix=prefix,
+        origin_asn=origin_asn,
+        route_set_names_json=route_set_names_json or ['AS64500:RS-LOCAL-EDGE'],
+        maintainer_names_json=maintainer_names_json or ['LOCAL-IRR-MNT'],
+        **kwargs,
+    )
+
+
+def create_test_imported_irr_route_set(
+    name='route_set:AS64500:RS-LOCAL-EDGE',
+    snapshot=None,
+    source=None,
+    rpsl_object_class='route-set',
+    rpsl_pk='AS64500:RS-LOCAL-EDGE',
+    stable_key='route_set:AS64500:RS-LOCAL-EDGE',
+    set_name='AS64500:RS-LOCAL-EDGE',
+    maintainer_names_json=None,
+    member_count=2,
+    source_database_label='LOCAL-IRR',
+    payload_json=None,
+    **kwargs,
+):
+    if source is None:
+        source = create_test_irr_source()
+    if snapshot is None:
+        snapshot = create_test_irr_snapshot(source=source)
+    return rpki_models.ImportedIrrRouteSet.objects.create(
+        name=name,
+        snapshot=snapshot,
+        source=source,
+        rpsl_object_class=rpsl_object_class,
+        rpsl_pk=rpsl_pk,
+        stable_key=stable_key,
+        object_text=kwargs.pop('object_text', ''),
+        payload_json=payload_json or {},
+        source_database_label=source_database_label,
+        set_name=set_name,
+        maintainer_names_json=maintainer_names_json or ['LOCAL-IRR-MNT'],
+        member_count=member_count,
+        **kwargs,
+    )
+
+
+def create_test_imported_irr_route_set_member(
+    name='route_set:AS64500:RS-LOCAL-EDGE|203.0.113.0/24',
+    snapshot=None,
+    source=None,
+    parent_route_set=None,
+    rpsl_object_class='route-set-member',
+    rpsl_pk='AS64500:RS-LOCAL-EDGE|203.0.113.0/24',
+    stable_key='route_set:AS64500:RS-LOCAL-EDGE|203.0.113.0/24',
+    member_text='203.0.113.0/24',
+    member_type=None,
+    normalized_prefix='203.0.113.0/24',
+    normalized_set_name='',
+    source_database_label='LOCAL-IRR',
+    payload_json=None,
+    **kwargs,
+):
+    if source is None:
+        source = create_test_irr_source()
+    if snapshot is None:
+        snapshot = create_test_irr_snapshot(source=source)
+    if parent_route_set is None:
+        parent_route_set = create_test_imported_irr_route_set(snapshot=snapshot, source=source)
+    return rpki_models.ImportedIrrRouteSetMember.objects.create(
+        name=name,
+        snapshot=snapshot,
+        source=source,
+        parent_route_set=parent_route_set,
+        rpsl_object_class=rpsl_object_class,
+        rpsl_pk=rpsl_pk,
+        stable_key=stable_key,
+        object_text=kwargs.pop('object_text', ''),
+        payload_json=payload_json or {},
+        source_database_label=source_database_label,
+        member_text=member_text,
+        member_type=member_type or rpki_models.IrrMemberType.PREFIX,
+        normalized_prefix=normalized_prefix,
+        normalized_set_name=normalized_set_name,
+        **kwargs,
+    )
+
+
+def create_test_imported_irr_as_set(
+    name='as_set:AS64500:AS-LOCAL-CUSTOMERS',
+    snapshot=None,
+    source=None,
+    rpsl_object_class='as-set',
+    rpsl_pk='AS64500:AS-LOCAL-CUSTOMERS',
+    stable_key='as_set:AS64500:AS-LOCAL-CUSTOMERS',
+    set_name='AS64500:AS-LOCAL-CUSTOMERS',
+    maintainer_names_json=None,
+    member_count=1,
+    source_database_label='LOCAL-IRR',
+    payload_json=None,
+    **kwargs,
+):
+    if source is None:
+        source = create_test_irr_source()
+    if snapshot is None:
+        snapshot = create_test_irr_snapshot(source=source)
+    return rpki_models.ImportedIrrAsSet.objects.create(
+        name=name,
+        snapshot=snapshot,
+        source=source,
+        rpsl_object_class=rpsl_object_class,
+        rpsl_pk=rpsl_pk,
+        stable_key=stable_key,
+        object_text=kwargs.pop('object_text', ''),
+        payload_json=payload_json or {},
+        source_database_label=source_database_label,
+        set_name=set_name,
+        maintainer_names_json=maintainer_names_json or ['LOCAL-IRR-MNT'],
+        member_count=member_count,
+        **kwargs,
+    )
+
+
+def create_test_imported_irr_as_set_member(
+    name='as_set:AS64500:AS-LOCAL-CUSTOMERS|AS64500',
+    snapshot=None,
+    source=None,
+    parent_as_set=None,
+    rpsl_object_class='as-set-member',
+    rpsl_pk='AS64500:AS-LOCAL-CUSTOMERS|AS64500',
+    stable_key='as_set:AS64500:AS-LOCAL-CUSTOMERS|AS64500',
+    member_text='AS64500',
+    member_type=None,
+    normalized_asn='AS64500',
+    normalized_set_name='',
+    source_database_label='LOCAL-IRR',
+    payload_json=None,
+    **kwargs,
+):
+    if source is None:
+        source = create_test_irr_source()
+    if snapshot is None:
+        snapshot = create_test_irr_snapshot(source=source)
+    if parent_as_set is None:
+        parent_as_set = create_test_imported_irr_as_set(snapshot=snapshot, source=source)
+    return rpki_models.ImportedIrrAsSetMember.objects.create(
+        name=name,
+        snapshot=snapshot,
+        source=source,
+        parent_as_set=parent_as_set,
+        rpsl_object_class=rpsl_object_class,
+        rpsl_pk=rpsl_pk,
+        stable_key=stable_key,
+        object_text=kwargs.pop('object_text', ''),
+        payload_json=payload_json or {},
+        source_database_label=source_database_label,
+        member_text=member_text,
+        member_type=member_type or rpki_models.IrrMemberType.ASN,
+        normalized_asn=normalized_asn,
+        normalized_set_name=normalized_set_name,
+        **kwargs,
+    )
+
+
+def create_test_imported_irr_aut_num(
+    name='aut_num:AS64500',
+    snapshot=None,
+    source=None,
+    rpsl_object_class='aut-num',
+    rpsl_pk='AS64500',
+    stable_key='aut_num:AS64500',
+    asn='AS64500',
+    as_name='AS-LOCAL-IRR',
+    import_policy_summary='',
+    export_policy_summary='',
+    maintainer_names_json=None,
+    admin_contact_handles_json=None,
+    tech_contact_handles_json=None,
+    source_database_label='LOCAL-IRR',
+    payload_json=None,
+    **kwargs,
+):
+    if source is None:
+        source = create_test_irr_source()
+    if snapshot is None:
+        snapshot = create_test_irr_snapshot(source=source)
+    return rpki_models.ImportedIrrAutNum.objects.create(
+        name=name,
+        snapshot=snapshot,
+        source=source,
+        rpsl_object_class=rpsl_object_class,
+        rpsl_pk=rpsl_pk,
+        stable_key=stable_key,
+        object_text=kwargs.pop('object_text', ''),
+        payload_json=payload_json or {},
+        source_database_label=source_database_label,
+        asn=asn,
+        as_name=as_name,
+        import_policy_summary=import_policy_summary,
+        export_policy_summary=export_policy_summary,
+        maintainer_names_json=maintainer_names_json or ['LOCAL-IRR-MNT'],
+        admin_contact_handles_json=admin_contact_handles_json or ['LOCAL-IRR-PERSON'],
+        tech_contact_handles_json=tech_contact_handles_json or ['LOCAL-IRR-PERSON'],
+        **kwargs,
+    )
+
+
+def create_test_imported_irr_maintainer(
+    name='mntner:LOCAL-IRR-MNT',
+    snapshot=None,
+    source=None,
+    rpsl_object_class='mntner',
+    rpsl_pk='LOCAL-IRR-MNT',
+    stable_key='mntner:LOCAL-IRR-MNT',
+    maintainer_name='LOCAL-IRR-MNT',
+    auth_summary_json=None,
+    admin_contact_handles_json=None,
+    upd_to_addresses_json=None,
+    source_database_label='LOCAL-IRR',
+    payload_json=None,
+    **kwargs,
+):
+    if source is None:
+        source = create_test_irr_source()
+    if snapshot is None:
+        snapshot = create_test_irr_snapshot(source=source)
+    return rpki_models.ImportedIrrMaintainer.objects.create(
+        name=name,
+        snapshot=snapshot,
+        source=source,
+        rpsl_object_class=rpsl_object_class,
+        rpsl_pk=rpsl_pk,
+        stable_key=stable_key,
+        object_text=kwargs.pop('object_text', ''),
+        payload_json=payload_json or {},
+        source_database_label=source_database_label,
+        maintainer_name=maintainer_name,
+        auth_summary_json=auth_summary_json or ['BCRYPT-PW filtered'],
+        admin_contact_handles_json=admin_contact_handles_json or ['LOCAL-IRR-PERSON'],
+        upd_to_addresses_json=upd_to_addresses_json or ['irrd-dev@example.invalid'],
+        **kwargs,
+    )
+
+
 def create_test_lifecycle_health_policy(
     name='Lifecycle Health Policy 1',
     organization=None,

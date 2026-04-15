@@ -72,6 +72,7 @@ from .bulk_intent_governance import (
     is_bulk_intent_run_approved,
 )
 from .governance_rollup import build_organization_governance_rollup
+from .irr_sync import IrrSyncError, sync_irr_source
 
 __all__ = (
     'ProviderSyncError',
@@ -128,4 +129,6 @@ __all__ = (
     'secondary_approve_bulk_intent_run',
     'is_bulk_intent_run_approved',
     'build_organization_governance_rollup',
+    'IrrSyncError',
+    'sync_irr_source',
 )

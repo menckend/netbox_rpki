@@ -30,6 +30,8 @@ The plugin also includes hosted-provider synchronization and reporting surfaces 
 
 The latest provider-sync reporting work adds stable evidence summaries so imported publication-observation surfaces can explain publication linkage, authored linkage, source ambiguity, freshness, and family-level churn without creating false diffs across unchanged snapshots.
 
+The first IRR coordination slice now adds source-backed IRR import surfaces for configured `IrrSource` records, retained `IrrSnapshot` history, and normalized imported IRR inventory for `route`, `route6`, `route-set`, `as-set`, `aut-num`, and `mntner` families. The initial live adapter targets IRRd-compatible sources through the local IRRd lab, while snapshot-file import remains available for deterministic tests and disconnected development.
+
 ### Models / DB tables
 
 #### Core inventory models
