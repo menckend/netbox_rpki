@@ -445,6 +445,17 @@ Implements NetBox models, API endpoints, GraphQL types, tables, and UI views acr
 
 The plugin declares NetBox compatibility for the 4.5.x release line. Verification has been completed against real development installs of NetBox 4.5.0 and NetBox 4.5.7, covering plugin bootstrap, `manage.py check`, provider-sync, models, API, GraphQL, view, and navigation suites, browser smoke testing, and the full routing-intent and bulk-authoring workflow.
 
+| NetBox | Python | Status | Notes |
+| --- | --- | --- | --- |
+| 4.5.0 | 3.12 | GA | Release-gated developer install verified end-to-end. |
+| 4.5.7 | 3.12 | GA | Release-gated developer install verified end-to-end. |
+| 4.5.x | 3.12 | Beta | Supported release line, but exact patch combinations other than the GA anchors are not release-gated. |
+| 4.5.x | 3.13 - 3.14 | Best effort | Allowed for operator evaluation and tracked in the compatibility contract CI lane, but not release-gated. |
+| < 4.5 or >= 4.6 | any | Unsupported | Outside the plugin compatibility window. |
+| 4.5.x | < 3.12 or > 3.14 | Unsupported | Outside the documented Python range. |
+
+Non-GA combinations emit a runtime `RuntimeWarning` during plugin startup so unsupported and best-effort deployments are visible before operators proceed.
+
 
 ## Installing
 
