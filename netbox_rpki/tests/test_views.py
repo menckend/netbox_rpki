@@ -369,7 +369,7 @@ class LifecycleExportViewTestCase(PluginViewTestCase):
             'netbox_rpki.view_rpkiprovideraccount',
             'netbox_rpki.view_providersnapshot',
             'netbox_rpki.view_providersnapshotdiff',
-            'netbox_rpki.view_roa',
+            'netbox_rpki.view_roaobject',
             'netbox_rpki.view_certificate',
             'netbox_rpki.view_routingintenttemplatebinding',
             'netbox_rpki.view_routingintentexception',
@@ -810,7 +810,7 @@ class SectionNineSurfaceDetailViewTestCase(PluginViewTestCase):
         self.assertContains(response, self.crl_signed_object.name)
 
     def test_roa_detail_shows_signed_object_link(self):
-        self.add_permissions('netbox_rpki.view_roa', 'netbox_rpki.view_signedobject')
+        self.add_permissions('netbox_rpki.view_roaobject', 'netbox_rpki.view_signedobject')
 
         response = self.client.get(self.roa.get_absolute_url())
 
@@ -905,13 +905,13 @@ class SectionNineSurfaceDetailViewTestCase(PluginViewTestCase):
         self.assertContains(response, self.authored_signed_object.get_absolute_url())
         self.assertContains(response, self.authored_signed_object.name)
 
-    def test_signed_object_detail_shows_legacy_roa_link(self):
-        self.add_permissions('netbox_rpki.view_signedobject', 'netbox_rpki.view_roa')
+    def test_signed_object_detail_shows_roa_extension_link(self):
+        self.add_permissions('netbox_rpki.view_signedobject', 'netbox_rpki.view_roaobject')
 
         response = self.client.get(self.roa_signed_object.get_absolute_url())
 
         self.assertHttpStatus(response, 200)
-        self.assertContains(response, 'Legacy ROA')
+        self.assertContains(response, 'ROA Object')
         self.assertContains(response, self.roa.get_absolute_url())
         self.assertContains(response, self.roa.name)
 
@@ -1665,7 +1665,7 @@ class ExternalOverlayDetailViewTestCase(PluginViewTestCase):
 
     def test_roa_and_aspa_detail_views_show_external_overlay_summary(self):
         self.add_permissions(
-            'netbox_rpki.view_roa',
+            'netbox_rpki.view_roaobject',
             'netbox_rpki.view_aspa',
             'netbox_rpki.view_validatedroapayload',
             'netbox_rpki.view_validatedaspapayload',
@@ -2257,7 +2257,7 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
             'netbox_rpki.view_rpkiprovideraccount',
             'netbox_rpki.view_providersnapshot',
             'netbox_rpki.view_providersnapshotdiff',
-            'netbox_rpki.view_roa',
+            'netbox_rpki.view_roaobject',
             'netbox_rpki.view_certificate',
             'netbox_rpki.view_routingintenttemplatebinding',
             'netbox_rpki.view_routingintentexception',
@@ -2352,7 +2352,7 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
             'netbox_rpki.view_rpkiprovideraccount',
             'netbox_rpki.view_providersnapshot',
             'netbox_rpki.view_providersnapshotdiff',
-            'netbox_rpki.view_roa',
+            'netbox_rpki.view_roaobject',
             'netbox_rpki.view_certificate',
             'netbox_rpki.view_routingintenttemplatebinding',
             'netbox_rpki.view_routingintentexception',
@@ -2385,7 +2385,7 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
             'netbox_rpki.view_rpkiprovideraccount',
             'netbox_rpki.view_providersnapshot',
             'netbox_rpki.view_providersnapshotdiff',
-            'netbox_rpki.view_roa',
+            'netbox_rpki.view_roaobject',
             'netbox_rpki.view_certificate',
             'netbox_rpki.view_routingintenttemplatebinding',
             'netbox_rpki.view_routingintentexception',
@@ -2460,7 +2460,7 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
             'netbox_rpki.view_rpkiprovideraccount',
             'netbox_rpki.view_providersnapshot',
             'netbox_rpki.view_providersnapshotdiff',
-            'netbox_rpki.view_roa',
+            'netbox_rpki.view_roaobject',
             'netbox_rpki.view_certificate',
             'netbox_rpki.view_routingintenttemplatebinding',
             'netbox_rpki.view_routingintentexception',
@@ -2521,7 +2521,7 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
             'netbox_rpki.view_rpkiprovideraccount',
             'netbox_rpki.view_providersnapshot',
             'netbox_rpki.view_providersnapshotdiff',
-            'netbox_rpki.view_roa',
+            'netbox_rpki.view_roaobject',
             'netbox_rpki.view_certificate',
             'netbox_rpki.view_routingintenttemplatebinding',
             'netbox_rpki.view_routingintentexception',
@@ -2553,7 +2553,7 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
             'netbox_rpki.view_rpkiprovideraccount',
             'netbox_rpki.view_providersnapshot',
             'netbox_rpki.view_providersnapshotdiff',
-            'netbox_rpki.view_roa',
+            'netbox_rpki.view_roaobject',
             'netbox_rpki.view_certificate',
             'netbox_rpki.view_routingintenttemplatebinding',
             'netbox_rpki.view_routingintentexception',
@@ -3328,7 +3328,6 @@ class CertificateViewTestCase(GeneratedObjectViewTestMixin, PluginViewTestCase):
         self.assertTemplateUsed(response, 'netbox_rpki/object_detail.html')
         self.assertContains(response, str(self.prefix.prefix))
         self.assertContains(response, str(self.asn))
-        self.assertContains(response, self.roa.name)
         self.assertContains(
             response,
             f'{reverse("plugins:netbox_rpki:certificateprefix_add")}?certificate_name={self.certificates[0].pk}',
@@ -3339,25 +3338,25 @@ class CertificateViewTestCase(GeneratedObjectViewTestMixin, PluginViewTestCase):
         )
         self.assertContains(
             response,
-            f'{reverse("plugins:netbox_rpki:roa_add")}?signed_by={self.certificates[0].pk}',
+            reverse("plugins:netbox_rpki:roaobject_add"),
         )
 
 
 class RoaViewTestCase(GeneratedObjectViewTestMixin, PluginViewTestCase):
-    view_name = 'roa'
+    view_name = 'roaobject'
     model = Roa
-    list_permissions = ('netbox_rpki.view_roa',)
-    create_permissions = ('netbox_rpki.add_roa', 'netbox_rpki.view_certificate', 'ipam.view_asn')
-    invalid_create_permissions = ('netbox_rpki.add_roa', 'netbox_rpki.view_certificate', 'ipam.view_asn')
-    empty_create_permissions = ('netbox_rpki.add_roa', 'netbox_rpki.view_certificate', 'ipam.view_asn')
-    edit_permissions = ('netbox_rpki.change_roa', 'netbox_rpki.view_certificate', 'ipam.view_asn')
-    delete_permissions = ('netbox_rpki.delete_roa',)
+    list_permissions = ('netbox_rpki.view_roaobject',)
+    create_permissions = ('netbox_rpki.add_roaobject', 'netbox_rpki.view_organization', 'ipam.view_asn')
+    invalid_create_permissions = ('netbox_rpki.add_roaobject', 'netbox_rpki.view_organization', 'ipam.view_asn')
+    empty_create_permissions = ('netbox_rpki.add_roaobject', 'netbox_rpki.view_organization', 'ipam.view_asn')
+    edit_permissions = ('netbox_rpki.change_roaobject', 'netbox_rpki.view_organization', 'ipam.view_asn')
+    delete_permissions = ('netbox_rpki.delete_roaobject',)
     list_expected_text = ('View ROA 1', 'View ROA 2')
     filter_query = 'View ROA 2'
     filter_expected_text = ('View ROA 2',)
     filter_unexpected_text = ('View ROA 1',)
     invalid_form_errors = ('name', 'This field is required')
-    empty_form_errors = ('name', 'signed_by', 'This field is required')
+    empty_form_errors = ('name', 'This field is required')
 
     @classmethod
     def setUpTestData(cls):
@@ -3394,13 +3393,13 @@ class RoaViewTestCase(GeneratedObjectViewTestMixin, PluginViewTestCase):
     def get_valid_create_data(self):
         return {
             'name': 'View ROA 4',
+            'organization': self.organization,
             'origin_as': self.asns[0],
-            'auto_renews': True,
-            'signed_by': self.certificates[0],
+            'validation_state': rpki_models.ValidationState.UNKNOWN,
         }
 
     def get_invalid_create_data(self):
-        return {'auto_renews': True, 'signed_by': self.certificates[0]}
+        return {'validation_state': rpki_models.ValidationState.UNKNOWN}
 
     def get_edit_instance(self):
         return self.roas[0]
@@ -3408,9 +3407,9 @@ class RoaViewTestCase(GeneratedObjectViewTestMixin, PluginViewTestCase):
     def get_valid_edit_data(self):
         return {
             'name': 'View ROA 1 Updated',
+            'organization': self.organization,
             'origin_as': self.asns[0],
-            'auto_renews': True,
-            'signed_by': self.certificates[0],
+            'validation_state': rpki_models.ValidationState.UNKNOWN,
         }
 
     def get_delete_instance(self):
@@ -3424,7 +3423,7 @@ class RoaViewTestCase(GeneratedObjectViewTestMixin, PluginViewTestCase):
         self.assertEqual(instance.name, 'View ROA 1 Updated')
 
     def test_roa_detail_renders_prefix_table_and_prefill_link(self):
-        self.add_permissions('netbox_rpki.view_roa', 'netbox_rpki.change_roa')
+        self.add_permissions('netbox_rpki.view_roaobject', 'netbox_rpki.change_roaobject')
 
         response = self.client.get(self.roas[0].get_absolute_url())
 
@@ -3435,25 +3434,25 @@ class RoaViewTestCase(GeneratedObjectViewTestMixin, PluginViewTestCase):
         self.assertContains(response, date_format(self.roas[0].valid_to))
         self.assertContains(
             response,
-            f'{reverse("plugins:netbox_rpki:roaprefix_add")}?roa_name={self.roas[0].pk}',
+            f'{reverse("plugins:netbox_rpki:roaobjectprefix_add")}?roa_object={self.roas[0].pk}',
         )
 
 
 class RoaPrefixViewTestCase(GeneratedObjectViewTestMixin, PluginViewTestCase):
-    view_name = 'roaprefix'
+    view_name = 'roaobjectprefix'
     model = RoaPrefix
-    list_permissions = ('netbox_rpki.view_roaprefix',)
-    create_permissions = ('netbox_rpki.add_roaprefix', 'netbox_rpki.view_roa', 'ipam.view_prefix')
-    invalid_create_permissions = ('netbox_rpki.add_roaprefix', 'netbox_rpki.view_roa', 'ipam.view_prefix')
-    empty_create_permissions = ('netbox_rpki.add_roaprefix', 'netbox_rpki.view_roa', 'ipam.view_prefix')
-    edit_permissions = ('netbox_rpki.change_roaprefix', 'netbox_rpki.view_roa', 'ipam.view_prefix')
-    delete_permissions = ('netbox_rpki.delete_roaprefix',)
+    list_permissions = ('netbox_rpki.view_roaobjectprefix',)
+    create_permissions = ('netbox_rpki.add_roaobjectprefix', 'netbox_rpki.view_roaobject', 'ipam.view_prefix')
+    invalid_create_permissions = ('netbox_rpki.add_roaobjectprefix', 'netbox_rpki.view_roaobject', 'ipam.view_prefix')
+    empty_create_permissions = ('netbox_rpki.add_roaobjectprefix', 'netbox_rpki.view_roaobject', 'ipam.view_prefix')
+    edit_permissions = ('netbox_rpki.change_roaobjectprefix', 'netbox_rpki.view_roaobject', 'ipam.view_prefix')
+    delete_permissions = ('netbox_rpki.delete_roaobjectprefix',)
     list_expected_text = ('10.50.1.0/24', '10.50.2.0/24')
     filter_query = '10.50.2.0/24'
     filter_expected_text = ('10.50.2.0/24',)
     filter_unexpected_text = ('10.50.1.0/24',)
-    invalid_form_errors = ('prefix', 'This field is required')
-    empty_form_errors = ('prefix', 'max_length', 'roa_name', 'This field is required')
+    invalid_form_errors = ('roa_object', 'Select a valid choice.')
+    empty_form_errors = ('prefix', 'max_length', 'roa_object', 'This field is required')
 
     @classmethod
     def setUpTestData(cls):
@@ -3477,22 +3476,22 @@ class RoaPrefixViewTestCase(GeneratedObjectViewTestMixin, PluginViewTestCase):
         ]
 
     def get_valid_create_data(self):
-        return {'prefix': self.prefixes[0], 'max_length': 27, 'roa_name': self.roas[1]}
+        return {'prefix': self.prefixes[0], 'prefix_cidr_text': str(self.prefixes[0].prefix), 'max_length': 27, 'roa_object': self.roas[1]}
 
     def get_invalid_create_data(self):
-        return {'max_length': 27, 'roa_name': self.roas[1]}
+        return {'max_length': 27, 'roa_object': 999999}
 
     def get_edit_instance(self):
         return self.roa_prefixes[0]
 
     def get_valid_edit_data(self):
-        return {'prefix': self.prefixes[0], 'max_length': 28, 'roa_name': self.roas[0]}
+        return {'prefix': self.prefixes[0], 'prefix_cidr_text': str(self.prefixes[0].prefix), 'max_length': 28, 'roa_object': self.roas[0]}
 
     def get_delete_instance(self):
         return self.roa_prefixes[2]
 
     def assert_valid_create_result(self):
-        self.assertTrue(RoaPrefix.objects.filter(prefix=self.prefixes[0], roa_name=self.roas[1], max_length=27).exists())
+        self.assertTrue(RoaPrefix.objects.filter(prefix=self.prefixes[0], roa_object=self.roas[1], max_length=27).exists())
 
     def assert_valid_edit_result(self, instance):
         instance.refresh_from_db()

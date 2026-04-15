@@ -758,28 +758,34 @@ class Certificate(NamedRpkiStandardModel):
         return reverse("plugins:netbox_rpki:certificate", args=[self.pk])
 
 
-class Roa(NamedRpkiStandardModel):
-    origin_as = models.ForeignKey(
-        to=ASN,
+class RoaObject(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
         on_delete=models.PROTECT,
-        related_name='roas',
+        related_name='roa_objects',
         blank=True,
         null=True
-    )
-    valid_from = models.DateField(editable=True, blank=True, null=True)
-    valid_to = models.DateField(editable=True, blank=True, null=True)
-    auto_renews = models.BooleanField(editable=True)
-    signed_by = models.ForeignKey(
-        to=Certificate,
-        on_delete=models.PROTECT,
-        related_name='roas'
     )
     signed_object = models.OneToOneField(
         to='SignedObject',
-        on_delete=models.SET_NULL,
-        related_name='legacy_roa',
+        on_delete=models.PROTECT,
+        related_name='roa_extension',
         blank=True,
         null=True
+    )
+    origin_as = models.ForeignKey(
+        to=ASN,
+        on_delete=models.PROTECT,
+        related_name='roa_objects',
+        blank=True,
+        null=True
+    )
+    valid_from = models.DateField(blank=True, null=True)
+    valid_to = models.DateField(blank=True, null=True)
+    validation_state = models.CharField(
+        max_length=32,
+        choices=ValidationState.choices,
+        default=ValidationState.UNKNOWN,
     )
 
     class Meta:
@@ -797,18 +803,11 @@ class Roa(NamedRpkiStandardModel):
         if self.signed_object.object_type != SignedObjectType.ROA:
             errors.append('Signed object must use the ROA object type.')
         if (
-            self.signed_by_id is not None
-            and self.signed_object.resource_certificate_id is not None
-            and self.signed_by_id != self.signed_object.resource_certificate_id
-        ):
-            errors.append('Signed object must use the same resource certificate as the ROA signing certificate.')
-        if (
-            self.signed_by_id is not None
-            and self.signed_by.rpki_org_id is not None
+            self.organization_id is not None
             and self.signed_object.organization_id is not None
-            and self.signed_by.rpki_org_id != self.signed_object.organization_id
+            and self.organization_id != self.signed_object.organization_id
         ):
-            errors.append('Signed object must belong to the same organization as the ROA signing certificate.')
+            errors.append('Signed object must belong to the same organization as the ROA object.')
         if (
             self.valid_from is not None
             and self.signed_object.valid_from is not None
@@ -826,30 +825,50 @@ class Roa(NamedRpkiStandardModel):
             raise ValidationError({'signed_object': errors})
 
     def get_absolute_url(self):
-        return reverse("plugins:netbox_rpki:roa", args=[self.pk])
+        return reverse("plugins:netbox_rpki:roaobject", args=[self.pk])
+
+    @property
+    def signed_by(self):
+        return getattr(self.signed_object, 'resource_certificate', None)
+
+    @property
+    def RoaToPrefixTable(self):
+        return self.prefix_authorizations
 
 
-class RoaPrefix(RpkiStandardModel):
+class RoaObjectPrefix(RpkiStandardModel):
+    roa_object = models.ForeignKey(
+        to=RoaObject,
+        on_delete=models.PROTECT,
+        related_name='prefix_authorizations'
+    )
     prefix = models.ForeignKey(
-        to=ipam.models.ip.Prefix,
+        to=Prefix,
         on_delete=models.PROTECT,
-        related_name='PrefixToRoaTable'
+        related_name='roa_object_prefixes',
+        blank=True,
+        null=True
     )
-    max_length = models.IntegerField(editable=True)
-    roa_name = models.ForeignKey(
-        to=Roa,
-        on_delete=models.PROTECT,
-        related_name='RoaToPrefixTable'
-    )
+    prefix_cidr_text = models.CharField(max_length=64, blank=True)
+    max_length = models.PositiveSmallIntegerField()
+    is_current = models.BooleanField(default=True)
 
     class Meta:
-        ordering = ("prefix",)
+        ordering = ("roa_object", "prefix_cidr_text")
 
     def __str__(self):
-        return str(self.prefix)
+        return self.prefix_cidr_text or str(self.prefix)
 
     def get_absolute_url(self):
-        return reverse("plugins:netbox_rpki:roaprefix", args=[self.pk])
+        return reverse("plugins:netbox_rpki:roaobjectprefix", args=[self.pk])
+
+    @property
+    def roa_name(self):
+        return self.roa_object
+
+
+Roa = RoaObject
+RoaPrefix = RoaObjectPrefix
 
 
 class CertificatePrefix(RpkiStandardModel):
@@ -1757,8 +1776,8 @@ class ValidatedRoaPayload(NamedRpkiStandardModel):
         on_delete=models.PROTECT,
         related_name='validated_roa_payloads'
     )
-    roa = models.ForeignKey(
-        to=Roa,
+    roa_object = models.ForeignKey(
+        to=RoaObject,
         on_delete=models.PROTECT,
         related_name='validated_payloads',
         blank=True,
@@ -1804,10 +1823,10 @@ class ValidatedRoaPayload(NamedRpkiStandardModel):
         if self.object_validation_result.validation_run_id != self.validation_run_id:
             errors.append('Object validation result must belong to the same validation run as the validated ROA payload.')
         if (
-            self.roa_id is not None
-            and self.roa.signed_object_id is not None
+            self.roa_object_id is not None
+            and self.roa_object.signed_object_id is not None
             and self.object_validation_result.signed_object_id is not None
-            and self.roa.signed_object_id != self.object_validation_result.signed_object_id
+            and self.roa_object.signed_object_id != self.object_validation_result.signed_object_id
         ):
             errors.append('Object validation result must reference the same signed object as the validated ROA payload.')
 
@@ -1816,6 +1835,10 @@ class ValidatedRoaPayload(NamedRpkiStandardModel):
 
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:validatedroapayload", args=[self.pk])
+
+    @property
+    def roa(self):
+        return self.roa_object
 
 
 class ValidatedAspaPayload(NamedRpkiStandardModel):
@@ -2625,8 +2648,8 @@ class ExternalManagementException(NamedRpkiStandardModel):
     )
     origin_asn_value = models.PositiveBigIntegerField(blank=True, null=True)
     max_length = models.PositiveSmallIntegerField(blank=True, null=True)
-    roa = models.ForeignKey(
-        to='Roa',
+    roa_object = models.ForeignKey(
+        to='RoaObject',
         on_delete=models.PROTECT,
         related_name='external_management_exceptions',
         blank=True,
@@ -2720,27 +2743,27 @@ class ExternalManagementException(NamedRpkiStandardModel):
         scope_fields = {
             ExternalManagementScope.ROA_PREFIX: (
                 bool(self.prefix_id or self.prefix_cidr_text),
-                ('roa', 'imported_authorization', 'customer_asn', 'customer_asn_value', 'provider_asn', 'provider_asn_value', 'aspa', 'imported_aspa'),
+                ('roa_object', 'imported_authorization', 'customer_asn', 'customer_asn_value', 'provider_asn', 'provider_asn_value', 'aspa', 'imported_aspa'),
             ),
             ExternalManagementScope.ROA_OBJECT: (
-                self.roa_id is not None,
+                self.roa_object_id is not None,
                 ('prefix', 'prefix_cidr_text', 'origin_asn', 'origin_asn_value', 'max_length', 'imported_authorization', 'customer_asn', 'customer_asn_value', 'provider_asn', 'provider_asn_value', 'aspa', 'imported_aspa'),
             ),
             ExternalManagementScope.ROA_IMPORTED: (
                 self.imported_authorization_id is not None,
-                ('prefix', 'prefix_cidr_text', 'origin_asn', 'origin_asn_value', 'max_length', 'roa', 'customer_asn', 'customer_asn_value', 'provider_asn', 'provider_asn_value', 'aspa', 'imported_aspa'),
+                ('prefix', 'prefix_cidr_text', 'origin_asn', 'origin_asn_value', 'max_length', 'roa_object', 'customer_asn', 'customer_asn_value', 'provider_asn', 'provider_asn_value', 'aspa', 'imported_aspa'),
             ),
             ExternalManagementScope.ASPA_CUSTOMER: (
                 bool(self.customer_asn_id or self.customer_asn_value is not None),
-                ('prefix', 'prefix_cidr_text', 'origin_asn', 'origin_asn_value', 'max_length', 'roa', 'imported_authorization', 'aspa', 'imported_aspa'),
+                ('prefix', 'prefix_cidr_text', 'origin_asn', 'origin_asn_value', 'max_length', 'roa_object', 'imported_authorization', 'aspa', 'imported_aspa'),
             ),
             ExternalManagementScope.ASPA_OBJECT: (
                 self.aspa_id is not None,
-                ('prefix', 'prefix_cidr_text', 'origin_asn', 'origin_asn_value', 'max_length', 'roa', 'imported_authorization', 'customer_asn', 'customer_asn_value', 'provider_asn', 'provider_asn_value', 'imported_aspa'),
+                ('prefix', 'prefix_cidr_text', 'origin_asn', 'origin_asn_value', 'max_length', 'roa_object', 'imported_authorization', 'customer_asn', 'customer_asn_value', 'provider_asn', 'provider_asn_value', 'imported_aspa'),
             ),
             ExternalManagementScope.ASPA_IMPORTED: (
                 self.imported_aspa_id is not None,
-                ('prefix', 'prefix_cidr_text', 'origin_asn', 'origin_asn_value', 'max_length', 'roa', 'imported_authorization', 'customer_asn', 'customer_asn_value', 'provider_asn', 'provider_asn_value', 'aspa'),
+                ('prefix', 'prefix_cidr_text', 'origin_asn', 'origin_asn_value', 'max_length', 'roa_object', 'imported_authorization', 'customer_asn', 'customer_asn_value', 'provider_asn', 'provider_asn_value', 'aspa'),
             ),
         }
 
@@ -2756,8 +2779,8 @@ class ExternalManagementException(NamedRpkiStandardModel):
         if self.scope_type == ExternalManagementScope.ROA_PREFIX and not (self.prefix_id or self.prefix_cidr_text):
             errors['prefix_cidr_text'] = 'A prefix-scoped exception requires a prefix or prefix CIDR text.'
 
-        if self.scope_type == ExternalManagementScope.ROA_OBJECT and self.roa_id is not None:
-            organization_id = getattr(getattr(self.roa, 'signed_by', None), 'rpki_org_id', None)
+        if self.scope_type == ExternalManagementScope.ROA_OBJECT and self.roa_object_id is not None:
+            organization_id = self.roa_object.organization_id
             if organization_id is not None and organization_id != self.organization_id:
                 errors['organization'] = 'Organization must match the selected ROA.'
         if self.scope_type == ExternalManagementScope.ROA_IMPORTED and self.imported_authorization_id is not None:
@@ -2783,6 +2806,10 @@ class ExternalManagementException(NamedRpkiStandardModel):
         if self.ends_at is not None and self.ends_at <= now:
             return False
         return True
+
+    @property
+    def roa(self):
+        return self.roa_object
 
     @property
     def is_expired(self) -> bool:
@@ -5674,8 +5701,8 @@ class ROAIntentMatch(NamedRpkiStandardModel):
         on_delete=models.PROTECT,
         related_name='candidate_matches'
     )
-    roa = models.ForeignKey(
-        to=Roa,
+    roa_object = models.ForeignKey(
+        to=RoaObject,
         on_delete=models.PROTECT,
         related_name='intent_matches'
         ,
@@ -5701,19 +5728,19 @@ class ROAIntentMatch(NamedRpkiStandardModel):
         ordering = ("name",)
         constraints = (
             models.UniqueConstraint(
-                fields=("roa_intent", "roa"),
-                condition=models.Q(roa__isnull=False, imported_authorization__isnull=True),
-                name="netbox_rpki_roaintentmatch_roa_intent_roa_unique",
+                fields=("roa_intent", "roa_object"),
+                condition=models.Q(roa_object__isnull=False, imported_authorization__isnull=True),
+                name="netbox_rpki_roaintentmatch_intent_roa_object_unique",
             ),
             models.UniqueConstraint(
                 fields=("roa_intent", "imported_authorization"),
-                condition=models.Q(roa__isnull=True, imported_authorization__isnull=False),
+                condition=models.Q(roa_object__isnull=True, imported_authorization__isnull=False),
                 name="netbox_rpki_roaintentmatch_roa_intent_imported_unique",
             ),
             models.CheckConstraint(
                 condition=(
-                    models.Q(roa__isnull=False, imported_authorization__isnull=True)
-                    | models.Q(roa__isnull=True, imported_authorization__isnull=False)
+                    models.Q(roa_object__isnull=False, imported_authorization__isnull=True)
+                    | models.Q(roa_object__isnull=True, imported_authorization__isnull=False)
                 ),
                 name="netbox_rpki_roaintentmatch_exactly_one_source",
             ),
@@ -5724,6 +5751,10 @@ class ROAIntentMatch(NamedRpkiStandardModel):
 
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:roaintentmatch", args=[self.pk])
+
+    @property
+    def roa(self):
+        return self.roa_object
 
 
 class ROAReconciliationRun(NamedRpkiStandardModel):
@@ -5833,8 +5864,8 @@ class ROAIntentResult(NamedRpkiStandardModel):
         choices=ReconciliationSeverity.choices,
         default=ReconciliationSeverity.INFO,
     )
-    best_roa = models.ForeignKey(
-        to=Roa,
+    best_roa_object = models.ForeignKey(
+        to=RoaObject,
         on_delete=models.SET_NULL,
         related_name='intent_result_matches',
         blank=True,
@@ -5866,6 +5897,10 @@ class ROAIntentResult(NamedRpkiStandardModel):
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:roaintentresult", args=[self.pk])
 
+    @property
+    def best_roa(self):
+        return self.best_roa_object
+
 
 class PublishedROAResult(NamedRpkiStandardModel):
     reconciliation_run = models.ForeignKey(
@@ -5873,8 +5908,8 @@ class PublishedROAResult(NamedRpkiStandardModel):
         on_delete=models.PROTECT,
         related_name='published_roa_results'
     )
-    roa = models.ForeignKey(
-        to=Roa,
+    roa_object = models.ForeignKey(
+        to=RoaObject,
         on_delete=models.PROTECT,
         related_name='published_reconciliation_results'
         ,
@@ -5906,19 +5941,19 @@ class PublishedROAResult(NamedRpkiStandardModel):
         ordering = ("name",)
         constraints = (
             models.UniqueConstraint(
-                fields=("reconciliation_run", "roa"),
-                condition=models.Q(roa__isnull=False, imported_authorization__isnull=True),
-                name="netbox_rpki_publishedroaresult_run_roa_unique",
+                fields=("reconciliation_run", "roa_object"),
+                condition=models.Q(roa_object__isnull=False, imported_authorization__isnull=True),
+                name="netbox_rpki_publishedroaresult_run_roa_object_unique",
             ),
             models.UniqueConstraint(
                 fields=("reconciliation_run", "imported_authorization"),
-                condition=models.Q(roa__isnull=True, imported_authorization__isnull=False),
+                condition=models.Q(roa_object__isnull=True, imported_authorization__isnull=False),
                 name="netbox_rpki_publishedresult_run_imported_unique",
             ),
             models.CheckConstraint(
                 condition=(
-                    models.Q(roa__isnull=False, imported_authorization__isnull=True)
-                    | models.Q(roa__isnull=True, imported_authorization__isnull=False)
+                    models.Q(roa_object__isnull=False, imported_authorization__isnull=True)
+                    | models.Q(roa_object__isnull=True, imported_authorization__isnull=False)
                 ),
                 name="netbox_rpki_publishedroaresult_exactly_one_source",
             ),
@@ -5929,6 +5964,10 @@ class PublishedROAResult(NamedRpkiStandardModel):
 
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:publishedroaresult", args=[self.pk])
+
+    @property
+    def roa(self):
+        return self.roa_object
 
 
 class ROALintFinding(NamedRpkiStandardModel):
@@ -6956,8 +6995,8 @@ class ROAChangePlanItem(NamedRpkiStandardModel):
         blank=True,
         null=True
     )
-    roa = models.ForeignKey(
-        to=Roa,
+    roa_object = models.ForeignKey(
+        to=RoaObject,
         on_delete=models.PROTECT,
         related_name='change_plan_items',
         blank=True,
@@ -6988,6 +7027,10 @@ class ROAChangePlanItem(NamedRpkiStandardModel):
 
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:roachangeplanitem", args=[self.pk])
+
+    @property
+    def roa(self):
+        return self.roa_object
 
 
 class ASPAChangePlanItem(NamedRpkiStandardModel):

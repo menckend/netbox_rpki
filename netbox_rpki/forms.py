@@ -41,8 +41,8 @@ from netbox_rpki.services.roa_lint import build_roa_change_plan_lint_posture
 from netbox_rpki.models import (
     Certificate,
     Organization,
-    Roa,
-    RoaPrefix,
+    RoaObject,
+    RoaObjectPrefix,
     CertificatePrefix,
     CertificateAsn,
     validate_maintenance_window_bounds,

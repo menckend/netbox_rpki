@@ -9,7 +9,7 @@ OPERATIONS_MENU_ITEM = PluginMenuItem(
     link_text='Operations',
     permissions=[
         'netbox_rpki.view_rpkiprovideraccount',
-        'netbox_rpki.view_roa',
+        'netbox_rpki.view_roaobject',
         'netbox_rpki.view_certificate',
     ],
 )

@@ -28,8 +28,8 @@ class RoutingIntentExecutionError(ValueError):
 class PublishedAuthorization:
     source_key: str
     source_name: str
-    roa: rpki_models.Roa | None
-    roa_prefix: rpki_models.RoaPrefix | None
+    roa_object: rpki_models.RoaObject | None
+    roa_object_prefix: rpki_models.RoaObjectPrefix | None
     imported_authorization: rpki_models.ImportedRoaAuthorization | None
     network: IPNetwork
     prefix_cidr_text: str
@@ -1629,20 +1629,23 @@ def _network_contains(container: IPNetwork, member: IPNetwork) -> bool:
 
 def _load_local_published_authorizations() -> dict[str, list[PublishedAuthorization]]:
     by_source = {}
-    prefix_rows = rpki_models.RoaPrefix.objects.select_related('roa_name', 'roa_name__origin_as').all()
+    prefix_rows = rpki_models.RoaObjectPrefix.objects.select_related('roa_object', 'roa_object__origin_as').all()
     today = timezone.now().date()
     for prefix_row in prefix_rows:
-        roa = prefix_row.roa_name
+        roa = prefix_row.roa_object
+        prefix_cidr_text = prefix_row.prefix_cidr_text or str(getattr(prefix_row.prefix, 'prefix', ''))
+        if not prefix_cidr_text:
+            continue
         source_key = f'roa:{roa.pk}'
         by_source.setdefault(source_key, []).append(
             PublishedAuthorization(
                 source_key=source_key,
                 source_name=roa.name,
-                roa=roa,
-                roa_prefix=prefix_row,
+                roa_object=roa,
+                roa_object_prefix=prefix_row,
                 imported_authorization=None,
-                network=IPNetwork(str(prefix_row.prefix.prefix)),
-                prefix_cidr_text=str(prefix_row.prefix.prefix),
+                network=IPNetwork(prefix_cidr_text),
+                prefix_cidr_text=prefix_cidr_text,
                 origin_asn_value=getattr(roa.origin_as, 'asn', None),
                 max_length=prefix_row.max_length,
                 stale=bool(roa.valid_to and roa.valid_to < today),
@@ -1686,8 +1689,8 @@ def _load_imported_published_authorizations(
             PublishedAuthorization(
                 source_key=source_key,
                 source_name=imported.name,
-                roa=None,
-                roa_prefix=None,
+                roa_object=None,
+                roa_object_prefix=None,
                 imported_authorization=imported,
                 network=IPNetwork(imported.prefix_cidr_text),
                 prefix_cidr_text=imported.prefix_cidr_text,
@@ -1813,11 +1816,11 @@ def _build_match_analysis(intent: rpki_models.ROAIntent, published: PublishedAut
 def _serialize_match_source(match: rpki_models.ROAIntentMatch | None) -> dict:
     if match is None:
         return {}
-    if match.roa_id is not None:
+    if match.roa_object_id is not None:
         return {
             'source': 'local_roa',
-            'roa_id': match.roa_id,
-            'name': match.roa.name,
+            'roa_id': match.roa_object_id,
+            'name': match.roa_object.name,
         }
 
     imported = match.imported_authorization
@@ -1881,8 +1884,8 @@ def _result_from_best_match(
 
 
 def _match_source_key(match: rpki_models.ROAIntentMatch) -> str:
-    if match.roa_id is not None:
-        return f'roa:{match.roa_id}'
+    if match.roa_object_id is not None:
+        return f'roa:{match.roa_object_id}'
     return f'imported:{match.imported_authorization_id}'
 
 
@@ -1994,7 +1997,7 @@ def reconcile_roa_intents(
             match = rpki_models.ROAIntentMatch.objects.create(
                 name=f'{intent.name} vs {published.source_name}',
                 roa_intent=intent,
-                roa=published.roa,
+                roa_object=published.roa_object,
                 imported_authorization=published.imported_authorization,
                 tenant=intent.tenant,
                 match_kind=match_kind,
@@ -2041,7 +2044,7 @@ def reconcile_roa_intents(
             tenant=intent.tenant,
             result_type=result_type,
             severity=severity,
-            best_roa=getattr(best_match, 'roa', None),
+            best_roa_object=getattr(best_match, 'roa_object', None),
             best_imported_authorization=getattr(best_match, 'imported_authorization', None),
             match_count=len(candidates),
             details_json={
@@ -2083,7 +2086,7 @@ def reconcile_roa_intents(
         published_result_summary[result_type] = published_result_summary.get(result_type, 0) + 1
         external_management_exception = match_published_roa_exception(
             profile.organization,
-            roa_id=getattr(representative.roa, 'pk', None),
+            roa_object_id=getattr(representative.roa_object, 'pk', None),
             imported_authorization_id=getattr(representative.imported_authorization, 'pk', None),
             prefix_cidr_text=representative.prefix_cidr_text,
             origin_asn_value=representative.origin_asn_value,
@@ -2098,9 +2101,9 @@ def reconcile_roa_intents(
         rpki_models.PublishedROAResult.objects.create(
             name=f'{representative.source_name} Published Result',
             reconciliation_run=reconciliation_run,
-            roa=representative.roa,
+            roa_object=representative.roa_object,
             imported_authorization=representative.imported_authorization,
-            tenant=representative.roa.tenant if representative.roa is not None else profile.tenant,
+            tenant=representative.roa_object.tenant if representative.roa_object is not None else profile.tenant,
             result_type=result_type,
             severity=severity,
             matched_intent_count=len(row_matches),
@@ -2197,14 +2200,17 @@ def _serialize_intent_for_plan(intent: rpki_models.ROAIntent) -> dict:
 
 
 def _serialize_published_source_for_plan(published_result: rpki_models.PublishedROAResult) -> dict:
-    if published_result.roa is not None:
+    if published_result.roa_object is not None:
         return {
             'source': 'local_roa',
-            'roa_id': published_result.roa.pk,
-            'name': published_result.roa.name,
-            'origin_asn_value': getattr(published_result.roa.origin_as, 'asn', None),
-            'prefixes': [str(prefix.prefix) for prefix in published_result.roa.RoaToPrefixTable.all()],
-            'max_lengths': [prefix.max_length for prefix in published_result.roa.RoaToPrefixTable.all()],
+            'roa_id': published_result.roa_object.pk,
+            'name': published_result.roa_object.name,
+            'origin_asn_value': getattr(published_result.roa_object.origin_as, 'asn', None),
+            'prefixes': [
+                prefix.prefix_cidr_text or str(prefix.prefix)
+                for prefix in published_result.roa_object.prefix_authorizations.all()
+            ],
+            'max_lengths': [prefix.max_length for prefix in published_result.roa_object.prefix_authorizations.all()],
         }
 
     imported = published_result.imported_authorization
@@ -2250,16 +2256,16 @@ def _intent_result_requires_replacement(intent_result: rpki_models.ROAIntentResu
 
 
 def _plan_withdraw_source_key_for_intent_result(intent_result: rpki_models.ROAIntentResult) -> str | None:
-    if intent_result.best_roa_id is not None:
-        return f'roa:{intent_result.best_roa_id}'
+    if intent_result.best_roa_object_id is not None:
+        return f'roa:{intent_result.best_roa_object_id}'
     if intent_result.best_imported_authorization_id is not None:
         return f'imported:{intent_result.best_imported_authorization_id}'
     return None
 
 
 def _plan_withdraw_source_key_for_published_result(published_result: rpki_models.PublishedROAResult) -> str:
-    if published_result.roa_id is not None:
-        return f'roa:{published_result.roa_id}'
+    if published_result.roa_object_id is not None:
+        return f'roa:{published_result.roa_object_id}'
     return f'imported:{published_result.imported_authorization_id}'
 
 
@@ -2374,7 +2380,7 @@ def create_roa_change_plan(
         'roa_intent',
         'roa_intent__delegated_entity',
         'roa_intent__managed_relationship__provider_account',
-        'best_roa',
+        'best_roa_object',
         'best_imported_authorization',
     ).all():
         intent_scope_summary = _delegated_scope_summary_for_intent(intent_result.roa_intent)
@@ -2457,7 +2463,7 @@ def create_roa_change_plan(
                     tenant=intent_result.tenant,
                     action_type=rpki_models.ROAChangePlanAction.WITHDRAW,
                     plan_semantic=rpki_models.ROAChangePlanItemSemantic.REPLACE,
-                    roa=intent_result.best_roa,
+                    roa_object=intent_result.best_roa_object,
                     imported_authorization=intent_result.best_imported_authorization,
                     provider_operation=(
                         rpki_models.ProviderWriteOperation.REMOVE_ROUTE
@@ -2482,7 +2488,7 @@ def create_roa_change_plan(
         else:
             skipped_counts[intent_result.result_type] = skipped_counts.get(intent_result.result_type, 0) + 1
 
-    for published_result in reconciliation_run.published_roa_results.select_related('roa', 'imported_authorization').all():
+    for published_result in reconciliation_run.published_roa_results.select_related('roa_object', 'imported_authorization').all():
         if published_result.result_type == rpki_models.PublishedROAResultType.ORPHANED:
             rpki_models.ROAChangePlanItem.objects.create(
                 name=f'Withdraw {published_result.name}',
@@ -2490,7 +2496,7 @@ def create_roa_change_plan(
                 tenant=published_result.tenant,
                 action_type=rpki_models.ROAChangePlanAction.WITHDRAW,
                 plan_semantic=rpki_models.ROAChangePlanItemSemantic.WITHDRAW,
-                roa=published_result.roa,
+                roa_object=published_result.roa_object,
                 imported_authorization=published_result.imported_authorization,
                 provider_operation=(
                     rpki_models.ProviderWriteOperation.REMOVE_ROUTE

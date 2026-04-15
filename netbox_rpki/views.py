@@ -21,7 +21,7 @@ from netbox_rpki.detail_specs import (
     DETAIL_SPEC_BY_MODEL,
     DetailFieldSpec,
     ORGANIZATION_DETAIL_SPEC,
-    ROA_DETAIL_SPEC,
+    ROA_OBJECT_DETAIL_SPEC,
     ROUTING_INTENT_TEMPLATE_BINDING_DETAIL_SPEC,
 )
 from netbox_rpki.object_registry import SIMPLE_DETAIL_VIEW_OBJECT_SPECS, VIEW_OBJECT_SPECS
@@ -178,9 +178,9 @@ class OrganizationView(MetadataDrivenDetailView):
     detail_spec = ORGANIZATION_DETAIL_SPEC
 
 
-class RoaView(MetadataDrivenDetailView):
-    queryset = models.Roa.objects.all()
-    detail_spec = ROA_DETAIL_SPEC
+class RoaObjectView(MetadataDrivenDetailView):
+    queryset = models.RoaObject.objects.all()
+    detail_spec = ROA_OBJECT_DETAIL_SPEC
 
 
 def build_generated_detail_field_spec(spec: ObjectSpec, field_name: str) -> DetailFieldSpec:
@@ -435,7 +435,7 @@ class LifecycleExportViewMixin:
 
 class OperationsDashboardExportView(LifecycleExportViewMixin, ContentTypePermissionRequiredMixin, View):
     additional_permissions = [
-        'netbox_rpki.view_roa',
+        'netbox_rpki.view_roaobject',
         'netbox_rpki.view_certificate',
         'netbox_rpki.view_routingintenttemplatebinding',
         'netbox_rpki.view_routingintentexception',
@@ -1829,7 +1829,7 @@ class ASPAReconciliationRunCreatePlanView(generic.ObjectEditView):
 class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
     template_name = 'netbox_rpki/operations_dashboard.html'
     additional_permissions = [
-        'netbox_rpki.view_roa',
+        'netbox_rpki.view_roaobject',
         'netbox_rpki.view_certificate',
         'netbox_rpki.view_routingintenttemplatebinding',
         'netbox_rpki.view_routingintentexception',
@@ -2019,7 +2019,7 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
         return build_telemetry_source_attention_items(queryset)
 
     def get_external_mismatch_items(self, request):
-        roas = models.Roa.objects.restrict(request.user, 'view').select_related('origin_as')[:50]
+        roas = models.RoaObject.objects.restrict(request.user, 'view').select_related('origin_as')[:50]
         aspas = models.ASPA.objects.restrict(request.user, 'view').select_related('customer_as', 'signed_object')[:50]
         return build_external_mismatch_items(roas, aspas)
 
@@ -2120,16 +2120,16 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
 
     def get_expiring_roas(self, request):
         now = timezone.now()
-        queryset = models.Roa.objects.restrict(request.user, 'view').select_related(
+        queryset = models.RoaObject.objects.restrict(request.user, 'view').select_related(
             'origin_as',
-            'signed_by',
-            'signed_by__rpki_org',
+            'organization',
+            'signed_object__resource_certificate__rpki_org',
         ).filter(
             valid_to__isnull=False,
         ).order_by('valid_to', 'name')
         items = []
         for roa in queryset:
-            organization = roa.signed_by.rpki_org
+            organization = roa.organization
             _policy, thresholds, _source = get_effective_lifecycle_thresholds(organization=organization)
             if not is_within_lifecycle_expiry_threshold(
                 expires_at=roa.valid_to,
@@ -2140,7 +2140,7 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
             items.append({
                 'object': roa,
                 'organization': organization,
-                'related_object': roa.signed_by,
+                'related_object': getattr(roa.signed_object, 'resource_certificate', None),
                 'expiry_text': self.get_expiry_text(roa.valid_to, today=now.date()),
                 'expiry_badge_class': self.get_expiry_badge_class(roa.valid_to, today=now.date()),
             })
@@ -2231,7 +2231,7 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
         now = timezone.now()
         queryset = (
             models.ExternalManagementException.objects.restrict(request.user, 'view')
-            .select_related('organization', 'prefix', 'roa', 'imported_authorization', 'aspa', 'imported_aspa')
+            .select_related('organization', 'prefix', 'roa_object', 'imported_authorization', 'aspa', 'imported_aspa')
             .filter(enabled=True)
             .order_by('review_at', 'ends_at', 'name')
         )

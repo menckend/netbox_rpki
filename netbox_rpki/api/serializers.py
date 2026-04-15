@@ -1167,7 +1167,7 @@ globals()['ImportedCertificateObservationSerializer'] = ImportedCertificateObser
 
 
 class SignedObjectSerializer(SERIALIZER_CLASS_MAP['signedobject']):
-    legacy_roa = serializers.SerializerMethodField()
+    roa_extension = serializers.SerializerMethodField()
     crl_extension = serializers.SerializerMethodField()
     manifest_extension = serializers.SerializerMethodField()
     trust_anchor_key_extension = serializers.SerializerMethodField()
@@ -1179,7 +1179,7 @@ class SignedObjectSerializer(SERIALIZER_CLASS_MAP['signedobject']):
 
     class Meta(SERIALIZER_CLASS_MAP['signedobject'].Meta):
         fields = SERIALIZER_CLASS_MAP['signedobject'].Meta.fields + (
-            'legacy_roa',
+            'roa_extension',
             'crl_extension',
             'manifest_extension',
             'trust_anchor_key_extension',
@@ -1219,8 +1219,8 @@ class SignedObjectSerializer(SERIALIZER_CLASS_MAP['signedobject']):
             queryset = queryset.select_related(*select_related_fields)
         return serializer_class(queryset, many=True, context=self.context).data
 
-    def get_legacy_roa(self, obj):
-        return self._serialize_related_object(obj, 'legacy_roa', 'roa')
+    def get_roa_extension(self, obj):
+        return self._serialize_related_object(obj, 'roa_extension', 'roaobject')
 
     def get_crl_extension(self, obj):
         return self._serialize_related_object(obj, 'crl_extension', 'certificaterevocationlist')
@@ -1261,11 +1261,11 @@ SERIALIZER_CLASS_MAP['signedobject'] = SignedObjectSerializer
 globals()['SignedObjectSerializer'] = SignedObjectSerializer
 
 
-class RoaSerializer(SERIALIZER_CLASS_MAP['roa']):
+class RoaObjectSerializer(SERIALIZER_CLASS_MAP['roaobject']):
     external_overlay_summary = serializers.SerializerMethodField()
 
-    class Meta(SERIALIZER_CLASS_MAP['roa'].Meta):
-        fields = SERIALIZER_CLASS_MAP['roa'].Meta.fields + (
+    class Meta(SERIALIZER_CLASS_MAP['roaobject'].Meta):
+        fields = SERIALIZER_CLASS_MAP['roaobject'].Meta.fields + (
             'external_overlay_summary',
         )
 
@@ -1273,8 +1273,8 @@ class RoaSerializer(SERIALIZER_CLASS_MAP['roa']):
         return build_roa_overlay_summary(obj)
 
 
-SERIALIZER_CLASS_MAP['roa'] = RoaSerializer
-globals()['RoaSerializer'] = RoaSerializer
+SERIALIZER_CLASS_MAP['roaobject'] = RoaObjectSerializer
+globals()['RoaObjectSerializer'] = RoaObjectSerializer
 
 
 class ASPASerializer(SERIALIZER_CLASS_MAP['aspa']):

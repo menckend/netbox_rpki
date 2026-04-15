@@ -17,8 +17,8 @@ from netbox_rpki.api.serializers import (
     CertificatePrefixSerializer,
     CertificateSerializer,
     OrganizationSerializer,
-    RoaPrefixSerializer,
-    RoaSerializer,
+    RoaObjectPrefixSerializer,
+    RoaObjectSerializer,
 )
 from netbox_rpki.api.views import RootView
 from netbox_rpki.graphql import filters as graphql_filters
@@ -1156,48 +1156,49 @@ API_TEST_CASES = {
         'update_payload': {'issuer': 'Issuer 1 Updated'},
         'assert_updated': lambda self, instance: self.assertEqual(instance.issuer, 'Issuer 1 Updated'),
     },
-    'roa': {
-        'method_singular': 'roa',
-        'method_plural': 'roas',
+    'roaobject': {
+        'method_singular': 'roa_object',
+        'method_plural': 'roa_objects',
         'collection_attr': 'roas',
-        'related_permissions': ('netbox_rpki.view_certificate', 'netbox_rpki.view_organization', 'ipam.view_asn'),
+        'related_permissions': ('netbox_rpki.view_organization', 'ipam.view_asn'),
         'detail_assertions': {'name': 'ROA 1'},
         'list_filter_query': 'ROA 2',
         'list_filter_assertions': {'name': 'ROA 2'},
         'create_valid_payload': lambda self: {
             'name': 'ROA 4',
+            'organization': self.organizations[0].pk,
             'origin_as': self.asns[0].pk,
-            'auto_renews': True,
-            'signed_by': self.certificates[0].pk,
+            'validation_state': rpki_models.ValidationState.UNKNOWN,
         },
         'create_success_lookup': {'name': 'ROA 4'},
-        'create_invalid_payload': {'name': 'ROA Invalid', 'auto_renews': True, 'signed_by': 999999},
-        'create_invalid_fields': ('signed_by',),
-        'create_empty_fields': ('name', 'auto_renews', 'signed_by'),
+        'create_invalid_payload': {'name': 'ROA Invalid', 'organization': 999999},
+        'create_invalid_fields': ('organization',),
+        'create_empty_fields': ('name',),
         'update_payload': {'name': 'ROA 1 Updated'},
         'assert_updated': lambda self, instance: self.assertEqual(instance.name, 'ROA 1 Updated'),
     },
-    'roaprefix': {
-        'method_singular': 'roa_prefix',
-        'method_plural': 'roa_prefixes',
+    'roaobjectprefix': {
+        'method_singular': 'roa_object_prefix',
+        'method_plural': 'roa_object_prefixes',
         'collection_attr': 'roa_prefixes',
-        'related_permissions': ('netbox_rpki.view_roa', 'ipam.view_prefix'),
+        'related_permissions': ('netbox_rpki.view_roaobject', 'ipam.view_prefix'),
         'detail_assertions': {'max_length': 24},
         'list_filter_query': '10.20.2.0/24',
         'list_filter_assertions': {'max_length': 25},
         'create_valid_payload': lambda self: {
+            'roa_object': self.roas[1].pk,
             'prefix': self.prefixes[0].pk,
+            'prefix_cidr_text': str(self.prefixes[0].prefix),
             'max_length': 27,
-            'roa_name': self.roas[1].pk,
         },
         'create_success_lookup': lambda self: {
             'prefix': self.prefixes[0],
-            'roa_name': self.roas[1],
+            'roa_object': self.roas[1],
             'max_length': 27,
         },
-        'create_invalid_payload': lambda self: {'prefix': 999999, 'max_length': 27, 'roa_name': self.roas[1].pk},
+        'create_invalid_payload': lambda self: {'prefix': 999999, 'max_length': 27, 'roa_object': self.roas[1].pk},
         'create_invalid_fields': ('prefix',),
-        'create_empty_fields': ('prefix', 'max_length', 'roa_name'),
+        'create_empty_fields': ('max_length', 'roa_object'),
         'update_payload': {'max_length': 28},
         'assert_updated': lambda self, instance: self.assertEqual(instance.max_length, 28),
     },
@@ -3332,7 +3333,7 @@ class CertificateAPITestCase(RegistryDrivenObjectAPITestCase):
 
 @_install_registry_api_tests
 class RoaAPITestCase(RegistryDrivenObjectAPITestCase):
-    object_spec_key = 'roa'
+    object_spec_key = 'roaobject'
 
     @classmethod
     def setUpTestData(cls):
@@ -3367,8 +3368,8 @@ class RoaAPITestCase(RegistryDrivenObjectAPITestCase):
         cls.roas[0].save(update_fields=('signed_object',))
 
     def test_roa_list_and_detail_expose_signed_object(self):
-        self.add_permissions('netbox_rpki.view_roa', 'netbox_rpki.view_signedobject')
-        spec = OBJECT_SPEC_BY_REGISTRY_KEY['roa']
+        self.add_permissions('netbox_rpki.view_roaobject', 'netbox_rpki.view_signedobject')
+        spec = OBJECT_SPEC_BY_REGISTRY_KEY['roaobject']
         list_url = reverse(f'plugins-api:netbox_rpki-api:{spec.api.basename}-list')
         detail_url = reverse(
             spec.api.detail_view_name,
@@ -3396,7 +3397,7 @@ class RoaAPITestCase(RegistryDrivenObjectAPITestCase):
 
 @_install_registry_api_tests
 class RoaPrefixAPITestCase(RegistryDrivenObjectAPITestCase):
-    object_spec_key = 'roaprefix'
+    object_spec_key = 'roaobjectprefix'
 
     @classmethod
     def setUpTestData(cls):

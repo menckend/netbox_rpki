@@ -73,7 +73,7 @@ def _active_queryset(organization: rpki_models.Organization | int, *, reference_
         'organization',
         'prefix',
         'origin_asn',
-        'roa',
+        'roa_object',
         'imported_authorization',
         'customer_asn',
         'provider_asn',
@@ -149,7 +149,7 @@ def match_roa_intent_exception(
 def match_published_roa_exception(
     organization: rpki_models.Organization | int,
     *,
-    roa_id: int | None,
+    roa_object_id: int | None,
     imported_authorization_id: int | None,
     prefix_cidr_text: str | None,
     origin_asn_value: int | None,
@@ -161,7 +161,7 @@ def match_published_roa_exception(
         exception
         for exception in candidates
         if (
-            (exception.scope_type == rpki_models.ExternalManagementScope.ROA_OBJECT and exception.roa_id == roa_id)
+            (exception.scope_type == rpki_models.ExternalManagementScope.ROA_OBJECT and exception.roa_object_id == roa_object_id)
             or (
                 exception.scope_type == rpki_models.ExternalManagementScope.ROA_IMPORTED
                 and exception.imported_authorization_id == imported_authorization_id

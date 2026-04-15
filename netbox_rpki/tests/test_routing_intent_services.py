@@ -1124,7 +1124,7 @@ class RoutingIntentServiceTestCase(TestCase):
 
         reconciliation_run = reconcile_roa_intents(derivation_run)
         intent_result = reconciliation_run.intent_results.get(roa_intent__prefix=self.primary_prefix)
-        published_result = reconciliation_run.published_roa_results.get(roa=roa)
+        published_result = reconciliation_run.published_roa_results.get(roa_object=roa)
         best_match = derivation_run.roa_intents.get(prefix=self.primary_prefix).candidate_matches.get(is_best_match=True)
 
         self.assertEqual(best_match.match_kind, rpki_models.ROAIntentMatchKind.LENGTH_BROADER)

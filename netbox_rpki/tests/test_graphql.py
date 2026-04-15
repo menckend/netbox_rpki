@@ -395,10 +395,10 @@ class CertificateGraphQLTestCase(PluginGraphQLTestMixin, APITestCase):
 
 class RoaGraphQLTestCase(PluginGraphQLTestMixin, APITestCase):
     model = Roa
-    view_permission = 'netbox_rpki.view_roa'
-    detail_field = 'netbox_rpki_roa'
-    list_field = 'netbox_rpki_roa_list'
-    detail_selection = 'id name auto_renews'
+    view_permission = 'netbox_rpki.view_roaobject'
+    detail_field = 'netbox_rpki_roa_object'
+    list_field = 'netbox_rpki_roa_object_list'
+    detail_selection = 'id name validation_state'
 
     @classmethod
     def setUpTestData(cls):
@@ -434,19 +434,19 @@ class RoaGraphQLTestCase(PluginGraphQLTestMixin, APITestCase):
         )
         cls.valid_filter_cases = (
             ('name: {i_contains: "Alpha"}', (cls.roa_alpha,)),
-            ('auto_renews: {exact: true}', (cls.roa_alpha, cls.roa_gamma)),
+            ('validation_state: {exact: "unknown"}', (cls.roa_alpha, cls.roa_beta, cls.roa_gamma)),
             (f'origin_as_id: "{cls.asn_b.pk}"', (cls.roa_beta,)),
-            (f'signed_by_id: "{cls.signing_certificate_a.pk}"', (cls.roa_alpha, cls.roa_gamma)),
+            (f'organization_id: "{cls.organization.pk}"', (cls.roa_alpha, cls.roa_beta, cls.roa_gamma)),
             (f'signed_object_id: "{cls.signed_object_alpha.pk}"', (cls.roa_alpha,)),
         )
-        cls.empty_result_filter = 'signed_by_id: "999999"'
+        cls.empty_result_filter = 'organization_id: "999999"'
 
 
 class RoaPrefixGraphQLTestCase(PluginGraphQLTestMixin, APITestCase):
     model = RoaPrefix
-    view_permission = 'netbox_rpki.view_roaprefix'
-    detail_field = 'netbox_rpki_roa_prefix'
-    list_field = 'netbox_rpki_roa_prefix_list'
+    view_permission = 'netbox_rpki.view_roaobjectprefix'
+    detail_field = 'netbox_rpki_roa_object_prefix'
+    list_field = 'netbox_rpki_roa_object_prefix_list'
     detail_selection = 'id max_length'
 
     @classmethod
@@ -463,9 +463,9 @@ class RoaPrefixGraphQLTestCase(PluginGraphQLTestMixin, APITestCase):
         cls.roa_prefix_c = create_test_roa_prefix(prefix=cls.prefix_c, roa=cls.roa_b, max_length=26)
         cls.valid_filter_cases = (
             (f'prefix_id: "{cls.prefix_a.pk}"', (cls.roa_prefix_a,)),
-            (f'roa_name_id: "{cls.roa_b.pk}"', (cls.roa_prefix_b, cls.roa_prefix_c)),
+            (f'roa_object_id: "{cls.roa_b.pk}"', (cls.roa_prefix_b, cls.roa_prefix_c)),
         )
-        cls.empty_result_filter = 'roa_name_id: "999999"'
+        cls.empty_result_filter = 'roa_object_id: "999999"'
 
 
 class ProviderReportingGraphQLTestCase(APITestCase):

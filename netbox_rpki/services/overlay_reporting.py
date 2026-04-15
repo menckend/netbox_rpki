@@ -20,15 +20,15 @@ def build_roa_reconciliation_overlay_summary(run: rpki_models.ROAReconciliationR
     roas = []
     unresolved_reference_count = 0
 
-    for result in run.intent_results.select_related('best_roa').all():
-        if result.best_roa_id is not None:
-            roas.append(result.best_roa)
+    for result in run.intent_results.select_related('best_roa_object').all():
+        if result.best_roa_object_id is not None:
+            roas.append(result.best_roa_object)
         else:
             unresolved_reference_count += 1
 
-    for result in run.published_roa_results.select_related('roa').all():
-        if result.roa_id is not None:
-            roas.append(result.roa)
+    for result in run.published_roa_results.select_related('roa_object').all():
+        if result.roa_object_id is not None:
+            roas.append(result.roa_object)
         else:
             unresolved_reference_count += 1
 
@@ -72,9 +72,9 @@ def build_roa_change_plan_overlay_summary(plan: rpki_models.ROAChangePlan) -> di
     roas = []
     unresolved_reference_count = 0
 
-    for item in plan.items.select_related('roa').all():
-        if item.roa_id is not None:
-            roas.append(item.roa)
+    for item in plan.items.select_related('roa_object').all():
+        if item.roa_object_id is not None:
+            roas.append(item.roa_object)
         else:
             unresolved_reference_count += 1
 
@@ -165,7 +165,7 @@ def build_telemetry_source_attention_items(sources) -> list[dict[str, object]]:
 def build_external_mismatch_items(roas, aspas, *, limit: int = 20) -> list[dict[str, object]]:
     items = []
     for obj in chain(roas, aspas):
-        if isinstance(obj, rpki_models.Roa):
+        if isinstance(obj, rpki_models.RoaObject):
             overlay_summary = build_roa_overlay_summary(obj)
             object_family = 'roa'
         else:

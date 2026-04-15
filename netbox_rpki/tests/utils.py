@@ -194,15 +194,14 @@ def create_test_asn(asn=65001, rir=None, **kwargs):
     )[0]
 
 
-def create_test_roa(name='ROA 1', signed_by=None, auto_renews=True, signed_object=None, **kwargs):
-    if signed_by is None:
-        signed_by = create_test_certificate()
+def create_test_roa_object(name='ROA Object 1', organization=None, signed_object=None, origin_as=None, **kwargs):
+    if organization is None:
+        organization = create_test_organization()
     if signed_object is None and kwargs.pop('link_signed_object', False):
-        organization = signed_by.rpki_org
         publication_point = create_test_publication_point(organization=organization)
         ee_certificate = create_test_end_entity_certificate(
             organization=organization,
-            resource_certificate=signed_by,
+            resource_certificate=create_test_certificate(rpki_org=organization),
             publication_point=publication_point,
             valid_from=kwargs.get('valid_from'),
             valid_to=kwargs.get('valid_to'),
@@ -211,29 +210,52 @@ def create_test_roa(name='ROA 1', signed_by=None, auto_renews=True, signed_objec
             name=f'{name} Signed Object',
             organization=organization,
             object_type=rpki_models.SignedObjectType.ROA,
-            resource_certificate=signed_by,
+            resource_certificate=ee_certificate.resource_certificate,
             ee_certificate=ee_certificate,
             publication_point=publication_point,
             valid_from=kwargs.get('valid_from'),
             valid_to=kwargs.get('valid_to'),
         )
-    return rpki_models.Roa.objects.create(
+    return rpki_models.RoaObject.objects.create(
         name=name,
-        signed_by=signed_by,
+        organization=organization,
         signed_object=signed_object,
-        auto_renews=auto_renews,
+        origin_as=origin_as,
+        **kwargs,
+    )
+
+
+def create_test_roa_object_prefix(prefix=None, roa_object=None, max_length=24, **kwargs):
+    if prefix is None:
+        prefix = create_test_prefix()
+    if roa_object is None:
+        roa_object = create_test_roa_object()
+    return rpki_models.RoaObjectPrefix.objects.create(
+        roa_object=roa_object,
+        prefix=prefix,
+        prefix_cidr_text=str(prefix.prefix) if hasattr(prefix, 'prefix') else str(prefix),
+        max_length=max_length,
+        **kwargs,
+    )
+
+
+def create_test_roa(name='ROA 1', signed_by=None, auto_renews=True, signed_object=None, **kwargs):
+    organization = kwargs.pop('organization', None)
+    if organization is None and signed_by is not None:
+        organization = signed_by.rpki_org
+    return create_test_roa_object(
+        name=name,
+        organization=organization,
+        signed_object=signed_object,
+        origin_as=kwargs.pop('origin_as', None),
         **kwargs,
     )
 
 
 def create_test_roa_prefix(prefix=None, roa=None, max_length=24, **kwargs):
-    if prefix is None:
-        prefix = create_test_prefix()
-    if roa is None:
-        roa = create_test_roa()
-    return roa.RoaToPrefixTable.model.objects.create(
+    return create_test_roa_object_prefix(
         prefix=prefix,
-        roa_name=roa,
+        roa_object=roa,
         max_length=max_length,
         **kwargs,
     )
@@ -881,7 +903,7 @@ def create_test_object_validation_result(
 def create_test_validated_roa_payload(
     name='Validated ROA Payload 1',
     validation_run=None,
-    roa=None,
+    roa_object=None,
     object_validation_result=None,
     prefix=None,
     origin_as=None,
@@ -890,10 +912,12 @@ def create_test_validated_roa_payload(
     details_json=None,
     **kwargs,
 ):
+    if roa_object is None and 'roa' in kwargs:
+        roa_object = kwargs.pop('roa')
     if validation_run is None:
         validation_run = create_test_validation_run()
-    if roa is None:
-        roa = create_test_roa()
+    if roa_object is None:
+        roa_object = create_test_roa_object()
     if prefix is None:
         prefix = create_test_prefix()
     if origin_as is None:
@@ -901,7 +925,7 @@ def create_test_validated_roa_payload(
     return rpki_models.ValidatedRoaPayload.objects.create(
         name=name,
         validation_run=validation_run,
-        roa=roa,
+        roa_object=roa_object,
         object_validation_result=object_validation_result,
         prefix=prefix,
         origin_as=origin_as,
@@ -1310,7 +1334,7 @@ def create_test_external_management_exception(
     origin_asn=None,
     origin_asn_value=None,
     max_length=None,
-    roa=None,
+    roa_object=None,
     imported_authorization=None,
     customer_asn=None,
     customer_asn_value=None,
@@ -1329,9 +1353,11 @@ def create_test_external_management_exception(
     summary_json=None,
     **kwargs,
 ):
+    if roa_object is None and 'roa' in kwargs:
+        roa_object = kwargs.pop('roa')
     if organization is None:
-        if roa is not None:
-            organization = roa.signed_by.rpki_org
+        if roa_object is not None:
+            organization = roa_object.organization
         elif imported_authorization is not None:
             organization = imported_authorization.organization
         elif aspa is not None:
@@ -1349,7 +1375,7 @@ def create_test_external_management_exception(
         origin_asn=origin_asn,
         origin_asn_value=origin_asn_value,
         max_length=max_length,
-        roa=roa,
+        roa_object=roa_object,
         imported_authorization=imported_authorization,
         customer_asn=customer_asn,
         customer_asn_value=customer_asn_value,
@@ -3067,21 +3093,23 @@ def create_test_aspa_intent_match(
 def create_test_roa_intent_match(
     name='ROA Intent Match 1',
     roa_intent=None,
-    roa=None,
+    roa_object=None,
     imported_authorization=None,
     match_kind=None,
     is_best_match=False,
     details_json=None,
     **kwargs,
 ):
+    if roa_object is None and 'roa' in kwargs:
+        roa_object = kwargs.pop('roa')
     if roa_intent is None:
         roa_intent = create_test_roa_intent(origin_asn=create_test_asn())
-    if roa is None and imported_authorization is None:
-        roa = create_test_roa(origin_as=roa_intent.origin_asn, signed_by=create_test_certificate())
+    if roa_object is None and imported_authorization is None:
+        roa_object = create_test_roa_object(origin_as=roa_intent.origin_asn, organization=roa_intent.organization)
     return rpki_models.ROAIntentMatch.objects.create(
         name=name,
         roa_intent=roa_intent,
-        roa=roa,
+        roa_object=roa_object,
         imported_authorization=imported_authorization,
         match_kind=match_kind or rpki_models.ROAIntentMatchKind.EXACT,
         is_best_match=is_best_match,
@@ -3282,13 +3310,15 @@ def create_test_roa_intent_result(
     roa_intent=None,
     result_type=None,
     severity=None,
-    best_roa=None,
+    best_roa_object=None,
     best_imported_authorization=None,
     match_count=0,
     details_json=None,
     computed_at=None,
     **kwargs,
 ):
+    if best_roa_object is None and 'best_roa' in kwargs:
+        best_roa_object = kwargs.pop('best_roa')
     if roa_intent is None:
         roa_intent = create_test_roa_intent(origin_asn=create_test_asn())
     if reconciliation_run is None:
@@ -3303,7 +3333,7 @@ def create_test_roa_intent_result(
         roa_intent=roa_intent,
         result_type=result_type or rpki_models.ROAIntentResultType.MATCH,
         severity=severity or rpki_models.ReconciliationSeverity.INFO,
-        best_roa=best_roa,
+        best_roa_object=best_roa_object,
         best_imported_authorization=best_imported_authorization,
         match_count=match_count,
         details_json=details_json or {},
@@ -3315,7 +3345,7 @@ def create_test_roa_intent_result(
 def create_test_published_roa_result(
     name='Published ROA Result 1',
     reconciliation_run=None,
-    roa=None,
+    roa_object=None,
     imported_authorization=None,
     result_type=None,
     severity=None,
@@ -3324,8 +3354,10 @@ def create_test_published_roa_result(
     computed_at=None,
     **kwargs,
 ):
-    if roa is None and imported_authorization is None:
-        roa = create_test_roa()
+    if roa_object is None and 'roa' in kwargs:
+        roa_object = kwargs.pop('roa')
+    if roa_object is None and imported_authorization is None:
+        roa_object = create_test_roa_object()
     if reconciliation_run is None:
         organization = create_test_organization()
         intent_profile = create_test_routing_intent_profile(organization=organization)
@@ -3338,7 +3370,7 @@ def create_test_published_roa_result(
     return rpki_models.PublishedROAResult.objects.create(
         name=name,
         reconciliation_run=reconciliation_run,
-        roa=roa,
+        roa_object=roa_object,
         imported_authorization=imported_authorization,
         result_type=result_type or rpki_models.PublishedROAResultType.MATCHED,
         severity=severity or rpki_models.ReconciliationSeverity.INFO,
@@ -3578,7 +3610,7 @@ def create_test_roa_change_plan_item(
     action_type=None,
     plan_semantic=None,
     roa_intent=None,
-    roa=None,
+    roa_object=None,
     imported_authorization=None,
     provider_operation='',
     provider_payload_json=None,
@@ -3587,6 +3619,8 @@ def create_test_roa_change_plan_item(
     reason='',
     **kwargs,
 ):
+    if roa_object is None and 'roa' in kwargs:
+        roa_object = kwargs.pop('roa')
     if change_plan is None:
         change_plan = create_test_roa_change_plan()
     return rpki_models.ROAChangePlanItem.objects.create(
@@ -3595,7 +3629,7 @@ def create_test_roa_change_plan_item(
         action_type=action_type or rpki_models.ROAChangePlanAction.CREATE,
         plan_semantic=plan_semantic,
         roa_intent=roa_intent,
-        roa=roa,
+        roa_object=roa_object,
         imported_authorization=imported_authorization,
         provider_operation=provider_operation,
         provider_payload_json=provider_payload_json or {},
@@ -3960,11 +3994,18 @@ def create_test_roa_change_plan_matrix(
 
     derivation_run = derive_roa_intents(intent_profile)
 
-    local_certificate = create_test_certificate(name=f'{matrix_label} Local Cert', rpki_org=organization)
-    replacement_roa = create_test_roa(name=f'{matrix_label} Replacement ROA', signed_by=local_certificate, origin_as=replacement_asn)
-    create_test_roa_prefix(prefix=selected_prefixes[0], roa=replacement_roa, max_length=replacement_max_length)
-    orphan_roa = create_test_roa(name=f'{matrix_label} Orphan ROA', signed_by=local_certificate, origin_as=orphan_asn)
-    create_test_roa_prefix(prefix=orphan_prefix, roa=orphan_roa, max_length=24)
+    replacement_roa = create_test_roa_object(
+        name=f'{matrix_label} Replacement ROA Object',
+        organization=organization,
+        origin_as=replacement_asn,
+    )
+    create_test_roa_object_prefix(prefix=selected_prefixes[0], roa_object=replacement_roa, max_length=replacement_max_length)
+    orphan_roa = create_test_roa_object(
+        name=f'{matrix_label} Orphan ROA Object',
+        organization=organization,
+        origin_as=orphan_asn,
+    )
+    create_test_roa_object_prefix(prefix=orphan_prefix, roa_object=orphan_roa, max_length=24)
 
     local_reconciliation_run = reconcile_roa_intents(derivation_run)
     local_plan = create_roa_change_plan(local_reconciliation_run, name=f'{matrix_label} Local Plan')

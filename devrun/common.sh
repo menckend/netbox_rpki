@@ -107,6 +107,7 @@ krill_is_running() {
 stop_runserver() {
     local pid
     local stopped=1
+    local attempt
 
     while IFS= read -r pid; do
         [ -n "$pid" ] || continue
@@ -114,7 +115,23 @@ stop_runserver() {
         stopped=0
     done < <(find_runserver_pids)
 
-    return "$stopped"
+    if [ "$stopped" -ne 0 ]; then
+        return 1
+    fi
+
+    for attempt in $(seq 1 10); do
+        if ! runserver_is_running; then
+            return 0
+        fi
+        sleep 1
+    done
+
+    while IFS= read -r pid; do
+        [ -n "$pid" ] || continue
+        kill -9 "$pid" >/dev/null 2>&1 || true
+    done < <(find_runserver_pids)
+
+    return 0
 }
 
 start_krill() {
@@ -127,6 +144,7 @@ start_krill() {
 stop_worker() {
     local pid
     local stopped=1
+    local attempt
 
     while IFS= read -r pid; do
         [ -n "$pid" ] || continue
@@ -134,7 +152,23 @@ stop_worker() {
         stopped=0
     done < <(find_worker_pids)
 
-    return "$stopped"
+    if [ "$stopped" -ne 0 ]; then
+        return 1
+    fi
+
+    for attempt in $(seq 1 10); do
+        if ! worker_is_running; then
+            return 0
+        fi
+        sleep 1
+    done
+
+    while IFS= read -r pid; do
+        [ -n "$pid" ] || continue
+        kill -9 "$pid" >/dev/null 2>&1 || true
+    done < <(find_worker_pids)
+
+    return 0
 }
 
 stop_krill() {

@@ -172,7 +172,7 @@ def _persist_payload_rows(
         rpki_models.ValidatedRoaPayload.objects.create(
             name=_build_payload_name(run, 'roa', index),
             validation_run=run,
-            roa=item.get('roa'),
+            roa_object=item.get('roa_object'),
             object_validation_result=object_rows.get(item['object_key']),
             prefix=item.get('prefix'),
             origin_as=item.get('origin_as'),
@@ -279,8 +279,8 @@ def _normalize_roa_record(
     )
     prefix = _resolve_prefix(observed_prefix)
     origin_as = _resolve_asn(origin_value)
-    roa = _match_roa(prefix=prefix, origin_as=origin_as, max_length=max_length)
-    if match.match_status == 'unmatched' and roa is not None:
+    roa_object = _match_roa_object(prefix=prefix, origin_as=origin_as, max_length=max_length)
+    if match.match_status == 'unmatched' and roa_object is not None:
         match = MatchResult(match_status='payload_level')
     details_json = {
         'source_record': _extract_source_record(record),
@@ -306,7 +306,7 @@ def _normalize_roa_record(
         },
         'payload': {
             'object_key': object_key,
-            'roa': roa,
+            'roa_object': roa_object,
             'prefix': prefix,
             'origin_as': origin_as,
             'max_length': max_length,
@@ -469,20 +469,20 @@ def _find_imported_signed_object_match(
     return None
 
 
-def _match_roa(
+def _match_roa_object(
     *,
     prefix: Prefix | None,
     origin_as: ASN | None,
     max_length: int | None,
-) -> rpki_models.Roa | None:
+) -> rpki_models.RoaObject | None:
     if prefix is None:
         return None
-    queryset = rpki_models.Roa.objects.filter(
+    queryset = rpki_models.RoaObject.objects.filter(
         origin_as=origin_as,
-        RoaToPrefixTable__prefix=prefix,
+        prefix_authorizations__prefix=prefix,
     )
     if max_length is not None:
-        queryset = queryset.filter(RoaToPrefixTable__max_length=max_length)
+        queryset = queryset.filter(prefix_authorizations__max_length=max_length)
     matches = list(queryset.distinct()[:2])
     return matches[0] if len(matches) == 1 else None
 

@@ -38,8 +38,8 @@ SEED_TARGET_MODELS = (
     rpki_models.Manifest,
     rpki_models.ManifestEntry,
     rpki_models.TrustAnchorKey,
-    rpki_models.Roa,
-    rpki_models.RoaPrefix,
+    rpki_models.RoaObject,
+    rpki_models.RoaObjectPrefix,
     rpki_models.CertificatePrefix,
     rpki_models.CertificateAsn,
     rpki_models.ASPA,
@@ -404,23 +404,24 @@ def seed_sample_data(
             tenant=tenants[index],
             **_seeded_text_kwargs(rpki_models.TrustAnchorKey, marker),
         )
-        roa = rpki_models.Roa.objects.create(
-            name=f"{label_prefix} ROA {suffix}",
+        roa = rpki_models.RoaObject.objects.create(
+            name=f"{label_prefix} ROA Object {suffix}",
+            organization=certificate.rpki_org,
             origin_as=customer_asns[index],
-            signed_by=certificate,
             signed_object=roa_signed_object,
             valid_from=valid_from,
             valid_to=valid_to,
-            auto_renews=True,
+            validation_state=roa_signed_object.validation_state,
             tenant=tenants[index],
-            **_seeded_text_kwargs(rpki_models.Roa, marker),
+            **_seeded_text_kwargs(rpki_models.RoaObject, marker),
         )
-        roa_prefix = rpki_models.RoaPrefix.objects.create(
+        roa_prefix = rpki_models.RoaObjectPrefix.objects.create(
+            roa_object=roa,
             prefix=prefixes_v4[index],
-            roa_name=roa,
+            prefix_cidr_text=str(prefixes_v4[index].prefix),
             max_length=24,
             tenant=tenants[index],
-            **_seeded_text_kwargs(rpki_models.RoaPrefix, marker),
+            **_seeded_text_kwargs(rpki_models.RoaObjectPrefix, marker),
         )
         certificate_prefix = rpki_models.CertificatePrefix.objects.create(
             prefix=prefixes_v6[index],
@@ -606,7 +607,7 @@ def seed_sample_data(
         validated_roa_payload = rpki_models.ValidatedRoaPayload.objects.create(
             name=f"{label_prefix} Validated ROA Payload {suffix}",
             validation_run=validation_run,
-            roa=roa,
+            roa_object=roa,
             object_validation_result=roa_object_validation_result,
             prefix=prefixes_v4[index],
             origin_as=customer_asns[index],
@@ -734,7 +735,7 @@ def seed_sample_data(
         roa_intent_match = rpki_models.ROAIntentMatch.objects.create(
             name=f"{label_prefix} ROA Intent Match {suffix}",
             roa_intent=roa_intent,
-            roa=roa,
+            roa_object=roa,
             match_kind=rpki_models.ROAIntentMatchKind.EXACT,
             is_best_match=True,
             details_json={"seed_suffix": suffix},
@@ -762,7 +763,7 @@ def seed_sample_data(
             roa_intent=roa_intent,
             result_type=rpki_models.ROAIntentResultType.MATCH,
             severity=rpki_models.ReconciliationSeverity.INFO,
-            best_roa=roa,
+            best_roa_object=roa,
             match_count=1,
             details_json={"seed_suffix": suffix},
             computed_at=completed_at,
@@ -772,7 +773,7 @@ def seed_sample_data(
         published_roa_result = rpki_models.PublishedROAResult.objects.create(
             name=f"{label_prefix} Published ROA Result {suffix}",
             reconciliation_run=reconciliation_run,
-            roa=roa,
+            roa_object=roa,
             result_type=rpki_models.PublishedROAResultType.MATCHED,
             severity=rpki_models.ReconciliationSeverity.INFO,
             matched_intent_count=1,

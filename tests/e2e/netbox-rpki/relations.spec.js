@@ -6,8 +6,8 @@ const {
   createCertificateFromOrganization,
   createCertificatePrefixFromCertificate,
   createOrganization,
-  createRoaFromCertificate,
-  createRoaPrefixFromRoa,
+  createRoaObject,
+  createRoaObjectPrefix,
   deleteCurrentObject,
   fillText,
   relativeChildPath,
@@ -56,12 +56,12 @@ test('certificate ASN CRUD works through the hidden relation UI', async ({ page 
   await expect(page.locator('table tbody')).not.toContainText(fixtures.asns.secondary.label);
 });
 
-test('roa prefix CRUD works through the hidden relation UI', async ({ page }) => {
+test('roa object prefix CRUD works through the hidden relation UI', async ({ page }) => {
   const fixtures = runtimeFixtures();
   const organization = await createOrganization(page);
-  const certificate = await createCertificateFromOrganization(page, organization);
-  const roa = await createRoaFromCertificate(page, certificate);
-  const roaPrefix = await createRoaPrefixFromRoa(page, roa);
+  await createCertificateFromOrganization(page, organization);
+  const roa = await createRoaObject(page, organization);
+  const roaPrefix = await createRoaObjectPrefix(page, roa);
 
   await expect(page.locator('.attr-table')).toContainText(fixtures.prefixes.primary.label);
   await expect(page.locator('.attr-table')).toContainText(roa.name);
@@ -75,6 +75,6 @@ test('roa prefix CRUD works through the hidden relation UI', async ({ page }) =>
   await expect(page.locator('.attr-table')).toContainText('25');
 
   await deleteCurrentObject(page);
-  await expect(page).toHaveURL(new RegExp(`${PATHS.roaPrefixes}$`));
+  await expect(page).toHaveURL(new RegExp(`${PATHS.roaObjectPrefixes}$`));
   await expect(page.locator('table tbody')).not.toContainText(fixtures.prefixes.secondary.label);
 });

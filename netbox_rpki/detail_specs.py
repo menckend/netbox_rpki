@@ -79,7 +79,7 @@ def get_signed_object_external_overlay_summary(obj: models.SignedObject) -> str 
     return get_pretty_json(build_signed_object_overlay_summary(obj))
 
 
-def get_roa_external_overlay_summary(obj: models.Roa) -> str | None:
+def get_roa_external_overlay_summary(obj: models.RoaObject) -> str | None:
     return get_pretty_json(build_roa_overlay_summary(obj))
 
 
@@ -371,22 +371,22 @@ def get_result_expected_origin(result: models.ROAIntentResult) -> Any:
 
 
 def get_result_published_origin(result: models.ROAIntentResult) -> Any:
-    if result.best_roa_id is None:
+    if result.best_roa_object_id is None:
         return None
-    return result.best_roa.origin_as
+    return result.best_roa_object.origin_as
 
 
 def get_result_best_roa_prefixes(result: models.ROAIntentResult) -> str | None:
-    if result.best_roa_id is None:
+    if result.best_roa_object_id is None:
         return None
-    prefixes = [str(prefix.prefix) for prefix in result.best_roa.RoaToPrefixTable.all()]
+    prefixes = [prefix.prefix_cidr_text or str(prefix.prefix) for prefix in result.best_roa_object.prefix_authorizations.all()]
     return ', '.join(prefixes) or None
 
 
 def get_result_best_roa_max_lengths(result: models.ROAIntentResult) -> str | None:
-    if result.best_roa_id is None:
+    if result.best_roa_object_id is None:
         return None
-    max_lengths = [str(prefix.max_length) for prefix in result.best_roa.RoaToPrefixTable.all()]
+    max_lengths = [str(prefix.max_length) for prefix in result.best_roa_object.prefix_authorizations.all()]
     return ', '.join(max_lengths) or None
 
 
@@ -707,8 +707,8 @@ def get_optional_related(instance: Any, attribute_name: str):
         return None
 
 
-def get_signed_object_legacy_roa(signed_object: models.SignedObject):
-    return get_optional_related(signed_object, 'legacy_roa')
+def get_signed_object_roa_extension(signed_object: models.SignedObject):
+    return get_optional_related(signed_object, 'roa_extension')
 
 
 def get_signed_object_crl(signed_object: models.SignedObject):
@@ -1771,7 +1771,7 @@ ROA_INTENT_RESULT_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(label='Match Count', value=lambda obj: obj.match_count),
         DetailFieldSpec(
             label='Best Published ROA',
-            value=lambda obj: obj.best_roa,
+            value=lambda obj: obj.best_roa_object,
             kind='link',
             empty_text='None',
         ),
@@ -1813,7 +1813,7 @@ PUBLISHED_ROA_RESULT_DETAIL_SPEC = DetailSpec(
     fields=(
         DetailFieldSpec(label='Name', value=lambda obj: obj.name),
         DetailFieldSpec(label='Reconciliation Run', value=lambda obj: obj.reconciliation_run, kind='link'),
-        DetailFieldSpec(label='Published ROA', value=lambda obj: obj.roa, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Published ROA', value=lambda obj: obj.roa_object, kind='link', empty_text='None'),
         DetailFieldSpec(
             label='Imported Authorization',
             value=lambda obj: obj.imported_authorization,
@@ -2063,7 +2063,7 @@ ROA_CHANGE_PLAN_ITEM_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(label='Action Type', value=lambda obj: obj.action_type),
         DetailFieldSpec(label='Plan Semantic', value=lambda obj: obj.plan_semantic, empty_text='None'),
         DetailFieldSpec(label='ROA Intent', value=lambda obj: obj.roa_intent, kind='link', empty_text='None'),
-        DetailFieldSpec(label='Published ROA', value=lambda obj: obj.roa, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Published ROA', value=lambda obj: obj.roa_object, kind='link', empty_text='None'),
         DetailFieldSpec(
             label='Imported Authorization',
             value=lambda obj: obj.imported_authorization,
@@ -2524,8 +2524,8 @@ SIGNED_OBJECT_DETAIL_SPEC = DetailSpec(
             empty_text='None',
         ),
         DetailFieldSpec(
-            label='Legacy ROA',
-            value=get_signed_object_legacy_roa,
+            label='ROA Object',
+            value=get_signed_object_roa_extension,
             kind='link',
             empty_text='None',
         ),
@@ -2652,12 +2652,6 @@ CERTIFICATE_DETAIL_SPEC = DetailSpec(
             url_name='plugins:netbox_rpki:certificateasn_add',
             query_param='certificate_name2',
         ),
-        DetailActionSpec(
-            permission='netbox_rpki.change_certificate',
-            label='ROA',
-            url_name='plugins:netbox_rpki:roa_add',
-            query_param='signed_by',
-        ),
     ),
     side_tables=(
         DetailTableSpec(
@@ -2683,9 +2677,9 @@ CERTIFICATE_DETAIL_SPEC = DetailSpec(
             queryset=lambda obj: obj.signed_objects.select_related('ee_certificate', 'publication_point').all(),
         ),
         DetailTableSpec(
-            title='ROAs',
-            table_class_name='RoaTable',
-            queryset=lambda obj: obj.roas.all(),
+            title='ROA Objects',
+            table_class_name='RoaObjectTable',
+            queryset=lambda obj: models.RoaObject.objects.filter(signed_object__resource_certificate=obj),
         ),
     ),
 )
@@ -2749,11 +2743,11 @@ END_ENTITY_CERTIFICATE_DETAIL_SPEC = DetailSpec(
 )
 
 
-ROA_DETAIL_SPEC = DetailSpec(
-    model=models.Roa,
-    list_url_name='plugins:netbox_rpki:roa_list',
-    breadcrumb_label='RPKI ROAs',
-    card_title='RPKI Route Origination Authorization (ROA)',
+ROA_OBJECT_DETAIL_SPEC = DetailSpec(
+    model=models.RoaObject,
+    list_url_name='plugins:netbox_rpki:roaobject_list',
+    breadcrumb_label='RPKI ROA Objects',
+    card_title='RPKI Route Origination Authorization (ROA) Object',
     fields=(
         DetailFieldSpec(label='Name', value=lambda obj: obj.name),
         DetailFieldSpec(
@@ -2764,6 +2758,12 @@ ROA_DETAIL_SPEC = DetailSpec(
             empty_text='None',
         ),
         DetailFieldSpec(
+            label='Organization',
+            value=lambda obj: obj.organization,
+            kind='link',
+            empty_text='None',
+        ),
+        DetailFieldSpec(
             label='Origination AS Number',
             value=lambda obj: obj.origin_as,
             kind='link',
@@ -2771,14 +2771,7 @@ ROA_DETAIL_SPEC = DetailSpec(
         ),
         DetailFieldSpec(label='Date Valid From', value=lambda obj: obj.valid_from),
         DetailFieldSpec(label='Date Valid To', value=lambda obj: obj.valid_to),
-        DetailFieldSpec(label='Auto-renews', value=lambda obj: obj.auto_renews),
-        DetailFieldSpec(
-            label='Signing Certificate',
-            value=lambda obj: obj.signed_by.name if obj.signed_by else None,
-            kind='link',
-            url=lambda obj: obj.signed_by.get_absolute_url() if obj.signed_by else None,
-            empty_text='None',
-        ),
+        DetailFieldSpec(label='Validation State', value=lambda obj: obj.validation_state),
         DetailFieldSpec(
             label='Signed Object',
             value=lambda obj: obj.signed_object,
@@ -2794,17 +2787,17 @@ ROA_DETAIL_SPEC = DetailSpec(
     ),
     actions=(
         DetailActionSpec(
-            permission='netbox_rpki.change_roa',
-            label='ROA Prefix',
-            url_name='plugins:netbox_rpki:roaprefix_add',
-            query_param='roa_name',
+            permission='netbox_rpki.change_roaobject',
+            label='ROA Object Prefix',
+            url_name='plugins:netbox_rpki:roaobjectprefix_add',
+            query_param='roa_object',
         ),
     ),
     bottom_tables=(
         DetailTableSpec(
-            title='Prefixes Included in this ROA',
-            table_class_name='RoaPrefixTable',
-            queryset=lambda obj: obj.RoaToPrefixTable.all(),
+            title='Prefixes Included in this ROA Object',
+            table_class_name='RoaObjectPrefixTable',
+            queryset=lambda obj: obj.prefix_authorizations.all(),
         ),
     ),
 )
@@ -3289,7 +3282,7 @@ DETAIL_SPEC_BY_MODEL = {
     models.SignedObject: SIGNED_OBJECT_DETAIL_SPEC,
     models.Certificate: CERTIFICATE_DETAIL_SPEC,
     models.EndEntityCertificate: END_ENTITY_CERTIFICATE_DETAIL_SPEC,
-    models.Roa: ROA_DETAIL_SPEC,
+    models.RoaObject: ROA_OBJECT_DETAIL_SPEC,
     models.ASPA: ASPA_DETAIL_SPEC,
     models.ImportedAspa: IMPORTED_ASPA_DETAIL_SPEC,
     models.ImportedCaMetadata: IMPORTED_CA_METADATA_DETAIL_SPEC,

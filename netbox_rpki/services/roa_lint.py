@@ -1026,7 +1026,7 @@ def _intent_lint_findings(
             rpki_models.ROAIntentResultType.INACTIVE_INTENT,
         }
         and (
-            intent_result.best_roa_id is not None
+            intent_result.best_roa_object_id is not None
             or intent_result.best_imported_authorization_id is not None
             or details.get('published_prefix')
         )

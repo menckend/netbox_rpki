@@ -30,8 +30,8 @@ def build_signed_object_overlay_summary(obj: rpki_models.SignedObject) -> dict[s
     telemetry_summary = {}
     if obj.object_type == rpki_models.SignedObjectType.ROA:
         try:
-            telemetry_summary = build_roa_overlay_summary(obj.legacy_roa).get('telemetry', {})
-        except rpki_models.Roa.DoesNotExist:
+            telemetry_summary = build_roa_overlay_summary(obj.roa_extension).get('telemetry', {})
+        except rpki_models.RoaObject.DoesNotExist:
             telemetry_summary = {}
     elif obj.object_type == rpki_models.SignedObjectType.ASPA:
         try:
@@ -62,7 +62,7 @@ def build_signed_object_overlay_summary(obj: rpki_models.SignedObject) -> dict[s
     }
 
 
-def build_roa_overlay_summary(obj: rpki_models.Roa) -> dict[str, object]:
+def build_roa_overlay_summary(obj: rpki_models.RoaObject) -> dict[str, object]:
     payloads = list(
         obj.validated_payloads.select_related('validation_run', 'object_validation_result').order_by('-validation_run__completed_at', '-pk')[:10]
     )
@@ -235,10 +235,10 @@ def _telemetry_summary(queryset) -> dict[str, object]:
     }
 
 
-def _roa_telemetry_queryset(obj: rpki_models.Roa):
+def _roa_telemetry_queryset(obj: rpki_models.RoaObject):
     if obj.origin_as_id is None:
         return rpki_models.BgpPathObservation.objects.none()
-    prefixes = list(obj.RoaToPrefixTable.values_list('prefix__prefix', flat=True))
+    prefixes = list(obj.prefix_authorizations.values_list('prefix__prefix', flat=True))
     if not prefixes:
         return rpki_models.BgpPathObservation.objects.none()
     return rpki_models.BgpPathObservation.objects.filter(

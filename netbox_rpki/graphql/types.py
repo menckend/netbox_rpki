@@ -347,10 +347,10 @@ class BgpPathObservationReportingMixin:
 class SignedObjectSurfaceMixin:
 
     @strawberry.field
-    def legacy_roa(self) -> Annotated["RoaType", strawberry.lazy('.types')] | None:
+    def roa_extension(self) -> Annotated["RoaObjectType", strawberry.lazy('.types')] | None:
         try:
-            return self.legacy_roa
-        except models.Roa.DoesNotExist:
+            return self.roa_extension
+        except models.RoaObject.DoesNotExist:
             return None
 
     @strawberry.field
@@ -490,7 +490,7 @@ REPORTING_MIXINS = {
     'telemetrysource': TelemetrySourceReportingMixin,
     'telemetryrun': TelemetryRunReportingMixin,
     'bgppathobservation': BgpPathObservationReportingMixin,
-    'roa': RoaOverlayMixin,
+    'roaobject': RoaOverlayMixin,
     'aspa': AspaOverlayMixin,
     'rpkiprovideraccount': ProviderAccountReportingMixin,
     'providersnapshot': ProviderSnapshotReportingMixin,

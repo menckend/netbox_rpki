@@ -115,8 +115,8 @@ class ModelBehaviorTestCase(TestCase):
     def test_absolute_urls(self):
         self.assertEqual(self.organization_a.get_absolute_url(), reverse('plugins:netbox_rpki:organization', args=[self.organization_a.pk]))
         self.assertEqual(self.certificate_a.get_absolute_url(), reverse('plugins:netbox_rpki:certificate', args=[self.certificate_a.pk]))
-        self.assertEqual(self.roa_a.get_absolute_url(), reverse('plugins:netbox_rpki:roa', args=[self.roa_a.pk]))
-        self.assertEqual(self.roa_prefix_a.get_absolute_url(), reverse('plugins:netbox_rpki:roaprefix', args=[self.roa_prefix_a.pk]))
+        self.assertEqual(self.roa_a.get_absolute_url(), reverse('plugins:netbox_rpki:roaobject', args=[self.roa_a.pk]))
+        self.assertEqual(self.roa_prefix_a.get_absolute_url(), reverse('plugins:netbox_rpki:roaobjectprefix', args=[self.roa_prefix_a.pk]))
         self.assertEqual(self.certificate_prefix_a.get_absolute_url(), reverse('plugins:netbox_rpki:certificateprefix', args=[self.certificate_prefix_a.pk]))
         self.assertEqual(self.certificate_asn_a.get_absolute_url(), reverse('plugins:netbox_rpki:certificateasn', args=[self.certificate_asn_a.pk]))
 
@@ -308,7 +308,7 @@ class RoaSignedObjectModelNormalizationTestCase(TestCase):
         )
 
         self.assertEqual(roa.signed_object, signed_object)
-        self.assertEqual(signed_object.legacy_roa, roa)
+        self.assertEqual(signed_object.roa_extension, roa)
 
     def test_roa_rejects_non_roa_signed_object(self):
         organization = create_test_organization(org_id='roa-invalid-org', name='ROA Invalid Org')
@@ -322,11 +322,10 @@ class RoaSignedObjectModelNormalizationTestCase(TestCase):
             object_type=rpki_models.SignedObjectType.MANIFEST,
             resource_certificate=signing_certificate,
         )
-        roa = rpki_models.Roa(
+        roa = rpki_models.RoaObject(
             name='Invalid ROA',
-            signed_by=signing_certificate,
+            organization=organization,
             signed_object=signed_object,
-            auto_renews=True,
         )
 
         with self.assertRaises(ValidationError) as context:

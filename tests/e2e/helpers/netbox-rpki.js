@@ -7,8 +7,8 @@ const PATHS = {
   certificatePrefixes: '/plugins/netbox_rpki/certificateprefixes/',
   certificates: '/plugins/netbox_rpki/certificate/',
   organizations: '/plugins/netbox_rpki/orgs/',
-  roaPrefixes: '/plugins/netbox_rpki/roaprefixes/',
-  roas: '/plugins/netbox_rpki/roa/',
+  roaObjectPrefixes: '/plugins/netbox_rpki/roaobjectprefixes/',
+  roaObjects: '/plugins/netbox_rpki/roaobject/',
 };
 
 function runtimeFixtures() {
@@ -134,7 +134,7 @@ async function createCertificateFromOrganization(page, organization, overrides =
   return certificate;
 }
 
-async function createRoaFromCertificate(page, certificate, overrides = {}) {
+async function createRoaObject(page, organization, overrides = {}) {
   const fixtures = runtimeFixtures();
   const token = uniqueLabel('roa');
   const roa = {
@@ -148,19 +148,19 @@ async function createRoaFromCertificate(page, certificate, overrides = {}) {
     ...overrides,
   };
 
-  await page.goto(certificate.detailPath);
-  await page.locator(`a[href="${PATHS.roas}add/?signed_by=${certificate.id}"]`).click();
-  await expect(page.locator('select[name="signed_by"]')).toHaveValue(String(certificate.id));
+  await page.goto(organization.detailPath);
+  await page.locator(`a[href="${PATHS.roaObjects}add/"]`).click();
 
   await fillText(page, 'name', roa.name);
+  await selectValue(page, 'organization', organization.id);
   await selectValue(page, 'origin_as', roa.originAsId);
   await fillText(page, 'valid_from', roa.validFrom);
   await fillText(page, 'valid_to', roa.validTo);
   await fillText(page, 'comments', roa.comment);
-  await setCheckbox(page, 'auto_renews', true);
+  await selectValue(page, 'validation_state', 'unknown');
   await submitCreate(page);
 
-  await expect(page).toHaveURL(/\/plugins\/netbox_rpki\/roa\/\d+\/$/);
+  await expect(page).toHaveURL(/\/plugins\/netbox_rpki\/roaobject\/\d+\/$/);
   roa.id = objectIdFromUrl(page);
   roa.detailPath = new URL(page.url()).pathname;
   await expect(page.locator('.attr-table')).toContainText(roa.name);
@@ -220,7 +220,7 @@ async function createCertificateAsnFromCertificate(page, certificate, overrides 
   return certificateAsn;
 }
 
-async function createRoaPrefixFromRoa(page, roa, overrides = {}) {
+async function createRoaObjectPrefix(page, roa, overrides = {}) {
   const fixtures = runtimeFixtures();
   const roaPrefix = {
     comment: e2eComment('roa prefix'),
@@ -233,15 +233,17 @@ async function createRoaPrefixFromRoa(page, roa, overrides = {}) {
   };
 
   await page.goto(roa.detailPath);
-  await page.locator(`a[href="${PATHS.roaPrefixes}add/?roa_name=${roa.id}"]`).click();
-  await expect(page.locator('select[name="roa_name"]')).toHaveValue(String(roa.id));
+  await page.locator(`a[href="${PATHS.roaObjectPrefixes}add/?roa_object=${roa.id}"]`).click();
+  await expect(page.locator('select[name="roa_object"]')).toHaveValue(String(roa.id));
 
+  await selectValue(page, 'roa_object', roa.id);
   await selectValue(page, 'prefix', roaPrefix.prefixId);
+  await fillText(page, 'prefix_cidr_text', roaPrefix.prefixLabel);
   await fillText(page, 'max_length', roaPrefix.maxLength);
   await fillText(page, 'comments', roaPrefix.comment);
   await submitCreate(page);
 
-  await expect(page).toHaveURL(/\/plugins\/netbox_rpki\/roaprefixes\/\d+\/$/);
+  await expect(page).toHaveURL(/\/plugins\/netbox_rpki\/roaobjectprefixes\/\d+\/$/);
   roaPrefix.id = objectIdFromUrl(page);
   roaPrefix.detailPath = new URL(page.url()).pathname;
 
@@ -254,8 +256,8 @@ module.exports = {
   createCertificateFromOrganization,
   createCertificatePrefixFromCertificate,
   createOrganization,
-  createRoaFromCertificate,
-  createRoaPrefixFromRoa,
+  createRoaObject,
+  createRoaObjectPrefix,
   deleteCurrentObject,
   fillText,
   relativeChildPath,

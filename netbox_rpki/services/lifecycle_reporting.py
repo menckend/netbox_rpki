@@ -867,8 +867,8 @@ def _count_expiring_objects(
     certificate_threshold = today + timedelta(days=int(thresholds['certificate_expiry_warning_days']))
     exception_threshold = now + timedelta(days=int(thresholds['exception_expiry_warning_days']))
 
-    roa_count = rpki_models.Roa.objects.filter(
-        signed_by__rpki_org=organization,
+    roa_count = rpki_models.RoaObject.objects.filter(
+        organization=organization,
         valid_to__isnull=False,
         valid_to__lte=roa_threshold,
     ).count()

@@ -100,13 +100,13 @@ from netbox_rpki.tests.utils import (
     create_test_roa_change_plan_item,
     create_test_roa_change_plan_matrix,
     create_test_imported_roa_authorization,
-    create_test_roa,
+    create_test_roa_object,
     create_test_roa_intent,
     create_test_roa_intent_match,
     create_test_roa_intent_override,
     create_test_roa_intent_result,
     create_test_roa_reconciliation_run,
-    create_test_roa_prefix,
+    create_test_roa_object_prefix,
     create_test_roa_validation_simulation_result,
     create_test_roa_validation_simulation_run,
     create_test_router_certificate,
@@ -233,11 +233,11 @@ def create_unique_prefix(**kwargs):
     return create_test_prefix(f"10.{second_octet}.{third_octet}.0/24", **kwargs)
 
 
-def create_unique_roa(prefix: str = "roa", signed_by=None, **kwargs):
+def create_unique_roa_object(prefix: str = "roa-object", organization=None, **kwargs):
     token = unique_token(prefix)
-    if signed_by is None:
-        signed_by = create_unique_certificate("roa-signing-certificate")
-    return create_test_roa(name=f"{prefix.title()} {token}", signed_by=signed_by, **kwargs)
+    if organization is None:
+        organization = create_unique_organization("roa-object-org")
+    return create_test_roa_object(name=f"{prefix.title()} {token}", organization=organization, **kwargs)
 
 
 _SKIP_VALUE = object()
@@ -300,10 +300,9 @@ def _build_related_value(field_name: str, token: str, variant: int = 0, for_form
         value = create_unique_certificate(f"{token}-certificate", rpki_org=org)
     elif field_name == "prefix":
         value = create_unique_prefix()
-    elif field_name == "roa_name":
-        org = create_unique_organization(f"{token}-roa-org")
-        certificate = create_unique_certificate(f"{token}-roa-certificate", rpki_org=org)
-        value = create_unique_roa(f"{token}-roa", signed_by=certificate)
+    elif field_name == "roa_object":
+        organization = create_unique_organization(f"{token}-roa-object-org")
+        value = create_unique_roa_object(f"{token}-roa-object", organization=organization)
     elif field_name == "trust_anchor":
         value = create_test_trust_anchor(name=f"Trust Anchor {token}")
     elif field_name == "publication_point":
@@ -330,8 +329,8 @@ def _build_related_value(field_name: str, token: str, variant: int = 0, for_form
         value = create_test_intent_derivation_run(name=f"Derivation Run {token}")
     elif field_name == "roa_intent":
         value = create_test_roa_intent(name=f"ROA Intent {token}")
-    elif field_name == "roa":
-        value = create_test_roa(name=f"ROA {token}")
+    elif field_name == "roa_object":
+        value = create_test_roa_object(name=f"ROA Object {token}")
     elif field_name == "basis_derivation_run":
         value = create_test_intent_derivation_run(name=f"Basis Run {token}")
     elif field_name == "delegated_entity":
@@ -353,8 +352,8 @@ def _build_related_value(field_name: str, token: str, variant: int = 0, for_form
             value = create_test_roa_reconciliation_run(name=f"Reconciliation Run {token}")
     elif field_name == "aspa_intent":
         value = create_test_aspa_intent(name=f"ASPA Intent {token}")
-    elif field_name == "best_roa":
-        value = create_test_roa(name=f"Best ROA {token}")
+    elif field_name == "best_roa_object":
+        value = create_test_roa_object(name=f"Best ROA Object {token}")
     elif field_name == "best_aspa":
         value = create_test_aspa(name=f"Best ASPA {token}")
     elif field_name == "best_imported_aspa":
@@ -572,8 +571,8 @@ def _register_scenario_builders() -> None:
             "organization": build_organization_form_data,
             "certificate": build_certificate_form_data,
             "irr_source": build_irr_source_form_data,
-            "roa": build_roa_form_data,
-            "roaprefix": build_roa_prefix_form_data,
+            "roaobject": build_roa_object_form_data,
+            "roaobjectprefix": build_roa_object_prefix_form_data,
             "certificateprefix": build_certificate_prefix_form_data,
             "certificateasn": build_certificate_asn_form_data,
             "routingintenttemplate": build_routing_intent_template_form_data,
@@ -595,8 +594,8 @@ def _register_scenario_builders() -> None:
         {
             "organization": build_organization_filter_cases,
             "certificate": build_certificate_filter_cases,
-            "roa": build_roa_filter_cases,
-            "roaprefix": build_roa_prefix_filter_cases,
+            "roaobject": build_roa_object_filter_cases,
+            "roaobjectprefix": build_roa_object_prefix_filter_cases,
             "certificateprefix": build_certificate_prefix_filter_cases,
             "certificateasn": build_certificate_asn_filter_cases,
         }
@@ -605,8 +604,8 @@ def _register_scenario_builders() -> None:
         {
             "organization": build_organization_table_rows,
             "certificate": build_certificate_table_rows,
-            "roa": build_roa_table_rows,
-            "roaprefix": build_roa_prefix_table_rows,
+            "roaobject": build_roa_object_table_rows,
+            "roaobjectprefix": build_roa_object_prefix_table_rows,
             "certificateprefix": build_certificate_prefix_table_rows,
             "certificateasn": build_certificate_asn_table_rows,
         }
@@ -877,27 +876,27 @@ def build_irr_source_form_data() -> dict[str, object]:
     }
 
 
-def build_roa_form_data() -> dict[str, object]:
+def build_roa_object_form_data() -> dict[str, object]:
     organization = create_unique_organization("roa-form-org")
-    certificate = create_unique_certificate("roa-form-certificate", rpki_org=organization)
     asn = create_unique_asn()
     return {
-        "name": f"RPKI Test ROA {unique_token('roa-form')}",
+        "name": f"RPKI Test ROA Object {unique_token('roa-form')}",
+        "organization": organization.pk,
         "origin_as": asn.pk,
-        "auto_renews": True,
-        "signed_by": certificate.pk,
+        "validation_state": rpki_models.ValidationState.UNKNOWN,
     }
 
 
-def build_roa_prefix_form_data() -> dict[str, object]:
+def build_roa_object_prefix_form_data() -> dict[str, object]:
     organization = create_unique_organization("roa-prefix-form-org")
-    certificate = create_unique_certificate("roa-prefix-form-certificate", rpki_org=organization)
-    roa = create_unique_roa("roa-prefix-form-roa", signed_by=certificate)
+    roa_object = create_unique_roa_object("roa-prefix-form-roa-object", organization=organization)
     prefix = create_unique_prefix()
     return {
+        "roa_object": roa_object.pk,
         "prefix": prefix.pk,
+        "prefix_cidr_text": str(prefix.prefix),
         "max_length": 24,
-        "roa_name": roa.pk,
+        "is_current": True,
     }
 
 
@@ -1338,23 +1337,21 @@ def build_certificate_filter_cases() -> tuple[FilterCase, ...]:
     )
 
 
-def build_roa_filter_cases() -> tuple[FilterCase, ...]:
+def build_roa_object_filter_cases() -> tuple[FilterCase, ...]:
     token = unique_token("roa-filter")
     organization = create_test_organization(org_id=f"roa-filter-org-{token}", name=f"ROA Filter Org {token}")
-    certificate_a = create_test_certificate(name=f"ROA Filter Certificate A {token}", rpki_org=organization)
-    certificate_b = create_test_certificate(name=f"ROA Filter Certificate B {token}", rpki_org=organization)
     asn_a = create_unique_asn()
     asn_b = create_unique_asn()
-    alpha = create_test_roa(
-        name=f"Alpha ROA {token}",
+    alpha = create_test_roa_object(
+        name=f"Alpha ROA Object {token}",
+        organization=organization,
         origin_as=asn_a,
-        signed_by=certificate_a,
         comments=f"alpha comment {token}",
     )
-    bravo = create_test_roa(
-        name=f"Bravo ROA {token}",
+    bravo = create_test_roa_object(
+        name=f"Bravo ROA Object {token}",
+        organization=organization,
         origin_as=asn_b,
-        signed_by=certificate_b,
     )
     return (
         FilterCase(
@@ -1363,23 +1360,27 @@ def build_roa_filter_cases() -> tuple[FilterCase, ...]:
             expected_objects=(alpha,),
         ),
         FilterCase(
-            label="filter by signed_by",
-            params={"signed_by": certificate_b.pk},
-            expected_objects=(bravo,),
+            label="filter by organization",
+            params={"organization": organization.pk},
+            expected_objects=(alpha, bravo),
         ),
     )
 
 
-def build_roa_prefix_filter_cases() -> tuple[FilterCase, ...]:
+def build_roa_object_prefix_filter_cases() -> tuple[FilterCase, ...]:
     token = unique_token("roa-prefix-filter")
     organization = create_test_organization(org_id=f"roa-prefix-filter-org-{token}", name=f"ROA Prefix Filter Org {token}")
-    certificate = create_test_certificate(name=f"ROA Prefix Filter Certificate {token}", rpki_org=organization)
-    roa_a = create_test_roa(name=f"ROA Prefix Parent A {token}", signed_by=certificate)
-    roa_b = create_test_roa(name=f"ROA Prefix Parent B {token}", signed_by=certificate)
+    roa_a = create_test_roa_object(name=f"ROA Object Prefix Parent A {token}", organization=organization)
+    roa_b = create_test_roa_object(name=f"ROA Object Prefix Parent B {token}", organization=organization)
     prefix_a = create_unique_prefix()
     prefix_b = create_unique_prefix()
-    alpha = create_test_roa_prefix(prefix=prefix_a, roa=roa_a, max_length=24, comments=f"alpha prefix comment {token}")
-    bravo = create_test_roa_prefix(prefix=prefix_b, roa=roa_b, max_length=25)
+    alpha = create_test_roa_object_prefix(
+        prefix=prefix_a,
+        roa_object=roa_a,
+        max_length=24,
+        comments=f"alpha prefix comment {token}",
+    )
+    bravo = create_test_roa_object_prefix(prefix=prefix_b, roa_object=roa_b, max_length=25)
     return (
         FilterCase(
             label="search by prefix",
@@ -1387,8 +1388,8 @@ def build_roa_prefix_filter_cases() -> tuple[FilterCase, ...]:
             expected_objects=(bravo,),
         ),
         FilterCase(
-            label="filter by roa_name",
-            params={"roa_name": roa_a.pk},
+            label="filter by roa_object",
+            params={"roa_object": roa_a.pk},
             expected_objects=(alpha,),
         ),
     )
@@ -1471,20 +1472,18 @@ def build_certificate_table_rows() -> None:
     create_test_certificate(name=f"Table Certificate B {token}", issuer=f"Issuer B {token}", rpki_org=organization)
 
 
-def build_roa_table_rows() -> None:
+def build_roa_object_table_rows() -> None:
     organization = create_unique_organization("table-roa-org")
-    certificate = create_unique_certificate("table-roa-certificate", rpki_org=organization)
     token = unique_token("table-roa")
-    create_test_roa(name=f"Table ROA A {token}", origin_as=create_unique_asn(), signed_by=certificate)
-    create_test_roa(name=f"Table ROA B {token}", origin_as=create_unique_asn(), signed_by=certificate)
+    create_test_roa_object(name=f"Table ROA Object A {token}", organization=organization, origin_as=create_unique_asn())
+    create_test_roa_object(name=f"Table ROA Object B {token}", organization=organization, origin_as=create_unique_asn())
 
 
-def build_roa_prefix_table_rows() -> None:
+def build_roa_object_prefix_table_rows() -> None:
     organization = create_unique_organization("table-roa-prefix-org")
-    certificate = create_unique_certificate("table-roa-prefix-certificate", rpki_org=organization)
-    roa = create_unique_roa("table-roa-prefix-parent", signed_by=certificate)
-    create_test_roa_prefix(prefix=create_unique_prefix(), roa=roa, max_length=24)
-    create_test_roa_prefix(prefix=create_unique_prefix(), roa=roa, max_length=25)
+    roa_object = create_unique_roa_object("table-roa-prefix-parent", organization=organization)
+    create_test_roa_object_prefix(prefix=create_unique_prefix(), roa_object=roa_object, max_length=24)
+    create_test_roa_object_prefix(prefix=create_unique_prefix(), roa_object=roa_object, max_length=25)
 
 
 def build_certificate_prefix_table_rows() -> None:
@@ -1769,11 +1768,11 @@ def build_object_validation_result_instance():
 
 def build_validated_roa_payload_instance():
     validation_run = build_validation_run_instance()
-    roa = create_unique_roa("validated-roa", signed_by=create_unique_certificate("validated-roa-certificate"))
+    roa_object = create_unique_roa_object("validated-roa-object")
     return create_test_validated_roa_payload(
         name=f"Validated ROA Payload {unique_token('validated-roa')}",
         validation_run=validation_run,
-        roa=roa,
+        roa_object=roa_object,
         prefix=create_unique_prefix(),
         origin_as=create_unique_asn(),
         max_length=24,

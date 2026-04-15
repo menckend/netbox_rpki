@@ -10,8 +10,8 @@ from netbox_rpki.models import (
     CertificateAsn,
     CertificatePrefix,
     Organization,
-    Roa,
-    RoaPrefix,
+    RoaObject,
+    RoaObjectPrefix,
 )
 
 
@@ -23,8 +23,8 @@ def delete_stale_plugin_objects():
 
     CertificateAsn.objects.filter(**marker_filter).delete()
     CertificatePrefix.objects.filter(**marker_filter).delete()
-    RoaPrefix.objects.filter(**marker_filter).delete()
-    Roa.objects.filter(**marker_filter).delete()
+    RoaObjectPrefix.objects.filter(**marker_filter).delete()
+    RoaObject.objects.filter(**marker_filter).delete()
     Certificate.objects.filter(**marker_filter).delete()
     Organization.objects.filter(**marker_filter).delete()
 
