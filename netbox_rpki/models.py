@@ -328,6 +328,24 @@ class IrrCoordinationResultType(models.TextChoices):
     POLICY_CONTEXT_GAP = "policy_context_gap", "Policy Context Gap"
 
 
+class IrrChangePlanStatus(models.TextChoices):
+    DRAFT = "draft", "Draft"
+    READY = "ready", "Ready"
+    APPROVED = "approved", "Approved"
+    EXECUTING = "executing", "Executing"
+    COMPLETED = "completed", "Completed"
+    FAILED = "failed", "Failed"
+    CANCELED = "canceled", "Canceled"
+
+
+class IrrChangePlanAction(models.TextChoices):
+    CREATE = "create", "Create"
+    MODIFY = "modify", "Modify"
+    REPLACE = "replace", "Replace"
+    DELETE = "delete", "Delete"
+    NOOP = "noop", "No-op"
+
+
 class ProviderSyncFamily(models.TextChoices):
     ROA_AUTHORIZATIONS = "roa_authorizations", "ROA Authorizations"
     ASPAS = "aspas", "ASPAs"
@@ -3364,6 +3382,215 @@ class IrrCoordinationResult(NamedRpkiStandardModel):
 
     def get_absolute_url(self):
         return _plugin_get_action_url(type(self), kwargs={'pk': self.pk})
+
+
+class IrrChangePlan(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='irr_change_plans',
+    )
+    coordination_run = models.ForeignKey(
+        to='IrrCoordinationRun',
+        on_delete=models.PROTECT,
+        related_name='change_plans',
+    )
+    source = models.ForeignKey(
+        to='IrrSource',
+        on_delete=models.PROTECT,
+        related_name='change_plans',
+    )
+    snapshot = models.ForeignKey(
+        to='IrrSnapshot',
+        on_delete=models.PROTECT,
+        related_name='change_plans',
+        blank=True,
+        null=True,
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=IrrChangePlanStatus.choices,
+        default=IrrChangePlanStatus.DRAFT,
+    )
+    write_support_mode = models.CharField(
+        max_length=32,
+        choices=IrrWriteSupportMode.choices,
+        default=IrrWriteSupportMode.UNSUPPORTED,
+    )
+    ticket_reference = models.CharField(max_length=200, blank=True)
+    change_reference = models.CharField(max_length=200, blank=True)
+    maintenance_window_start = models.DateTimeField(blank=True, null=True)
+    maintenance_window_end = models.DateTimeField(blank=True, null=True)
+    approved_at = models.DateTimeField(blank=True, null=True)
+    approved_by = models.CharField(max_length=150, blank=True)
+    execution_requested_by = models.CharField(max_length=150, blank=True)
+    execution_started_at = models.DateTimeField(blank=True, null=True)
+    completed_at = models.DateTimeField(blank=True, null=True)
+    failed_at = models.DateTimeField(blank=True, null=True)
+    canceled_at = models.DateTimeField(blank=True, null=True)
+    summary_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ('-created', 'name')
+        constraints = (
+            models.CheckConstraint(
+                condition=(
+                    models.Q(maintenance_window_start__isnull=True)
+                    | models.Q(maintenance_window_end__isnull=True)
+                    | models.Q(maintenance_window_end__gte=models.F('maintenance_window_start'))
+                ),
+                name='nb_rpki_irrchangeplan_valid_maintenance_window',
+            ),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return _plugin_get_action_url(type(self), kwargs={'pk': self.pk})
+
+    def clean(self):
+        super().clean()
+        validate_maintenance_window_bounds(
+            start_at=self.maintenance_window_start,
+            end_at=self.maintenance_window_end,
+        )
+        errors = {}
+        if self.coordination_run_id is not None and self.coordination_run.organization_id != self.organization_id:
+            errors['coordination_run'] = 'Coordination run must belong to the same organization as the IRR change plan.'
+        if self.source_id is not None and self.source.organization_id != self.organization_id:
+            errors['source'] = 'IRR source must belong to the same organization as the IRR change plan.'
+        if self.snapshot_id is not None:
+            if self.source_id is None:
+                errors['source'] = 'IRR source is required when snapshot is set.'
+            elif self.snapshot.source_id != self.source_id:
+                errors['snapshot'] = 'IRR snapshot must belong to the selected IRR source.'
+        if errors:
+            raise ValidationError(errors)
+
+    @property
+    def has_governance_metadata(self) -> bool:
+        return any(
+            (
+                self.ticket_reference,
+                self.change_reference,
+                self.maintenance_window_start,
+                self.maintenance_window_end,
+            )
+        )
+
+    @property
+    def supports_preview(self) -> bool:
+        return self.write_support_mode in {
+            IrrWriteSupportMode.PREVIEW_ONLY,
+            IrrWriteSupportMode.APPLY_SUPPORTED,
+        }
+
+    @property
+    def supports_apply(self) -> bool:
+        return self.write_support_mode == IrrWriteSupportMode.APPLY_SUPPORTED
+
+    @property
+    def can_preview(self) -> bool:
+        return self.supports_preview and self.status in {
+            IrrChangePlanStatus.DRAFT,
+            IrrChangePlanStatus.READY,
+            IrrChangePlanStatus.APPROVED,
+            IrrChangePlanStatus.FAILED,
+        }
+
+    @property
+    def can_apply(self) -> bool:
+        return self.supports_apply and self.status in {
+            IrrChangePlanStatus.READY,
+            IrrChangePlanStatus.APPROVED,
+            IrrChangePlanStatus.FAILED,
+        }
+
+
+class IrrChangePlanItem(NamedRpkiStandardModel):
+    change_plan = models.ForeignKey(
+        to='IrrChangePlan',
+        on_delete=models.PROTECT,
+        related_name='items',
+    )
+    coordination_result = models.ForeignKey(
+        to='IrrCoordinationResult',
+        on_delete=models.PROTECT,
+        related_name='change_plan_items',
+        blank=True,
+        null=True,
+    )
+    object_family = models.CharField(
+        max_length=64,
+        choices=IrrCoordinationFamily.choices,
+    )
+    action = models.CharField(
+        max_length=16,
+        choices=IrrChangePlanAction.choices,
+        default=IrrChangePlanAction.NOOP,
+    )
+    stable_object_key = models.CharField(max_length=255, blank=True)
+    source_object_key = models.CharField(max_length=255, blank=True)
+    roa_intent = models.ForeignKey(
+        to='ROAIntent',
+        on_delete=models.PROTECT,
+        related_name='irr_change_plan_items',
+        blank=True,
+        null=True,
+    )
+    imported_route_object = models.ForeignKey(
+        to='ImportedIrrRouteObject',
+        on_delete=models.PROTECT,
+        related_name='change_plan_items',
+        blank=True,
+        null=True,
+    )
+    imported_aut_num = models.ForeignKey(
+        to='ImportedIrrAutNum',
+        on_delete=models.PROTECT,
+        related_name='change_plan_items',
+        blank=True,
+        null=True,
+    )
+    imported_maintainer = models.ForeignKey(
+        to='ImportedIrrMaintainer',
+        on_delete=models.PROTECT,
+        related_name='change_plan_items',
+        blank=True,
+        null=True,
+    )
+    before_state_json = models.JSONField(default=dict, blank=True)
+    after_state_json = models.JSONField(default=dict, blank=True)
+    request_payload_json = models.JSONField(default=dict, blank=True)
+    response_summary_json = models.JSONField(default=dict, blank=True)
+    reason = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ('name',)
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return _plugin_get_action_url(type(self), kwargs={'pk': self.pk})
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self.coordination_result_id is not None and self.coordination_result.coordination_run_id != self.change_plan.coordination_run_id:
+            errors['coordination_result'] = 'Coordination result must belong to the change plan coordination run.'
+        if self.action != IrrChangePlanAction.NOOP and not any(
+            (
+                self.roa_intent_id,
+                self.imported_route_object_id,
+                self.imported_aut_num_id,
+                self.imported_maintainer_id,
+            )
+        ):
+            errors['action'] = 'Actionable IRR change plan items must reference at least one related object.'
+        if errors:
+            raise ValidationError(errors)
 
 
 class LifecycleHealthPolicy(NamedRpkiStandardModel):

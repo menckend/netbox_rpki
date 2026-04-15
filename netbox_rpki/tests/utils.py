@@ -2002,6 +2002,111 @@ def create_test_irr_coordination_result(
     )
 
 
+def create_test_irr_change_plan(
+    name='IRR Change Plan 1',
+    organization=None,
+    coordination_run=None,
+    source=None,
+    snapshot=None,
+    status=None,
+    write_support_mode=None,
+    ticket_reference='',
+    change_reference='',
+    maintenance_window_start=None,
+    maintenance_window_end=None,
+    approved_at=None,
+    approved_by='',
+    execution_requested_by='',
+    execution_started_at=None,
+    completed_at=None,
+    failed_at=None,
+    canceled_at=None,
+    summary_json=None,
+    **kwargs,
+):
+    if source is None:
+        source = create_test_irr_source()
+    if organization is None:
+        organization = source.organization
+    if snapshot is None:
+        snapshot = create_test_irr_snapshot(source=source)
+    if coordination_run is None:
+        coordination_run = create_test_irr_coordination_run(
+            organization=organization,
+            compared_sources=[source],
+        )
+    return rpki_models.IrrChangePlan.objects.create(
+        name=name,
+        organization=organization,
+        coordination_run=coordination_run,
+        source=source,
+        snapshot=snapshot,
+        status=status or rpki_models.IrrChangePlanStatus.DRAFT,
+        write_support_mode=write_support_mode or source.write_support_mode,
+        ticket_reference=ticket_reference,
+        change_reference=change_reference,
+        maintenance_window_start=maintenance_window_start,
+        maintenance_window_end=maintenance_window_end,
+        approved_at=approved_at,
+        approved_by=approved_by,
+        execution_requested_by=execution_requested_by,
+        execution_started_at=execution_started_at,
+        completed_at=completed_at,
+        failed_at=failed_at,
+        canceled_at=canceled_at,
+        summary_json=summary_json or {},
+        **kwargs,
+    )
+
+
+def create_test_irr_change_plan_item(
+    name='IRR Change Plan Item 1',
+    change_plan=None,
+    coordination_result=None,
+    object_family=None,
+    action=None,
+    stable_object_key='route:203.0.113.0/24AS64500',
+    source_object_key='route:203.0.113.0/24AS64500',
+    roa_intent=None,
+    imported_route_object=None,
+    imported_aut_num=None,
+    imported_maintainer=None,
+    before_state_json=None,
+    after_state_json=None,
+    request_payload_json=None,
+    response_summary_json=None,
+    reason='',
+    **kwargs,
+):
+    if change_plan is None:
+        change_plan = create_test_irr_change_plan()
+    if coordination_result is None:
+        coordination_result = create_test_irr_coordination_result(
+            coordination_run=change_plan.coordination_run,
+            source=change_plan.source,
+            snapshot=change_plan.snapshot,
+        )
+    return rpki_models.IrrChangePlanItem.objects.create(
+        name=name,
+        change_plan=change_plan,
+        coordination_result=coordination_result,
+        object_family=object_family or rpki_models.IrrCoordinationFamily.ROUTE_OBJECT,
+        action=action or rpki_models.IrrChangePlanAction.CREATE,
+        stable_object_key=stable_object_key,
+        source_object_key=source_object_key,
+        roa_intent=roa_intent,
+        imported_route_object=imported_route_object,
+        imported_aut_num=imported_aut_num,
+        imported_maintainer=imported_maintainer,
+        before_state_json=before_state_json or {},
+        after_state_json=after_state_json or {},
+        request_payload_json=request_payload_json or {},
+        response_summary_json=response_summary_json or {},
+        reason=reason,
+        **kwargs,
+    )
+
+
 def create_test_lifecycle_health_policy(
     name='Lifecycle Health Policy 1',
     organization=None,

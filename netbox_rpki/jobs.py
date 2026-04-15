@@ -5,6 +5,7 @@ from core.models import Job
 from netbox_rpki import models as rpki_models
 from netbox_rpki.services import (
     build_bulk_routing_intent_baseline_fingerprint,
+    create_irr_change_plans,
     evaluate_lifecycle_health_events,
     run_aspa_reconciliation_pipeline,
     run_bulk_routing_intent_pipeline,
@@ -501,6 +502,63 @@ class RunIrrCoordinationJob(JobRunner):
         }
         self.job.save(update_fields=('data',))
         self.logger.info(f'Completed IRR coordination run {coordination_run.pk}')
+
+
+class CreateIrrChangePlansJob(JobRunner):
+    class Meta:
+        name = 'IRR Change Plan Drafting'
+
+    @classmethod
+    def get_job_name(cls, coordination_run: rpki_models.IrrCoordinationRun | int) -> str:
+        coordination_run_pk = coordination_run.pk if hasattr(coordination_run, 'pk') else coordination_run
+        return f'{cls.name} [{coordination_run_pk}]'
+
+    @classmethod
+    def get_active_job_for_coordination_run(cls, coordination_run: rpki_models.IrrCoordinationRun | int):
+        return Job.objects.filter(
+            name=cls.get_job_name(coordination_run),
+            status__in=JobStatusChoices.ENQUEUED_STATE_CHOICES,
+        ).order_by('created').first()
+
+    @classmethod
+    def enqueue_for_coordination_run(
+        cls,
+        coordination_run: rpki_models.IrrCoordinationRun | int,
+        *,
+        user=None,
+        schedule_at=None,
+    ):
+        if not isinstance(coordination_run, rpki_models.IrrCoordinationRun):
+            coordination_run = rpki_models.IrrCoordinationRun.objects.get(pk=coordination_run)
+
+        existing_job = cls.get_active_job_for_coordination_run(coordination_run)
+        if existing_job is not None:
+            return existing_job, False
+
+        if rpki_models.IrrChangePlan.objects.filter(
+            coordination_run=coordination_run,
+            status=rpki_models.IrrChangePlanStatus.EXECUTING,
+        ).exists():
+            return None, False
+
+        job = cls.enqueue(
+            name=cls.get_job_name(coordination_run),
+            user=user,
+            schedule_at=schedule_at,
+            coordination_run_pk=coordination_run.pk,
+        )
+        return job, True
+
+    def run(self, coordination_run_pk, *args, **kwargs):
+        coordination_run = rpki_models.IrrCoordinationRun.objects.get(pk=coordination_run_pk)
+        self.logger.info(f'Creating IRR change plans for coordination run {coordination_run.name} ({coordination_run.pk})')
+        plans = create_irr_change_plans(coordination_run)
+        self.job.data = {
+            'irr_coordination_run_pk': coordination_run.pk,
+            'irr_change_plan_pks': [plan.pk for plan in plans],
+        }
+        self.job.save(update_fields=('data',))
+        self.logger.info(f'Created {len(plans)} IRR change plans for coordination run {coordination_run.pk}')
 
 
 class EvaluateLifecycleHealthJob(JobRunner):
