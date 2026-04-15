@@ -1164,12 +1164,13 @@ def evaluate_lifecycle_health_events(
         if hook.policy_id is not None and hook.policy_id != ((summary.get('policy') or {}).get('policy_id')):
             continue
         allowed_kinds = set(hook.event_kinds_json or [])
+        matched_dedupe_keys: set[str] = set()
         for candidate in candidates:
             if allowed_kinds and candidate['event_kind'] not in allowed_kinds:
                 continue
 
             active_event = (
-                hook.events.filter(
+            hook.events.filter(
                     dedupe_key=candidate['dedupe_key'],
                     status__in=_LIFECYCLE_EVENT_ACTIVE_STATUSES,
                 )
@@ -1178,6 +1179,7 @@ def evaluate_lifecycle_health_events(
             )
 
             if candidate['active']:
+                matched_dedupe_keys.add(candidate['dedupe_key'])
                 if active_event is None:
                     event = rpki_models.LifecycleHealthEvent.objects.create(
                         name=candidate['title'],
@@ -1227,28 +1229,22 @@ def evaluate_lifecycle_health_events(
                             'delivery_error',
                             'last_updated',
                         )
-                    )
+                )
                 events.append(event)
                 continue
 
-            if active_event is None:
+        for active_event in hook.events.filter(status__in=_LIFECYCLE_EVENT_ACTIVE_STATUSES).order_by('-last_seen_at', '-created'):
+            if active_event.dedupe_key in matched_dedupe_keys:
                 continue
-
             active_event.status = rpki_models.LifecycleHealthEventStatus.RESOLVED
             active_event.resolved_at = now
             active_event.last_seen_at = now
-            active_event.related_snapshot_id = candidate['related_snapshot_id']
-            active_event.related_snapshot_diff_id = candidate['related_snapshot_diff_id']
-            active_event.payload_json = candidate['payload_json']
             active_event.delivery_error = ''
             active_event.save(
                 update_fields=(
                     'status',
                     'resolved_at',
                     'last_seen_at',
-                    'related_snapshot',
-                    'related_snapshot_diff',
-                    'payload_json',
                     'delivery_error',
                     'last_updated',
                 )
