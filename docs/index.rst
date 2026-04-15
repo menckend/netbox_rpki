@@ -3,6 +3,7 @@
 
    Home/README <self>
    Contributing <CONTRIBUTING.rst>
+   Local Development Setup <LOCAL_DEV_SETUP.rst>
    Changelog <CHANGELOG.rst>
    ...
    autoapi/index
