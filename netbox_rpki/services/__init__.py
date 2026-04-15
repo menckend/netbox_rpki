@@ -78,6 +78,8 @@ from .delegated_workflow import (
     build_delegated_authorization_entity_summary,
     build_delegated_publication_workflow_summary,
     build_managed_authorization_relationship_summary,
+    matching_authored_relationships_for_workflow,
+    matching_workflows_for_authored_relationship,
 )
 from .irr_sync import IrrSyncError, sync_irr_source
 from .irr_coordination import IrrCoordinationError, run_irr_coordination
@@ -184,6 +186,8 @@ __all__ = (
     'build_delegated_authorization_entity_summary',
     'build_delegated_publication_workflow_summary',
     'build_managed_authorization_relationship_summary',
+    'matching_authored_relationships_for_workflow',
+    'matching_workflows_for_authored_relationship',
     'ExternalValidationError',
     'IrrSyncError',
     'sync_irr_source',

@@ -6,6 +6,7 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
+from netbox.models import NetBoxModel
 from tenancy.models import Tenant
 
 from netbox_rpki import models as rpki_models
@@ -543,6 +544,29 @@ class ASPAModelValidationTestCase(TestCase):
         self.assertEqual(key_a, key_b)
         self.assertNotEqual(key_a, key_c)
 
+    def test_aspa_intent_build_intent_key_changes_for_delegated_scope(self):
+        key_a = rpki_models.ASPAIntent.build_intent_key(
+            customer_asn_value=65123,
+            provider_asn_value=65234,
+            delegated_entity_id=10,
+            managed_relationship_id=20,
+        )
+        key_b = rpki_models.ASPAIntent.build_intent_key(
+            customer_asn_value=65123,
+            provider_asn_value=65234,
+            delegated_entity_id=10,
+            managed_relationship_id=20,
+        )
+        key_c = rpki_models.ASPAIntent.build_intent_key(
+            customer_asn_value=65123,
+            provider_asn_value=65234,
+            delegated_entity_id=11,
+            managed_relationship_id=21,
+        )
+
+        self.assertEqual(key_a, key_b)
+        self.assertNotEqual(key_a, key_c)
+
     def test_aspa_intent_enforces_unique_customer_provider_pair(self):
         aspa_intent = create_test_aspa_intent()
 
@@ -574,6 +598,49 @@ class ASPAModelValidationTestCase(TestCase):
         self.assertEqual(
             context.exception.message_dict,
             {'provider_as': ['Provider ASN must differ from the ASPA customer ASN.']},
+        )
+
+    def test_aspa_intent_rejects_mismatched_managed_relationship_scope(self):
+        organization = create_test_organization(org_id='aspa-scope-org', name='ASPA Scope Org')
+        provider_account = create_test_provider_account(organization=organization, org_handle='ORG-ASPA-SCOPE')
+        delegated_entity = rpki_models.DelegatedAuthorizationEntity.objects.create(
+            name='ASPA Scope Entity',
+            organization=organization,
+            kind=rpki_models.DelegatedAuthorizationEntityKind.CUSTOMER,
+        )
+        other_entity = rpki_models.DelegatedAuthorizationEntity.objects.create(
+            name='ASPA Scope Other Entity',
+            organization=organization,
+            kind=rpki_models.DelegatedAuthorizationEntityKind.DOWNSTREAM,
+        )
+        managed_relationship = rpki_models.ManagedAuthorizationRelationship.objects.create(
+            name='ASPA Scope Relationship',
+            organization=organization,
+            delegated_entity=delegated_entity,
+            provider_account=provider_account,
+            status=rpki_models.ManagedAuthorizationRelationshipStatus.ACTIVE,
+        )
+        intent = rpki_models.ASPAIntent(
+            name='Scoped ASPA Intent',
+            organization=organization,
+            intent_key=rpki_models.ASPAIntent.build_intent_key(
+                customer_asn_value=65220,
+                provider_asn_value=65221,
+                delegated_entity_id=other_entity.pk,
+                managed_relationship_id=managed_relationship.pk,
+            ),
+            customer_as=create_test_asn(65220),
+            provider_as=create_test_asn(65221),
+            delegated_entity=other_entity,
+            managed_relationship=managed_relationship,
+        )
+
+        with self.assertRaises(ValidationError) as context:
+            intent.full_clean()
+
+        self.assertEqual(
+            context.exception.message_dict,
+            {'managed_relationship': ['Managed relationship must reference the same delegated entity as this ASPA intent.']},
         )
 
     def test_aspa_reconciliation_run_requires_provider_snapshot_for_provider_imported_scope(self):
@@ -659,6 +726,63 @@ class ASPAModelValidationTestCase(TestCase):
 
         with self.assertRaises(ValidationError):
             match.full_clean()
+
+
+class DelegatedOwnershipModelValidationTestCase(TestCase):
+    def test_authored_ca_relationship_rejects_mismatched_managed_relationship_scope(self):
+        organization = create_test_organization(org_id='delegated-scope-model-org', name='Delegated Scope Model Org')
+        provider_account = create_test_provider_account(
+            name='Delegated Scope Provider',
+            organization=organization,
+            org_handle='ORG-DELEGATED-SCOPE',
+        )
+        entity_a = rpki_models.DelegatedAuthorizationEntity.objects.create(
+            name='Delegated Scope Entity A',
+            organization=organization,
+            kind=rpki_models.DelegatedAuthorizationEntityKind.CUSTOMER,
+        )
+        entity_b = rpki_models.DelegatedAuthorizationEntity.objects.create(
+            name='Delegated Scope Entity B',
+            organization=organization,
+            kind=rpki_models.DelegatedAuthorizationEntityKind.DOWNSTREAM,
+        )
+        relationship = rpki_models.ManagedAuthorizationRelationship.objects.create(
+            name='Delegated Scope Relationship',
+            organization=organization,
+            delegated_entity=entity_a,
+            provider_account=provider_account,
+            status=rpki_models.ManagedAuthorizationRelationshipStatus.ACTIVE,
+        )
+
+        authored_relationship = rpki_models.AuthoredCaRelationship(
+            name='Delegated Scope Authored Relationship',
+            organization=organization,
+            provider_account=provider_account,
+            delegated_entity=entity_b,
+            managed_relationship=relationship,
+            child_ca_handle='delegated-scope-child',
+            relationship_type=rpki_models.AuthoredCaRelationshipType.PARENT,
+            status=rpki_models.AuthoredCaRelationshipStatus.ACTIVE,
+        )
+
+        with self.assertRaises(ValidationError) as ctx:
+            authored_relationship.full_clean()
+
+        self.assertIn('managed_relationship', ctx.exception.message_dict)
+
+
+class ModelConventionInventoryTestCase(TestCase):
+    def test_only_documented_legacy_models_inherit_directly_from_netboxmodel(self):
+        direct_subclasses = {
+            cls.__name__
+            for cls in rpki_models.__dict__.values()
+            if isinstance(cls, type) and NetBoxModel in getattr(cls, '__bases__', ())
+        }
+
+        self.assertEqual(
+            direct_subclasses,
+            {'RpkiStandardModel', *rpki_models.LEGACY_DIRECT_NETBOX_MODEL_EXCEPTIONS},
+        )
 
 
 class LifecycleHealthPolicyModelTestCase(TestCase):
@@ -1044,6 +1168,35 @@ class PriorityOneModelBehaviorTestCase(TestCase):
         self.assertEqual(key_a, key_b)
         self.assertNotEqual(key_a, key_c)
 
+    def test_roa_intent_build_intent_key_changes_for_delegated_scope(self):
+        key_a = rpki_models.ROAIntent.build_intent_key(
+            prefix_cidr_text='10.123.0.0/24',
+            address_family=rpki_models.AddressFamily.IPV4,
+            origin_asn_value=65123,
+            max_length=24,
+            delegated_entity_id=10,
+            managed_relationship_id=20,
+        )
+        key_b = rpki_models.ROAIntent.build_intent_key(
+            prefix_cidr_text='10.123.0.0/24',
+            address_family=rpki_models.AddressFamily.IPV4,
+            origin_asn_value=65123,
+            max_length=24,
+            delegated_entity_id=10,
+            managed_relationship_id=20,
+        )
+        key_c = rpki_models.ROAIntent.build_intent_key(
+            prefix_cidr_text='10.123.0.0/24',
+            address_family=rpki_models.AddressFamily.IPV4,
+            origin_asn_value=65123,
+            max_length=24,
+            delegated_entity_id=11,
+            managed_relationship_id=21,
+        )
+
+        self.assertEqual(key_a, key_b)
+        self.assertNotEqual(key_a, key_c)
+
     def test_provider_account_exposes_explicit_roa_write_capability(self):
         krill_account = create_test_provider_account(
             name='Krill Capability Account',
@@ -1252,6 +1405,59 @@ class PriorityOneModelBehaviorTestCase(TestCase):
                     max_length=24,
                     intent_key=self.roa_intent.intent_key,
                 )
+
+    def test_roa_intent_rejects_mismatched_managed_relationship_scope(self):
+        provider_account = create_test_provider_account(
+            organization=self.organization,
+            org_handle='ORG-ROA-SCOPE',
+        )
+        delegated_entity = rpki_models.DelegatedAuthorizationEntity.objects.create(
+            name='ROA Scope Entity',
+            organization=self.organization,
+            kind=rpki_models.DelegatedAuthorizationEntityKind.CUSTOMER,
+        )
+        other_entity = rpki_models.DelegatedAuthorizationEntity.objects.create(
+            name='ROA Scope Other Entity',
+            organization=self.organization,
+            kind=rpki_models.DelegatedAuthorizationEntityKind.DOWNSTREAM,
+        )
+        managed_relationship = rpki_models.ManagedAuthorizationRelationship.objects.create(
+            name='ROA Scope Relationship',
+            organization=self.organization,
+            delegated_entity=delegated_entity,
+            provider_account=provider_account,
+            status=rpki_models.ManagedAuthorizationRelationshipStatus.ACTIVE,
+        )
+        intent = rpki_models.ROAIntent(
+            name='Scoped ROA Intent',
+            derivation_run=self.derivation_run,
+            organization=self.organization,
+            intent_profile=self.profile,
+            intent_key=rpki_models.ROAIntent.build_intent_key(
+                prefix_cidr_text=str(self.prefix.prefix),
+                address_family=rpki_models.AddressFamily.IPV4,
+                origin_asn_value=self.origin_asn.asn,
+                max_length=24,
+                delegated_entity_id=other_entity.pk,
+                managed_relationship_id=managed_relationship.pk,
+            ),
+            prefix=self.prefix,
+            prefix_cidr_text=str(self.prefix.prefix),
+            address_family=rpki_models.AddressFamily.IPV4,
+            origin_asn=self.origin_asn,
+            origin_asn_value=self.origin_asn.asn,
+            max_length=24,
+            delegated_entity=other_entity,
+            managed_relationship=managed_relationship,
+        )
+
+        with self.assertRaises(ValidationError) as context:
+            intent.full_clean()
+
+        self.assertEqual(
+            context.exception.message_dict,
+            {'managed_relationship': ['Managed relationship must reference the same delegated entity as this ROA intent.']},
+        )
 
     def test_reconciliation_result_models_enforce_single_row_per_subject(self):
         with transaction.atomic():

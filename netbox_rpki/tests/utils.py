@@ -663,6 +663,8 @@ def create_test_aspa_intent(
     intent_key='',
     customer_as=None,
     provider_as=None,
+    delegated_entity=None,
+    managed_relationship=None,
     explanation='',
     **kwargs,
 ):
@@ -676,6 +678,8 @@ def create_test_aspa_intent(
         intent_key = rpki_models.ASPAIntent.build_intent_key(
             customer_asn_value=customer_as.asn,
             provider_asn_value=provider_as.asn,
+            delegated_entity_id=getattr(delegated_entity, 'pk', None),
+            managed_relationship_id=getattr(managed_relationship, 'pk', None),
         )
     return rpki_models.ASPAIntent.objects.create(
         name=name,
@@ -683,6 +687,8 @@ def create_test_aspa_intent(
         intent_key=intent_key,
         customer_as=customer_as,
         provider_as=provider_as,
+        delegated_entity=delegated_entity,
+        managed_relationship=managed_relationship,
         explanation=explanation,
         **kwargs,
     )
@@ -1428,6 +1434,8 @@ def create_test_roa_intent(
     scope_vrf=None,
     scope_site=None,
     scope_region=None,
+    delegated_entity=None,
+    managed_relationship=None,
     source_rule=None,
     applied_override=None,
     derived_state=None,
@@ -1454,6 +1462,8 @@ def create_test_roa_intent(
             vrf_id=getattr(scope_vrf, 'pk', None),
             site_id=getattr(scope_site, 'pk', None),
             region_id=getattr(scope_region, 'pk', None),
+            delegated_entity_id=getattr(delegated_entity, 'pk', None),
+            managed_relationship_id=getattr(managed_relationship, 'pk', None),
         )
     return rpki_models.ROAIntent.objects.create(
         name=name,
@@ -1472,6 +1482,8 @@ def create_test_roa_intent(
         scope_vrf=scope_vrf,
         scope_site=scope_site,
         scope_region=scope_region,
+        delegated_entity=delegated_entity,
+        managed_relationship=managed_relationship,
         source_rule=source_rule,
         applied_override=applied_override,
         derived_state=derived_state or rpki_models.ROAIntentDerivedState.ACTIVE,
@@ -1710,8 +1722,12 @@ def create_test_imported_irr_route_object(
         address_family=address_family or rpki_models.AddressFamily.IPV4,
         prefix=prefix,
         origin_asn=origin_asn,
-        route_set_names_json=route_set_names_json or ['AS64500:RS-LOCAL-EDGE'],
-        maintainer_names_json=maintainer_names_json or ['LOCAL-IRR-MNT'],
+        route_set_names_json=(
+            route_set_names_json if route_set_names_json is not None else ['AS64500:RS-LOCAL-EDGE']
+        ),
+        maintainer_names_json=(
+            maintainer_names_json if maintainer_names_json is not None else ['LOCAL-IRR-MNT']
+        ),
         **kwargs,
     )
 

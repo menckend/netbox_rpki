@@ -30,12 +30,20 @@ CONTRACT_TEST_LABELS=(
     netbox_rpki.tests.test_graphql
 )
 
+PROVIDER_TEST_LABELS=(
+    netbox_rpki.tests.test_provider_sync
+    netbox_rpki.tests.test_provider_write
+    netbox_rpki.tests.test_aspa_provider_write
+    netbox_rpki.tests.test_rollback_bundle
+)
+
 usage() {
     cat <<'EOF'
-Usage: ./test.sh [fast|contract|full|<test labels...>] [extra manage.py test args]
+Usage: ./test.sh [fast|contract|provider|full|<test labels...>] [extra manage.py test args]
 
   fast        Run the low-cost structural smoke lane under dedicated test settings
   contract    Run the registry/UI/API/GraphQL surface-contract lane (default)
+  provider    Run the provider-backed sync/write lane used for hosted-provider features
   full        Run the full plugin suite
   <labels>    Run explicit Django test labels under the same dedicated test settings
 
@@ -43,6 +51,7 @@ Examples:
   ./test.sh
   ./test.sh fast
   ./test.sh contract --verbosity 2
+  ./test.sh provider
   ./test.sh full
   ./test.sh netbox_rpki.tests.test_provider_sync --verbosity 2
 EOF
@@ -139,6 +148,10 @@ main() {
         contract)
             shift || true
             run_django_tests "${CONTRACT_TEST_LABELS[@]}" "$@"
+            ;;
+        provider)
+            shift || true
+            run_django_tests "${PROVIDER_TEST_LABELS[@]}" "$@"
             ;;
         full)
             shift || true

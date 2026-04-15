@@ -123,10 +123,13 @@ def _build_change_plan_for_source(
         item = _create_change_plan_item(plan=plan, source=source, result=result)
         item_counts[item.action] += 1
         family_counts[item.object_family] += 1
+        if _family_is_advisory_only(result.coordination_family):
+            capability_warnings.append(_advisory_only_warning_for_family(result.coordination_family))
         if item.action == rpki_models.IrrChangePlanAction.NOOP and result.result_type in ACTIONABLE_RESULT_TYPES:
-            capability_warnings.append(
-                f'{result.coordination_family} change {result.stable_object_key or result.name} is blocked by source write capability.'
-            )
+            if result.coordination_family == rpki_models.IrrCoordinationFamily.ROUTE_OBJECT:
+                capability_warnings.append(
+                    f'{result.coordination_family} change {result.stable_object_key or result.name} is blocked by source write capability.'
+                )
 
     summary_json = _build_plan_summary(
         plan=plan,
@@ -177,6 +180,8 @@ def _create_change_plan_item(*, plan, source, result):
 
 
 def _derive_action(*, result, source):
+    if _family_is_advisory_only(result.coordination_family):
+        return rpki_models.IrrChangePlanAction.NOOP
     if result.result_type in REVIEW_ONLY_RESULT_TYPES:
         return rpki_models.IrrChangePlanAction.NOOP
     if source.write_support_mode == rpki_models.IrrWriteSupportMode.UNSUPPORTED:
@@ -193,7 +198,12 @@ def _derive_action(*, result, source):
 def _derive_plan_states(result):
     before_state_json = {}
     after_state_json = {}
-    if result.imported_route_object_id is not None:
+    if result.coordination_family in {
+        rpki_models.IrrCoordinationFamily.ROUTE_SET_MEMBERSHIP,
+        rpki_models.IrrCoordinationFamily.AS_SET_MEMBERSHIP,
+    }:
+        before_state_json = dict(result.summary_json or {})
+    elif result.imported_route_object_id is not None:
         before_state_json = _serialize_imported_route(result.imported_route_object)
     elif result.imported_aut_num_id is not None:
         before_state_json = _serialize_imported_aut_num(result.imported_aut_num)
@@ -303,6 +313,10 @@ def _build_item_name(*, result, action) -> str:
 
 
 def _build_item_reason(*, result, action) -> str:
+    if result.coordination_family == rpki_models.IrrCoordinationFamily.ROUTE_SET_MEMBERSHIP:
+        return 'Route-set membership coordination is currently advisory-only; no automated IRR draft synthesis is generated for this family yet.'
+    if result.coordination_family == rpki_models.IrrCoordinationFamily.AS_SET_MEMBERSHIP:
+        return 'AS-set membership coordination is currently advisory-only; no automated IRR draft synthesis is generated for this family yet.'
     if action == rpki_models.IrrChangePlanAction.CREATE:
         return 'NetBox policy expects a route object that is currently missing from the target IRR source.'
     if action == rpki_models.IrrChangePlanAction.DELETE:
@@ -346,6 +360,21 @@ def _build_plan_summary(*, plan, item_counts, family_counts, capability_warnings
         'capability_warnings': capability_warning_list,
         'latest_execution': None,
     }
+
+
+def _family_is_advisory_only(coordination_family: str) -> bool:
+    return coordination_family in {
+        rpki_models.IrrCoordinationFamily.ROUTE_SET_MEMBERSHIP,
+        rpki_models.IrrCoordinationFamily.AS_SET_MEMBERSHIP,
+    }
+
+
+def _advisory_only_warning_for_family(coordination_family: str) -> str:
+    if coordination_family == rpki_models.IrrCoordinationFamily.ROUTE_SET_MEMBERSHIP:
+        return 'Route-set membership results are advisory-only; automated IRR draft synthesis is not implemented for this family yet.'
+    if coordination_family == rpki_models.IrrCoordinationFamily.AS_SET_MEMBERSHIP:
+        return 'AS-set membership results are advisory-only; automated IRR draft synthesis is not implemented for this family yet.'
+    return 'This coordination family is currently advisory-only.'
 
 
 def preview_irr_change_plan(

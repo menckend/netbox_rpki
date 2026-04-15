@@ -198,6 +198,22 @@ def _build_coordination_results(*, organization, sources, coordination_run):
                     )
                 )
 
+            _append_route_set_membership_results(
+                results=results,
+                coordination_run=coordination_run,
+                source=source,
+                snapshot=snapshot,
+                imported_routes=imported_routes,
+                netbox_routes_by_key=netbox_routes_by_key,
+            )
+            _append_as_set_membership_results(
+                results=results,
+                coordination_run=coordination_run,
+                source=source,
+                snapshot=snapshot,
+                imported_routes=imported_routes,
+                netbox_routes_by_key=netbox_routes_by_key,
+            )
             _append_context_results(
                 results=results,
                 coordination_run=coordination_run,
@@ -216,6 +232,188 @@ def _build_coordination_results(*, organization, sources, coordination_run):
         )
 
     return results
+
+
+def _append_route_set_membership_results(
+    *,
+    results,
+    coordination_run,
+    source,
+    snapshot,
+    imported_routes,
+    netbox_routes_by_key,
+):
+    memberships_by_prefix = defaultdict(dict)
+    route_set_members = rpki_models.ImportedIrrRouteSetMember.objects.filter(
+        snapshot=snapshot,
+    ).select_related('parent_route_set')
+    for membership in route_set_members:
+        if not membership.normalized_prefix:
+            continue
+        canonical_set_name = _canonicalize_set_name(membership.parent_route_set.set_name)
+        if not canonical_set_name:
+            continue
+        memberships_by_prefix[membership.normalized_prefix.lower()][canonical_set_name] = membership
+
+    for route in imported_routes:
+        policy_row = netbox_routes_by_key.get(route.stable_key)
+        if policy_row is None:
+            continue
+
+        declared_route_sets = {}
+        for route_set_name in route.route_set_names_json or []:
+            canonical_set_name = _canonicalize_set_name(route_set_name)
+            if canonical_set_name:
+                declared_route_sets[canonical_set_name] = route_set_name
+
+        actual_memberships = memberships_by_prefix.get(route.prefix.lower(), {})
+        compared_route_sets = sorted(set(declared_route_sets) | set(actual_memberships))
+        for canonical_set_name in compared_route_sets:
+            declared_route_set_name = declared_route_sets.get(canonical_set_name, '')
+            membership = actual_memberships.get(canonical_set_name)
+            route_set_name = (
+                declared_route_set_name
+                or (membership.parent_route_set.set_name if membership is not None else canonical_set_name)
+            )
+            summary_json = {
+                'route_stable_key': route.stable_key,
+                'route_prefix': route.prefix,
+                'route_origin_asn': route.origin_asn,
+                'route_set_name': route_set_name,
+                'declared_by_route_object': canonical_set_name in declared_route_sets,
+                'member_present_in_route_set': membership is not None,
+                'source_name': source.name,
+                'snapshot_id': snapshot.pk,
+            }
+            if membership is not None:
+                summary_json['route_set_stable_key'] = membership.parent_route_set.stable_key
+                summary_json['membership_stable_key'] = membership.stable_key
+                summary_json['membership_member_type'] = membership.member_type
+
+            result_type = rpki_models.IrrCoordinationResultType.MATCH
+            severity = rpki_models.ReconciliationSeverity.INFO
+            source_object_key = membership.stable_key if membership is not None else route.stable_key
+            if canonical_set_name not in actual_memberships:
+                result_type = rpki_models.IrrCoordinationResultType.MISSING_IN_SOURCE
+                severity = rpki_models.ReconciliationSeverity.WARNING
+                summary_json['message'] = (
+                    'Route object declares member-of linkage, but no matching imported route-set membership was found.'
+                )
+            elif canonical_set_name not in declared_route_sets:
+                result_type = rpki_models.IrrCoordinationResultType.EXTRA_IN_SOURCE
+                severity = rpki_models.ReconciliationSeverity.WARNING
+                summary_json['message'] = (
+                    'Imported route-set membership exists for the prefix, but the matching route object does not declare it.'
+                )
+
+            results.append(
+                _create_result(
+                    coordination_run=coordination_run,
+                    source=source,
+                    snapshot=snapshot,
+                    coordination_family=rpki_models.IrrCoordinationFamily.ROUTE_SET_MEMBERSHIP,
+                    result_type=result_type,
+                    severity=severity,
+                    stable_object_key=f'{route.stable_key}|{route_set_name}',
+                    netbox_object_key=policy_row.stable_key,
+                    source_object_key=source_object_key,
+                    roa_intent=policy_row.roa_intent,
+                    imported_route_object=route,
+                    summary_json=summary_json,
+                )
+            )
+
+
+def _append_as_set_membership_results(
+    *,
+    results,
+    coordination_run,
+    source,
+    snapshot,
+    imported_routes,
+    netbox_routes_by_key,
+):
+    policies_by_origin_asn = defaultdict(list)
+    routes_by_origin_asn = defaultdict(list)
+    for route in imported_routes:
+        policy_row = netbox_routes_by_key.get(route.stable_key)
+        if policy_row is None:
+            continue
+        origin_asn = _canonicalize_asn(route.origin_asn)
+        if not origin_asn:
+            continue
+        policies_by_origin_asn[origin_asn].append(policy_row)
+        routes_by_origin_asn[origin_asn].append(route)
+
+    memberships_by_asn = defaultdict(list)
+    as_set_members = rpki_models.ImportedIrrAsSetMember.objects.filter(
+        snapshot=snapshot,
+    ).select_related('parent_as_set')
+    for membership in as_set_members:
+        origin_asn = _canonicalize_asn(membership.normalized_asn)
+        if not origin_asn:
+            continue
+        memberships_by_asn[origin_asn].append(membership)
+
+    for origin_asn in sorted(routes_by_origin_asn):
+        policy_rows = policies_by_origin_asn[origin_asn]
+        route_rows = routes_by_origin_asn[origin_asn]
+        representative_policy = policy_rows[0]
+        representative_route = route_rows[0]
+        memberships = memberships_by_asn.get(origin_asn, [])
+        if not memberships:
+            results.append(
+                _create_result(
+                    coordination_run=coordination_run,
+                    source=source,
+                    snapshot=snapshot,
+                    coordination_family=rpki_models.IrrCoordinationFamily.AS_SET_MEMBERSHIP,
+                    result_type=rpki_models.IrrCoordinationResultType.POLICY_CONTEXT_GAP,
+                    severity=rpki_models.ReconciliationSeverity.WARNING,
+                    stable_object_key=origin_asn,
+                    netbox_object_key=representative_policy.stable_key,
+                    source_object_key=representative_route.stable_key,
+                    roa_intent=representative_policy.roa_intent,
+                    imported_route_object=representative_route,
+                    summary_json={
+                        'origin_asn': origin_asn,
+                        'source_name': source.name,
+                        'snapshot_id': snapshot.pk,
+                        'route_policy_count': len(route_rows),
+                        'route_stable_keys': [route.stable_key for route in route_rows],
+                        'message': 'No imported AS-set membership was found for this active origin ASN.',
+                    },
+                )
+            )
+            continue
+
+        for membership in memberships:
+            results.append(
+                _create_result(
+                    coordination_run=coordination_run,
+                    source=source,
+                    snapshot=snapshot,
+                    coordination_family=rpki_models.IrrCoordinationFamily.AS_SET_MEMBERSHIP,
+                    result_type=rpki_models.IrrCoordinationResultType.MATCH,
+                    severity=rpki_models.ReconciliationSeverity.INFO,
+                    stable_object_key=f'{origin_asn}|{membership.parent_as_set.set_name}',
+                    netbox_object_key=representative_policy.stable_key,
+                    source_object_key=membership.stable_key,
+                    roa_intent=representative_policy.roa_intent,
+                    imported_route_object=representative_route,
+                    summary_json={
+                        'origin_asn': origin_asn,
+                        'as_set_name': membership.parent_as_set.set_name,
+                        'as_set_stable_key': membership.parent_as_set.stable_key,
+                        'membership_stable_key': membership.stable_key,
+                        'membership_member_type': membership.member_type,
+                        'source_name': source.name,
+                        'snapshot_id': snapshot.pk,
+                        'route_policy_count': len(route_rows),
+                        'route_stable_keys': [route.stable_key for route in route_rows],
+                    },
+                )
+            )
 
 
 def _append_context_results(*, results, coordination_run, source, snapshot, imported_routes):
@@ -471,3 +669,16 @@ def _load_netbox_route_policy(organization):
             )
         )
     return rows
+
+
+def _canonicalize_set_name(value):
+    return str(value or '').strip().upper()
+
+
+def _canonicalize_asn(value):
+    candidate = str(value or '').strip().upper()
+    if not candidate:
+        return ''
+    if candidate.startswith('AS'):
+        return candidate
+    return f'AS{candidate}'

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 
+from django.db.models import Q
 from django.utils import timezone
 
 from netbox_rpki import models as rpki_models
@@ -184,16 +185,17 @@ def build_delegated_authorization_entity_summary(
 def build_authored_ca_relationship_delegated_summary(
     relationship: rpki_models.AuthoredCaRelationship,
 ) -> dict[str, object]:
-    linked_workflows = list(_matching_workflows_for_authored_relationship(relationship))
+    linked_workflows = list(matching_workflows_for_authored_relationship(relationship))
     status_counts = Counter(workflow.status for workflow in linked_workflows)
     workflow_summaries = [
         build_delegated_publication_workflow_summary(workflow)
         for workflow in linked_workflows
     ]
+    delegated_entity = relationship.delegated_entity or getattr(relationship.managed_relationship, 'delegated_entity', None)
 
     if linked_workflows:
         linkage_status = 'linked'
-    elif _candidate_workflows_for_authored_relationship(relationship).exists():
+    elif candidate_workflows_for_authored_relationship(relationship).exists():
         linkage_status = 'partial'
     else:
         linkage_status = 'unlinked'
@@ -206,6 +208,11 @@ def build_authored_ca_relationship_delegated_summary(
         'effective_workflow_count': sum(1 for summary in workflow_summaries if summary['is_effective']),
         'workflow_ids': [workflow.pk for workflow in linked_workflows],
         'workflow_names': [workflow.name for workflow in linked_workflows],
+        'ownership_scope': _authored_relationship_ownership_scope(relationship),
+        'delegated_entity_id': getattr(delegated_entity, 'pk', None),
+        'delegated_entity_name': getattr(delegated_entity, 'name', ''),
+        'managed_relationship_id': relationship.managed_relationship_id,
+        'managed_relationship_name': getattr(relationship.managed_relationship, 'name', ''),
         'linkage_status': linkage_status,
         'requires_attention': linkage_status != 'linked',
     }
@@ -233,10 +240,17 @@ def _publication_endpoint(workflow: rpki_models.DelegatedPublicationWorkflow) ->
 def _matching_authored_relationships_for_workflow(
     workflow: rpki_models.DelegatedPublicationWorkflow,
 ):
+    return matching_authored_relationships_for_workflow(workflow)
+
+
+def matching_authored_relationships_for_workflow(
+    workflow: rpki_models.DelegatedPublicationWorkflow,
+):
     queryset = rpki_models.AuthoredCaRelationship.objects.filter(
         organization=workflow.organization,
         child_ca_handle=workflow.child_ca_handle,
     )
+    queryset = _scope_authored_relationships_for_workflow(queryset, workflow)
     provider_account_id = workflow.managed_relationship.provider_account_id
     if provider_account_id is not None:
         queryset = queryset.filter(provider_account_id=provider_account_id)
@@ -248,6 +262,12 @@ def _matching_authored_relationships_for_workflow(
 def _candidate_authored_relationships_for_workflow(
     workflow: rpki_models.DelegatedPublicationWorkflow,
 ):
+    return candidate_authored_relationships_for_workflow(workflow)
+
+
+def candidate_authored_relationships_for_workflow(
+    workflow: rpki_models.DelegatedPublicationWorkflow,
+):
     queryset = rpki_models.AuthoredCaRelationship.objects.filter(
         organization=workflow.organization,
         child_ca_handle=workflow.child_ca_handle,
@@ -255,20 +275,17 @@ def _candidate_authored_relationships_for_workflow(
     provider_account_id = workflow.managed_relationship.provider_account_id
     if provider_account_id is not None:
         queryset = queryset.filter(
-            provider_account_id=provider_account_id,
-        ) | queryset.filter(
-            organization=workflow.organization,
-            child_ca_handle=workflow.child_ca_handle,
-            provider_account__isnull=True,
+            Q(provider_account_id=provider_account_id) | Q(provider_account__isnull=True)
         )
+    queryset = _scope_authored_relationships_for_workflow(queryset, workflow)
     return queryset.order_by('pk').distinct()
 
 
 def _build_workflow_linkage_summary(
     workflow: rpki_models.DelegatedPublicationWorkflow,
 ) -> dict[str, object]:
-    linked_relationships = list(_matching_authored_relationships_for_workflow(workflow))
-    candidate_relationships = list(_candidate_authored_relationships_for_workflow(workflow))
+    linked_relationships = list(matching_authored_relationships_for_workflow(workflow))
+    candidate_relationships = list(candidate_authored_relationships_for_workflow(workflow))
 
     linkage_status = 'linked'
     if not linked_relationships:
@@ -278,6 +295,10 @@ def _build_workflow_linkage_summary(
         'linkage_status': linkage_status,
         'linked_authored_ca_relationship_count': len(linked_relationships),
         'linked_authored_ca_relationship_ids': [relationship.pk for relationship in linked_relationships],
+        'explicitly_scoped_authored_ca_relationship_count': sum(
+            1 for relationship in linked_relationships
+            if relationship.managed_relationship_id is not None or relationship.delegated_entity_id is not None
+        ),
         'candidate_authored_ca_relationship_count': len(candidate_relationships),
         'candidate_authored_ca_relationship_ids': [relationship.pk for relationship in candidate_relationships],
     }
@@ -286,10 +307,17 @@ def _build_workflow_linkage_summary(
 def _matching_workflows_for_authored_relationship(
     relationship: rpki_models.AuthoredCaRelationship,
 ):
+    return matching_workflows_for_authored_relationship(relationship)
+
+
+def matching_workflows_for_authored_relationship(
+    relationship: rpki_models.AuthoredCaRelationship,
+):
     queryset = rpki_models.DelegatedPublicationWorkflow.objects.filter(
         organization=relationship.organization,
         child_ca_handle=relationship.child_ca_handle,
     )
+    queryset = _scope_workflows_for_authored_relationship(queryset, relationship)
     if relationship.parent_ca_handle:
         queryset = queryset.filter(parent_ca_handle=relationship.parent_ca_handle)
     if relationship.provider_account_id is not None:
@@ -300,7 +328,39 @@ def _matching_workflows_for_authored_relationship(
 def _candidate_workflows_for_authored_relationship(
     relationship: rpki_models.AuthoredCaRelationship,
 ):
-    return rpki_models.DelegatedPublicationWorkflow.objects.filter(
+    return candidate_workflows_for_authored_relationship(relationship)
+
+
+def candidate_workflows_for_authored_relationship(
+    relationship: rpki_models.AuthoredCaRelationship,
+):
+    queryset = rpki_models.DelegatedPublicationWorkflow.objects.filter(
         organization=relationship.organization,
         child_ca_handle=relationship.child_ca_handle,
-    ).order_by('pk')
+    )
+    queryset = _scope_workflows_for_authored_relationship(queryset, relationship)
+    return queryset.order_by('pk')
+
+
+def _scope_authored_relationships_for_workflow(queryset, workflow):
+    delegated_entity_id = workflow.managed_relationship.delegated_entity_id
+    return queryset.filter(
+        Q(managed_relationship__isnull=True) | Q(managed_relationship_id=workflow.managed_relationship_id),
+        Q(delegated_entity__isnull=True) | Q(delegated_entity_id=delegated_entity_id),
+    )
+
+
+def _scope_workflows_for_authored_relationship(queryset, relationship):
+    if relationship.managed_relationship_id is not None:
+        return queryset.filter(managed_relationship_id=relationship.managed_relationship_id)
+    if relationship.delegated_entity_id is not None:
+        return queryset.filter(managed_relationship__delegated_entity_id=relationship.delegated_entity_id)
+    return queryset
+
+
+def _authored_relationship_ownership_scope(relationship: rpki_models.AuthoredCaRelationship) -> str:
+    if relationship.managed_relationship_id is not None:
+        return 'managed_relationship'
+    if relationship.delegated_entity_id is not None:
+        return 'delegated_entity'
+    return 'organization'

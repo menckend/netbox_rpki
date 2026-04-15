@@ -144,6 +144,71 @@ class IrrChangePlanServiceTestCase(TestCase):
         self.assertEqual(item.action, rpki_models.IrrChangePlanAction.NOOP)
         self.assertEqual(item.request_payload_json, {})
 
+    def test_create_irr_change_plans_keeps_set_membership_families_advisory_only(self):
+        create_test_irr_coordination_result(
+            name='Route-Set Membership Gap',
+            coordination_run=self.coordination_run,
+            source=self.source,
+            snapshot=self.snapshot,
+            coordination_family=rpki_models.IrrCoordinationFamily.ROUTE_SET_MEMBERSHIP,
+            result_type=rpki_models.IrrCoordinationResultType.MISSING_IN_SOURCE,
+            severity=rpki_models.ReconciliationSeverity.WARNING,
+            stable_object_key='route:203.0.113.0/24AS64500|AS64500:RS-EDGE',
+            summary_json={
+                'route_stable_key': 'route:203.0.113.0/24AS64500',
+                'route_set_name': 'AS64500:RS-EDGE',
+            },
+        )
+        create_test_irr_coordination_result(
+            name='AS-Set Context Gap',
+            coordination_run=self.coordination_run,
+            source=self.source,
+            snapshot=self.snapshot,
+            coordination_family=rpki_models.IrrCoordinationFamily.AS_SET_MEMBERSHIP,
+            result_type=rpki_models.IrrCoordinationResultType.POLICY_CONTEXT_GAP,
+            severity=rpki_models.ReconciliationSeverity.WARNING,
+            stable_object_key='AS64500',
+            summary_json={
+                'origin_asn': 'AS64500',
+                'route_policy_count': 1,
+            },
+        )
+
+        plans = create_irr_change_plans(self.coordination_run)
+
+        self.assertEqual(len(plans), 1)
+        plan = plans[0]
+        self.assertFalse(plan.summary_json['previewable'])
+        self.assertFalse(plan.summary_json['applyable'])
+        self.assertEqual(plan.summary_json['item_counts'][rpki_models.IrrChangePlanAction.NOOP], 2)
+        self.assertEqual(
+            plan.summary_json['family_counts'][rpki_models.IrrCoordinationFamily.ROUTE_SET_MEMBERSHIP],
+            1,
+        )
+        self.assertEqual(
+            plan.summary_json['family_counts'][rpki_models.IrrCoordinationFamily.AS_SET_MEMBERSHIP],
+            1,
+        )
+        self.assertIn(
+            'Route-set membership results are advisory-only',
+            ' '.join(plan.summary_json['capability_warnings']),
+        )
+        self.assertIn(
+            'AS-set membership results are advisory-only',
+            ' '.join(plan.summary_json['capability_warnings']),
+        )
+
+        items = list(plan.items.order_by('coordination_result__coordination_family', 'pk'))
+        self.assertEqual([item.action for item in items], [rpki_models.IrrChangePlanAction.NOOP, rpki_models.IrrChangePlanAction.NOOP])
+        self.assertEqual(items[0].object_family, rpki_models.IrrCoordinationFamily.AS_SET_MEMBERSHIP)
+        self.assertEqual(items[1].object_family, rpki_models.IrrCoordinationFamily.ROUTE_SET_MEMBERSHIP)
+        self.assertIn('advisory-only', items[0].reason)
+        self.assertIn('advisory-only', items[1].reason)
+        self.assertEqual(items[0].before_state_json['origin_asn'], 'AS64500')
+        self.assertEqual(items[1].before_state_json['route_set_name'], 'AS64500:RS-EDGE')
+        self.assertEqual(items[0].request_payload_json, {})
+        self.assertEqual(items[1].request_payload_json, {})
+
 
 class CreateIrrChangePlansCommandTestCase(TestCase):
     def setUp(self):

@@ -357,6 +357,165 @@ class RoutingIntentServiceTestCase(TestCase):
 
         self.assertIn('Unable to resolve provider-account context', derivation_run.error_summary)
 
+    def test_provider_account_context_resolves_delegated_ownership(self):
+        provider_account = create_test_provider_account(
+            name='Delegated Intent Provider',
+            organization=self.organization,
+            org_handle='ORG-INTENT-DELEGATED',
+        )
+        delegated_entity = rpki_models.DelegatedAuthorizationEntity.objects.create(
+            name='Delegated Intent Entity',
+            organization=self.organization,
+            kind=rpki_models.DelegatedAuthorizationEntityKind.CUSTOMER,
+        )
+        managed_relationship = rpki_models.ManagedAuthorizationRelationship.objects.create(
+            name='Delegated Intent Relationship',
+            organization=self.organization,
+            delegated_entity=delegated_entity,
+            provider_account=provider_account,
+            status=rpki_models.ManagedAuthorizationRelationshipStatus.ACTIVE,
+        )
+        context_group = create_test_routing_intent_context_group(
+            name='Delegated Provider Scoped',
+            organization=self.organization,
+        )
+        create_test_routing_intent_context_criterion(
+            name='Delegated Provider Criterion',
+            context_group=context_group,
+            criterion_type=rpki_models.RoutingIntentContextCriterionType.PROVIDER_ACCOUNT,
+            match_provider_account=provider_account,
+        )
+        self.profile.context_groups.add(context_group)
+        self.primary_prefix.custom_field_data = {'provider_account_id': provider_account.pk}
+        self.primary_prefix.save(update_fields=['custom_field_data'])
+
+        derivation_run = derive_roa_intents(self.profile)
+        primary_intent = derivation_run.roa_intents.get(prefix=self.primary_prefix)
+
+        self.assertEqual(primary_intent.delegated_entity, delegated_entity)
+        self.assertEqual(primary_intent.managed_relationship, managed_relationship)
+        self.assertEqual(primary_intent.summary_json['delegated_scope']['ownership_scope'], 'managed_relationship')
+        self.assertEqual(primary_intent.summary_json['delegated_scope']['provider_account_id'], provider_account.pk)
+        self.assertEqual(primary_intent.summary_json['delegated_scope']['managed_relationship_id'], managed_relationship.pk)
+        self.assertIn('Delegated ownership resolved via managed relationship', primary_intent.explanation)
+
+    def test_provider_account_context_with_multiple_relationships_stays_unscoped(self):
+        provider_account = create_test_provider_account(
+            name='Ambiguous Delegated Provider',
+            organization=self.organization,
+            org_handle='ORG-INTENT-AMBIGUOUS',
+        )
+        delegated_entity_a = rpki_models.DelegatedAuthorizationEntity.objects.create(
+            name='Ambiguous Delegated Entity A',
+            organization=self.organization,
+            kind=rpki_models.DelegatedAuthorizationEntityKind.CUSTOMER,
+        )
+        delegated_entity_b = rpki_models.DelegatedAuthorizationEntity.objects.create(
+            name='Ambiguous Delegated Entity B',
+            organization=self.organization,
+            kind=rpki_models.DelegatedAuthorizationEntityKind.DOWNSTREAM,
+        )
+        rpki_models.ManagedAuthorizationRelationship.objects.create(
+            name='Ambiguous Delegated Relationship A',
+            organization=self.organization,
+            delegated_entity=delegated_entity_a,
+            provider_account=provider_account,
+            status=rpki_models.ManagedAuthorizationRelationshipStatus.ACTIVE,
+        )
+        rpki_models.ManagedAuthorizationRelationship.objects.create(
+            name='Ambiguous Delegated Relationship B',
+            organization=self.organization,
+            delegated_entity=delegated_entity_b,
+            provider_account=provider_account,
+            status=rpki_models.ManagedAuthorizationRelationshipStatus.ACTIVE,
+        )
+        context_group = create_test_routing_intent_context_group(
+            name='Ambiguous Provider Scoped',
+            organization=self.organization,
+        )
+        create_test_routing_intent_context_criterion(
+            name='Ambiguous Provider Criterion',
+            context_group=context_group,
+            criterion_type=rpki_models.RoutingIntentContextCriterionType.PROVIDER_ACCOUNT,
+            match_provider_account=provider_account,
+        )
+        self.profile.context_groups.add(context_group)
+        self.primary_prefix.custom_field_data = {'provider_account_id': provider_account.pk}
+        self.primary_prefix.save(update_fields=['custom_field_data'])
+
+        derivation_run = derive_roa_intents(self.profile)
+        primary_intent = derivation_run.roa_intents.get(prefix=self.primary_prefix)
+
+        self.assertIsNone(primary_intent.delegated_entity)
+        self.assertIsNone(primary_intent.managed_relationship)
+        self.assertEqual(
+            primary_intent.summary_json['delegated_scope']['resolution_status'],
+            'ambiguous_managed_relationships',
+        )
+        self.assertIn('multiple active managed authorization relationships', derivation_run.error_summary)
+
+    def test_delegated_scope_carries_into_reconciliation_and_change_plan(self):
+        provider_account = create_test_provider_account(
+            name='Delegated Flow Provider',
+            organization=self.organization,
+            provider_type=rpki_models.ProviderType.KRILL,
+            org_handle='ORG-INTENT-FLOW',
+            ca_handle='ca-intent-flow',
+            api_base_url='https://krill.example.invalid',
+        )
+        delegated_entity = rpki_models.DelegatedAuthorizationEntity.objects.create(
+            name='Delegated Flow Entity',
+            organization=self.organization,
+            kind=rpki_models.DelegatedAuthorizationEntityKind.CUSTOMER,
+        )
+        managed_relationship = rpki_models.ManagedAuthorizationRelationship.objects.create(
+            name='Delegated Flow Relationship',
+            organization=self.organization,
+            delegated_entity=delegated_entity,
+            provider_account=provider_account,
+            status=rpki_models.ManagedAuthorizationRelationshipStatus.ACTIVE,
+        )
+        context_group = create_test_routing_intent_context_group(
+            name='Delegated Flow Scoped',
+            organization=self.organization,
+        )
+        create_test_routing_intent_context_criterion(
+            name='Delegated Flow Provider Criterion',
+            context_group=context_group,
+            criterion_type=rpki_models.RoutingIntentContextCriterionType.PROVIDER_ACCOUNT,
+            match_provider_account=provider_account,
+        )
+        self.profile.context_groups.add(context_group)
+        self.primary_prefix.custom_field_data = {'provider_account_id': provider_account.pk}
+        self.primary_prefix.save(update_fields=['custom_field_data'])
+
+        derivation_run = derive_roa_intents(self.profile)
+        provider_snapshot = create_test_provider_snapshot(
+            name='Delegated Flow Snapshot',
+            organization=self.organization,
+            provider_account=provider_account,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        reconciliation_run = reconcile_roa_intents(
+            derivation_run,
+            comparison_scope=rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
+            provider_snapshot=provider_snapshot,
+        )
+        plan = create_roa_change_plan(reconciliation_run)
+
+        intent_result = reconciliation_run.intent_results.get(roa_intent__prefix=self.primary_prefix)
+        create_item = plan.items.get(action_type=rpki_models.ROAChangePlanAction.CREATE)
+
+        self.assertEqual(
+            intent_result.details_json['delegated_scope']['managed_relationship_id'],
+            managed_relationship.pk,
+        )
+        self.assertEqual(
+            create_item.after_state_json['delegated_scope']['delegated_entity_id'],
+            delegated_entity.pk,
+        )
+        self.assertEqual(plan.summary_json['delegated_scoped_item_count'], 1)
+
     def test_expired_exception_does_not_apply(self):
         create_test_routing_intent_exception(
             name='Expired Suppression',

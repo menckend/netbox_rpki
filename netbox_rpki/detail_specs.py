@@ -38,6 +38,8 @@ from netbox_rpki.services.delegated_workflow import (
     build_delegated_authorization_entity_summary,
     build_delegated_publication_workflow_summary,
     build_managed_authorization_relationship_summary,
+    matching_authored_relationships_for_workflow,
+    matching_workflows_for_authored_relationship,
 )
 from netbox_rpki.services.provider_sync_evidence import (
     get_certificate_observation_evidence_summary,
@@ -3098,6 +3100,8 @@ AUTHORED_CA_RELATIONSHIP_DETAIL_SPEC = DetailSpec(
         DetailFieldSpec(label='Name', value=lambda obj: obj.name),
         DetailFieldSpec(label='Organization', value=lambda obj: obj.organization, kind='link'),
         DetailFieldSpec(label='Provider Account', value=lambda obj: obj.provider_account, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Delegated Entity', value=lambda obj: obj.delegated_entity, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Managed Relationship', value=lambda obj: obj.managed_relationship, kind='link', empty_text='None'),
         DetailFieldSpec(label='Child CA Handle', value=lambda obj: obj.child_ca_handle),
         DetailFieldSpec(label='Parent CA Handle', value=lambda obj: obj.parent_ca_handle, empty_text='None'),
         DetailFieldSpec(label='Relationship Type', value=lambda obj: obj.relationship_type),
@@ -3109,10 +3113,7 @@ AUTHORED_CA_RELATIONSHIP_DETAIL_SPEC = DetailSpec(
         DetailTableSpec(
             title='Linked Delegated Publication Workflows',
             table_class_name='DelegatedPublicationWorkflowTable',
-            queryset=lambda obj: models.DelegatedPublicationWorkflow.objects.filter(
-                organization=obj.organization,
-                child_ca_handle=obj.child_ca_handle,
-            ),
+            queryset=lambda obj: matching_workflows_for_authored_relationship(obj),
         ),
     ),
 )
@@ -3205,10 +3206,7 @@ DELEGATED_PUBLICATION_WORKFLOW_DETAIL_SPEC = DetailSpec(
         DetailTableSpec(
             title='Linked Authored CA Relationships',
             table_class_name='AuthoredCaRelationshipTable',
-            queryset=lambda obj: models.AuthoredCaRelationship.objects.filter(
-                organization=obj.organization,
-                child_ca_handle=obj.child_ca_handle,
-            ),
+            queryset=lambda obj: matching_authored_relationships_for_workflow(obj),
         ),
     ),
 )

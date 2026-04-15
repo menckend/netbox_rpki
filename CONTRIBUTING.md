@@ -617,6 +617,13 @@ cd /home/mencken/src/netbox_rpki/devrun
 ./dev.sh test fast
 ```
 
+Optional provider-backed sync/write lane:
+
+```bash
+cd /home/mencken/src/netbox_rpki/devrun
+./dev.sh test provider
+```
+
 Use explicit test labels through the same wrapper when you want a targeted run without the normal dev bootstrap path:
 
 ```bash
@@ -628,6 +635,7 @@ For local development and browser testing, prefer the wrappers in `devrun/`:
 
 - `./dev.sh test fast`
 - `./dev.sh test contract`
+- `./dev.sh test provider`
 - `./dev.sh test full`
 - `./dev.sh start` when you actually need the full NetBox stack
 - `./dev.sh status`

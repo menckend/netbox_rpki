@@ -427,6 +427,30 @@ def _prefix_matches_context_group(
     return True, tuple(warnings)
 
 
+def _provider_accounts_for_context_group(
+    context_group: rpki_models.RoutingIntentContextGroup,
+) -> tuple[rpki_models.RpkiProviderAccount, ...]:
+    accounts: list[rpki_models.RpkiProviderAccount] = []
+    seen_account_ids: set[int] = set()
+    criteria = (
+        context_group.criteria
+        .filter(
+            enabled=True,
+            criterion_type=rpki_models.RoutingIntentContextCriterionType.PROVIDER_ACCOUNT,
+            match_provider_account__isnull=False,
+        )
+        .select_related('match_provider_account')
+        .order_by('weight', 'name', 'pk')
+    )
+    for criterion in criteria:
+        account = criterion.match_provider_account
+        if account is None or account.pk in seen_account_ids:
+            continue
+        seen_account_ids.add(account.pk)
+        accounts.append(account)
+    return tuple(accounts)
+
+
 def _prefix_matches_rule(prefix: Prefix, rule: rpki_models.RoutingIntentRule) -> bool:
     if rule.address_family:
         family = rpki_models.AddressFamily.IPV6 if prefix.family == 6 else rpki_models.AddressFamily.IPV4
@@ -1068,6 +1092,29 @@ def _evaluate_compiled_roa_intents(
     warnings = list(compiled_policy.warnings)
     results = []
     active_binding_ids = frozenset(compiled_binding.binding.pk for compiled_binding in compiled_policy.template_bindings)
+    managed_relationships_by_provider_account: dict[int, list[rpki_models.ManagedAuthorizationRelationship]] = {}
+    for relationship in (
+        rpki_models.ManagedAuthorizationRelationship.objects
+        .filter(
+            organization=profile.organization,
+            provider_account__isnull=False,
+            status=rpki_models.ManagedAuthorizationRelationshipStatus.ACTIVE,
+        )
+        .select_related('delegated_entity', 'provider_account')
+        .order_by('name', 'pk')
+    ):
+        managed_relationships_by_provider_account.setdefault(relationship.provider_account_id, []).append(relationship)
+
+    context_group_provider_accounts: dict[int, tuple[rpki_models.RpkiProviderAccount, ...]] = {}
+    unique_context_groups = {
+        group.pk: group
+        for group in (
+            *compiled_policy.profile_context_groups,
+            *(group for binding in compiled_policy.template_bindings for group in binding.context_groups),
+        )
+    }
+    for context_group_id, context_group in unique_context_groups.items():
+        context_group_provider_accounts[context_group_id] = _provider_accounts_for_context_group(context_group)
 
     for prefix in compiled_policy.prefixes:
         prefix_warnings: list[str] = []
@@ -1081,6 +1128,8 @@ def _evaluate_compiled_roa_intents(
         last_template_binding_name = None
         matched_profile_context_groups: list[rpki_models.RoutingIntentContextGroup] = []
         matched_binding_context_groups: dict[int, list[rpki_models.RoutingIntentContextGroup]] = {}
+        delegated_entity = None
+        managed_relationship = None
 
         if compiled_policy.profile_context_groups:
             for context_group in compiled_policy.profile_context_groups:
@@ -1097,6 +1146,15 @@ def _evaluate_compiled_roa_intents(
                         groups=', '.join(group.name for group in matched_profile_context_groups),
                     )
                 )
+
+        matched_provider_accounts: list[rpki_models.RpkiProviderAccount] = []
+        seen_provider_account_ids: set[int] = set()
+        for context_group in matched_profile_context_groups:
+            for account in context_group_provider_accounts.get(context_group.pk, ()):
+                if account.pk in seen_provider_account_ids:
+                    continue
+                seen_provider_account_ids.add(account.pk)
+                matched_provider_accounts.append(account)
 
         for compiled_binding in compiled_policy.template_bindings:
             if prefix.pk not in compiled_binding.prefix_ids:
@@ -1115,6 +1173,12 @@ def _evaluate_compiled_roa_intents(
                     )
                     continue
                 matched_binding_context_groups[compiled_binding.binding.pk] = matched_groups_for_binding
+                for context_group in matched_groups_for_binding:
+                    for account in context_group_provider_accounts.get(context_group.pk, ()):
+                        if account.pk in seen_provider_account_ids:
+                            continue
+                        seen_provider_account_ids.add(account.pk)
+                        matched_provider_accounts.append(account)
 
             before_template_state = (included, origin_asn_value, max_length)
             binding_changed_state = False
@@ -1262,6 +1326,67 @@ def _evaluate_compiled_roa_intents(
         else:
             derived_state = rpki_models.ROAIntentDerivedState.ACTIVE
 
+        delegated_scope_summary = {
+            'ownership_scope': 'organization',
+            'resolution_status': 'organization_default',
+            'provider_account_id': None,
+            'provider_account_name': None,
+            'provider_account_ids': [account.pk for account in matched_provider_accounts],
+            'provider_account_names': [account.name for account in matched_provider_accounts],
+            'delegated_entity_id': None,
+            'delegated_entity_name': None,
+            'managed_relationship_id': None,
+            'managed_relationship_name': None,
+        }
+        if len(matched_provider_accounts) > 1:
+            delegated_scope_summary['resolution_status'] = 'ambiguous_provider_accounts'
+            prefix_warnings.append(
+                'Multiple provider-account context matches resolved for prefix {prefix}; delegated ownership was not assigned.'.format(
+                    prefix=prefix.prefix,
+                )
+            )
+        elif len(matched_provider_accounts) == 1:
+            provider_account = matched_provider_accounts[0]
+            delegated_scope_summary.update(
+                {
+                    'provider_account_id': provider_account.pk,
+                    'provider_account_name': provider_account.name,
+                }
+            )
+            candidate_relationships = managed_relationships_by_provider_account.get(provider_account.pk, [])
+            if len(candidate_relationships) == 1:
+                managed_relationship = candidate_relationships[0]
+                delegated_entity = managed_relationship.delegated_entity
+                delegated_scope_summary.update(
+                    {
+                        'ownership_scope': 'managed_relationship',
+                        'resolution_status': 'resolved_managed_relationship',
+                        'delegated_entity_id': getattr(delegated_entity, 'pk', None),
+                        'delegated_entity_name': getattr(delegated_entity, 'name', None),
+                        'managed_relationship_id': managed_relationship.pk,
+                        'managed_relationship_name': managed_relationship.name,
+                    }
+                )
+                explanation_parts.append(
+                    'Delegated ownership resolved via managed relationship {relationship}.'.format(
+                        relationship=managed_relationship.name,
+                    )
+                )
+            elif len(candidate_relationships) > 1:
+                delegated_scope_summary['resolution_status'] = 'ambiguous_managed_relationships'
+                prefix_warnings.append(
+                    'Provider account context for prefix {prefix} matched multiple active managed authorization relationships; delegated ownership was not assigned.'.format(
+                        prefix=prefix.prefix,
+                    )
+                )
+            else:
+                delegated_scope_summary['resolution_status'] = 'no_active_managed_relationship'
+                prefix_warnings.append(
+                    'Provider account context for prefix {prefix} did not match an active managed authorization relationship; delegated ownership was not assigned.'.format(
+                        prefix=prefix.prefix,
+                    )
+                )
+
         exposure_state = (
             rpki_models.ROAIntentExposureState.ADVERTISED
             if prefix.status == 'active'
@@ -1278,6 +1403,7 @@ def _evaluate_compiled_roa_intents(
             'warnings': sorted(set(prefix_warnings)),
             'source_rule_id': getattr(source_rule, 'pk', None),
             'applied_override_id': getattr(applied_override, 'pk', None),
+            'delegated_scope': delegated_scope_summary,
         }
 
         results.append(
@@ -1294,6 +1420,8 @@ def _evaluate_compiled_roa_intents(
                 'scope_vrf': prefix.vrf,
                 'scope_site': _resolve_prefix_site(prefix),
                 'scope_region': _resolve_prefix_region(prefix),
+                'delegated_entity': delegated_entity,
+                'managed_relationship': managed_relationship,
                 'source_rule': source_rule,
                 'applied_override': applied_override,
                 'explanation': ' '.join(explanation_parts),
@@ -1358,6 +1486,8 @@ def derive_roa_intents(
                 vrf_id=row['prefix'].vrf_id,
                 site_id=getattr(row['scope_site'], 'pk', None),
                 region_id=getattr(row['scope_region'], 'pk', None),
+                delegated_entity_id=getattr(row['delegated_entity'], 'pk', None),
+                managed_relationship_id=getattr(row['managed_relationship'], 'pk', None),
             ),
             prefix=row['prefix'],
             prefix_cidr_text=row['prefix_cidr_text'],
@@ -1370,6 +1500,8 @@ def derive_roa_intents(
             scope_vrf=row['scope_vrf'],
             scope_site=row['scope_site'],
             scope_region=row['scope_region'],
+            delegated_entity=row['delegated_entity'],
+            managed_relationship=row['managed_relationship'],
             source_rule=row['source_rule'],
             applied_override=row['applied_override'],
             derived_state=row['derived_state'],
@@ -1693,6 +1825,29 @@ def _serialize_match_source(match: rpki_models.ROAIntentMatch | None) -> dict:
     }
 
 
+def _delegated_scope_summary_for_intent(intent: rpki_models.ROAIntent) -> dict:
+    summary_json = getattr(intent, 'summary_json', {}) or {}
+    delegated_scope = summary_json.get('delegated_scope')
+    if isinstance(delegated_scope, dict) and delegated_scope:
+        return delegated_scope
+    return {
+        'ownership_scope': 'managed_relationship' if intent.managed_relationship_id is not None else (
+            'delegated_entity' if intent.delegated_entity_id is not None else 'organization'
+        ),
+        'resolution_status': 'persisted_scope' if (
+            intent.managed_relationship_id is not None or intent.delegated_entity_id is not None
+        ) else 'organization_default',
+        'provider_account_id': getattr(getattr(intent.managed_relationship, 'provider_account', None), 'pk', None),
+        'provider_account_name': getattr(getattr(intent.managed_relationship, 'provider_account', None), 'name', None),
+        'provider_account_ids': [],
+        'provider_account_names': [],
+        'delegated_entity_id': getattr(intent.delegated_entity, 'pk', None),
+        'delegated_entity_name': getattr(intent.delegated_entity, 'name', None),
+        'managed_relationship_id': getattr(intent.managed_relationship, 'pk', None),
+        'managed_relationship_name': getattr(intent.managed_relationship, 'name', None),
+    }
+
+
 def _result_from_best_match(
     intent: rpki_models.ROAIntent,
     best_match: rpki_models.ROAIntentMatch | None,
@@ -1807,7 +1962,16 @@ def reconcile_roa_intents(
     best_results_by_source: dict[str, list[dict]] = {}
     active_intents = 0
 
-    intents = derivation_run.roa_intents.select_related('origin_asn', 'prefix', 'scope_tenant', 'scope_vrf', 'scope_site', 'scope_region').all()
+    intents = derivation_run.roa_intents.select_related(
+        'origin_asn',
+        'prefix',
+        'scope_tenant',
+        'scope_vrf',
+        'scope_site',
+        'scope_region',
+        'delegated_entity',
+        'managed_relationship__provider_account',
+    ).all()
     for intent in intents:
         if intent.derived_state == rpki_models.ROAIntentDerivedState.ACTIVE:
             active_intents += 1
@@ -1849,6 +2013,7 @@ def reconcile_roa_intents(
         result_type, severity = _result_from_best_match(intent, best_match)
         intent_result_summary[result_type] = intent_result_summary.get(result_type, 0) + 1
         best_match_details = dict(getattr(best_match, 'details_json', {}) or {})
+        delegated_scope = _delegated_scope_summary_for_intent(intent)
         intent_result = rpki_models.ROAIntentResult.objects.create(
             name=f'{intent.name} Result',
             reconciliation_run=reconciliation_run,
@@ -1874,6 +2039,7 @@ def reconcile_roa_intents(
                 'replacement_required': best_match_details.get('replacement_required', False),
                 'replacement_reason_code': best_match_details.get('replacement_reason_code'),
                 'published_source': _serialize_match_source(best_match),
+                'delegated_scope': delegated_scope,
             },
             computed_at=now,
         )
@@ -1885,6 +2051,7 @@ def reconcile_roa_intents(
                     'result_type': result_type,
                     'replacement_required': best_match_details.get('replacement_required', False),
                     'replacement_reason_code': best_match_details.get('replacement_reason_code'),
+                    'delegated_scope': delegated_scope,
                 }
             )
 
@@ -1911,6 +2078,11 @@ def reconcile_roa_intents(
                 'prefix_cidr_text': representative.prefix_cidr_text,
                 'max_length': representative.max_length,
                 'stale': representative.stale,
+                'matched_intent_delegated_scopes': [
+                    match_info['delegated_scope']
+                    for match_info in row_matches
+                    if match_info.get('delegated_scope')
+                ],
                 **published_details,
             },
             computed_at=now,
@@ -1982,6 +2154,7 @@ def _serialize_intent_for_plan(intent: rpki_models.ROAIntent) -> dict:
         'origin_asn_value': intent.origin_asn_value,
         'max_length': intent.max_length,
         'derived_state': intent.derived_state,
+        'delegated_scope': _delegated_scope_summary_for_intent(intent),
     }
 
 
@@ -2116,12 +2289,20 @@ def create_roa_change_plan(
     plan_semantic_counts: dict[str, int] = {}
     skipped_counts: dict[str, int] = {}
     replacement_withdraw_sources: set[str] = set()
+    delegated_scoped_item_count = 0
 
     for intent_result in reconciliation_run.intent_results.select_related(
         'roa_intent',
+        'roa_intent__delegated_entity',
+        'roa_intent__managed_relationship__provider_account',
         'best_roa',
         'best_imported_authorization',
     ).all():
+        if (
+            intent_result.roa_intent.delegated_entity_id is not None
+            or intent_result.roa_intent.managed_relationship_id is not None
+        ):
+            delegated_scoped_item_count += 1
         if (
             intent_result.result_type == rpki_models.ROAIntentResultType.MISSING
             and intent_result.roa_intent.derived_state == rpki_models.ROAIntentDerivedState.ACTIVE
@@ -2265,6 +2446,7 @@ def create_roa_change_plan(
         'comparison_scope': reconciliation_run.comparison_scope,
         'plan_semantic_counts': plan_semantic_counts,
         'skipped_counts': skipped_counts,
+        'delegated_scoped_item_count': delegated_scoped_item_count,
     }
     plan.save(update_fields=('summary_json',))
     from netbox_rpki.services.roa_lint import run_roa_lint

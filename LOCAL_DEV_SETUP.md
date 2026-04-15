@@ -201,10 +201,12 @@ The test runner is **Django's `manage.py test`**, not `pytest`. Always use the `
 ```bash
 ./dev.sh test fast       # quick structural smoke checks (~seconds)
 ./dev.sh test contract   # registry/UI/API/GraphQL surface contracts
+./dev.sh test provider   # provider-backed sync/write workflows
 ./dev.sh test full       # the complete netbox_rpki.tests suite
 ```
 
 Running `./dev.sh test` with no argument defaults to `contract`.
+The `provider` lane is optional and is mainly for changes in hosted-provider sync/write behavior; most day-to-day work should stay on `fast`, `contract`, or explicit labels.
 
 ### Focused tests
 

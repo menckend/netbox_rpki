@@ -220,6 +220,8 @@ class DelegatedWorkflowSerializerTestCase(TestCase):
             name='Delegated Serializer Authored CA Relationship',
             organization=organization,
             provider_account=provider_account,
+            delegated_entity=entity,
+            managed_relationship=relationship,
             child_ca_handle='delegated-child-serializer',
             relationship_type=rpki_models.AuthoredCaRelationshipType.PARENT,
             status=rpki_models.AuthoredCaRelationshipStatus.ACTIVE,
@@ -236,8 +238,10 @@ class DelegatedWorkflowSerializerTestCase(TestCase):
         self.assertEqual(relationship_data['relationship_summary']['workflow_count'], 1)
         self.assertIn('workflow_summary', workflow_data)
         self.assertEqual(workflow_data['workflow_summary']['linkage']['linkage_status'], 'linked')
+        self.assertEqual(workflow_data['workflow_summary']['linkage']['explicitly_scoped_authored_ca_relationship_count'], 1)
         self.assertIn('delegated_workflow_summary', authored_data)
         self.assertEqual(authored_data['delegated_workflow_summary']['workflow_count'], 1)
+        self.assertEqual(authored_data['delegated_workflow_summary']['ownership_scope'], 'managed_relationship')
 
 
 class LifecycleHealthSurfaceContractTestCase(SimpleTestCase):

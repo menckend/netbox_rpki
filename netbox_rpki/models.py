@@ -677,12 +677,11 @@ class NamedRpkiStandardModel(RpkiStandardModel):
         abstract = True
 
 
-class Organization(NetBoxModel):
+LEGACY_DIRECT_NETBOX_MODEL_EXCEPTIONS = ()
+
+
+class Organization(NamedRpkiStandardModel):
     org_id = models.CharField(max_length=200, editable=True)
-    name = models.CharField(max_length=200, editable=True)
-    comments = models.TextField(
-        blank=True
-    )
     ext_url = models.CharField(max_length=200, editable=True, blank=True)
     parent_rir = models.ForeignKey(
         to=RIR,
@@ -690,12 +689,6 @@ class Organization(NetBoxModel):
         related_name='rpki_certs',
         null=True,
         blank=True
-    )
-    tenant = models.ForeignKey(
-        to='tenancy.Tenant',
-        on_delete=models.PROTECT,
-        blank=True,
-        null=True
     )
 
     class Meta:
@@ -709,11 +702,7 @@ class Organization(NetBoxModel):
         return reverse("plugins:netbox_rpki:organization", args=[self.pk])
 
 
-class Certificate(NetBoxModel):
-    name = models.CharField(max_length=200, editable=True)
-    comments = models.TextField(
-        blank=True
-    )
+class Certificate(NamedRpkiStandardModel):
     issuer = models.CharField(max_length=200, editable=True, blank=True)
     subject = models.CharField(max_length=200, editable=True, blank=True)
     serial = models.CharField(max_length=200, editable=True, blank=True)
@@ -744,12 +733,6 @@ class Certificate(NetBoxModel):
         blank=True,
         null=True
     )
-    tenant = models.ForeignKey(
-        to='tenancy.Tenant',
-        on_delete=models.PROTECT,
-        blank=True,
-        null=True
-    )
 
     class Meta:
         ordering = ("name",)
@@ -761,11 +744,7 @@ class Certificate(NetBoxModel):
         return reverse("plugins:netbox_rpki:certificate", args=[self.pk])
 
 
-class Roa(NetBoxModel):
-    name = models.CharField(max_length=200, editable=True)
-    comments = models.TextField(
-        blank=True
-    )
+class Roa(NamedRpkiStandardModel):
     origin_as = models.ForeignKey(
         to=ASN,
         on_delete=models.PROTECT,
@@ -785,12 +764,6 @@ class Roa(NetBoxModel):
         to='SignedObject',
         on_delete=models.SET_NULL,
         related_name='legacy_roa',
-        blank=True,
-        null=True
-    )
-    tenant = models.ForeignKey(
-        to='tenancy.Tenant',
-        on_delete=models.PROTECT,
         blank=True,
         null=True
     )
@@ -842,26 +815,17 @@ class Roa(NetBoxModel):
         return reverse("plugins:netbox_rpki:roa", args=[self.pk])
 
 
-class RoaPrefix(NetBoxModel):
+class RoaPrefix(RpkiStandardModel):
     prefix = models.ForeignKey(
         to=ipam.models.ip.Prefix,
         on_delete=models.PROTECT,
         related_name='PrefixToRoaTable'
-    )
-    comments = models.TextField(
-        blank=True
     )
     max_length = models.IntegerField(editable=True)
     roa_name = models.ForeignKey(
         to=Roa,
         on_delete=models.PROTECT,
         related_name='RoaToPrefixTable'
-    )
-    tenant = models.ForeignKey(
-        to='tenancy.Tenant',
-        on_delete=models.PROTECT,
-        blank=True,
-        null=True
     )
 
     class Meta:
@@ -874,25 +838,16 @@ class RoaPrefix(NetBoxModel):
         return reverse("plugins:netbox_rpki:roaprefix", args=[self.pk])
 
 
-class CertificatePrefix(NetBoxModel):
+class CertificatePrefix(RpkiStandardModel):
     prefix = models.ForeignKey(
         to=Prefix,
         on_delete=models.PROTECT,
         related_name='PrefixToCertificateTable'
     )
-    comments = models.TextField(
-        blank=True
-    )
     certificate_name = models.ForeignKey(
         to=Certificate,
         on_delete=models.PROTECT,
         related_name='CertificateToPrefixTable'
-    )
-    tenant = models.ForeignKey(
-        to='tenancy.Tenant',
-        on_delete=models.PROTECT,
-        blank=True,
-        null=True
     )
 
     class Meta:
@@ -905,25 +860,16 @@ class CertificatePrefix(NetBoxModel):
         return reverse("plugins:netbox_rpki:certificateprefix", args=[self.pk])
 
 
-class CertificateAsn(NetBoxModel):
+class CertificateAsn(RpkiStandardModel):
     asn = models.ForeignKey(
         to=ASN,
         on_delete=models.PROTECT,
         related_name='ASNtoCertificateTable'
     )
-    comments = models.TextField(
-        blank=True
-    )
     certificate_name2 = models.ForeignKey(
         to=Certificate,
         on_delete=models.PROTECT,
         related_name='CertificatetoASNTable'
-    )
-    tenant = models.ForeignKey(
-        to='tenancy.Tenant',
-        on_delete=models.PROTECT,
-        blank=True,
-        null=True
     )
 
     class Meta:
@@ -2914,6 +2860,20 @@ class ROAIntent(NamedRpkiStandardModel):
         blank=True,
         null=True
     )
+    delegated_entity = models.ForeignKey(
+        to='DelegatedAuthorizationEntity',
+        on_delete=models.PROTECT,
+        related_name='roa_intents',
+        blank=True,
+        null=True,
+    )
+    managed_relationship = models.ForeignKey(
+        to='ManagedAuthorizationRelationship',
+        on_delete=models.PROTECT,
+        related_name='roa_intents',
+        blank=True,
+        null=True,
+    )
     source_rule = models.ForeignKey(
         to='RoutingIntentRule',
         on_delete=models.SET_NULL,
@@ -2961,6 +2921,36 @@ class ROAIntent(NamedRpkiStandardModel):
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:roaintent", args=[self.pk])
 
+    def clean(self):
+        super().clean()
+        errors = {}
+
+        if (
+            self.delegated_entity_id is not None
+            and self.delegated_entity.organization_id != self.organization_id
+        ):
+            errors['delegated_entity'] = 'Delegated entity must belong to the same organization as this ROA intent.'
+
+        if (
+            self.managed_relationship_id is not None
+            and self.managed_relationship.organization_id != self.organization_id
+        ):
+            errors['managed_relationship'] = (
+                'Managed relationship must belong to the same organization as this ROA intent.'
+            )
+
+        if (
+            self.delegated_entity_id is not None
+            and self.managed_relationship_id is not None
+            and self.managed_relationship.delegated_entity_id != self.delegated_entity_id
+        ):
+            errors['managed_relationship'] = (
+                'Managed relationship must reference the same delegated entity as this ROA intent.'
+            )
+
+        if errors:
+            raise ValidationError(errors)
+
     @classmethod
     def build_intent_key(
         cls,
@@ -2973,6 +2963,8 @@ class ROAIntent(NamedRpkiStandardModel):
         vrf_id: int | None = None,
         site_id: int | None = None,
         region_id: int | None = None,
+        delegated_entity_id: int | None = None,
+        managed_relationship_id: int | None = None,
     ) -> str:
         normalized = "|".join(
             str(value)
@@ -2985,6 +2977,8 @@ class ROAIntent(NamedRpkiStandardModel):
                 vrf_id if vrf_id is not None else "",
                 site_id if site_id is not None else "",
                 region_id if region_id is not None else "",
+                delegated_entity_id if delegated_entity_id is not None else "",
+                managed_relationship_id if managed_relationship_id is not None else "",
             )
         )
         return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
@@ -5158,6 +5152,20 @@ class ASPAIntent(NamedRpkiStandardModel):
         on_delete=models.PROTECT,
         related_name='aspa_provider_intents'
     )
+    delegated_entity = models.ForeignKey(
+        to='DelegatedAuthorizationEntity',
+        on_delete=models.PROTECT,
+        related_name='aspa_intents',
+        blank=True,
+        null=True,
+    )
+    managed_relationship = models.ForeignKey(
+        to='ManagedAuthorizationRelationship',
+        on_delete=models.PROTECT,
+        related_name='aspa_intents',
+        blank=True,
+        null=True,
+    )
     explanation = models.TextField(blank=True)
 
     class Meta:
@@ -5177,8 +5185,35 @@ class ASPAIntent(NamedRpkiStandardModel):
 
     def clean(self):
         super().clean()
+        errors = {}
         if self.customer_as_id is not None and self.customer_as_id == self.provider_as_id:
-            raise ValidationError({'provider_as': ['Provider ASN must differ from the ASPA customer ASN.']})
+            errors['provider_as'] = ['Provider ASN must differ from the ASPA customer ASN.']
+
+        if (
+            self.delegated_entity_id is not None
+            and self.delegated_entity.organization_id != self.organization_id
+        ):
+            errors['delegated_entity'] = 'Delegated entity must belong to the same organization as this ASPA intent.'
+
+        if (
+            self.managed_relationship_id is not None
+            and self.managed_relationship.organization_id != self.organization_id
+        ):
+            errors['managed_relationship'] = (
+                'Managed relationship must belong to the same organization as this ASPA intent.'
+            )
+
+        if (
+            self.delegated_entity_id is not None
+            and self.managed_relationship_id is not None
+            and self.managed_relationship.delegated_entity_id != self.delegated_entity_id
+        ):
+            errors['managed_relationship'] = (
+                'Managed relationship must reference the same delegated entity as this ASPA intent.'
+            )
+
+        if errors:
+            raise ValidationError(errors)
 
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:aspaintent", args=[self.pk])
@@ -5189,12 +5224,16 @@ class ASPAIntent(NamedRpkiStandardModel):
         *,
         customer_asn_value: int | None,
         provider_asn_value: int | None,
+        delegated_entity_id: int | None = None,
+        managed_relationship_id: int | None = None,
     ) -> str:
         normalized = "|".join(
             str(value)
             for value in (
                 customer_asn_value if customer_asn_value is not None else "",
                 provider_asn_value if provider_asn_value is not None else "",
+                delegated_entity_id if delegated_entity_id is not None else "",
+                managed_relationship_id if managed_relationship_id is not None else "",
             )
         )
         return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
@@ -7021,6 +7060,20 @@ class AuthoredCaRelationship(NamedRpkiStandardModel):
         blank=True,
         null=True,
     )
+    delegated_entity = models.ForeignKey(
+        to='DelegatedAuthorizationEntity',
+        on_delete=models.PROTECT,
+        related_name='authored_ca_relationships',
+        blank=True,
+        null=True,
+    )
+    managed_relationship = models.ForeignKey(
+        to='ManagedAuthorizationRelationship',
+        on_delete=models.PROTECT,
+        related_name='authored_ca_relationships',
+        blank=True,
+        null=True,
+    )
     child_ca_handle = models.CharField(max_length=100)
     parent_ca_handle = models.CharField(max_length=100, blank=True)
     relationship_type = models.CharField(
@@ -7064,6 +7117,40 @@ class AuthoredCaRelationship(NamedRpkiStandardModel):
 
     def get_absolute_url(self):
         return reverse("plugins:netbox_rpki:authoredcarelationship", args=[self.pk])
+
+    def clean(self):
+        super().clean()
+        errors = {}
+
+        if (
+            self.delegated_entity_id is not None
+            and self.delegated_entity.organization_id != self.organization_id
+        ):
+            errors['delegated_entity'] = 'Delegated entity must belong to the same organization as this authored CA relationship.'
+
+        if (
+            self.managed_relationship_id is not None
+            and self.managed_relationship.organization_id != self.organization_id
+        ):
+            errors['managed_relationship'] = 'Managed relationship must belong to the same organization as this authored CA relationship.'
+
+        if (
+            self.delegated_entity_id is not None
+            and self.managed_relationship_id is not None
+            and self.managed_relationship.delegated_entity_id != self.delegated_entity_id
+        ):
+            errors['managed_relationship'] = 'Managed relationship must reference the same delegated entity as this authored CA relationship.'
+
+        if (
+            self.provider_account_id is not None
+            and self.managed_relationship_id is not None
+            and self.managed_relationship.provider_account_id is not None
+            and self.managed_relationship.provider_account_id != self.provider_account_id
+        ):
+            errors['provider_account'] = 'Provider account must match the managed relationship when both are set.'
+
+        if errors:
+            raise ValidationError(errors)
 
 
 _register_plugin_action_urls()
