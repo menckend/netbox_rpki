@@ -380,8 +380,19 @@ class RpkiProviderAccountSerializerTestCase(TestCase):
             name='Serializer Validator',
             summary_json={'adapter': 'routinator'},
         )
+        create_test_validation_run(
+            name='Serializer Previous Validation Run',
+            validator=validator,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+            repository_serial='10',
+            completed_at=timezone.now() - timedelta(days=2),
+            summary_json={'validated_roa_payload_count': 0},
+        )
         validation_run = create_test_validation_run(
             validator=validator,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+            repository_serial='11',
+            completed_at=timezone.now() - timedelta(hours=1),
             summary_json={'validated_roa_payload_count': 1},
         )
         object_result = create_test_object_validation_result(
@@ -401,7 +412,9 @@ class RpkiProviderAccountSerializerTestCase(TestCase):
         payload_data = api_serializers.ValidatedRoaPayloadSerializer(payload, context={'request': None}).data
 
         self.assertEqual(validator_data['summary']['adapter'], 'routinator')
+        self.assertEqual(validator_data['run_history_summary']['latest_comparison']['comparison_state'], 'changed')
         self.assertEqual(run_data['summary']['validated_roa_payload_count'], 1)
+        self.assertEqual(run_data['comparison_to_previous']['comparison_state'], 'changed')
         self.assertEqual(result_data['details']['match_status_reason'], 'exact_uri_match')
         self.assertEqual(payload_data['details']['ta'], 'test-ta')
         self.assertEqual(payload_data['observed_prefix'], '198.51.100.0/24')
@@ -411,8 +424,17 @@ class RpkiProviderAccountSerializerTestCase(TestCase):
             name='Serializer Telemetry Source',
             summary_json={'adapter': 'imported_mrt'},
         )
+        create_test_telemetry_run(
+            name='Serializer Previous Telemetry Run',
+            source=source,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+            completed_at=timezone.now() - timedelta(hours=3),
+            summary_json={'observation_count': 0},
+        )
         run = create_test_telemetry_run(
             source=source,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+            completed_at=timezone.now() - timedelta(minutes=30),
             summary_json={'observation_count': 1},
         )
         observation = create_test_bgp_path_observation(
@@ -426,7 +448,9 @@ class RpkiProviderAccountSerializerTestCase(TestCase):
         observation_data = api_serializers.BgpPathObservationSerializer(observation, context={'request': None}).data
 
         self.assertEqual(source_data['sync_health'], source.sync_health)
+        self.assertEqual(source_data['run_history_summary']['latest_comparison']['comparison_state'], 'changed')
         self.assertEqual(run_data['summary']['observation_count'], 1)
+        self.assertEqual(run_data['comparison_to_previous']['comparison_state'], 'changed')
         self.assertEqual(observation_data['details']['collector'], 'route-views2')
         self.assertEqual(observation_data['path_asns_json'], [64496, 64510, 64500])
 
@@ -2114,7 +2138,75 @@ class ProviderAccountSummaryAPITestCase(PluginAPITestCase):
         self.assertEqual(response.data['roa_write_supported_count'], 1)
         self.assertEqual(response.data['aspa_write_supported_count'], 1)
 
-    def test_provider_account_timeline_actions_return_timeline_payloads(self):
+
+class ExternalOverlayHistoryAPITestCase(PluginAPITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='external-history-api-org', name='External History API Org')
+        cls.validator = create_test_validator_instance(
+            name='External History Validator',
+            organization=cls.organization,
+        )
+        create_test_validation_run(
+            name='External History Older Validation Run',
+            validator=cls.validator,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+            repository_serial='200',
+            completed_at=timezone.now() - timedelta(days=2),
+            summary_json={'validated_roa_payload_count': 1},
+        )
+        cls.latest_validation_run = create_test_validation_run(
+            name='External History Latest Validation Run',
+            validator=cls.validator,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+            repository_serial='201',
+            completed_at=timezone.now() - timedelta(hours=1),
+            summary_json={'validated_roa_payload_count': 3},
+        )
+        cls.telemetry_source = create_test_telemetry_source(
+            name='External History Telemetry Source',
+            organization=cls.organization,
+            slug='external-history-telemetry',
+            import_interval=60,
+        )
+        create_test_telemetry_run(
+            name='External History Older Telemetry Run',
+            source=cls.telemetry_source,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+            completed_at=timezone.now() - timedelta(hours=3),
+            summary_json={'observation_count': 2},
+        )
+        cls.latest_telemetry_run = create_test_telemetry_run(
+            name='External History Latest Telemetry Run',
+            source=cls.telemetry_source,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+            completed_at=timezone.now() - timedelta(minutes=30),
+            summary_json={'observation_count': 5},
+        )
+
+    def test_validator_and_telemetry_history_actions_return_comparison_payloads(self):
+        self.add_permissions('netbox_rpki.view_validatorinstance', 'netbox_rpki.view_telemetrysource')
+
+        validator_response = self.client.get(
+            reverse('plugins-api:netbox_rpki-api:validatorinstance-history-summary', kwargs={'pk': self.validator.pk}),
+            **self.header,
+        )
+        telemetry_response = self.client.get(
+            reverse('plugins-api:netbox_rpki-api:telemetrysource-history-summary', kwargs={'pk': self.telemetry_source.pk}),
+            **self.header,
+        )
+
+        self.assertHttpStatus(validator_response, 200)
+        self.assertHttpStatus(telemetry_response, 200)
+        self.assertEqual(validator_response.data['latest_run_id'], self.latest_validation_run.pk)
+        self.assertEqual(validator_response.data['latest_comparison']['comparison_state'], 'changed')
+        self.assertEqual(telemetry_response.data['latest_run_id'], self.latest_telemetry_run.pk)
+        self.assertEqual(
+            telemetry_response.data['latest_comparison']['changed_summary_fields']['observation_count']['delta'],
+            3,
+        )
+
+    def _provider_account_timeline_actions_reference(self):
         self.add_permissions(
             'netbox_rpki.view_rpkiprovideraccount',
             'netbox_rpki.view_providersnapshot',

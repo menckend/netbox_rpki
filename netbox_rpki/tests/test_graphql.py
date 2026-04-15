@@ -1,5 +1,6 @@
 import json
 from importlib import import_module
+from datetime import timedelta
 
 from django.test import SimpleTestCase
 from django.urls import reverse
@@ -1105,9 +1106,20 @@ class ValidationReportingGraphQLTestCase(APITestCase):
             organization=cls.organization,
             summary_json={'adapter': 'routinator'},
         )
+        create_test_validation_run(
+            name='Validation GraphQL Previous Run',
+            validator=cls.validator,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+            repository_serial='50',
+            completed_at=timezone.now() - timedelta(days=2),
+            summary_json={'validated_roa_payload_count': 0},
+        )
         cls.validation_run = create_test_validation_run(
             name='Validation GraphQL Run',
             validator=cls.validator,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+            repository_serial='51',
+            completed_at=timezone.now() - timedelta(hours=1),
             summary_json={'validated_roa_payload_count': 1},
         )
         cls.object_validation_result = create_test_object_validation_result(
@@ -1133,6 +1145,7 @@ class ValidationReportingGraphQLTestCase(APITestCase):
           netbox_rpki_validationrun(id: {self.validation_run.pk}) {{
             id
             summary
+            comparison_to_previous
           }}
           netbox_rpki_objectvalidationresult(id: {self.object_validation_result.pk}) {{
             id
@@ -1141,6 +1154,7 @@ class ValidationReportingGraphQLTestCase(APITestCase):
           netbox_rpki_validatorinstance(id: {self.validator.pk}) {{
             id
             summary
+            run_history_summary
           }}
         }}
         '''
@@ -1152,12 +1166,20 @@ class ValidationReportingGraphQLTestCase(APITestCase):
             1,
         )
         self.assertEqual(
+            data['data']['netbox_rpki_validationrun']['comparison_to_previous']['comparison_state'],
+            'changed',
+        )
+        self.assertEqual(
             data['data']['netbox_rpki_objectvalidationresult']['details']['match_status_reason'],
             'exact_uri_match',
         )
         self.assertEqual(
             data['data']['netbox_rpki_validatorinstance']['summary']['adapter'],
             'routinator',
+        )
+        self.assertEqual(
+            data['data']['netbox_rpki_validatorinstance']['run_history_summary']['latest_comparison']['comparison_state'],
+            'changed',
         )
 
 
@@ -1170,9 +1192,18 @@ class TelemetryReportingGraphQLTestCase(APITestCase):
             organization=cls.organization,
             summary_json={'adapter': 'imported_mrt'},
         )
+        create_test_telemetry_run(
+            name='Telemetry GraphQL Previous Run',
+            source=cls.source,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+            completed_at=timezone.now() - timedelta(hours=2),
+            summary_json={'observation_count': 0},
+        )
         cls.telemetry_run = create_test_telemetry_run(
             name='Telemetry GraphQL Run',
             source=cls.source,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+            completed_at=timezone.now() - timedelta(minutes=20),
             summary_json={'observation_count': 1},
         )
         cls.observation = create_test_bgp_path_observation(
@@ -1200,10 +1231,12 @@ class TelemetryReportingGraphQLTestCase(APITestCase):
             id
             sync_health
             summary
+            run_history_summary
           }}
           netbox_rpki_telemetryrun(id: {self.telemetry_run.pk}) {{
             id
             summary
+            comparison_to_previous
           }}
           netbox_rpki_bgppathobservation(id: {self.observation.pk}) {{
             id
@@ -1215,7 +1248,15 @@ class TelemetryReportingGraphQLTestCase(APITestCase):
 
         self.assertNotIn('errors', data)
         self.assertEqual(data['data']['netbox_rpki_telemetrysource']['summary']['adapter'], 'imported_mrt')
+        self.assertEqual(
+            data['data']['netbox_rpki_telemetrysource']['run_history_summary']['latest_comparison']['comparison_state'],
+            'changed',
+        )
         self.assertEqual(data['data']['netbox_rpki_telemetryrun']['summary']['observation_count'], 1)
+        self.assertEqual(
+            data['data']['netbox_rpki_telemetryrun']['comparison_to_previous']['comparison_state'],
+            'changed',
+        )
         self.assertEqual(data['data']['netbox_rpki_bgppathobservation']['details']['collector'], 'route-views2')
 
 

@@ -67,6 +67,8 @@ from netbox_rpki.services import (
     preview_routing_intent_template_binding,
     preview_aspa_change_plan_provider_write,
     preview_roa_change_plan_provider_write,
+    build_telemetry_run_history_summary,
+    build_validator_run_history_summary,
     lift_roa_lint_suppression,
     run_routing_intent_template_binding_pipeline,
     simulate_roa_change_plan,
@@ -185,6 +187,24 @@ class RoutingIntentProfileViewSet(VIEWSET_CLASS_MAP['routingintentprofile']):
         payload['job']['comparison_scope'] = comparison_scope
         payload['job']['provider_snapshot'] = provider_snapshot_pk
         return Response(payload)
+
+
+class ValidatorInstanceViewSet(VIEWSET_CLASS_MAP['validatorinstance']):
+    @action(detail=True, methods=['get'])
+    def history_summary(self, request, pk=None):
+        validator = self.get_object()
+        return Response(build_validator_run_history_summary(validator))
+
+
+class TelemetrySourceViewSet(VIEWSET_CLASS_MAP['telemetrysource']):
+    @action(detail=True, methods=['get'])
+    def history_summary(self, request, pk=None):
+        source = self.get_object()
+        return Response(build_telemetry_run_history_summary(source))
+
+
+VIEWSET_CLASS_MAP['validatorinstance'] = ValidatorInstanceViewSet
+VIEWSET_CLASS_MAP['telemetrysource'] = TelemetrySourceViewSet
 
 
 class RoutingIntentExceptionViewSet(VIEWSET_CLASS_MAP['routingintentexception']):

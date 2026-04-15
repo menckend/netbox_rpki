@@ -49,6 +49,12 @@ from netbox_rpki.services.overlay_reporting import (
     build_roa_change_plan_overlay_summary,
     build_roa_reconciliation_overlay_summary,
 )
+from netbox_rpki.services.overlay_history import (
+    build_telemetry_run_comparison,
+    build_telemetry_run_history_summary,
+    build_validation_run_comparison,
+    build_validator_run_history_summary,
+)
 
 def _simulation_run_summary(run):
     summary = dict(run.summary_json or {})
@@ -131,14 +137,19 @@ globals()['OrganizationSerializer'] = OrganizationSerializer
 
 class ValidatorInstanceSerializer(SERIALIZER_CLASS_MAP['validatorinstance']):
     summary = serializers.SerializerMethodField()
+    run_history_summary = serializers.SerializerMethodField()
 
     class Meta(SERIALIZER_CLASS_MAP['validatorinstance'].Meta):
         fields = SERIALIZER_CLASS_MAP['validatorinstance'].Meta.fields + (
             'summary',
+            'run_history_summary',
         )
 
     def get_summary(self, obj):
         return obj.summary_json or {}
+
+    def get_run_history_summary(self, obj):
+        return build_validator_run_history_summary(obj)
 
 
 SERIALIZER_CLASS_MAP['validatorinstance'] = ValidatorInstanceSerializer
@@ -147,14 +158,19 @@ globals()['ValidatorInstanceSerializer'] = ValidatorInstanceSerializer
 
 class ValidationRunSerializer(SERIALIZER_CLASS_MAP['validationrun']):
     summary = serializers.SerializerMethodField()
+    comparison_to_previous = serializers.SerializerMethodField()
 
     class Meta(SERIALIZER_CLASS_MAP['validationrun'].Meta):
         fields = SERIALIZER_CLASS_MAP['validationrun'].Meta.fields + (
             'summary',
+            'comparison_to_previous',
         )
 
     def get_summary(self, obj):
         return obj.summary_json or {}
+
+    def get_comparison_to_previous(self, obj):
+        return build_validation_run_comparison(obj)
 
 
 SERIALIZER_CLASS_MAP['validationrun'] = ValidationRunSerializer
@@ -212,12 +228,17 @@ globals()['ValidatedAspaPayloadSerializer'] = ValidatedAspaPayloadSerializer
 class TelemetrySourceSerializer(SERIALIZER_CLASS_MAP['telemetrysource']):
     sync_health = serializers.ReadOnlyField()
     sync_health_display = serializers.ReadOnlyField()
+    run_history_summary = serializers.SerializerMethodField()
 
     class Meta(SERIALIZER_CLASS_MAP['telemetrysource'].Meta):
         fields = SERIALIZER_CLASS_MAP['telemetrysource'].Meta.fields + (
             'sync_health',
             'sync_health_display',
+            'run_history_summary',
         )
+
+    def get_run_history_summary(self, obj):
+        return build_telemetry_run_history_summary(obj)
 
 
 SERIALIZER_CLASS_MAP['telemetrysource'] = TelemetrySourceSerializer
@@ -226,14 +247,19 @@ globals()['TelemetrySourceSerializer'] = TelemetrySourceSerializer
 
 class TelemetryRunSerializer(SERIALIZER_CLASS_MAP['telemetryrun']):
     summary = serializers.SerializerMethodField()
+    comparison_to_previous = serializers.SerializerMethodField()
 
     class Meta(SERIALIZER_CLASS_MAP['telemetryrun'].Meta):
         fields = SERIALIZER_CLASS_MAP['telemetryrun'].Meta.fields + (
             'summary',
+            'comparison_to_previous',
         )
 
     def get_summary(self, obj):
         return obj.summary_json or {}
+
+    def get_comparison_to_previous(self, obj):
+        return build_telemetry_run_comparison(obj)
 
 
 SERIALIZER_CLASS_MAP['telemetryrun'] = TelemetryRunSerializer

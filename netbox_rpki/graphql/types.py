@@ -43,6 +43,12 @@ from netbox_rpki.services.overlay_correlation import (
     build_roa_overlay_summary,
     build_signed_object_overlay_summary,
 )
+from netbox_rpki.services.overlay_history import (
+    build_telemetry_run_comparison,
+    build_telemetry_run_history_summary,
+    build_validation_run_comparison,
+    build_validator_run_history_summary,
+)
 
 from .filters import GRAPHQL_FILTER_CLASS_MAP
 
@@ -256,6 +262,10 @@ class ValidatorInstanceReportingMixin:
     def summary(self) -> JSON:
         return self.summary_json or {}
 
+    @strawberry.field
+    def run_history_summary(self) -> JSON:
+        return build_validator_run_history_summary(self)
+
 
 @strawberry.type
 class ValidationRunReportingMixin:
@@ -263,6 +273,10 @@ class ValidationRunReportingMixin:
     @strawberry.field
     def summary(self) -> JSON:
         return self.summary_json or {}
+
+    @strawberry.field
+    def comparison_to_previous(self) -> JSON:
+        return build_validation_run_comparison(self)
 
 
 @strawberry.type
@@ -304,6 +318,10 @@ class TelemetrySourceReportingMixin:
     def sync_health_display(self) -> str:
         return models.TelemetrySource.sync_health_display.fget(self)
 
+    @strawberry.field
+    def run_history_summary(self) -> JSON:
+        return build_telemetry_run_history_summary(self)
+
 
 @strawberry.type
 class TelemetryRunReportingMixin:
@@ -311,6 +329,10 @@ class TelemetryRunReportingMixin:
     @strawberry.field
     def summary(self) -> JSON:
         return self.summary_json or {}
+
+    @strawberry.field
+    def comparison_to_previous(self) -> JSON:
+        return build_telemetry_run_comparison(self)
 
 
 @strawberry.type

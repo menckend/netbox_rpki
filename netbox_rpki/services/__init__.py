@@ -110,6 +110,12 @@ from .overlay_reporting import (
     build_validation_run_attention_items,
     build_validator_instance_attention_items,
 )
+from .overlay_history import (
+    build_telemetry_run_comparison,
+    build_telemetry_run_history_summary,
+    build_validation_run_comparison,
+    build_validator_run_history_summary,
+)
 
 __all__ = (
     'ProviderSyncError',
@@ -196,4 +202,8 @@ __all__ = (
     'build_telemetry_source_attention_items',
     'build_validation_run_attention_items',
     'build_validator_instance_attention_items',
+    'build_telemetry_run_comparison',
+    'build_telemetry_run_history_summary',
+    'build_validation_run_comparison',
+    'build_validator_run_history_summary',
 )
