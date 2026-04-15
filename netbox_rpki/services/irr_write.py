@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import base64
+import json
 from collections import Counter
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from django.db import transaction
 from django.utils import timezone
@@ -9,6 +13,10 @@ from netbox_rpki import models as rpki_models
 
 
 class IrrChangePlanError(ValueError):
+    pass
+
+
+class IrrWriteExecutionError(ValueError):
     pass
 
 
@@ -126,8 +134,17 @@ def _build_change_plan_for_source(
         family_counts=family_counts,
         capability_warnings=capability_warnings,
     )
+    actionable_item_count = sum(
+        count for action, count in item_counts.items()
+        if action != rpki_models.IrrChangePlanAction.NOOP
+    )
+    plan.status = (
+        rpki_models.IrrChangePlanStatus.READY
+        if actionable_item_count and source.write_support_mode != rpki_models.IrrWriteSupportMode.UNSUPPORTED
+        else rpki_models.IrrChangePlanStatus.DRAFT
+    )
     plan.summary_json = summary_json
-    plan.save(update_fields=('summary_json',))
+    plan.save(update_fields=('status', 'summary_json'))
     return plan
 
 
@@ -329,6 +346,359 @@ def _build_plan_summary(*, plan, item_counts, family_counts, capability_warnings
         'capability_warnings': capability_warning_list,
         'latest_execution': None,
     }
+
+
+def preview_irr_change_plan(
+    plan: rpki_models.IrrChangePlan | int,
+    *,
+    requested_by: str = '',
+) -> tuple[rpki_models.IrrWriteExecution, dict]:
+    plan = _normalize_change_plan(plan)
+    if not plan.can_preview:
+        raise IrrWriteExecutionError('IRR change plan is not previewable in its current state.')
+
+    payload = _build_execution_payload(plan)
+    started_at = timezone.now()
+    execution = rpki_models.IrrWriteExecution.objects.create(
+        name=f'{plan.name} Preview {started_at:%Y-%m-%d %H:%M:%S}',
+        organization=plan.organization,
+        source=plan.source,
+        change_plan=plan,
+        tenant=plan.tenant,
+        execution_mode=rpki_models.IrrWriteExecutionMode.PREVIEW,
+        status=rpki_models.IrrWriteExecutionStatus.COMPLETED,
+        requested_by=requested_by,
+        started_at=started_at,
+        completed_at=started_at,
+        item_count=payload['actionable_item_count'],
+        request_payload_json=payload,
+        response_payload_json={
+            'preview_only': True,
+            'write_support_mode': plan.write_support_mode,
+            'item_results': payload['item_results'],
+        },
+    )
+    _update_plan_latest_execution(plan, execution)
+    return execution, payload
+
+
+def apply_irr_change_plan(
+    plan: rpki_models.IrrChangePlan | int,
+    *,
+    requested_by: str = '',
+) -> tuple[rpki_models.IrrWriteExecution, dict]:
+    plan = _normalize_change_plan(plan)
+    if not plan.can_apply:
+        raise IrrWriteExecutionError('IRR change plan is not applyable in its current state.')
+    if plan.source.source_family != rpki_models.IrrSourceFamily.IRRD_COMPATIBLE:
+        raise IrrWriteExecutionError(f'IRR source family {plan.source.source_family} is not implemented for write execution yet.')
+    if not plan.source.api_key:
+        raise IrrWriteExecutionError('IRR source api_key is required for IRRd override-based write execution.')
+
+    payload = _build_execution_payload(plan)
+    started_at = timezone.now()
+    plan.status = rpki_models.IrrChangePlanStatus.EXECUTING
+    plan.execution_started_at = started_at
+    plan.execution_requested_by = requested_by
+    plan.completed_at = None
+    plan.failed_at = None
+    plan.save(update_fields=('status', 'execution_started_at', 'execution_requested_by', 'completed_at', 'failed_at'))
+
+    execution = rpki_models.IrrWriteExecution.objects.create(
+        name=f'{plan.name} Apply {started_at:%Y-%m-%d %H:%M:%S}',
+        organization=plan.organization,
+        source=plan.source,
+        change_plan=plan,
+        tenant=plan.tenant,
+        execution_mode=rpki_models.IrrWriteExecutionMode.APPLY,
+        status=rpki_models.IrrWriteExecutionStatus.RUNNING,
+        requested_by=requested_by,
+        started_at=started_at,
+        item_count=payload['actionable_item_count'],
+        request_payload_json=payload,
+    )
+
+    final_payload: dict = {
+        'write_support_mode': plan.write_support_mode,
+        'item_results': [],
+        'request_summary': payload['request_summary'],
+    }
+    successful_operations = 0
+    failed_operations = 0
+    encountered_error_messages: list[str] = []
+
+    try:
+        for item_result in payload['item_results']:
+            if item_result.get('skipped'):
+                final_payload['item_results'].append(item_result)
+                continue
+            operation_outcomes = []
+            for operation in item_result['operations']:
+                response_payload = _submit_irrd_operation(plan.source, operation)
+                operation_success = _operation_succeeded(response_payload)
+                operation_outcomes.append(
+                    {
+                        'method': operation['method'],
+                        'url': operation['url'],
+                        'request_body': operation['body'],
+                        'successful': operation_success,
+                        'response': response_payload,
+                    }
+                )
+                if operation_success:
+                    successful_operations += 1
+                else:
+                    failed_operations += 1
+                    encountered_error_messages.extend(_extract_error_messages(response_payload))
+            enriched_item_result = dict(item_result)
+            enriched_item_result['operation_outcomes'] = operation_outcomes
+            final_payload['item_results'].append(enriched_item_result)
+
+        completed_at = timezone.now()
+        execution.completed_at = completed_at
+        execution.response_payload_json = final_payload
+        if failed_operations and successful_operations:
+            execution.status = rpki_models.IrrWriteExecutionStatus.PARTIAL
+            execution.error = '; '.join(encountered_error_messages)[:4000]
+            plan.status = rpki_models.IrrChangePlanStatus.FAILED
+            plan.failed_at = completed_at
+            plan.completed_at = None
+        elif failed_operations:
+            execution.status = rpki_models.IrrWriteExecutionStatus.FAILED
+            execution.error = '; '.join(encountered_error_messages)[:4000]
+            plan.status = rpki_models.IrrChangePlanStatus.FAILED
+            plan.failed_at = completed_at
+            plan.completed_at = None
+        else:
+            execution.status = rpki_models.IrrWriteExecutionStatus.COMPLETED
+            plan.status = rpki_models.IrrChangePlanStatus.COMPLETED
+            plan.completed_at = completed_at
+            plan.failed_at = None
+        execution.save(update_fields=('status', 'completed_at', 'response_payload_json', 'error'))
+        plan.save(update_fields=('status', 'completed_at', 'failed_at'))
+        _update_plan_latest_execution(plan, execution)
+        return execution, final_payload
+    except Exception as exc:
+        completed_at = timezone.now()
+        execution.status = rpki_models.IrrWriteExecutionStatus.FAILED
+        execution.completed_at = completed_at
+        execution.error = str(exc)
+        execution.response_payload_json = final_payload
+        execution.save(update_fields=('status', 'completed_at', 'error', 'response_payload_json'))
+        plan.status = rpki_models.IrrChangePlanStatus.FAILED
+        plan.failed_at = completed_at
+        plan.completed_at = None
+        plan.save(update_fields=('status', 'failed_at', 'completed_at'))
+        _update_plan_latest_execution(plan, execution)
+        raise IrrWriteExecutionError(str(exc)) from exc
+
+
+def _normalize_change_plan(plan: rpki_models.IrrChangePlan | int) -> rpki_models.IrrChangePlan:
+    if isinstance(plan, rpki_models.IrrChangePlan):
+        return plan
+    return rpki_models.IrrChangePlan.objects.get(pk=plan)
+
+
+def _build_execution_payload(plan: rpki_models.IrrChangePlan) -> dict:
+    item_results = []
+    request_summary = {
+        'create_requests': 0,
+        'modify_requests': 0,
+        'replace_requests': 0,
+        'delete_requests': 0,
+        'noop_items': 0,
+    }
+    actionable_item_count = 0
+    for item in plan.items.select_related('imported_route_object').order_by('name', 'pk'):
+        operations = _build_item_operations(plan.source, item)
+        skipped = item.action == rpki_models.IrrChangePlanAction.NOOP or not operations
+        if skipped:
+            request_summary['noop_items'] += 1
+        else:
+            actionable_item_count += 1
+            if item.action == rpki_models.IrrChangePlanAction.CREATE:
+                request_summary['create_requests'] += 1
+            elif item.action == rpki_models.IrrChangePlanAction.MODIFY:
+                request_summary['modify_requests'] += 1
+            elif item.action == rpki_models.IrrChangePlanAction.REPLACE:
+                request_summary['replace_requests'] += 1
+            elif item.action == rpki_models.IrrChangePlanAction.DELETE:
+                request_summary['delete_requests'] += 1
+        item_results.append(
+            {
+                'item_id': item.pk,
+                'item_name': item.name,
+                'action': item.action,
+                'object_family': item.object_family,
+                'stable_object_key': item.stable_object_key,
+                'skipped': skipped,
+                'operations': operations,
+            }
+        )
+    return {
+        'source_slug': plan.source.slug,
+        'source_family': plan.source.source_family,
+        'write_support_mode': plan.write_support_mode,
+        'actionable_item_count': actionable_item_count,
+        'request_summary': request_summary,
+        'item_results': item_results,
+    }
+
+
+def _build_item_operations(source: rpki_models.IrrSource, item: rpki_models.IrrChangePlanItem) -> list[dict]:
+    if item.object_family != rpki_models.IrrCoordinationFamily.ROUTE_OBJECT:
+        return []
+    if item.action == rpki_models.IrrChangePlanAction.NOOP:
+        return []
+    if item.action in {rpki_models.IrrChangePlanAction.CREATE, rpki_models.IrrChangePlanAction.MODIFY}:
+        object_text = _render_route_object_text(source=source, state_json=item.after_state_json)
+        return [_build_submit_operation(source=source, method='POST', object_texts=[object_text])]
+    if item.action == rpki_models.IrrChangePlanAction.DELETE:
+        object_text = _existing_route_object_text(item)
+        return [_build_submit_operation(source=source, method='DELETE', object_texts=[object_text], delete_reason=item.reason or 'Deleted by netbox_rpki IRR coordination.')]
+    if item.action == rpki_models.IrrChangePlanAction.REPLACE:
+        create_text = _render_route_object_text(source=source, state_json=item.after_state_json)
+        delete_text = _existing_route_object_text(item)
+        return [
+            _build_submit_operation(source=source, method='POST', object_texts=[create_text]),
+            _build_submit_operation(source=source, method='DELETE', object_texts=[delete_text], delete_reason=item.reason or 'Replaced by netbox_rpki IRR coordination.'),
+        ]
+    return []
+
+
+def _render_route_object_text(*, source: rpki_models.IrrSource, state_json: dict) -> str:
+    object_class = state_json.get('object_class') or 'route'
+    prefix = state_json.get('prefix') or ''
+    origin_asn = (state_json.get('origin_asn') or '').upper()
+    lines = [
+        f'{object_class}:        {prefix}',
+        f'descr:           Generated by netbox_rpki',
+        f'origin:          {origin_asn}',
+    ]
+    if source.maintainer_name:
+        lines.append(f'mnt-by:          {source.maintainer_name}')
+    if source.default_database_label:
+        lines.append(f'source:          {source.default_database_label}')
+    return '\n'.join(lines)
+
+
+def _existing_route_object_text(item: rpki_models.IrrChangePlanItem) -> str:
+    if item.imported_route_object_id is not None and item.imported_route_object.object_text:
+        return item.imported_route_object.object_text
+    state_json = item.before_state_json or {}
+    lines = [
+        f'{state_json.get("object_class", "route")}:        {state_json.get("prefix", "")}',
+        f'origin:          {(state_json.get("origin_asn") or "").upper()}',
+    ]
+    if state_json.get('source_database_label'):
+        lines.append(f'source:          {state_json["source_database_label"]}')
+    return '\n'.join(lines)
+
+
+def _build_submit_operation(
+    *,
+    source: rpki_models.IrrSource,
+    method: str,
+    object_texts: list[str],
+    delete_reason: str | None = None,
+) -> dict:
+    body = {
+        'objects': [{'object_text': object_text} for object_text in object_texts],
+        'override': source.api_key,
+    }
+    if delete_reason:
+        body['delete_reason'] = delete_reason
+    return {
+        'method': method,
+        'url': _submit_url(source),
+        'body': body,
+    }
+
+
+def _submit_url(source: rpki_models.IrrSource) -> str:
+    base_url = (source.query_base_url or '').rstrip('/')
+    return f'{base_url}/v1/submit/'
+
+
+def _submit_irrd_operation(source: rpki_models.IrrSource, operation: dict) -> dict:
+    request = Request(
+        operation['url'],
+        data=json.dumps(operation['body']).encode('utf-8'),
+        headers={
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+        },
+        method=operation['method'],
+    )
+    _add_basic_auth(
+        request,
+        username=source.http_username or None,
+        password=source.http_password or None,
+    )
+    try:
+        with urlopen(request, timeout=30) as response:
+            raw_body = response.read().decode('utf-8').strip()
+    except HTTPError as exc:
+        error_body = exc.read().decode('utf-8', errors='replace')
+        return {
+            'http_status': exc.code,
+            'error': error_body or str(exc),
+        }
+    except URLError as exc:
+        raise IrrWriteExecutionError(f'IRRd submit request failed: {exc}') from exc
+
+    if not raw_body:
+        return {}
+    try:
+        payload = json.loads(raw_body)
+    except json.JSONDecodeError:
+        return {'raw': raw_body}
+    if isinstance(payload, dict):
+        return payload
+    return {'raw': payload}
+
+
+def _operation_succeeded(response_payload: dict) -> bool:
+    if response_payload.get('http_status', 200) >= 400:
+        return False
+    summary = response_payload.get('summary')
+    if isinstance(summary, dict):
+        return not summary.get('failed')
+    return 'error' not in response_payload
+
+
+def _extract_error_messages(response_payload: dict) -> list[str]:
+    if response_payload.get('error'):
+        return [str(response_payload['error'])]
+    messages: list[str] = []
+    for obj in response_payload.get('objects', []) if isinstance(response_payload.get('objects'), list) else []:
+        for message in obj.get('error_messages', []) or []:
+            messages.append(str(message))
+    if not messages and isinstance(response_payload.get('summary'), dict) and response_payload['summary'].get('failed'):
+        messages.append('IRRd reported one or more failed object submissions.')
+    return messages
+
+
+def _update_plan_latest_execution(plan: rpki_models.IrrChangePlan, execution: rpki_models.IrrWriteExecution) -> None:
+    summary_json = dict(plan.summary_json or {})
+    summary_json['latest_execution'] = {
+        'id': execution.pk,
+        'mode': execution.execution_mode,
+        'status': execution.status,
+        'completed_at': execution.completed_at.isoformat() if execution.completed_at else None,
+        'error': execution.error,
+    }
+    summary_json['previewable'] = bool(plan.supports_preview and plan.items.exclude(action=rpki_models.IrrChangePlanAction.NOOP).exists())
+    summary_json['applyable'] = bool(plan.supports_apply and plan.items.exclude(action=rpki_models.IrrChangePlanAction.NOOP).exists())
+    plan.summary_json = summary_json
+    plan.save(update_fields=('summary_json',))
+
+
+def _add_basic_auth(request: Request, *, username: str | None = None, password: str | None = None) -> None:
+    if not username:
+        return
+    token = base64.b64encode(f'{username}:{password or ""}'.encode('utf-8')).decode('ascii')
+    request.add_header('Authorization', f'Basic {token}')
 
 
 def result_key_for_route(*, prefix: str, origin_asn: str) -> str:

@@ -3801,6 +3801,31 @@ OBJECT_SPECS = (
         ui_read_only=True,
         show_add_button=False,
     ),
+    build_standard_object_spec(
+        registry_key="irr_write_execution",
+        model=models.IrrWriteExecution,
+        class_prefix="IrrWriteExecution",
+        label_singular="IRR Write Execution",
+        label_plural="IRR Write Executions",
+        api_fields=("name", "organization", "source", "change_plan", "execution_mode", "status", "requested_by", "started_at", "completed_at", "item_count", "request_payload_json", "response_payload_json", "error"),
+        brief_fields=("name", "organization", "source", "execution_mode", "status", "started_at"),
+        filter_fields=("name", "organization", "source", "change_plan", "execution_mode", "status", "tenant"),
+        search_fields=("name__icontains", "requested_by__icontains", "error__icontains", "comments__icontains"),
+        graphql_fields=(
+            ("name", "str"),
+            ("organization_id", "id"),
+            ("source_id", "id"),
+            ("change_plan_id", "id"),
+            ("execution_mode", "str"),
+            ("status", "str"),
+        ),
+        navigation_group="IRR",
+        navigation_label="IRR Write Executions",
+        navigation_order=140,
+        api_read_only=True,
+        ui_read_only=True,
+        show_add_button=False,
+    ),
 )
 
 API_OBJECT_SPECS = OBJECT_SPECS

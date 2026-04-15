@@ -78,6 +78,7 @@ from netbox_rpki.tests.utils import (
     create_test_irr_coordination_run,
     create_test_irr_change_plan,
     create_test_irr_change_plan_item,
+    create_test_irr_write_execution,
     create_test_irr_snapshot,
     create_test_irr_source,
     create_test_lifecycle_health_event,
@@ -653,6 +654,9 @@ def _register_scenario_builders() -> None:
             ),
             "irr_change_plan_item": lambda: create_test_irr_change_plan_item(
                 name=f"IRR Change Plan Item {unique_token('irr-change-plan-item')}"
+            ),
+            "irr_write_execution": lambda: create_test_irr_write_execution(
+                name=f"IRR Write Execution {unique_token('irr-write-execution')}"
             ),
             "bulkintentrun": lambda: create_test_bulk_intent_run(name=f"Bulk Intent Run {unique_token('bulk-intent-run')}"),
             "bulkintentrunscoperesult": lambda: create_test_bulk_intent_run_scope_result(

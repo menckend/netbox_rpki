@@ -346,6 +346,19 @@ class IrrChangePlanAction(models.TextChoices):
     NOOP = "noop", "No-op"
 
 
+class IrrWriteExecutionMode(models.TextChoices):
+    PREVIEW = "preview", "Preview"
+    APPLY = "apply", "Apply"
+
+
+class IrrWriteExecutionStatus(models.TextChoices):
+    PENDING = "pending", "Pending"
+    RUNNING = "running", "Running"
+    COMPLETED = "completed", "Completed"
+    FAILED = "failed", "Failed"
+    PARTIAL = "partial", "Partial"
+
+
 class ProviderSyncFamily(models.TextChoices):
     ROA_AUTHORIZATIONS = "roa_authorizations", "ROA Authorizations"
     ASPAS = "aspas", "ASPAs"
@@ -3502,6 +3515,7 @@ class IrrChangePlan(NamedRpkiStandardModel):
     @property
     def can_apply(self) -> bool:
         return self.supports_apply and self.status in {
+            IrrChangePlanStatus.DRAFT,
             IrrChangePlanStatus.READY,
             IrrChangePlanStatus.APPROVED,
             IrrChangePlanStatus.FAILED,
@@ -3589,6 +3603,62 @@ class IrrChangePlanItem(NamedRpkiStandardModel):
             )
         ):
             errors['action'] = 'Actionable IRR change plan items must reference at least one related object.'
+        if errors:
+            raise ValidationError(errors)
+
+
+class IrrWriteExecution(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='irr_write_executions',
+    )
+    source = models.ForeignKey(
+        to='IrrSource',
+        on_delete=models.PROTECT,
+        related_name='write_executions',
+    )
+    change_plan = models.ForeignKey(
+        to='IrrChangePlan',
+        on_delete=models.PROTECT,
+        related_name='write_executions',
+    )
+    execution_mode = models.CharField(
+        max_length=16,
+        choices=IrrWriteExecutionMode.choices,
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=IrrWriteExecutionStatus.choices,
+        default=IrrWriteExecutionStatus.PENDING,
+    )
+    requested_by = models.CharField(max_length=150, blank=True)
+    started_at = models.DateTimeField(blank=True, null=True)
+    completed_at = models.DateTimeField(blank=True, null=True)
+    item_count = models.PositiveIntegerField(default=0)
+    request_payload_json = models.JSONField(default=dict, blank=True)
+    response_payload_json = models.JSONField(default=dict, blank=True)
+    error = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ('-started_at', 'name')
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return _plugin_get_action_url(type(self), kwargs={'pk': self.pk})
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self.source_id is not None and self.source.organization_id != self.organization_id:
+            errors['source'] = 'IRR source must belong to the same organization as the IRR write execution.'
+        if self.change_plan_id is not None:
+            if self.change_plan.organization_id != self.organization_id:
+                errors['change_plan'] = 'IRR change plan must belong to the same organization as the IRR write execution.'
+            if self.source_id is not None and self.change_plan.source_id != self.source_id:
+                errors['source'] = 'IRR write execution source must match the IRR change plan source.'
         if errors:
             raise ValidationError(errors)
 

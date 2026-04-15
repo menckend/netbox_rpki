@@ -4,9 +4,11 @@ from core.models import Job
 
 from netbox_rpki import models as rpki_models
 from netbox_rpki.services import (
+    apply_irr_change_plan,
     build_bulk_routing_intent_baseline_fingerprint,
     create_irr_change_plans,
     evaluate_lifecycle_health_events,
+    preview_irr_change_plan,
     run_aspa_reconciliation_pipeline,
     run_bulk_routing_intent_pipeline,
     run_irr_coordination,
@@ -559,6 +561,88 @@ class CreateIrrChangePlansJob(JobRunner):
         }
         self.job.save(update_fields=('data',))
         self.logger.info(f'Created {len(plans)} IRR change plans for coordination run {coordination_run.pk}')
+
+
+class ExecuteIrrChangePlanJob(JobRunner):
+    class Meta:
+        name = 'IRR Change Plan Execution'
+
+    @classmethod
+    def get_job_name(
+        cls,
+        change_plan: rpki_models.IrrChangePlan | int,
+        *,
+        execution_mode: str = rpki_models.IrrWriteExecutionMode.PREVIEW,
+    ) -> str:
+        change_plan_pk = change_plan.pk if hasattr(change_plan, 'pk') else change_plan
+        return f'{cls.name} [{change_plan_pk}:{execution_mode}]'
+
+    @classmethod
+    def get_active_job_for_change_plan(
+        cls,
+        change_plan: rpki_models.IrrChangePlan | int,
+        *,
+        execution_mode: str = rpki_models.IrrWriteExecutionMode.PREVIEW,
+    ):
+        return Job.objects.filter(
+            name=cls.get_job_name(change_plan, execution_mode=execution_mode),
+            status__in=JobStatusChoices.ENQUEUED_STATE_CHOICES,
+        ).order_by('created').first()
+
+    @classmethod
+    def enqueue_for_change_plan(
+        cls,
+        change_plan: rpki_models.IrrChangePlan | int,
+        *,
+        execution_mode: str = rpki_models.IrrWriteExecutionMode.PREVIEW,
+        user=None,
+        schedule_at=None,
+    ):
+        if not isinstance(change_plan, rpki_models.IrrChangePlan):
+            change_plan = rpki_models.IrrChangePlan.objects.get(pk=change_plan)
+
+        existing_job = cls.get_active_job_for_change_plan(change_plan, execution_mode=execution_mode)
+        if existing_job is not None:
+            return existing_job, False
+
+        if rpki_models.IrrWriteExecution.objects.filter(
+            change_plan=change_plan,
+            execution_mode=execution_mode,
+            status=rpki_models.IrrWriteExecutionStatus.RUNNING,
+        ).exists():
+            return None, False
+
+        job = cls.enqueue(
+            name=cls.get_job_name(change_plan, execution_mode=execution_mode),
+            user=user,
+            schedule_at=schedule_at,
+            change_plan_pk=change_plan.pk,
+            execution_mode=execution_mode,
+        )
+        return job, True
+
+    def run(
+        self,
+        change_plan_pk,
+        execution_mode=rpki_models.IrrWriteExecutionMode.PREVIEW,
+        *args,
+        **kwargs,
+    ):
+        change_plan = rpki_models.IrrChangePlan.objects.get(pk=change_plan_pk)
+        self.logger.info(
+            f'Running IRR change plan {execution_mode} for {change_plan.name} ({change_plan.pk})'
+        )
+        if execution_mode == rpki_models.IrrWriteExecutionMode.APPLY:
+            execution, _ = apply_irr_change_plan(change_plan)
+        else:
+            execution, _ = preview_irr_change_plan(change_plan)
+        self.job.data = {
+            'irr_change_plan_pk': change_plan.pk,
+            'irr_write_execution_pk': execution.pk,
+            'execution_mode': execution_mode,
+        }
+        self.job.save(update_fields=('data',))
+        self.logger.info(f'Completed IRR change plan {execution_mode} as execution {execution.pk}')
 
 
 class EvaluateLifecycleHealthJob(JobRunner):

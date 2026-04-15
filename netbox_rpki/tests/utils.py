@@ -2107,6 +2107,46 @@ def create_test_irr_change_plan_item(
     )
 
 
+def create_test_irr_write_execution(
+    name='IRR Write Execution 1',
+    organization=None,
+    source=None,
+    change_plan=None,
+    execution_mode=None,
+    status=None,
+    requested_by='',
+    started_at=None,
+    completed_at=None,
+    item_count=0,
+    request_payload_json=None,
+    response_payload_json=None,
+    error='',
+    **kwargs,
+):
+    if change_plan is None:
+        change_plan = create_test_irr_change_plan()
+    if source is None:
+        source = change_plan.source
+    if organization is None:
+        organization = change_plan.organization
+    return rpki_models.IrrWriteExecution.objects.create(
+        name=name,
+        organization=organization,
+        source=source,
+        change_plan=change_plan,
+        execution_mode=execution_mode or rpki_models.IrrWriteExecutionMode.PREVIEW,
+        status=status or rpki_models.IrrWriteExecutionStatus.COMPLETED,
+        requested_by=requested_by,
+        started_at=started_at,
+        completed_at=completed_at,
+        item_count=item_count,
+        request_payload_json=request_payload_json or {},
+        response_payload_json=response_payload_json or {},
+        error=error,
+        **kwargs,
+    )
+
+
 def create_test_lifecycle_health_policy(
     name='Lifecycle Health Policy 1',
     organization=None,
