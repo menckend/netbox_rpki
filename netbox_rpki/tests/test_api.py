@@ -31,8 +31,17 @@ from netbox_rpki.models import (
 )
 from netbox_rpki.object_registry import API_OBJECT_SPECS, GRAPHQL_OBJECT_SPECS, get_object_spec
 from netbox_rpki.services.lifecycle_reporting import (
+    LIFECYCLE_EXPORT_SCHEMA_VERSION,
+    LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_LIFECYCLE_SUMMARY,
+    LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_TIMELINE,
+    LIFECYCLE_EXPORT_KIND_PROVIDER_PUBLICATION_DIFF_TIMELINE,
     LIFECYCLE_TIMELINE_SCHEMA_VERSION,
     PUBLICATION_DIFF_TIMELINE_SCHEMA_VERSION,
+    build_lifecycle_export_payload,
+    build_provider_lifecycle_health_summary,
+    build_provider_lifecycle_timeline,
+    build_provider_publication_diff_timeline,
+    iter_lifecycle_export_rows,
 )
 from netbox_rpki.services.provider_sync_contract import build_provider_sync_summary
 from netbox_rpki.services.rov_simulation import _build_plan_fingerprint
@@ -1662,6 +1671,89 @@ class ProviderAccountSummaryAPITestCase(PluginAPITestCase):
         self.assertEqual(publication_diff_response.data['item_count'], 1)
         self.assertEqual(publication_diff_response.data['items'][0]['snapshot_diff_id'], self.healthy_diff.pk)
         self.assertEqual(publication_diff_response.data['items'][0]['publication_changes'], 1)
+
+
+class LifecycleExportFormatterAPITestCase(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='lifecycle-export-api-org', name='Lifecycle Export API Org')
+        cls.provider_account = create_test_provider_account(
+            name='Lifecycle Export API Account',
+            organization=cls.organization,
+            provider_type=rpki_models.ProviderType.KRILL,
+            ca_handle='export-api-ca',
+            org_handle='ORG-LIFECYCLE-EXPORT-API',
+        )
+        cls.base_snapshot = create_test_provider_snapshot(
+            name='Lifecycle Export Base Snapshot',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+            fetched_at=timezone.now() - timedelta(days=2),
+            completed_at=timezone.now() - timedelta(days=2, minutes=5),
+        )
+        cls.comparison_snapshot = create_test_provider_snapshot(
+            name='Lifecycle Export Comparison Snapshot',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+            fetched_at=timezone.now() - timedelta(days=1),
+            completed_at=timezone.now() - timedelta(days=1, minutes=5),
+        )
+        cls.snapshot_diff = create_test_provider_snapshot_diff(
+            name='Lifecycle Export Diff',
+            organization=cls.organization,
+            provider_account=cls.provider_account,
+            base_snapshot=cls.base_snapshot,
+            comparison_snapshot=cls.comparison_snapshot,
+            summary_json={
+                'status': rpki_models.ValidationRunStatus.COMPLETED,
+                'totals': {
+                    'records_added': 1,
+                    'records_removed': 2,
+                    'records_changed': 3,
+                    'records_stale': 1,
+                },
+            },
+        )
+        create_test_provider_snapshot_diff_item(
+            snapshot_diff=cls.snapshot_diff,
+            object_family=rpki_models.ProviderSyncFamily.PUBLICATION_POINTS,
+            change_type=rpki_models.ProviderSnapshotDiffChangeType.CHANGED,
+            is_stale=True,
+        )
+
+    def test_lifecycle_export_helpers_build_expected_envelope_and_rows(self):
+        summary = build_provider_lifecycle_health_summary(self.provider_account)
+        timeline = build_provider_lifecycle_timeline(self.provider_account)
+        publication_diff_timeline = build_provider_publication_diff_timeline(self.provider_account)
+
+        summary_payload = build_lifecycle_export_payload(
+            LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_LIFECYCLE_SUMMARY,
+            summary,
+            filters={'provider_account_id': self.provider_account.pk},
+        )
+        summary_rows = list(iter_lifecycle_export_rows(
+            LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_LIFECYCLE_SUMMARY,
+            summary,
+        ))
+        timeline_rows = list(iter_lifecycle_export_rows(
+            LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_TIMELINE,
+            timeline,
+        ))
+        publication_diff_rows = list(iter_lifecycle_export_rows(
+            LIFECYCLE_EXPORT_KIND_PROVIDER_PUBLICATION_DIFF_TIMELINE,
+            publication_diff_timeline,
+        ))
+
+        self.assertEqual(summary_payload['export_schema_version'], LIFECYCLE_EXPORT_SCHEMA_VERSION)
+        self.assertEqual(summary_payload['kind'], LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_LIFECYCLE_SUMMARY)
+        self.assertEqual(summary_payload['format'], 'json')
+        self.assertEqual(summary_payload['filters']['provider_account_id'], self.provider_account.pk)
+        self.assertEqual(summary_payload['data']['provider_account_id'], self.provider_account.pk)
+        self.assertEqual(summary_rows[0]['summary_schema_version'], 1)
+        self.assertEqual(timeline_rows[0]['snapshot_id'], self.comparison_snapshot.pk)
+        self.assertEqual(timeline_rows[0]['latest_diff_id'], self.snapshot_diff.pk)
+        self.assertEqual(publication_diff_rows[0]['snapshot_diff_id'], self.snapshot_diff.pk)
+        self.assertEqual(publication_diff_rows[0]['publication_changes'], 1)
 
 
 class ProviderSnapshotActionAPITestCase(PluginAPITestCase):

@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Mapping
 from datetime import date, datetime, time, timedelta
+from django.utils.text import slugify
 
 from django.db.models import Count, Q
 from django.utils import timezone
@@ -17,8 +18,13 @@ from netbox_rpki.services.provider_sync_evidence import (
 
 LIFECYCLE_HEALTH_SUMMARY_SCHEMA_VERSION = 1
 LIFECYCLE_TIMELINE_SCHEMA_VERSION = 1
+LIFECYCLE_EXPORT_SCHEMA_VERSION = 1
 PUBLICATION_HEALTH_SUMMARY_SCHEMA_VERSION = 1
 PUBLICATION_DIFF_TIMELINE_SCHEMA_VERSION = 1
+
+LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_LIFECYCLE_SUMMARY = 'provider_account_lifecycle_summary'
+LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_TIMELINE = 'provider_account_timeline'
+LIFECYCLE_EXPORT_KIND_PROVIDER_PUBLICATION_DIFF_TIMELINE = 'provider_publication_diff_timeline'
 
 LIFECYCLE_HEALTH_DEFAULTS = {
     'sync_stale_after_minutes': 120,
@@ -82,6 +88,123 @@ def _sanitize_related_reference(value: object, *, visible_ids: set[object] | Non
 
 def _summary_int(summary: Mapping[str, object], key: str) -> int:
     return int(summary.get(key, 0) or 0)
+
+
+def _export_kind_slug(kind: str) -> str:
+    return kind.replace('_', '-')
+
+
+def _export_provider_account_slug(provider_account: rpki_models.RpkiProviderAccount | None) -> str:
+    if provider_account is None:
+        return 'all-provider-accounts'
+    name_slug = slugify(provider_account.name) or 'provider-account'
+    return f'provider-account-{provider_account.pk}-{name_slug}'
+
+
+def _lifecycle_summary_export_row(summary: Mapping[str, object]) -> dict[str, object]:
+    policy = dict(summary.get('policy') or {})
+    sync = dict(summary.get('sync') or {})
+    publication_health = dict(summary.get('publication_health') or {})
+    publication = dict(summary.get('publication') or {})
+    diff = dict(summary.get('diff') or {})
+    attention_summary = dict(summary.get('attention_summary') or {})
+    return {
+        'summary_schema_version': int(summary.get('summary_schema_version', 0) or 0),
+        'provider_account_id': summary.get('provider_account_id'),
+        'policy_id': policy.get('policy_id'),
+        'policy_source': policy.get('source', ''),
+        'sync_status': sync.get('status', ''),
+        'sync_status_display': sync.get('status_display', ''),
+        'publication_status': publication_health.get('status', publication.get('status', '')),
+        'publication_attention_count': int(publication_health.get('attention_item_count', publication.get('attention_count', 0)) or 0),
+        'records_added': _summary_int(diff, 'records_added'),
+        'records_removed': _summary_int(diff, 'records_removed'),
+        'records_changed': _summary_int(diff, 'records_changed'),
+        'latest_snapshot_id': diff.get('latest_snapshot_id'),
+        'latest_diff_id': diff.get('latest_diff_id'),
+        'total_attention_count': int(attention_summary.get('total_attention_count', 0) or 0),
+    }
+
+
+def _lifecycle_timeline_export_row(item: Mapping[str, object]) -> dict[str, object]:
+    return {
+        'timeline_schema_version': int(item.get('timeline_schema_version', 0) or 0),
+        'snapshot_id': item.get('snapshot_id'),
+        'snapshot_name': item.get('snapshot_name', ''),
+        'snapshot_status': item.get('snapshot_status', ''),
+        'fetched_at': item.get('fetched_at', ''),
+        'completed_at': item.get('completed_at', ''),
+        'lifecycle_status': item.get('lifecycle_status', ''),
+        'publication_status': item.get('publication_status', ''),
+        'publication_attention_count': int(item.get('publication_attention_count', 0) or 0),
+        'latest_diff_id': item.get('latest_diff_id'),
+        'latest_diff_name': item.get('latest_diff_name', ''),
+        'records_added': int(item.get('records_added', 0) or 0),
+        'records_removed': int(item.get('records_removed', 0) or 0),
+        'records_changed': int(item.get('records_changed', 0) or 0),
+        'publication_changes': int(item.get('publication_changes', 0) or 0),
+    }
+
+
+def _publication_diff_timeline_export_row(item: Mapping[str, object]) -> dict[str, object]:
+    return {
+        'timeline_schema_version': int(item.get('timeline_schema_version', 0) or 0),
+        'snapshot_diff_id': item.get('snapshot_diff_id'),
+        'snapshot_diff_name': item.get('snapshot_diff_name', ''),
+        'status': item.get('status', ''),
+        'compared_at': item.get('compared_at', ''),
+        'base_snapshot_id': item.get('base_snapshot_id'),
+        'comparison_snapshot_id': item.get('comparison_snapshot_id'),
+        'records_added': int(item.get('records_added', 0) or 0),
+        'records_removed': int(item.get('records_removed', 0) or 0),
+        'records_changed': int(item.get('records_changed', 0) or 0),
+        'records_stale': int(item.get('records_stale', 0) or 0),
+        'publication_changes': int(item.get('publication_changes', 0) or 0),
+        'item_count': int(item.get('item_count', 0) or 0),
+    }
+
+
+def build_lifecycle_export_payload(
+    kind: str,
+    data: Mapping[str, object],
+    *,
+    filters: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    return {
+        'export_schema_version': LIFECYCLE_EXPORT_SCHEMA_VERSION,
+        'kind': kind,
+        'format': 'json',
+        'exported_at': _datetime_text(timezone.now()),
+        'filters': dict(filters or {}),
+        'data': dict(data),
+    }
+
+
+def iter_lifecycle_export_rows(kind: str, data: Mapping[str, object]):
+    if kind == LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_LIFECYCLE_SUMMARY:
+        yield _lifecycle_summary_export_row(data)
+        return
+
+    if kind == LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_TIMELINE:
+        for item in data.get('items') or []:
+            yield _lifecycle_timeline_export_row(item)
+        return
+
+    if kind == LIFECYCLE_EXPORT_KIND_PROVIDER_PUBLICATION_DIFF_TIMELINE:
+        for item in data.get('items') or []:
+            yield _publication_diff_timeline_export_row(item)
+        return
+
+    raise ValueError(f'Unsupported lifecycle export kind: {kind}')
+
+
+def get_lifecycle_export_filename(
+    kind: str,
+    fmt: str,
+    *,
+    provider_account: rpki_models.RpkiProviderAccount | None = None,
+) -> str:
+    return f"{_export_provider_account_slug(provider_account)}-{_export_kind_slug(kind)}.{fmt}"
 
 
 def _copy_publication_health_summary(summary: Mapping[str, object] | None) -> dict[str, object] | None:

@@ -10,6 +10,12 @@ from netbox_rpki import models as rpki_models
 from netbox_rpki.models import Certificate, CertificateAsn, CertificatePrefix, Organization, Roa, RoaPrefix
 from netbox_rpki.object_registry import SIMPLE_DETAIL_VIEW_OBJECT_SPECS, VIEW_OBJECT_SPECS, get_object_spec
 from netbox_rpki.services import create_roa_change_plan, derive_roa_intents, reconcile_roa_intents
+from netbox_rpki.services.lifecycle_reporting import (
+    LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_LIFECYCLE_SUMMARY,
+    LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_TIMELINE,
+    LIFECYCLE_EXPORT_KIND_PROVIDER_PUBLICATION_DIFF_TIMELINE,
+    get_lifecycle_export_filename,
+)
 from netbox_rpki.services.provider_sync_contract import build_provider_sync_summary
 from netbox_rpki.tests.registry_scenarios import _build_instance_for_spec
 from netbox_rpki.tests.base import PluginViewTestCase
@@ -176,6 +182,39 @@ class GeneratedListViewActionLinkTestCase(PluginViewTestCase):
                     ('changelog',),
                 )
                 self.assertNotContains(response, '/None')
+
+
+class LifecycleExportFormatterViewTestCase(TestCase):
+    def test_lifecycle_export_filename_uses_kind_and_provider_account_slug(self):
+        provider_account = create_test_provider_account(
+            name='Lifecycle Export View Account',
+            organization=create_test_organization(org_id='lifecycle-export-view-org', name='Lifecycle Export View Org'),
+            org_handle='ORG-LIFECYCLE-EXPORT-VIEW',
+        )
+
+        self.assertEqual(
+            get_lifecycle_export_filename(
+                LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_LIFECYCLE_SUMMARY,
+                'json',
+                provider_account=provider_account,
+            ),
+            f'provider-account-{provider_account.pk}-lifecycle-export-view-account-provider-account-lifecycle-summary.json',
+        )
+        self.assertEqual(
+            get_lifecycle_export_filename(
+                LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_TIMELINE,
+                'csv',
+                provider_account=provider_account,
+            ),
+            f'provider-account-{provider_account.pk}-lifecycle-export-view-account-provider-account-timeline.csv',
+        )
+        self.assertEqual(
+            get_lifecycle_export_filename(
+                LIFECYCLE_EXPORT_KIND_PROVIDER_PUBLICATION_DIFF_TIMELINE,
+                'csv',
+            ),
+            'all-provider-accounts-provider-publication-diff-timeline.csv',
+        )
 
 
 class ProviderAccountSyncViewTestCase(PluginViewTestCase):
