@@ -168,6 +168,30 @@ class SerializerSmokeTestCase(SimpleTestCase):
         )
 
 
+class LifecycleHealthSurfaceContractTestCase(SimpleTestCase):
+    def test_lifecycle_health_hook_and_event_api_surfaces_are_registered(self):
+        hook_spec = get_object_spec('lifecyclehealthhook')
+        event_spec = get_object_spec('lifecyclehealthevent')
+        hook_viewset = getattr(api_views, hook_spec.api.viewset_name)
+        event_viewset = getattr(api_views, event_spec.api.viewset_name)
+        hook_serializer = getattr(api_serializers, hook_spec.api.serializer_name)
+        event_serializer = getattr(api_serializers, event_spec.api.serializer_name)
+
+        self.assertFalse(hook_spec.api.read_only)
+        self.assertIn('post', hook_viewset.http_method_names)
+        self.assertIn('patch', hook_viewset.http_method_names)
+        self.assertIn('delete', hook_viewset.http_method_names)
+        self.assertTrue(event_spec.api.read_only)
+        self.assertEqual(set(event_viewset.http_method_names), {'get', 'head', 'options'})
+        self.assertIn('target_url', hook_serializer.Meta.fields)
+        self.assertIn('headers_json', hook_serializer.Meta.fields)
+        self.assertIn('event_kinds_json', hook_serializer.Meta.fields)
+        self.assertIn('payload_json', event_serializer.Meta.fields)
+        self.assertIn('delivery_error', event_serializer.Meta.fields)
+        self.assertIn('related_snapshot', event_serializer.Meta.fields)
+        self.assertIn('related_snapshot_diff', event_serializer.Meta.fields)
+
+
 class RpkiProviderAccountSerializerTestCase(TestCase):
     def test_provider_account_serializer_exposes_sync_health_fields(self):
         organization = create_test_organization(org_id='provider-serializer-org', name='Provider Serializer Org')

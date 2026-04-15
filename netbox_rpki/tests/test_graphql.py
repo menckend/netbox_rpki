@@ -169,6 +169,21 @@ class GraphQLSurfaceContractTestCase(APITestCase):
                 )
 
 
+class LifecycleHealthGraphQLSurfaceContractTestCase(SimpleTestCase):
+    def test_lifecycle_health_graphql_types_expose_payload_fields(self):
+        graphql_types = import_module('netbox_rpki.graphql.types')
+        hook_type = getattr(graphql_types, 'LifecycleHealthHookType')
+        event_type = getattr(graphql_types, 'LifecycleHealthEventType')
+
+        self.assertIn('target_url', hook_type.__annotations__)
+        self.assertIn('headers_json', hook_type.__annotations__)
+        self.assertIn('event_kinds_json', hook_type.__annotations__)
+        self.assertIn('payload_json', event_type.__annotations__)
+        self.assertIn('delivery_error', event_type.__annotations__)
+        self.assertIn('related_snapshot', event_type.__annotations__)
+        self.assertIn('related_snapshot_diff', event_type.__annotations__)
+
+
 class PluginGraphQLTestMixin:
     model = None
     view_permission = ''
