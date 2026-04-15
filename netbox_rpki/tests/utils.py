@@ -1925,6 +1925,83 @@ def create_test_imported_irr_maintainer(
     )
 
 
+def create_test_irr_coordination_run(
+    name='IRR Coordination Run 1',
+    organization=None,
+    status=None,
+    scope_summary_json=None,
+    summary_json=None,
+    started_at=None,
+    completed_at=None,
+    error_text='',
+    compared_sources=None,
+    **kwargs,
+):
+    if organization is None:
+        organization = create_test_organization()
+    coordination_run = rpki_models.IrrCoordinationRun.objects.create(
+        name=name,
+        organization=organization,
+        status=status or rpki_models.IrrCoordinationRunStatus.COMPLETED,
+        scope_summary_json=scope_summary_json or {},
+        summary_json=summary_json or {},
+        started_at=started_at,
+        completed_at=completed_at,
+        error_text=error_text,
+        **kwargs,
+    )
+    if compared_sources:
+        coordination_run.compared_sources.set(compared_sources)
+    return coordination_run
+
+
+def create_test_irr_coordination_result(
+    name='IRR Coordination Result 1',
+    coordination_run=None,
+    source=None,
+    snapshot=None,
+    coordination_family=None,
+    result_type=None,
+    severity=None,
+    stable_object_key='route:203.0.113.0/24AS64500',
+    netbox_object_key='route:203.0.113.0/24AS64500',
+    source_object_key='route:203.0.113.0/24AS64500',
+    roa_intent=None,
+    imported_route_object=None,
+    imported_aut_num=None,
+    imported_maintainer=None,
+    summary_json=None,
+    **kwargs,
+):
+    if source is None:
+        source = create_test_irr_source()
+    if snapshot is None:
+        snapshot = create_test_irr_snapshot(source=source)
+    if coordination_run is None:
+        coordination_run = create_test_irr_coordination_run(
+            organization=source.organization,
+            compared_sources=[source],
+        )
+    return rpki_models.IrrCoordinationResult.objects.create(
+        name=name,
+        coordination_run=coordination_run,
+        source=source,
+        snapshot=snapshot,
+        coordination_family=coordination_family or rpki_models.IrrCoordinationFamily.ROUTE_OBJECT,
+        result_type=result_type or rpki_models.IrrCoordinationResultType.MATCH,
+        severity=severity or rpki_models.ReconciliationSeverity.INFO,
+        stable_object_key=stable_object_key,
+        netbox_object_key=netbox_object_key,
+        source_object_key=source_object_key,
+        roa_intent=roa_intent,
+        imported_route_object=imported_route_object,
+        imported_aut_num=imported_aut_num,
+        imported_maintainer=imported_maintainer,
+        summary_json=summary_json or {},
+        **kwargs,
+    )
+
+
 def create_test_lifecycle_health_policy(
     name='Lifecycle Health Policy 1',
     organization=None,

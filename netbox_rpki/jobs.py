@@ -8,6 +8,7 @@ from netbox_rpki.services import (
     evaluate_lifecycle_health_events,
     run_aspa_reconciliation_pipeline,
     run_bulk_routing_intent_pipeline,
+    run_irr_coordination,
     run_routing_intent_pipeline,
     sync_irr_source,
     sync_provider_account,
@@ -443,6 +444,63 @@ class SyncIrrSourceJob(JobRunner):
         }
         self.job.save(update_fields=('data',))
         self.logger.info(f'Completed IRR import with snapshot {snapshot.pk}')
+
+
+class RunIrrCoordinationJob(JobRunner):
+    class Meta:
+        name = 'IRR Coordination'
+
+    @classmethod
+    def get_job_name(cls, organization: rpki_models.Organization | int) -> str:
+        organization_pk = organization.pk if hasattr(organization, 'pk') else organization
+        return f'{cls.name} [{organization_pk}]'
+
+    @classmethod
+    def get_active_job_for_organization(cls, organization: rpki_models.Organization | int):
+        return Job.objects.filter(
+            name=cls.get_job_name(organization),
+            status__in=JobStatusChoices.ENQUEUED_STATE_CHOICES,
+        ).order_by('created').first()
+
+    @classmethod
+    def enqueue_for_organization(
+        cls,
+        organization: rpki_models.Organization | int,
+        *,
+        user=None,
+        schedule_at=None,
+    ):
+        if not isinstance(organization, rpki_models.Organization):
+            organization = rpki_models.Organization.objects.get(pk=organization)
+
+        existing_job = cls.get_active_job_for_organization(organization)
+        if existing_job is not None:
+            return existing_job, False
+
+        if rpki_models.IrrCoordinationRun.objects.filter(
+            organization=organization,
+            status=rpki_models.IrrCoordinationRunStatus.RUNNING,
+        ).exists():
+            return None, False
+
+        job = cls.enqueue(
+            name=cls.get_job_name(organization),
+            user=user,
+            schedule_at=schedule_at,
+            organization_pk=organization.pk,
+        )
+        return job, True
+
+    def run(self, organization_pk, *args, **kwargs):
+        organization = rpki_models.Organization.objects.get(pk=organization_pk)
+        self.logger.info(f'Running IRR coordination for organization {organization.name} ({organization.pk})')
+        coordination_run = run_irr_coordination(organization)
+        self.job.data = {
+            'organization_pk': organization.pk,
+            'irr_coordination_run_pk': coordination_run.pk,
+        }
+        self.job.save(update_fields=('data',))
+        self.logger.info(f'Completed IRR coordination run {coordination_run.pk}')
 
 
 class EvaluateLifecycleHealthJob(JobRunner):

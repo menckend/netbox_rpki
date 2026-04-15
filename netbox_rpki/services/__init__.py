@@ -73,6 +73,7 @@ from .bulk_intent_governance import (
 )
 from .governance_rollup import build_organization_governance_rollup
 from .irr_sync import IrrSyncError, sync_irr_source
+from .irr_coordination import IrrCoordinationError, run_irr_coordination
 
 __all__ = (
     'ProviderSyncError',
@@ -131,4 +132,6 @@ __all__ = (
     'build_organization_governance_rollup',
     'IrrSyncError',
     'sync_irr_source',
+    'IrrCoordinationError',
+    'run_irr_coordination',
 )

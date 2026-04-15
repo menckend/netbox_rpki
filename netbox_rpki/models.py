@@ -302,6 +302,32 @@ class IrrMemberType(models.TextChoices):
     UNKNOWN = "unknown", "Unknown"
 
 
+class IrrCoordinationRunStatus(models.TextChoices):
+    PENDING = "pending", "Pending"
+    RUNNING = "running", "Running"
+    COMPLETED = "completed", "Completed"
+    FAILED = "failed", "Failed"
+
+
+class IrrCoordinationFamily(models.TextChoices):
+    ROUTE_OBJECT = "route_object", "Route Object"
+    ROUTE_SET_MEMBERSHIP = "route_set_membership", "Route-Set Membership"
+    AS_SET_MEMBERSHIP = "as_set_membership", "AS-Set Membership"
+    AUT_NUM_CONTEXT = "aut_num_context", "Aut-Num Context"
+    MAINTAINER_SUPPORTABILITY = "maintainer_supportability", "Maintainer Supportability"
+
+
+class IrrCoordinationResultType(models.TextChoices):
+    MATCH = "match", "Match"
+    MISSING_IN_SOURCE = "missing_in_source", "Missing In Source"
+    EXTRA_IN_SOURCE = "extra_in_source", "Extra In Source"
+    SOURCE_CONFLICT = "source_conflict", "Source Conflict"
+    UNSUPPORTED_WRITE = "unsupported_write", "Unsupported Write"
+    AMBIGUOUS_LINKAGE = "ambiguous_linkage", "Ambiguous Linkage"
+    STALE_SOURCE = "stale_source", "Stale Source"
+    POLICY_CONTEXT_GAP = "policy_context_gap", "Policy Context Gap"
+
+
 class ProviderSyncFamily(models.TextChoices):
     ROA_AUTHORIZATIONS = "roa_authorizations", "ROA Authorizations"
     ASPAS = "aspas", "ASPAs"
@@ -3230,6 +3256,114 @@ class ImportedIrrMaintainer(ImportedIrrObjectBase):
                 name='nb_rpki_iirmaintainer_snapshot_stable_key_unique',
             ),
         )
+
+
+class IrrCoordinationRun(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='irr_coordination_runs',
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=IrrCoordinationRunStatus.choices,
+        default=IrrCoordinationRunStatus.PENDING,
+    )
+    compared_sources = models.ManyToManyField(
+        to='IrrSource',
+        related_name='coordination_runs',
+        blank=True,
+    )
+    scope_summary_json = models.JSONField(default=dict, blank=True)
+    summary_json = models.JSONField(default=dict, blank=True)
+    started_at = models.DateTimeField(blank=True, null=True)
+    completed_at = models.DateTimeField(blank=True, null=True)
+    error_text = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ('-started_at', '-created')
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return _plugin_get_action_url(type(self), kwargs={'pk': self.pk})
+
+
+class IrrCoordinationResult(NamedRpkiStandardModel):
+    coordination_run = models.ForeignKey(
+        to='IrrCoordinationRun',
+        on_delete=models.PROTECT,
+        related_name='results',
+    )
+    source = models.ForeignKey(
+        to='IrrSource',
+        on_delete=models.PROTECT,
+        related_name='coordination_results',
+        blank=True,
+        null=True,
+    )
+    snapshot = models.ForeignKey(
+        to='IrrSnapshot',
+        on_delete=models.PROTECT,
+        related_name='coordination_results',
+        blank=True,
+        null=True,
+    )
+    coordination_family = models.CharField(
+        max_length=64,
+        choices=IrrCoordinationFamily.choices,
+    )
+    result_type = models.CharField(
+        max_length=64,
+        choices=IrrCoordinationResultType.choices,
+    )
+    severity = models.CharField(
+        max_length=16,
+        choices=ReconciliationSeverity.choices,
+        default=ReconciliationSeverity.INFO,
+    )
+    stable_object_key = models.CharField(max_length=255, blank=True)
+    netbox_object_key = models.CharField(max_length=255, blank=True)
+    source_object_key = models.CharField(max_length=255, blank=True)
+    roa_intent = models.ForeignKey(
+        to='ROAIntent',
+        on_delete=models.PROTECT,
+        related_name='irr_coordination_results',
+        blank=True,
+        null=True,
+    )
+    imported_route_object = models.ForeignKey(
+        to='ImportedIrrRouteObject',
+        on_delete=models.PROTECT,
+        related_name='coordination_results',
+        blank=True,
+        null=True,
+    )
+    imported_aut_num = models.ForeignKey(
+        to='ImportedIrrAutNum',
+        on_delete=models.PROTECT,
+        related_name='coordination_results',
+        blank=True,
+        null=True,
+    )
+    imported_maintainer = models.ForeignKey(
+        to='ImportedIrrMaintainer',
+        on_delete=models.PROTECT,
+        related_name='coordination_results',
+        blank=True,
+        null=True,
+    )
+    summary_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ('coordination_run', 'source', 'coordination_family', 'stable_object_key', 'name')
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return _plugin_get_action_url(type(self), kwargs={'pk': self.pk})
 
 
 class LifecycleHealthPolicy(NamedRpkiStandardModel):
