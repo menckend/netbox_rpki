@@ -1,0 +1,65 @@
+{% extends 'generic/_base.html' %}
+
+{% block title %}ASPA Reconciliation Run Summary{% endblock %}
+
+{% block content %}
+  <div class="row mt-4">
+    <div class="col col-md-12">
+      <div class="card border-primary mb-4">
+        <h2 class="card-header">ASPA Reconciliation Run Summary</h2>
+        <div class="card-body">
+          <p class="mb-0">Aggregate totals across all visible ASPA reconciliation runs.</p>
+        </div>
+      </div>
+
+      <div class="row g-3 mb-4">
+        <div class="col col-md-3">
+          <div class="border rounded p-3 h-100">
+            <div class="text-muted small text-uppercase">Total Runs</div>
+            <div class="fs-2 fw-semibold">{{ total_runs }}</div>
+          </div>
+        </div>
+        <div class="col col-md-3">
+          <div class="border rounded p-3 h-100">
+            <div class="text-muted small text-uppercase">Completed</div>
+            <div class="fs-2 fw-semibold">{{ completed_runs }}</div>
+          </div>
+        </div>
+        <div class="col col-md-3">
+          <div class="border rounded p-3 h-100">
+            <div class="text-muted small text-uppercase">Missing Intent</div>
+            <div class="fs-2 fw-semibold">{{ missing_count }}</div>
+          </div>
+        </div>
+        <div class="col col-md-3">
+          <div class="border rounded p-3 h-100">
+            <div class="text-muted small text-uppercase">Missing Provider</div>
+            <div class="fs-2 fw-semibold">{{ missing_provider_count }}</div>
+          </div>
+        </div>
+        <div class="col col-md-3">
+          <div class="border rounded p-3 h-100">
+            <div class="text-muted small text-uppercase">Extra Provider</div>
+            <div class="fs-2 fw-semibold">{{ extra_provider_count }}</div>
+          </div>
+        </div>
+        <div class="col col-md-3">
+          <div class="border rounded p-3 h-100">
+            <div class="text-muted small text-uppercase">Orphaned</div>
+            <div class="fs-2 fw-semibold">{{ orphaned_count }}</div>
+          </div>
+        </div>
+        <div class="col col-md-3">
+          <div class="border rounded p-3 h-100">
+            <div class="text-muted small text-uppercase">Stale</div>
+            <div class="fs-2 fw-semibold">{{ stale_count }}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="text-end">
+        <a href="{{ return_url }}" class="btn btn-outline-secondary">Back</a>
+      </div>
+    </div>
+  </div>
+{% endblock %}

@@ -94,8 +94,43 @@ def _serialize_state(subject_state: AspaSubjectState | None) -> dict:
     }
 
 
-def _serialize_target_state(customer_asn: int, provider_asns: tuple[int, ...]) -> dict:
+def _delegated_scope_summary_for_intent(intent) -> dict:
+    managed_relationship = getattr(intent, 'managed_relationship', None)
+    delegated_entity = getattr(intent, 'delegated_entity', None)
+    provider_account = getattr(managed_relationship, 'provider_account', None)
     return {
+        'ownership_scope': (
+            'managed_relationship'
+            if getattr(intent, 'managed_relationship_id', None) is not None
+            else 'delegated_entity'
+            if getattr(intent, 'delegated_entity_id', None) is not None
+            else 'organization'
+        ),
+        'delegated_entity_id': getattr(delegated_entity, 'pk', None),
+        'delegated_entity_name': getattr(delegated_entity, 'name', ''),
+        'managed_relationship_id': getattr(managed_relationship, 'pk', None),
+        'managed_relationship_name': getattr(managed_relationship, 'name', ''),
+        'provider_account_id': getattr(provider_account, 'pk', None),
+        'provider_account_name': getattr(provider_account, 'name', ''),
+    }
+
+
+def _delegated_scope_signature(summary: dict) -> tuple:
+    return (
+        summary.get('ownership_scope') or 'organization',
+        summary.get('delegated_entity_id'),
+        summary.get('managed_relationship_id'),
+    )
+
+
+def _serialize_target_state(
+    customer_asn: int,
+    provider_asns: tuple[int, ...],
+    *,
+    delegated_scope: dict | None = None,
+    delegated_scope_candidates: list[dict] | None = None,
+) -> dict:
+    payload = {
         'customer_asn': customer_asn,
         'customer_display': _customer_display(customer_asn),
         'provider_asns': list(provider_asns),
@@ -112,6 +147,11 @@ def _serialize_target_state(customer_asn: int, provider_asns: tuple[int, ...]) -
         'source_name': f'Desired ASPA for AS{customer_asn}',
         'stale': False,
     }
+    if delegated_scope:
+        payload['delegated_scope'] = delegated_scope
+    if delegated_scope_candidates:
+        payload['delegated_scope_candidates'] = delegated_scope_candidates
+    return payload
 
 
 def _serialize_provider_payload(customer_asn: int, provider_asns: tuple[int, ...]) -> dict:
@@ -123,12 +163,17 @@ def _serialize_provider_payload(customer_asn: int, provider_asns: tuple[int, ...
     }
 
 
-def _load_expected_provider_sets(reconciliation_run) -> dict[int, tuple[int, ...]]:
+def _load_expected_provider_sets(
+    reconciliation_run,
+) -> tuple[dict[int, tuple[int, ...]], dict[int, dict], dict[int, list[dict]], set[int]]:
     provider_sets: dict[int, set[int]] = defaultdict(set)
+    delegated_scope_by_customer: dict[int, dict] = {}
+    delegated_scope_candidates_by_customer: dict[int, list[dict]] = defaultdict(list)
+    conflicting_customers: set[int] = set()
     intents = (
         rpki_models.ASPAIntent.objects
         .filter(organization=reconciliation_run.organization)
-        .select_related('customer_as', 'provider_as')
+        .select_related('customer_as', 'provider_as', 'delegated_entity', 'managed_relationship__provider_account')
         .order_by('customer_as__asn', 'provider_as__asn', 'pk')
     )
     for intent in intents:
@@ -137,7 +182,25 @@ def _load_expected_provider_sets(reconciliation_run) -> dict[int, tuple[int, ...
         if customer_asn is None or provider_asn is None:
             continue
         provider_sets[customer_asn].add(provider_asn)
-    return {customer_asn: tuple(sorted(provider_asns)) for customer_asn, provider_asns in provider_sets.items()}
+        delegated_scope = _delegated_scope_summary_for_intent(intent)
+        existing = delegated_scope_by_customer.get(customer_asn)
+        if existing is None:
+            delegated_scope_by_customer[customer_asn] = delegated_scope
+            delegated_scope_candidates_by_customer[customer_asn].append(delegated_scope)
+        elif _delegated_scope_signature(existing) != _delegated_scope_signature(delegated_scope):
+            conflicting_customers.add(customer_asn)
+            candidate_signatures = {
+                _delegated_scope_signature(candidate)
+                for candidate in delegated_scope_candidates_by_customer[customer_asn]
+            }
+            if _delegated_scope_signature(delegated_scope) not in candidate_signatures:
+                delegated_scope_candidates_by_customer[customer_asn].append(delegated_scope)
+    return (
+        {customer_asn: tuple(sorted(provider_asns)) for customer_asn, provider_asns in provider_sets.items()},
+        delegated_scope_by_customer,
+        {customer_asn: list(candidates) for customer_asn, candidates in delegated_scope_candidates_by_customer.items()},
+        conflicting_customers,
+    )
 
 
 def _load_observed_states(reconciliation_run) -> dict[int, list[AspaSubjectState]]:
@@ -253,7 +316,12 @@ def create_aspa_change_plan(
         status=rpki_models.ASPAChangePlanStatus.DRAFT,
     )
 
-    expected_provider_sets = _load_expected_provider_sets(reconciliation_run)
+    (
+        expected_provider_sets,
+        delegated_scope_by_customer,
+        delegated_scope_candidates_by_customer,
+        conflicting_customers,
+    ) = _load_expected_provider_sets(reconciliation_run)
     observed_states = _load_observed_states(reconciliation_run)
 
     create_count = 0
@@ -263,6 +331,7 @@ def create_aspa_change_plan(
     provider_remove_count = 0
     plan_semantic_counts: Counter[str] = Counter()
     skipped_counts: Counter[str] = Counter()
+    delegated_scoped_item_count = 0
 
     for customer_asn in sorted(set(expected_provider_sets) | set(observed_states)):
         expected_provider_asns = expected_provider_sets.get(customer_asn, ())
@@ -270,8 +339,22 @@ def create_aspa_change_plan(
         observed_provider_asns = observed_state.provider_asns if observed_state is not None else ()
         expected_set = set(expected_provider_asns)
         observed_set = set(observed_provider_asns)
-        target_state_json = _serialize_target_state(customer_asn, expected_provider_asns) if expected_provider_asns else {}
+        delegated_scope = delegated_scope_by_customer.get(customer_asn)
+        delegated_scope_candidates = delegated_scope_candidates_by_customer.get(customer_asn, [])
+        target_state_json = (
+            _serialize_target_state(
+                customer_asn,
+                expected_provider_asns,
+                delegated_scope=delegated_scope,
+                delegated_scope_candidates=delegated_scope_candidates if len(delegated_scope_candidates) > 1 else None,
+            )
+            if expected_provider_asns else {}
+        )
         observed_state_json = _serialize_state(observed_state)
+
+        if customer_asn in conflicting_customers:
+            skipped_counts['ownership_scope_conflict'] += 1
+            continue
 
         if expected_provider_asns and observed_state is None:
             rpki_models.ASPAChangePlanItem.objects.create(
@@ -300,6 +383,8 @@ def create_aspa_change_plan(
                 reason='Active ASPA intent exists but no published ASPA was observed for this customer ASN.',
             )
             create_count += 1
+            if delegated_scope and delegated_scope.get('ownership_scope') != 'organization':
+                delegated_scoped_item_count += 1
             plan_semantic_counts[rpki_models.ASPAChangePlanItemSemantic.CREATE] += 1
             continue
 
@@ -375,6 +460,8 @@ def create_aspa_change_plan(
         )
         if anchor_semantic == rpki_models.ASPAChangePlanItemSemantic.REPLACE:
             replacement_count += 1
+        if delegated_scope and delegated_scope.get('ownership_scope') != 'organization':
+            delegated_scoped_item_count += 1
         plan_semantic_counts[anchor_semantic] += 1
 
         for provider_asn in added_provider_asns:
@@ -406,6 +493,8 @@ def create_aspa_change_plan(
                 reason=f'Provider AS{provider_asn} is required by intent but missing from the published ASPA.',
             )
             provider_add_count += 1
+            if delegated_scope and delegated_scope.get('ownership_scope') != 'organization':
+                delegated_scoped_item_count += 1
             plan_semantic_counts[rpki_models.ASPAChangePlanItemSemantic.ADD_PROVIDER] += 1
 
         for provider_asn in removed_provider_asns:
@@ -432,6 +521,8 @@ def create_aspa_change_plan(
                 reason=f'Provider AS{provider_asn} is present in the published ASPA but no longer required by intent.',
             )
             provider_remove_count += 1
+            if delegated_scope and delegated_scope.get('ownership_scope') != 'organization':
+                delegated_scoped_item_count += 1
             plan_semantic_counts[rpki_models.ASPAChangePlanItemSemantic.REMOVE_PROVIDER] += 1
 
     plan.summary_json = {
@@ -446,6 +537,9 @@ def create_aspa_change_plan(
         'comparison_scope': reconciliation_run.comparison_scope,
         'plan_semantic_counts': dict(plan_semantic_counts),
         'skipped_counts': dict(skipped_counts),
+        'delegated_scoped_item_count': delegated_scoped_item_count,
+        'ownership_scope_conflict_customer_count': len(conflicting_customers),
+        'ownership_scope_conflict_customer_asns': sorted(conflicting_customers),
     }
     plan.save(update_fields=('summary_json',))
     return plan

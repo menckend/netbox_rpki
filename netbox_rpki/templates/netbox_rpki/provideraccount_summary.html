@@ -1,0 +1,55 @@
+{% extends 'generic/_base.html' %}
+
+{% block title %}Provider Account Summary{% endblock %}
+
+{% block content %}
+  <div class="row mt-4">
+    <div class="col col-md-12">
+      <div class="card border-primary mb-4">
+        <h2 class="card-header">Provider Account Summary</h2>
+        <div class="card-body">
+          <p class="mb-3">
+            Aggregate lifecycle and sync health summary across all visible provider accounts
+            ({{ provider_account_count }} total).
+          </p>
+          <div class="mb-3">
+            <a href="{% url 'plugins:netbox_rpki:operations_export' %}?format=json"
+               class="btn btn-outline-primary btn-sm">Export JSON</a>
+            <a href="{% url 'plugins:netbox_rpki:operations_export' %}?format=csv"
+               class="btn btn-outline-secondary btn-sm">Export CSV</a>
+          </div>
+        </div>
+      </div>
+
+      {% if summary %}
+        <div class="row g-3 mb-4">
+          {% for account_summary in summary %}
+            <div class="col col-md-4">
+              <div class="card h-100">
+                <div class="card-header fw-semibold">{{ account_summary.name|default:'Unknown' }}</div>
+                <div class="card-body">
+                  <dl class="row mb-0 small">
+                    <dt class="col-sm-6">Org</dt>
+                    <dd class="col-sm-6">{{ account_summary.organization|default:'—' }}</dd>
+                    <dt class="col-sm-6">Provider Type</dt>
+                    <dd class="col-sm-6">{{ account_summary.provider_type|default:'—' }}</dd>
+                    <dt class="col-sm-6">Last Sync Status</dt>
+                    <dd class="col-sm-6">{{ account_summary.last_sync_status|default:'—' }}</dd>
+                    <dt class="col-sm-6">Health</dt>
+                    <dd class="col-sm-6">{{ account_summary.health|default:'—' }}</dd>
+                  </dl>
+                </div>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="alert alert-info" role="alert">No provider account summary data is available.</div>
+      {% endif %}
+
+      <div class="text-end">
+        <a href="{{ return_url }}" class="btn btn-outline-secondary">Back</a>
+      </div>
+    </div>
+  </div>
+{% endblock %}

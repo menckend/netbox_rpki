@@ -1,0 +1,68 @@
+{% extends 'generic/_base.html' %}
+
+{% block title %}Provider Snapshot Summary{% endblock %}
+
+{% block content %}
+  <div class="row mt-4">
+    <div class="col col-md-12">
+      <div class="card border-primary mb-4">
+        <h2 class="card-header">Provider Snapshot Summary</h2>
+        <div class="card-body">
+          <p class="mb-3">Aggregate status breakdown across all visible provider snapshots.</p>
+        </div>
+      </div>
+
+      <div class="row g-3 mb-4">
+        <div class="col col-md-3">
+          <div class="border rounded p-3 h-100">
+            <div class="text-muted small text-uppercase">Total Snapshots</div>
+            <div class="fs-2 fw-semibold">{{ total_snapshots }}</div>
+          </div>
+        </div>
+        <div class="col col-md-3">
+          <div class="border rounded p-3 h-100">
+            <div class="text-muted small text-uppercase">With Diff</div>
+            <div class="fs-2 fw-semibold">{{ with_diff_count }}</div>
+            <div class="text-muted">Snapshots compared against a prior baseline</div>
+          </div>
+        </div>
+        <div class="col col-md-3">
+          <div class="border rounded p-3 h-100">
+            <div class="text-muted small text-uppercase">Latest Completed At</div>
+            <div class="fs-5 fw-semibold mt-1">{{ latest_completed_at|default:'—' }}</div>
+          </div>
+        </div>
+      </div>
+
+      {% if by_status %}
+        <div class="card border-secondary mb-4">
+          <h3 class="card-header">By Status</h3>
+          <div class="card-body p-0">
+            <div class="table-responsive">
+              <table class="table table-hover mb-0">
+                <thead>
+                  <tr>
+                    <th>Status</th>
+                    <th>Count</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for status, count in by_status.items %}
+                    <tr>
+                      <td>{{ status }}</td>
+                      <td>{{ count }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      {% endif %}
+
+      <div class="text-end">
+        <a href="{{ return_url }}" class="btn btn-outline-secondary">Back</a>
+      </div>
+    </div>
+  </div>
+{% endblock %}

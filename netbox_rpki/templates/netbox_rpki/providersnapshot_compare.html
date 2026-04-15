@@ -1,0 +1,60 @@
+{% extends 'generic/_base.html' %}
+
+{% block title %}Compare {{ snapshot }}{% endblock %}
+
+{% block content %}
+  <div class="row mt-5">
+    <div class="col col-md-8 offset-md-2">
+      <form action="" method="post" class="form">
+        {% csrf_token %}
+        {% for field in form.hidden_fields %}
+          {{ field }}
+        {% endfor %}
+        <div class="card border-primary">
+          <h2 class="card-header">Compare Provider Snapshot</h2>
+          <div class="card-body">
+            <p>
+              Create a provider snapshot diff for <strong>{{ snapshot }}</strong>.
+              Leave the base snapshot blank to automatically compare against the most recent preceding
+              completed snapshot.
+            </p>
+            <dl class="row mb-3">
+              <dt class="col-sm-4">Provider Account</dt>
+              <dd class="col-sm-8">{{ snapshot.provider_account }}</dd>
+              <dt class="col-sm-4">Status</dt>
+              <dd class="col-sm-8">{{ snapshot.status }}</dd>
+              <dt class="col-sm-4">Fetched At</dt>
+              <dd class="col-sm-8">{{ snapshot.fetched_at|default:'—' }}</dd>
+              <dt class="col-sm-4">Completed At</dt>
+              <dd class="col-sm-8">{{ snapshot.completed_at|default:'—' }}</dd>
+            </dl>
+
+            {% if error_text %}
+              <div class="alert alert-danger" role="alert">{{ error_text }}</div>
+            {% endif %}
+
+            {% for error in form.non_field_errors %}
+              <div class="alert alert-danger" role="alert">{{ error }}</div>
+            {% endfor %}
+            {% for field in form.visible_fields %}
+              <div class="mb-3">
+                <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                {{ field }}
+                {% if field.help_text %}
+                  <div class="form-text">{{ field.help_text }}</div>
+                {% endif %}
+                {% for error in field.errors %}
+                  <div class="text-danger small">{{ error }}</div>
+                {% endfor %}
+              </div>
+            {% endfor %}
+          </div>
+          <div class="card-footer text-end">
+            <a href="{{ return_url }}" class="btn btn-outline-secondary">Cancel</a>
+            <button type="submit" class="btn btn-primary">Compare</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endblock %}

@@ -864,3 +864,28 @@ class BulkIntentRunActionForm(ConfirmationForm):
         ):
             raise ValidationError({'provider_snapshot': 'Provider snapshot must belong to the selected organization.'})
         return cleaned_data
+
+
+class ProviderSnapshotCompareForm(forms.Form):
+    base_snapshot = DynamicModelChoiceField(
+        queryset=netbox_rpki.models.ProviderSnapshot.objects.none(),
+        required=False,
+        label='Base Snapshot',
+        help_text=(
+            'Leave blank to automatically compare against the most recent preceding '
+            'completed snapshot for this provider account.'
+        ),
+    )
+
+    fieldsets = (
+        FieldSet('base_snapshot', name='Compare Options'),
+    )
+
+    def __init__(self, *args, provider_account=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if provider_account is not None:
+            self.fields['base_snapshot'].queryset = (
+                netbox_rpki.models.ProviderSnapshot.objects
+                .filter(provider_account=provider_account)
+                .order_by('-completed_at', 'name')
+            )

@@ -1,0 +1,73 @@
+{% extends 'generic/_base.html' %}
+
+{% block title %}ASPA Change Plan Summary{% endblock %}
+
+{% block content %}
+  <div class="row mt-4">
+    <div class="col col-md-12">
+      <div class="card border-primary mb-4">
+        <h2 class="card-header">ASPA Change Plan Summary</h2>
+        <div class="card-body">
+          <p class="mb-0">Aggregate totals across all visible ASPA change plans.</p>
+        </div>
+      </div>
+
+      <div class="row g-3 mb-4">
+        <div class="col col-md-3">
+          <div class="border rounded p-3 h-100">
+            <div class="text-muted small text-uppercase">Total Plans</div>
+            <div class="fs-2 fw-semibold">{{ total_plans }}</div>
+          </div>
+        </div>
+        <div class="col col-md-3">
+          <div class="border rounded p-3 h-100">
+            <div class="text-muted small text-uppercase">Provider-Backed</div>
+            <div class="fs-2 fw-semibold">{{ provider_backed_count }}</div>
+          </div>
+        </div>
+        <div class="col col-md-3">
+          <div class="border rounded p-3 h-100">
+            <div class="text-muted small text-uppercase">Replacements Total</div>
+            <div class="fs-2 fw-semibold">{{ replacement_count_total }}</div>
+          </div>
+        </div>
+        <div class="col col-md-3">
+          <div class="border rounded p-3 h-100">
+            <div class="text-muted small text-uppercase">Provider Additions Total</div>
+            <div class="fs-2 fw-semibold">{{ provider_add_count_total }}</div>
+          </div>
+        </div>
+        <div class="col col-md-3">
+          <div class="border rounded p-3 h-100">
+            <div class="text-muted small text-uppercase">Provider Removals Total</div>
+            <div class="fs-2 fw-semibold">{{ provider_remove_count_total }}</div>
+          </div>
+        </div>
+      </div>
+
+      {% if by_status %}
+        <div class="card border-secondary mb-4">
+          <h3 class="card-header">By Status</h3>
+          <div class="card-body p-0">
+            <div class="table-responsive">
+              <table class="table table-hover mb-0">
+                <thead>
+                  <tr><th>Status</th><th>Count</th></tr>
+                </thead>
+                <tbody>
+                  {% for status, count in by_status.items %}
+                    <tr><td>{{ status }}</td><td>{{ count }}</td></tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      {% endif %}
+
+      <div class="text-end">
+        <a href="{{ return_url }}" class="btn btn-outline-secondary">Back</a>
+      </div>
+    </div>
+  </div>
+{% endblock %}

@@ -38,6 +38,27 @@ def build_object_urlpatterns(spec):
                 name='provideraccount_export_timeline',
             )
         )
+        urlpatterns.append(
+            path(
+                f'{path_prefix}/<int:pk>/timeline/',
+                views.ProviderAccountTimelineView.as_view(),
+                name='provideraccount_timeline',
+            )
+        )
+        urlpatterns.append(
+            path(
+                f'{path_prefix}/<int:pk>/publication-diff-summary/',
+                views.ProviderAccountPublicationDiffSummaryView.as_view(),
+                name='provideraccount_publication_diff_summary',
+            )
+        )
+        urlpatterns.append(
+            path(
+                f'{path_prefix}/summary/',
+                views.ProviderAccountSummaryView.as_view(),
+                name='provideraccount_summary',
+            )
+        )
     if spec.registry_key == 'organization':
         urlpatterns.append(
             path(
@@ -127,6 +148,13 @@ def build_object_urlpatterns(spec):
                 ),
             )
         )
+        urlpatterns.append(
+            path(
+                f'{path_prefix}/summary/',
+                views.ROAChangePlanSummaryView.as_view(),
+                name='roachangeplan_summary',
+            )
+        )
     if spec.registry_key == 'roalintfinding':
         urlpatterns.append(
             path(
@@ -151,12 +179,26 @@ def build_object_urlpatterns(spec):
                 name='aspareconciliationrun_create_plan',
             )
         )
+        urlpatterns.append(
+            path(
+                f'{path_prefix}/summary/',
+                views.ASPAReconciliationRunSummaryView.as_view(),
+                name='aspareconciliationrun_summary',
+            )
+        )
     if spec.registry_key == 'roareconciliationrun':
         urlpatterns.append(
             path(
                 f'{path_prefix}/<int:pk>/create-plan/',
                 views.ROAReconciliationRunCreatePlanView.as_view(),
                 name='roareconciliationrun_create_plan',
+            )
+        )
+        urlpatterns.append(
+            path(
+                f'{path_prefix}/summary/',
+                views.ROAReconciliationRunSummaryView.as_view(),
+                name='roareconciliationrun_summary',
             )
         )
     if spec.registry_key == 'bulkintentrun':
@@ -199,6 +241,13 @@ def build_object_urlpatterns(spec):
                 ),
             )
         )
+        urlpatterns.append(
+            path(
+                f'{path_prefix}/summary/',
+                views.ASPAChangePlanSummaryView.as_view(),
+                name='aspachangeplan_summary',
+            )
+        )
     if spec.registry_key == 'roachangeplanrollbackbundle':
         urlpatterns.extend(
             (
@@ -227,6 +276,37 @@ def build_object_urlpatterns(spec):
                     views.ASPAChangePlanRollbackBundleApplyView.as_view(),
                     name='aspachangeplanrollbackbundle_apply',
                 ),
+            )
+        )
+    if spec.registry_key == 'providersnapshot':
+        urlpatterns.append(
+            path(
+                f'{path_prefix}/<int:pk>/compare/',
+                views.ProviderSnapshotCompareView.as_view(),
+                name='providersnapshot_compare',
+            )
+        )
+        urlpatterns.append(
+            path(
+                f'{path_prefix}/summary/',
+                views.ProviderSnapshotSummaryView.as_view(),
+                name='providersnapshot_summary',
+            )
+        )
+    if spec.registry_key == 'validatorinstance':
+        urlpatterns.append(
+            path(
+                f'{path_prefix}/<int:pk>/history-summary/',
+                views.ValidatorInstanceHistorySummaryView.as_view(),
+                name='validatorinstance_history_summary',
+            )
+        )
+    if spec.registry_key == 'telemetrysource':
+        urlpatterns.append(
+            path(
+                f'{path_prefix}/<int:pk>/history-summary/',
+                views.TelemetrySourceHistorySummaryView.as_view(),
+                name='telemetrysource_history_summary',
             )
         )
     if spec.view.edit_class_name is not None:

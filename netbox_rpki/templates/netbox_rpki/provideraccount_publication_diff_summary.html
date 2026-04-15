@@ -1,0 +1,65 @@
+{% extends 'generic/_base.html' %}
+
+{% block title %}Publication Diff Summary — {{ provider_account }}{% endblock %}
+
+{% block content %}
+  <div class="row mt-4">
+    <div class="col col-md-12">
+      <div class="card border-primary mb-3">
+        <h2 class="card-header">Publication Diff Summary</h2>
+        <div class="card-body">
+          <p class="mb-3">
+            Cross-snapshot publication diff history for <strong>{{ provider_account }}</strong>.
+            Each entry reflects the delta between two consecutive provider snapshots.
+          </p>
+          <dl class="row mb-0">
+            <dt class="col-sm-3">Provider Type</dt>
+            <dd class="col-sm-9">{{ provider_account.provider_type }}</dd>
+            <dt class="col-sm-3">Organization</dt>
+            <dd class="col-sm-9">{{ provider_account.organization }}</dd>
+          </dl>
+        </div>
+      </div>
+
+      {% if diff_summary %}
+        <div class="card border-secondary">
+          <h3 class="card-header">Diff Entries</h3>
+          <div class="card-body p-0">
+            <div class="table-responsive">
+              <table class="table table-hover mb-0">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Status</th>
+                    <th>Compared At</th>
+                    <th>Add</th>
+                    <th>Remove</th>
+                    <th>Change</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for entry in diff_summary %}
+                    <tr>
+                      <td>{{ entry.name|default:'—' }}</td>
+                      <td>{{ entry.status|default:'—' }}</td>
+                      <td>{{ entry.compared_at|default:'—' }}</td>
+                      <td>{{ entry.add_count|default:0 }}</td>
+                      <td>{{ entry.remove_count|default:0 }}</td>
+                      <td>{{ entry.change_count|default:0 }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      {% else %}
+        <div class="alert alert-info" role="alert">No publication diff entries are visible for this provider account.</div>
+      {% endif %}
+
+      <div class="mt-3 text-end">
+        <a href="{{ return_url }}" class="btn btn-outline-secondary">Back</a>
+      </div>
+    </div>
+  </div>
+{% endblock %}

@@ -106,6 +106,35 @@ def _intent_is_active(intent) -> bool:
     return bool(value)
 
 
+def _intent_delegated_scope(intent) -> dict:
+    managed_relationship = _field_value(intent, 'managed_relationship')
+    delegated_entity = _field_value(intent, 'delegated_entity')
+    provider_account = _field_value(managed_relationship, 'provider_account')
+    return {
+        'ownership_scope': (
+            'managed_relationship'
+            if _field_value(intent, 'managed_relationship_id') is not None
+            else 'delegated_entity'
+            if _field_value(intent, 'delegated_entity_id') is not None
+            else 'organization'
+        ),
+        'delegated_entity_id': _field_value(delegated_entity, 'pk'),
+        'delegated_entity_name': _field_value(delegated_entity, 'name', default=''),
+        'managed_relationship_id': _field_value(managed_relationship, 'pk'),
+        'managed_relationship_name': _field_value(managed_relationship, 'name', default=''),
+        'provider_account_id': _field_value(provider_account, 'pk'),
+        'provider_account_name': _field_value(provider_account, 'name', default=''),
+    }
+
+
+def _delegated_scope_signature(summary: dict) -> tuple:
+    return (
+        summary.get('ownership_scope') or 'organization',
+        summary.get('delegated_entity_id'),
+        summary.get('managed_relationship_id'),
+    )
+
+
 def _provider_rows(aspa) -> list[object]:
     manager = getattr(aspa, 'provider_authorizations', None)
     if manager is None:
@@ -173,7 +202,12 @@ def _intent_queryset(intent_profile):
     if organization is None:
         raise ASPAReconciliationExecutionError('ASPA reconciliation requires an organization context.')
 
-    queryset = intent_model.objects.filter(organization=organization)
+    queryset = intent_model.objects.filter(organization=organization).select_related(
+        'customer_as',
+        'provider_as',
+        'delegated_entity',
+        'managed_relationship__provider_account',
+    )
     if 'intent_profile' in _model_field_names('ASPAIntent'):
         queryset = queryset.filter(intent_profile=intent_profile)
     if 'is_active' in _model_field_names('ASPAIntent'):
@@ -412,6 +446,8 @@ def reconcile_aspa_intents(
     published_records_seen: set[str] = set()
     intent_records = list(_intent_queryset(intent_profile).order_by('pk'))
     intent_provider_values_by_customer: dict[int | None, set[int]] = defaultdict(set)
+    delegated_scope_counts: Counter[str] = Counter()
+    customer_scope_signatures: dict[int | None, set[tuple]] = defaultdict(set)
     for intent in intent_records:
         customer_value = _intent_customer_asn_value(intent)
         provider_value = _intent_provider_asn_value(intent)
@@ -420,6 +456,15 @@ def reconcile_aspa_intents(
                 'ASPA intents must resolve both customer ASN and provider ASN values.'
             )
         intent_provider_values_by_customer[customer_value].add(provider_value)
+        delegated_scope = _intent_delegated_scope(intent)
+        delegated_scope_counts[delegated_scope['ownership_scope']] += 1
+        customer_scope_signatures[customer_value].add(_delegated_scope_signature(delegated_scope))
+
+    ownership_scope_conflict_customer_asns = sorted(
+        customer_value
+        for customer_value, signatures in customer_scope_signatures.items()
+        if customer_value is not None and len(signatures) > 1
+    )
 
     for intent in intent_records:
         if not _intent_is_active(intent):
@@ -430,6 +475,7 @@ def reconcile_aspa_intents(
         customer_candidates = published_by_customer.get(customer_value, [])
         result_type, severity, best_candidate = _intent_result_type_and_severity(customer_candidates, provider_value)
         intent_result_counts[result_type] += 1
+        delegated_scope = _intent_delegated_scope(intent)
         details_json = {
             'comparison_scope': comparison_scope,
             'customer_asn_value': customer_value,
@@ -442,6 +488,8 @@ def reconcile_aspa_intents(
             'best_published_source': getattr(best_candidate, 'source_key', None),
             'best_published_provider_values': list(getattr(best_candidate, 'provider_values', ())),
             'best_published_stale': getattr(best_candidate, 'stale', None),
+            'delegated_scope': delegated_scope,
+            'ownership_scope_conflict_for_customer': customer_value in ownership_scope_conflict_customer_asns,
         }
         result_kwargs = {
             'name': f'{getattr(intent, "name", "ASPA Intent")} Result',
@@ -482,6 +530,11 @@ def reconcile_aspa_intents(
                     'customer_asn_value': customer_value,
                     'source_key': published_record.source_key,
                     'stale': published_record.stale,
+                    'matched_intent_delegated_scopes': [
+                        _intent_delegated_scope(intent)
+                        for intent in intent_records
+                        if _intent_is_active(intent) and _intent_customer_asn_value(intent) == customer_value
+                    ],
                     **details_json,
                 },
                 summary_json={
@@ -489,6 +542,11 @@ def reconcile_aspa_intents(
                     'customer_asn_value': customer_value,
                     'source_key': published_record.source_key,
                     'stale': published_record.stale,
+                    'matched_intent_delegated_scopes': [
+                        _intent_delegated_scope(intent)
+                        for intent in intent_records
+                        if _intent_is_active(intent) and _intent_customer_asn_value(intent) == customer_value
+                    ],
                     **details_json,
                 },
                 computed_at=now,
@@ -507,6 +565,9 @@ def reconcile_aspa_intents(
             'intent_count': active_intents,
             'published_aspa_count': sum(len(rows) for rows in published_by_customer.values()),
             'published_source_count': len(published_records_seen),
+            'delegated_scope_counts': dict(delegated_scope_counts),
+            'ownership_scope_conflict_customer_asns': ownership_scope_conflict_customer_asns,
+            'ownership_scope_conflict_customer_count': len(ownership_scope_conflict_customer_asns),
         },
         'summary_json': {
             'comparison_scope': comparison_scope,
@@ -516,6 +577,9 @@ def reconcile_aspa_intents(
             'intent_count': active_intents,
             'published_aspa_count': sum(len(rows) for rows in published_by_customer.values()),
             'published_source_count': len(published_records_seen),
+            'delegated_scope_counts': dict(delegated_scope_counts),
+            'ownership_scope_conflict_customer_asns': ownership_scope_conflict_customer_asns,
+            'ownership_scope_conflict_customer_count': len(ownership_scope_conflict_customer_asns),
         },
     }
     for field_name, value in run_kwargs.items():
