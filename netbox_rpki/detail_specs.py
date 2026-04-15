@@ -260,6 +260,26 @@ def get_bulk_run_summary(bulk_run: models.BulkIntentRun) -> str | None:
     return get_pretty_json(bulk_run.summary_json)
 
 
+def get_irr_run_scope_summary(run: models.IrrCoordinationRun) -> str | None:
+    return get_pretty_json(run.scope_summary_json)
+
+
+def get_irr_run_summary(run: models.IrrCoordinationRun) -> str | None:
+    return get_pretty_json(run.summary_json)
+
+
+def get_irr_plan_summary(plan: models.IrrChangePlan) -> str | None:
+    return get_pretty_json(plan.summary_json)
+
+
+def get_irr_execution_request_summary(execution: models.IrrWriteExecution) -> str | None:
+    return get_pretty_json(execution.request_payload_json)
+
+
+def get_irr_execution_response_summary(execution: models.IrrWriteExecution) -> str | None:
+    return get_pretty_json(execution.response_payload_json)
+
+
 def get_bulk_scope_result_summary(scope_result: models.BulkIntentRunScopeResult) -> str | None:
     return get_pretty_json(scope_result.summary_json)
 
@@ -1944,6 +1964,102 @@ ROA_CHANGE_PLAN_ITEM_DETAIL_SPEC = DetailSpec(
 )
 
 
+IRR_COORDINATION_RUN_DETAIL_SPEC = DetailSpec(
+    model=models.IrrCoordinationRun,
+    list_url_name='plugins:netbox_rpki:irr_coordination_run_list',
+    breadcrumb_label='IRR Coordination Runs',
+    card_title='IRR Coordination Run',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Organization', value=lambda obj: obj.organization, kind='link'),
+        DetailFieldSpec(label='Status', value=lambda obj: obj.status),
+        DetailFieldSpec(label='Started At', value=lambda obj: obj.started_at, empty_text='None'),
+        DetailFieldSpec(label='Completed At', value=lambda obj: obj.completed_at, empty_text='None'),
+        DetailFieldSpec(label='Compared Sources', value=get_related_count('compared_sources')),
+        DetailFieldSpec(label='Change Plans', value=get_related_count('change_plans')),
+        DetailFieldSpec(label='Results', value=get_related_count('results')),
+        DetailFieldSpec(label='Scope Summary', value=get_irr_run_scope_summary, kind='code', empty_text='None'),
+        DetailFieldSpec(label='Run Summary', value=get_irr_run_summary, kind='code', empty_text='None'),
+        DetailFieldSpec(label='Error', value=lambda obj: obj.error_text or None, empty_text='None'),
+    ),
+    bottom_tables=(
+        DetailTableSpec(
+            title='IRR Coordination Results',
+            table_class_name='IrrCoordinationResultTable',
+            queryset=lambda obj: obj.results.all(),
+        ),
+        DetailTableSpec(
+            title='IRR Change Plans',
+            table_class_name='IrrChangePlanTable',
+            queryset=lambda obj: obj.change_plans.all(),
+        ),
+    ),
+)
+
+
+IRR_CHANGE_PLAN_DETAIL_SPEC = DetailSpec(
+    model=models.IrrChangePlan,
+    list_url_name='plugins:netbox_rpki:irr_change_plan_list',
+    breadcrumb_label='IRR Change Plans',
+    card_title='IRR Change Plan',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Organization', value=lambda obj: obj.organization, kind='link'),
+        DetailFieldSpec(label='Coordination Run', value=lambda obj: obj.coordination_run, kind='link'),
+        DetailFieldSpec(label='Source', value=lambda obj: obj.source, kind='link'),
+        DetailFieldSpec(label='Snapshot', value=lambda obj: obj.snapshot, kind='link', empty_text='None'),
+        DetailFieldSpec(label='Status', value=lambda obj: obj.status),
+        DetailFieldSpec(label='Write Support Mode', value=lambda obj: obj.write_support_mode),
+        DetailFieldSpec(label='Ticket Reference', value=lambda obj: obj.ticket_reference or None, empty_text='None'),
+        DetailFieldSpec(label='Change Reference', value=lambda obj: obj.change_reference or None, empty_text='None'),
+        DetailFieldSpec(label='Maintenance Window Start', value=lambda obj: obj.maintenance_window_start, empty_text='None'),
+        DetailFieldSpec(label='Maintenance Window End', value=lambda obj: obj.maintenance_window_end, empty_text='None'),
+        DetailFieldSpec(label='Approved At', value=lambda obj: obj.approved_at, empty_text='None'),
+        DetailFieldSpec(label='Approved By', value=lambda obj: obj.approved_by or None, empty_text='None'),
+        DetailFieldSpec(label='Execution Requested By', value=lambda obj: obj.execution_requested_by or None, empty_text='None'),
+        DetailFieldSpec(label='Execution Started At', value=lambda obj: obj.execution_started_at, empty_text='None'),
+        DetailFieldSpec(label='Completed At', value=lambda obj: obj.completed_at, empty_text='None'),
+        DetailFieldSpec(label='Failed At', value=lambda obj: obj.failed_at, empty_text='None'),
+        DetailFieldSpec(label='Plan Summary', value=get_irr_plan_summary, kind='code', empty_text='None'),
+    ),
+    bottom_tables=(
+        DetailTableSpec(
+            title='IRR Change Plan Items',
+            table_class_name='IrrChangePlanItemTable',
+            queryset=lambda obj: obj.items.all(),
+        ),
+        DetailTableSpec(
+            title='IRR Write Executions',
+            table_class_name='IrrWriteExecutionTable',
+            queryset=lambda obj: obj.write_executions.all(),
+        ),
+    ),
+)
+
+
+IRR_WRITE_EXECUTION_DETAIL_SPEC = DetailSpec(
+    model=models.IrrWriteExecution,
+    list_url_name='plugins:netbox_rpki:irr_write_execution_list',
+    breadcrumb_label='IRR Write Executions',
+    card_title='IRR Write Execution',
+    fields=(
+        DetailFieldSpec(label='Name', value=lambda obj: obj.name),
+        DetailFieldSpec(label='Organization', value=lambda obj: obj.organization, kind='link'),
+        DetailFieldSpec(label='Source', value=lambda obj: obj.source, kind='link'),
+        DetailFieldSpec(label='Change Plan', value=lambda obj: obj.change_plan, kind='link'),
+        DetailFieldSpec(label='Execution Mode', value=lambda obj: obj.execution_mode),
+        DetailFieldSpec(label='Status', value=lambda obj: obj.status),
+        DetailFieldSpec(label='Requested By', value=lambda obj: obj.requested_by or None, empty_text='None'),
+        DetailFieldSpec(label='Started At', value=lambda obj: obj.started_at, empty_text='None'),
+        DetailFieldSpec(label='Completed At', value=lambda obj: obj.completed_at, empty_text='None'),
+        DetailFieldSpec(label='Item Count', value=lambda obj: obj.item_count),
+        DetailFieldSpec(label='Request Payload', value=get_irr_execution_request_summary, kind='code', empty_text='None'),
+        DetailFieldSpec(label='Response Payload', value=get_irr_execution_response_summary, kind='code', empty_text='None'),
+        DetailFieldSpec(label='Error', value=lambda obj: obj.error or None, empty_text='None'),
+    ),
+)
+
+
 ASPA_CHANGE_PLAN_ITEM_DETAIL_SPEC = DetailSpec(
     model=models.ASPAChangePlanItem,
     list_url_name='plugins:netbox_rpki:aspachangeplanitem_list',
@@ -2878,8 +2994,10 @@ DETAIL_SPEC_BY_MODEL = {
     models.ASPAIntentResult: ASPA_INTENT_RESULT_DETAIL_SPEC,
     models.PublishedASPAResult: PUBLISHED_ASPA_RESULT_DETAIL_SPEC,
     models.ROAReconciliationRun: ROA_RECONCILIATION_RUN_DETAIL_SPEC,
+    models.IrrCoordinationRun: IRR_COORDINATION_RUN_DETAIL_SPEC,
     models.ROALintRun: ROA_LINT_RUN_DETAIL_SPEC,
     models.ROAChangePlan: ROA_CHANGE_PLAN_DETAIL_SPEC,
+    models.IrrChangePlan: IRR_CHANGE_PLAN_DETAIL_SPEC,
     models.ASPAChangePlan: ASPA_CHANGE_PLAN_DETAIL_SPEC,
     models.ROAChangePlanRollbackBundle: ROA_CHANGE_PLAN_ROLLBACK_BUNDLE_DETAIL_SPEC,
     models.ASPAChangePlanRollbackBundle: ASPA_CHANGE_PLAN_ROLLBACK_BUNDLE_DETAIL_SPEC,
@@ -2895,4 +3013,5 @@ DETAIL_SPEC_BY_MODEL = {
     models.ROAValidationSimulationRun: ROA_VALIDATION_SIMULATION_RUN_DETAIL_SPEC,
     models.ROAValidationSimulationResult: ROA_VALIDATION_SIMULATION_RESULT_DETAIL_SPEC,
     models.ProviderWriteExecution: PROVIDER_WRITE_EXECUTION_DETAIL_SPEC,
+    models.IrrWriteExecution: IRR_WRITE_EXECUTION_DETAIL_SPEC,
 }

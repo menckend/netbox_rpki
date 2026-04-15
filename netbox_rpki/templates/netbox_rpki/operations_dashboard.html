@@ -75,6 +75,34 @@
             </div>
             <div class="col col-md-3">
               <div class="border rounded p-3 h-100">
+                <div class="text-muted small text-uppercase">IRR Sources Requiring Attention</div>
+                <div class="fs-2 fw-semibold">{{ irr_sources_requiring_attention|length }}</div>
+                <div class="text-muted">Failed, stale, or never-synced IRR sources</div>
+              </div>
+            </div>
+            <div class="col col-md-3">
+              <div class="border rounded p-3 h-100">
+                <div class="text-muted small text-uppercase">IRR Coordination Runs Requiring Attention</div>
+                <div class="fs-2 fw-semibold">{{ irr_coordination_attention_runs|length }}</div>
+                <div class="text-muted">Cross-source conflicts, stale imports, or undraftable sources</div>
+              </div>
+            </div>
+            <div class="col col-md-3">
+              <div class="border rounded p-3 h-100">
+                <div class="text-muted small text-uppercase">IRR Change Plans Requiring Attention</div>
+                <div class="fs-2 fw-semibold">{{ irr_change_plans_requiring_attention|length }}</div>
+                <div class="text-muted">Capability warnings, blocked items, or failed executions</div>
+              </div>
+            </div>
+            <div class="col col-md-3">
+              <div class="border rounded p-3 h-100">
+                <div class="text-muted small text-uppercase">IRR Write Failures</div>
+                <div class="fs-2 fw-semibold">{{ irr_write_failures|length }}</div>
+                <div class="text-muted">Recent failed or partial IRR write executions</div>
+              </div>
+            </div>
+            <div class="col col-md-3">
+              <div class="border rounded p-3 h-100">
                 <div class="text-muted small text-uppercase">ROAs Nearing Expiry</div>
                 <div class="fs-2 fw-semibold">{{ expiring_roas|length }}</div>
                 <div class="text-muted">Sorted by earliest valid-to date under the effective lifecycle policy</div>
@@ -89,6 +117,182 @@
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row mb-4">
+    <div class="col col-md-12">
+      <div class="card">
+        <h5 class="card-header">IRR Sources Requiring Attention</h5>
+        {% if irr_sources_requiring_attention %}
+          <div class="card-body table-responsive">
+            <table class="table table-hover align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Organization</th>
+                  <th>Sync Health</th>
+                  <th>Freshness</th>
+                  <th>Write Support</th>
+                  <th>Latest Snapshot</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in irr_sources_requiring_attention %}
+                  <tr>
+                    <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
+                    <td><a href="{{ item.object.organization.get_absolute_url }}">{{ item.object.organization }}</a></td>
+                    <td>{{ item.sync_health_display }}</td>
+                    <td>{{ item.freshness_text }}</td>
+                    <td>{{ item.write_support_mode }}</td>
+                    <td>
+                      {% if item.latest_snapshot %}
+                        <a href="{{ item.latest_snapshot_url }}">{{ item.latest_snapshot.name }}</a>
+                      {% else %}
+                        <span class="text-muted">None</span>
+                      {% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="card-body text-muted">No IRR sources currently require sync attention.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="row mb-4">
+    <div class="col col-md-12">
+      <div class="card">
+        <h5 class="card-header">IRR Coordination Runs Requiring Attention</h5>
+        {% if irr_coordination_attention_runs %}
+          <div class="card-body table-responsive">
+            <table class="table table-hover align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Organization</th>
+                  <th>Status</th>
+                  <th>Cross-Source Conflicts</th>
+                  <th>Stale Sources</th>
+                  <th>Undraftable Sources</th>
+                  <th>Draftable Sources</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in irr_coordination_attention_runs %}
+                  <tr>
+                    <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
+                    <td><a href="{{ item.object.organization.get_absolute_url }}">{{ item.object.organization }}</a></td>
+                    <td>{{ item.object.status }}</td>
+                    <td>{{ item.cross_source_conflict_count }}</td>
+                    <td>{{ item.stale_source_count }}</td>
+                    <td>{{ item.non_draftable_source_count }}</td>
+                    <td>{{ item.draftable_source_count }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="card-body text-muted">No IRR coordination runs currently require attention.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="row mb-4">
+    <div class="col col-md-12">
+      <div class="card">
+        <h5 class="card-header">IRR Change Plans Requiring Attention</h5>
+        {% if irr_change_plans_requiring_attention %}
+          <div class="card-body table-responsive">
+            <table class="table table-hover align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Organization</th>
+                  <th>Source</th>
+                  <th>Status</th>
+                  <th>Blocked Items</th>
+                  <th>Capability Warnings</th>
+                  <th>Latest Execution</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in irr_change_plans_requiring_attention %}
+                  <tr>
+                    <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
+                    <td><a href="{{ item.object.organization.get_absolute_url }}">{{ item.object.organization }}</a></td>
+                    <td><a href="{{ item.object.source.get_absolute_url }}">{{ item.object.source.name }}</a></td>
+                    <td>{{ item.object.status }}</td>
+                    <td>{{ item.noop_count }}</td>
+                    <td>
+                      {% if item.capability_warnings %}
+                        {{ item.capability_warnings|join:', ' }}
+                      {% else %}
+                        <span class="text-muted">None</span>
+                      {% endif %}
+                    </td>
+                    <td>
+                      {% if item.latest_execution.id %}
+                        {{ item.latest_execution.mode }} / {{ item.latest_execution.status }}
+                      {% else %}
+                        <span class="text-muted">None</span>
+                      {% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="card-body text-muted">No IRR change plans currently require attention.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="row mb-4">
+    <div class="col col-md-12">
+      <div class="card">
+        <h5 class="card-header">Recent IRR Write Failures</h5>
+        {% if irr_write_failures %}
+          <div class="card-body table-responsive">
+            <table class="table table-hover align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Organization</th>
+                  <th>Source</th>
+                  <th>Change Plan</th>
+                  <th>Mode</th>
+                  <th>Status</th>
+                  <th>Error</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for execution in irr_write_failures %}
+                  <tr>
+                    <td><a href="{{ execution.get_absolute_url }}">{{ execution.name }}</a></td>
+                    <td><a href="{{ execution.organization.get_absolute_url }}">{{ execution.organization }}</a></td>
+                    <td><a href="{{ execution.source.get_absolute_url }}">{{ execution.source.name }}</a></td>
+                    <td><a href="{{ execution.change_plan.get_absolute_url }}">{{ execution.change_plan.name }}</a></td>
+                    <td>{{ execution.execution_mode }}</td>
+                    <td>{{ execution.status }}</td>
+                    <td>{{ execution.error|default:'-' }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="card-body text-muted">No recent IRR write failures recorded.</div>
+        {% endif %}
       </div>
     </div>
   </div>

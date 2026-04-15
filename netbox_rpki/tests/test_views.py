@@ -36,6 +36,11 @@ from netbox_rpki.tests.utils import (
     create_test_certificate_revocation_list,
     create_test_end_entity_certificate,
     create_test_imported_roa_authorization,
+    create_test_irr_change_plan,
+    create_test_irr_change_plan_item,
+    create_test_irr_coordination_run,
+    create_test_irr_source,
+    create_test_irr_write_execution,
     create_test_intent_derivation_run,
     create_test_lifecycle_health_policy,
     create_test_organization,
@@ -367,6 +372,10 @@ class LifecycleExportViewTestCase(PluginViewTestCase):
             'netbox_rpki.view_roachangeplan',
             'netbox_rpki.view_aspareconciliationrun',
             'netbox_rpki.view_aspachangeplan',
+            'netbox_rpki.view_irrsource',
+            'netbox_rpki.view_irrcoordinationrun',
+            'netbox_rpki.view_irrchangeplan',
+            'netbox_rpki.view_irrwriteexecution',
         )
 
         response = self.client.get(reverse('plugins:netbox_rpki:operations_export'), {'format': 'json'})
@@ -1866,6 +1875,57 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
                 'provider_remove_count': 1,
             },
         )
+        cls.irr_source_attention = create_test_irr_source(
+            name='Operations IRR Source',
+            slug='operations-irr-source',
+            organization=cls.organization,
+            last_successful_snapshot=None,
+            last_sync_status=rpki_models.IrrSnapshotStatus.FAILED,
+        )
+        cls.irr_coordination_run = create_test_irr_coordination_run(
+            name='Operations IRR Coordination',
+            organization=cls.organization,
+            compared_sources=[cls.irr_source_attention],
+            summary_json={
+                'cross_source_conflict_count': 2,
+                'stale_source_count': 1,
+                'non_draftable_source_count': 1,
+                'draftable_source_count': 0,
+                'latest_plan_ids': [],
+            },
+        )
+        cls.irr_change_plan = create_test_irr_change_plan(
+            name='Operations IRR Change Plan',
+            organization=cls.organization,
+            coordination_run=cls.irr_coordination_run,
+            source=cls.irr_source_attention,
+            status=rpki_models.IrrChangePlanStatus.FAILED,
+            summary_json={
+                'capability_warnings': ['Target source does not currently support automated IRR preview or apply.'],
+                'item_counts': {
+                    rpki_models.IrrChangePlanAction.NOOP: 1,
+                },
+                'latest_execution': {
+                    'id': 0,
+                    'mode': 'apply',
+                    'status': 'failed',
+                },
+            },
+        )
+        create_test_irr_change_plan_item(
+            name='Operations IRR Change Plan Item',
+            change_plan=cls.irr_change_plan,
+            action=rpki_models.IrrChangePlanAction.NOOP,
+        )
+        cls.irr_write_execution = create_test_irr_write_execution(
+            name='Operations IRR Write Failure',
+            organization=cls.organization,
+            source=cls.irr_source_attention,
+            change_plan=cls.irr_change_plan,
+            execution_mode=rpki_models.IrrWriteExecutionMode.APPLY,
+            status=rpki_models.IrrWriteExecutionStatus.PARTIAL,
+            error='IRR delete rejected during dashboard test',
+        )
 
     def test_operations_dashboard_surfaces_sync_and_expiry_issues(self):
         self.add_permissions(
@@ -1881,6 +1941,10 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
             'netbox_rpki.view_roachangeplan',
             'netbox_rpki.view_aspareconciliationrun',
             'netbox_rpki.view_aspachangeplan',
+            'netbox_rpki.view_irrsource',
+            'netbox_rpki.view_irrcoordinationrun',
+            'netbox_rpki.view_irrchangeplan',
+            'netbox_rpki.view_irrwriteexecution',
         )
         scenario = create_test_roa_change_plan_matrix(organization=self.organization)
 
@@ -1931,6 +1995,15 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
         self.assertContains(response, 'Acknowledged')
         self.assertContains(response, 'Suppressed')
         self.assertContains(response, scenario.provider_plan.name)
+        self.assertContains(response, 'IRR Sources Requiring Attention')
+        self.assertContains(response, self.irr_source_attention.name)
+        self.assertContains(response, 'IRR Coordination Runs Requiring Attention')
+        self.assertContains(response, self.irr_coordination_run.name)
+        self.assertContains(response, 'IRR Change Plans Requiring Attention')
+        self.assertContains(response, self.irr_change_plan.name)
+        self.assertContains(response, 'Recent IRR Write Failures')
+        self.assertContains(response, self.irr_write_execution.name)
+        self.assertContains(response, 'IRR delete rejected during dashboard test')
 
     def test_operations_dashboard_surfaces_missing_simulation_attention(self):
         self.add_permissions(
@@ -1946,6 +2019,10 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
             'netbox_rpki.view_roachangeplan',
             'netbox_rpki.view_aspareconciliationrun',
             'netbox_rpki.view_aspachangeplan',
+            'netbox_rpki.view_irrsource',
+            'netbox_rpki.view_irrcoordinationrun',
+            'netbox_rpki.view_irrchangeplan',
+            'netbox_rpki.view_irrwriteexecution',
         )
         simulation_missing_plan = create_test_roa_change_plan(
             name='Dashboard Missing Simulation Plan',
@@ -1972,6 +2049,10 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
             'netbox_rpki.view_roachangeplan',
             'netbox_rpki.view_aspareconciliationrun',
             'netbox_rpki.view_aspachangeplan',
+            'netbox_rpki.view_irrsource',
+            'netbox_rpki.view_irrcoordinationrun',
+            'netbox_rpki.view_irrchangeplan',
+            'netbox_rpki.view_irrwriteexecution',
         )
 
         policy_organization = create_test_organization(
@@ -2043,6 +2124,10 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
             'netbox_rpki.view_roachangeplan',
             'netbox_rpki.view_aspareconciliationrun',
             'netbox_rpki.view_aspachangeplan',
+            'netbox_rpki.view_irrsource',
+            'netbox_rpki.view_irrcoordinationrun',
+            'netbox_rpki.view_irrchangeplan',
+            'netbox_rpki.view_irrwriteexecution',
             'netbox_rpki.view_roavalidationsimulationrun',
         )
         plan = create_test_roa_change_plan(
@@ -2097,6 +2182,10 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
             'netbox_rpki.view_roachangeplan',
             'netbox_rpki.view_aspareconciliationrun',
             'netbox_rpki.view_aspachangeplan',
+            'netbox_rpki.view_irrsource',
+            'netbox_rpki.view_irrcoordinationrun',
+            'netbox_rpki.view_irrchangeplan',
+            'netbox_rpki.view_irrwriteexecution',
         )
 
         response = self.client.get(reverse('plugins:netbox_rpki:operations_dashboard'))
@@ -2122,6 +2211,10 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
             'netbox_rpki.view_roachangeplan',
             'netbox_rpki.view_aspareconciliationrun',
             'netbox_rpki.view_aspachangeplan',
+            'netbox_rpki.view_irrsource',
+            'netbox_rpki.view_irrcoordinationrun',
+            'netbox_rpki.view_irrchangeplan',
+            'netbox_rpki.view_irrwriteexecution',
         )
 
         response = self.client.get(reverse('plugins:netbox_rpki:operations_dashboard'))
@@ -2384,6 +2477,54 @@ class ReconciliationDetailViewTestCase(PluginViewTestCase):
         self.assertContains(response, 'Candidate Matches')
         self.assertContains(response, 'Dashboard Candidate Match')
         self.assertContains(response, '&quot;delta&quot;')
+
+
+class IrrDetailViewTestCase(PluginViewTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='irr-detail-org', name='IRR Detail Org')
+        cls.source = create_test_irr_source(
+            name='IRR Detail Source',
+            slug='irr-detail-source',
+            organization=cls.organization,
+        )
+        cls.coordination_run = create_test_irr_coordination_run(
+            name='IRR Detail Coordination',
+            organization=cls.organization,
+            compared_sources=[cls.source],
+        )
+        cls.change_plan = create_test_irr_change_plan(
+            name='IRR Detail Change Plan',
+            organization=cls.organization,
+            coordination_run=cls.coordination_run,
+            source=cls.source,
+        )
+        cls.change_plan_item = create_test_irr_change_plan_item(
+            name='IRR Detail Plan Item',
+            change_plan=cls.change_plan,
+        )
+        cls.write_execution = create_test_irr_write_execution(
+            name='IRR Detail Write Execution',
+            organization=cls.organization,
+            source=cls.source,
+            change_plan=cls.change_plan,
+        )
+
+    def test_irr_change_plan_detail_renders_curated_sections(self):
+        self.add_permissions(
+            'netbox_rpki.view_irrchangeplan',
+            'netbox_rpki.view_irrchangeplanitem',
+            'netbox_rpki.view_irrwriteexecution',
+        )
+
+        response = self.client.get(self.change_plan.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertTemplateUsed(response, 'netbox_rpki/object_detail.html')
+        self.assertContains(response, 'IRR Change Plan Items')
+        self.assertContains(response, 'IRR Write Executions')
+        self.assertContains(response, self.change_plan_item.name)
+        self.assertContains(response, self.write_execution.name)
 
 
 class GeneratedObjectViewTestMixin:

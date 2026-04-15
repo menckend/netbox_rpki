@@ -431,6 +431,10 @@ class OperationsDashboardExportView(LifecycleExportViewMixin, ContentTypePermiss
         'netbox_rpki.view_roachangeplan',
         'netbox_rpki.view_aspareconciliationrun',
         'netbox_rpki.view_aspachangeplan',
+        'netbox_rpki.view_irrsource',
+        'netbox_rpki.view_irrcoordinationrun',
+        'netbox_rpki.view_irrchangeplan',
+        'netbox_rpki.view_irrwriteexecution',
     ]
 
     def get_required_permission(self):
@@ -867,6 +871,10 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
         'netbox_rpki.view_roachangeplan',
         'netbox_rpki.view_aspareconciliationrun',
         'netbox_rpki.view_aspachangeplan',
+        'netbox_rpki.view_irrsource',
+        'netbox_rpki.view_irrcoordinationrun',
+        'netbox_rpki.view_irrchangeplan',
+        'netbox_rpki.view_irrwriteexecution',
     ]
     provider_health_priority = {
         models.ProviderSyncHealth.FAILED: 0,
@@ -889,6 +897,10 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
         change_plans_requiring_attention = self.get_change_plans_requiring_attention(request)
         aspa_reconciliation_attention_runs = self.get_aspa_reconciliation_attention_runs(request)
         aspa_change_plans_requiring_attention = self.get_aspa_change_plans_requiring_attention(request)
+        irr_sources_requiring_attention = self.get_irr_sources_requiring_attention(request)
+        irr_coordination_attention_runs = self.get_irr_coordination_attention_runs(request)
+        irr_change_plans_requiring_attention = self.get_irr_change_plans_requiring_attention(request)
+        irr_write_failures = self.get_recent_irr_write_failures(request)
 
         return render(request, self.template_name, {
             'provider_accounts': provider_accounts,
@@ -903,6 +915,10 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
             'change_plans_requiring_attention': change_plans_requiring_attention,
             'aspa_reconciliation_attention_runs': aspa_reconciliation_attention_runs,
             'aspa_change_plans_requiring_attention': aspa_change_plans_requiring_attention,
+            'irr_sources_requiring_attention': irr_sources_requiring_attention,
+            'irr_coordination_attention_runs': irr_coordination_attention_runs,
+            'irr_change_plans_requiring_attention': irr_change_plans_requiring_attention,
+            'irr_write_failures': irr_write_failures,
         })
 
     def get_provider_accounts(self, request):
@@ -1009,6 +1025,101 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
             last_successful_sync_timestamp,
             provider_account.name.lower(),
         )
+
+    def get_irr_sources_requiring_attention(self, request):
+        queryset = models.IrrSource.objects.restrict(request.user, 'view').select_related(
+            'organization',
+            'last_successful_snapshot',
+        ).order_by('organization__name', 'name')
+        items = []
+        for source in queryset:
+            if source.sync_health not in {
+                models.IrrSyncHealth.FAILED,
+                models.IrrSyncHealth.STALE,
+                models.IrrSyncHealth.NEVER_SYNCED,
+            }:
+                continue
+            items.append({
+                'object': source,
+                'sync_health': source.sync_health,
+                'sync_health_display': source.sync_health_display,
+                'latest_snapshot': source.last_successful_snapshot,
+                'latest_snapshot_url': self.get_summary_url(
+                    'plugins:netbox_rpki:irr_snapshot',
+                    getattr(source.last_successful_snapshot, 'pk', None),
+                ),
+                'freshness_text': self.get_irr_source_freshness_text(source),
+                'write_support_mode': source.write_support_mode,
+            })
+        return items
+
+    def get_irr_source_freshness_text(self, source):
+        if source.last_successful_snapshot is None:
+            return 'Never synced'
+        completed_at = source.last_successful_snapshot.completed_at or source.last_successful_snapshot.started_at
+        if completed_at is None:
+            return 'Latest snapshot missing completion time'
+        return f'Latest snapshot {completed_at}'
+
+    def get_irr_coordination_attention_runs(self, request):
+        queryset = models.IrrCoordinationRun.objects.restrict(request.user, 'view').select_related(
+            'organization',
+        ).order_by('-started_at', '-created')
+        items = []
+        for run in queryset[:20]:
+            summary = run.summary_json or {}
+            conflict_count = summary.get('cross_source_conflict_count', 0)
+            stale_count = summary.get('stale_source_count', 0)
+            non_draftable_count = summary.get('non_draftable_source_count', 0)
+            if run.status == models.IrrCoordinationRunStatus.FAILED or conflict_count or stale_count or non_draftable_count:
+                items.append({
+                    'object': run,
+                    'cross_source_conflict_count': conflict_count,
+                    'stale_source_count': stale_count,
+                    'non_draftable_source_count': non_draftable_count,
+                    'draftable_source_count': summary.get('draftable_source_count', 0),
+                })
+        return items
+
+    def get_irr_change_plans_requiring_attention(self, request):
+        queryset = models.IrrChangePlan.objects.restrict(request.user, 'view').select_related(
+            'organization',
+            'source',
+        ).order_by('-created')
+        items = []
+        for plan in queryset[:20]:
+            summary = plan.summary_json or {}
+            capability_warnings = list(summary.get('capability_warnings') or [])
+            noop_count = (summary.get('item_counts') or {}).get(models.IrrChangePlanAction.NOOP, 0)
+            if (
+                plan.status in {
+                    models.IrrChangePlanStatus.DRAFT,
+                    models.IrrChangePlanStatus.READY,
+                    models.IrrChangePlanStatus.FAILED,
+                }
+                or capability_warnings
+                or noop_count
+            ):
+                items.append({
+                    'object': plan,
+                    'capability_warnings': capability_warnings,
+                    'noop_count': noop_count,
+                    'latest_execution': summary.get('latest_execution') or {},
+                })
+        return items
+
+    def get_recent_irr_write_failures(self, request):
+        queryset = models.IrrWriteExecution.objects.restrict(request.user, 'view').select_related(
+            'organization',
+            'source',
+            'change_plan',
+        ).filter(
+            status__in={
+                models.IrrWriteExecutionStatus.FAILED,
+                models.IrrWriteExecutionStatus.PARTIAL,
+            }
+        ).order_by('-started_at', '-created')
+        return list(queryset[:20])
 
     def get_expiring_roas(self, request):
         now = timezone.now()
