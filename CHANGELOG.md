@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.8.0 (2026-04-15)
+## 0.2.0 (2026-04-15)
 
 * Core inventory: expand the plugin from basic organization, certificate, and ROA tracking into a broader RPKI inventory surface that also covers publication points, repositories, trust-anchor hierarchy, generic signed objects, CRLs, manifests, ASPAs, RSCs, router certificates, and related object-linkage views.
 * External validator import: add retained validator instances, validation runs, object validation results, and validated ROA and ASPA payload models, including Routinator `jsonext` import support from either the live API or exported snapshot files.
