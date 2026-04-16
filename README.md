@@ -38,6 +38,8 @@ The plugin declares NetBox compatibility for the 4.5.x release line. Verificatio
 
 Non-GA combinations emit a runtime `RuntimeWarning` during plugin startup so unsupported and best-effort deployments are visible before operators proceed.
 
+Operators can also run `manage.py diagnose_netbox_rpki --format text|json` after installation to verify plugin registration, migrations, Redis-backed job prerequisites, and integration wiring before troubleshooting workflow-specific failures.
+
 ## Dependencies
 
 | Component | Required for | Supported versions | Notes |
