@@ -60,12 +60,13 @@ jobs:
       NETBOX_TEST_REDIS_PORT: '6379'
       NETBOX_TEST_REDIS_PASSWORD: ''
       CI_ARTIFACTS_DIR: ${{ github.workspace }}/ci-artifacts
+      NETBOX_CHECKOUT_DIR: ${{ github.workspace }}/netbox
     steps:
       - name: Checkout plugin
         uses: actions/checkout@v4
 
       - name: Clone NetBox
-        run: git clone --depth 1 --branch "${{ matrix.netbox-version }}" https://github.com/netbox-community/netbox.git ../netbox
+        run: git clone --depth 1 --branch "${{ matrix.netbox-version }}" https://github.com/netbox-community/netbox.git "$NETBOX_CHECKOUT_DIR"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -74,12 +75,12 @@ jobs:
           cache: pip
           cache-dependency-path: |
             pyproject.toml
-            ../netbox/requirements.txt
+            netbox/requirements.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r ../netbox/requirements.txt
+          python -m pip install -r "$NETBOX_CHECKOUT_DIR/requirements.txt"
           python -m pip install -e .[test]
 
       - name: Prepare CI artifacts directory
@@ -90,18 +91,18 @@ jobs:
           python --version | tee "$CI_ARTIFACTS_DIR/python-version.txt"
           python -m pip --version | tee "$CI_ARTIFACTS_DIR/pip-version.txt"
           python -m pip freeze | tee "$CI_ARTIFACTS_DIR/pip-freeze.txt"
-          git -C ../netbox rev-parse HEAD | tee "$CI_ARTIFACTS_DIR/netbox-commit.txt"
+          git -C "$NETBOX_CHECKOUT_DIR" rev-parse HEAD | tee "$CI_ARTIFACTS_DIR/netbox-commit.txt"
 
       - name: Run migrations
-        working-directory: ../netbox
+        working-directory: netbox
         run: python manage.py migrate --noinput 2>&1 | tee "$CI_ARTIFACTS_DIR/migrate.log"
 
       - name: Run system checks
-        working-directory: ../netbox
+        working-directory: netbox
         run: python manage.py check 2>&1 | tee "$CI_ARTIFACTS_DIR/check.log"
 
       - name: Run contract suite
-        working-directory: ../netbox
+        working-directory: netbox
         run: |
           python manage.py test --keepdb --noinput \
             netbox_rpki.tests.test_views \
@@ -161,12 +162,13 @@ jobs:
       NETBOX_TEST_REDIS_PORT: '6379'
       NETBOX_TEST_REDIS_PASSWORD: ''
       CI_ARTIFACTS_DIR: ${{ github.workspace }}/ci-artifacts
+      NETBOX_CHECKOUT_DIR: ${{ github.workspace }}/netbox
     steps:
       - name: Checkout plugin
         uses: actions/checkout@v4
 
       - name: Clone NetBox
-        run: git clone --depth 1 --branch v4.5.7 https://github.com/netbox-community/netbox.git ../netbox
+        run: git clone --depth 1 --branch v4.5.7 https://github.com/netbox-community/netbox.git "$NETBOX_CHECKOUT_DIR"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -175,12 +177,12 @@ jobs:
           cache: pip
           cache-dependency-path: |
             pyproject.toml
-            ../netbox/requirements.txt
+            netbox/requirements.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r ../netbox/requirements.txt
+          python -m pip install -r "$NETBOX_CHECKOUT_DIR/requirements.txt"
           python -m pip install -e .[test]
 
       - name: Prepare CI artifacts directory
@@ -191,18 +193,18 @@ jobs:
           python --version | tee "$CI_ARTIFACTS_DIR/python-version.txt"
           python -m pip --version | tee "$CI_ARTIFACTS_DIR/pip-version.txt"
           python -m pip freeze | tee "$CI_ARTIFACTS_DIR/pip-freeze.txt"
-          git -C ../netbox rev-parse HEAD | tee "$CI_ARTIFACTS_DIR/netbox-commit.txt"
+          git -C "$NETBOX_CHECKOUT_DIR" rev-parse HEAD | tee "$CI_ARTIFACTS_DIR/netbox-commit.txt"
 
       - name: Run migrations
-        working-directory: ../netbox
+        working-directory: netbox
         run: python manage.py migrate --noinput 2>&1 | tee "$CI_ARTIFACTS_DIR/migrate.log"
 
       - name: Run system checks
-        working-directory: ../netbox
+        working-directory: netbox
         run: python manage.py check 2>&1 | tee "$CI_ARTIFACTS_DIR/check.log"
 
       - name: Run full plugin suite
-        working-directory: ../netbox
+        working-directory: netbox
         run: python manage.py test --keepdb --noinput netbox_rpki.tests 2>&1 | tee "$CI_ARTIFACTS_DIR/full-suite.log"
 
       - name: Upload full-suite artifacts
