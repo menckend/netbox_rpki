@@ -7,6 +7,10 @@ from django.db import transaction
 from django.utils import timezone
 
 from netbox_rpki import models as rpki_models
+from netbox_rpki.services.provider_adapters import (
+    ProviderAdapterLookupError,
+    get_provider_adapter,
+)
 from netbox_rpki.services.provider_sync import sync_provider_account
 from netbox_rpki.services.provider_sync_krill import krill_aspas_url, krill_routes_url, krill_ssl_context
 from netbox_rpki.services.roa_lint import build_roa_change_plan_lint_posture, refresh_roa_change_plan_lint_posture
@@ -79,15 +83,10 @@ def _require_provider_write_capability(plan: rpki_models.ROAChangePlan) -> rpki_
     if provider_account is None:
         raise ProviderWriteError('This ROA change plan does not target a provider account.')
 
-    if not provider_account.supports_roa_write:
-        raise ProviderWriteError(
-            f'Provider account {provider_account.name} does not support ROA write operations.'
-        )
-
-    if provider_account.provider_type != rpki_models.ProviderType.KRILL:
-        raise ProviderWriteError(
-            f'Provider type {provider_account.provider_type} is not supported for ROA write operations.'
-        )
+    try:
+        get_provider_adapter(provider_account).ensure_roa_write_supported(provider_account)
+    except (ProviderAdapterLookupError, ValueError) as exc:
+        raise ProviderWriteError(str(exc)) from exc
 
     return provider_account
 
@@ -100,15 +99,10 @@ def _require_aspa_provider_write_capability(plan: rpki_models.ASPAChangePlan) ->
     if provider_account is None:
         raise ProviderWriteError('This ASPA change plan does not target a provider account.')
 
-    if not provider_account.supports_aspa_write:
-        raise ProviderWriteError(
-            f'Provider account {provider_account.name} does not support ASPA write operations.'
-        )
-
-    if provider_account.provider_type != rpki_models.ProviderType.KRILL:
-        raise ProviderWriteError(
-            f'Provider type {provider_account.provider_type} is not supported for ASPA write operations.'
-        )
+    try:
+        get_provider_adapter(provider_account).ensure_aspa_write_supported(provider_account)
+    except (ProviderAdapterLookupError, ValueError) as exc:
+        raise ProviderWriteError(str(exc)) from exc
 
     return provider_account
 
@@ -312,6 +306,7 @@ def apply_roa_rollback_bundle(
     provider_account = bundle.source_plan.provider_account
     if provider_account is None or not provider_account.supports_roa_write:
         raise ProviderWriteError('Source plan has no provider account capable of ROA writes.')
+    adapter = get_provider_adapter(provider_account)
 
     started_at = timezone.now()
     bundle.status = rpki_models.RollbackBundleStatus.APPLYING
@@ -321,7 +316,7 @@ def apply_roa_rollback_bundle(
     bundle.save(update_fields=('status', 'apply_started_at', 'apply_requested_by', 'failed_at'))
 
     try:
-        provider_response = _submit_krill_route_delta(provider_account, bundle.rollback_delta_json)
+        provider_response = adapter.apply_roa_delta(provider_account, bundle.rollback_delta_json)
         applied_at = timezone.now()
         bundle.status = rpki_models.RollbackBundleStatus.APPLIED
         bundle.applied_at = applied_at
@@ -370,6 +365,7 @@ def apply_aspa_rollback_bundle(
     provider_account = bundle.source_plan.provider_account
     if provider_account is None or not provider_account.supports_aspa_write:
         raise ProviderWriteError('Source plan has no provider account capable of ASPA writes.')
+    adapter = get_provider_adapter(provider_account)
 
     started_at = timezone.now()
     bundle.status = rpki_models.RollbackBundleStatus.APPLYING
@@ -379,7 +375,7 @@ def apply_aspa_rollback_bundle(
     bundle.save(update_fields=('status', 'apply_started_at', 'apply_requested_by', 'failed_at'))
 
     try:
-        provider_response = _submit_krill_aspa_delta(provider_account, bundle.rollback_delta_json)
+        provider_response = adapter.apply_aspa_delta(provider_account, bundle.rollback_delta_json)
         applied_at = timezone.now()
         bundle.status = rpki_models.RollbackBundleStatus.APPLIED
         bundle.applied_at = applied_at
@@ -1024,6 +1020,7 @@ def apply_roa_change_plan_provider_write(
 ) -> tuple[rpki_models.ProviderWriteExecution, dict[str, list[dict]]]:
     plan = _normalize_plan(plan)
     provider_account = _require_applicable(plan)
+    adapter = get_provider_adapter(provider_account)
     delta = build_roa_change_plan_delta(plan)
     started_at = timezone.now()
     plan.status = rpki_models.ROAChangePlanStatus.APPLYING
@@ -1043,7 +1040,7 @@ def apply_roa_change_plan_provider_write(
     )
 
     try:
-        provider_response = _submit_krill_route_delta(provider_account, delta)
+        provider_response = adapter.apply_roa_delta(provider_account, delta)
         applied_at = timezone.now()
         plan.status = rpki_models.ROAChangePlanStatus.APPLIED
         plan.applied_at = applied_at
@@ -1114,6 +1111,7 @@ def apply_aspa_change_plan_provider_write(
 ) -> tuple[rpki_models.ProviderWriteExecution, dict[str, list[dict]]]:
     plan = _normalize_aspa_plan(plan)
     provider_account = _require_aspa_applicable(plan)
+    adapter = get_provider_adapter(provider_account)
     delta = build_aspa_change_plan_delta(plan)
     started_at = timezone.now()
     plan.status = rpki_models.ASPAChangePlanStatus.APPLYING
@@ -1133,7 +1131,7 @@ def apply_aspa_change_plan_provider_write(
     )
 
     try:
-        provider_response = _submit_krill_aspa_delta(provider_account, delta)
+        provider_response = adapter.apply_aspa_delta(provider_account, delta)
         applied_at = timezone.now()
         plan.status = rpki_models.ASPAChangePlanStatus.APPLIED
         plan.applied_at = applied_at

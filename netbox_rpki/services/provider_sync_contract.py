@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from django.db.models import Count
 
 from netbox_rpki import models as rpki_models
+from netbox_rpki.services.provider_adapters import get_provider_adapter
 from netbox_rpki.services.lifecycle_reporting import (
     build_provider_lifecycle_health_summary,
     build_publication_health_rollup,
@@ -70,17 +71,6 @@ PROVIDER_SYNC_FAMILY_METADATA = {
     },
 }
 
-KRILL_CERTIFICATE_INVENTORY_LIMITATION_REASON = (
-    'Repository-derived certificate observation is linked to publication points and signed objects, '
-    'and it is populated from certificate-bearing Krill metadata, but it is still not a full repository '
-    'validator or canonical certificate catalog.'
-)
-ARIN_ROA_ONLY_LIMITATION_REASON = (
-    'ARIN synchronization currently imports hosted ROA authorizations only; this family is not yet '
-    'implemented for ARIN.'
-)
-
-
 def empty_sync_counts() -> dict[str, int]:
     return {key: 0 for key in PROVIDER_SYNC_COUNT_KEYS}
 
@@ -88,21 +78,7 @@ def empty_sync_counts() -> dict[str, int]:
 def supported_sync_families(provider_account: rpki_models.RpkiProviderAccount | None) -> tuple[str, ...]:
     if provider_account is None:
         return ()
-    if provider_account.provider_type == rpki_models.ProviderType.KRILL:
-        return (
-            rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS,
-            rpki_models.ProviderSyncFamily.ASPAS,
-            rpki_models.ProviderSyncFamily.CA_METADATA,
-            rpki_models.ProviderSyncFamily.PARENT_LINKS,
-            rpki_models.ProviderSyncFamily.CHILD_LINKS,
-            rpki_models.ProviderSyncFamily.RESOURCE_ENTITLEMENTS,
-            rpki_models.ProviderSyncFamily.PUBLICATION_POINTS,
-            rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY,
-            rpki_models.ProviderSyncFamily.SIGNED_OBJECT_INVENTORY,
-        )
-    if provider_account.provider_type == rpki_models.ProviderType.ARIN:
-        return (rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS,)
-    return ()
+    return get_provider_adapter(provider_account).supported_sync_families()
 
 
 def family_capability_extra(
@@ -111,33 +87,16 @@ def family_capability_extra(
 ) -> dict[str, object]:
     if provider_account is None:
         return {}
-    if (
-        provider_account.provider_type == rpki_models.ProviderType.ARIN
-        and family != rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS
-    ):
-        return {
-            'capability_status': rpki_models.ProviderSyncFamilyStatus.NOT_IMPLEMENTED,
-            'capability_mode': 'provider_limited',
-            'capability_reason': ARIN_ROA_ONLY_LIMITATION_REASON,
-        }
-    if (
-        provider_account.provider_type == rpki_models.ProviderType.KRILL
-        and family == rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY
-    ):
-        return {
-            'capability_status': rpki_models.ProviderSyncFamilyStatus.LIMITED,
-            'capability_mode': 'derived',
-            'capability_sources': [
-                'published_signed_objects',
-                'publication_point_link',
-                'signed_object_link',
-                'ca_metadata',
-                'parent_links',
-                'repo_status',
-            ],
-            'capability_reason': KRILL_CERTIFICATE_INVENTORY_LIMITATION_REASON,
-        }
-    return {}
+    return get_provider_adapter(provider_account).family_capability_extra(family)
+
+
+def family_default_status(
+    provider_account: rpki_models.RpkiProviderAccount | None,
+    family: str,
+) -> str | None:
+    if provider_account is None:
+        return None
+    return get_provider_adapter(provider_account).family_default_status(family)
 
 
 def family_metadata(family: str) -> dict[str, object]:
@@ -222,16 +181,11 @@ def _resolved_rollup_family_summary(
     if isinstance(family_summary, Mapping):
         return family_summary
 
-    if (
-        provider_account is not None
-        and (
-        provider_account.provider_type == rpki_models.ProviderType.KRILL
-        and family == rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY
-        )
-    ):
+    default_family_status = family_default_status(provider_account, family)
+    if default_family_status is not None:
         return build_family_summary(
             family,
-            status=rpki_models.ProviderSyncFamilyStatus.LIMITED,
+            status=default_family_status,
             extra=family_capability_extra(provider_account, family),
         )
 
@@ -645,13 +599,11 @@ def build_provider_sync_summary(
             )
             continue
 
-        if (
-            provider_account.provider_type == rpki_models.ProviderType.KRILL
-            and family == rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY
-        ):
+        default_family_status = family_default_status(provider_account, family)
+        if default_family_status is not None:
             resolved_family_summaries[family] = build_family_summary(
                 family,
-                status=rpki_models.ProviderSyncFamilyStatus.LIMITED,
+                status=default_family_status,
                 extra=family_capability_extra(provider_account, family),
             )
             continue
@@ -702,19 +654,7 @@ def build_provider_sync_summary(
     roa_family = resolved_family_summaries[rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS]
     summary['roa_authorization_records_fetched'] = roa_family['records_fetched']
     summary['roa_authorization_records_imported'] = roa_family['records_imported']
-
-    if provider_account.provider_type == rpki_models.ProviderType.KRILL:
-        summary['route_records_fetched'] = roa_family['records_fetched']
-        summary['route_records_imported'] = roa_family['records_imported']
-        aspa_family = resolved_family_summaries[rpki_models.ProviderSyncFamily.ASPAS]
-        summary['aspa_records_fetched'] = aspa_family['records_fetched']
-        summary['aspa_records_imported'] = aspa_family['records_imported']
-        signed_object_family = resolved_family_summaries[rpki_models.ProviderSyncFamily.SIGNED_OBJECT_INVENTORY]
-        summary['signed_object_records_fetched'] = signed_object_family['records_fetched']
-        summary['signed_object_records_imported'] = signed_object_family['records_imported']
-        certificate_family = resolved_family_summaries[rpki_models.ProviderSyncFamily.CERTIFICATE_INVENTORY]
-        summary['certificate_records_fetched'] = certificate_family['records_fetched']
-        summary['certificate_records_imported'] = certificate_family['records_imported']
+    get_provider_adapter(provider_account).augment_sync_summary(summary, resolved_family_summaries)
 
     if extra:
         summary.update(dict(extra))

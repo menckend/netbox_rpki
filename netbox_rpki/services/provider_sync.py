@@ -15,6 +15,10 @@ from ipam.models.asns import ASN
 from ipam.models.ip import Prefix
 
 from netbox_rpki import models as rpki_models
+from netbox_rpki.services.provider_adapters import (
+    ProviderAdapterLookupError,
+    get_provider_adapter,
+)
 from netbox_rpki.services.lifecycle_reporting import (
     build_snapshot_publication_health_rollup,
     evaluate_lifecycle_health_events,
@@ -1284,10 +1288,13 @@ def sync_provider_account(
 
     if not provider_account.sync_enabled:
         raise ProviderSyncError(f'Provider account {provider_account.name} is disabled for sync.')
-    if provider_account.provider_type == rpki_models.ProviderType.KRILL and not provider_account.sync_target_handle:
-        raise ProviderSyncError(f'Provider account {provider_account.name} is missing a Krill CA handle.')
-    if provider_account.provider_type not in {rpki_models.ProviderType.ARIN, rpki_models.ProviderType.KRILL}:
-        raise ProviderSyncError(f'Provider type {provider_account.provider_type} is not supported.')
+    try:
+        adapter = get_provider_adapter(provider_account)
+        adapter.validate_sync_account(provider_account)
+    except ProviderAdapterLookupError as exc:
+        raise ProviderSyncError(str(exc)) from exc
+    except ValueError as exc:
+        raise ProviderSyncError(str(exc)) from exc
 
     now = timezone.now()
     provider_account.last_sync_status = rpki_models.ValidationRunStatus.RUNNING
@@ -1317,10 +1324,7 @@ def sync_provider_account(
 
     snapshot_diff = None
     try:
-        if provider_account.provider_type == rpki_models.ProviderType.KRILL:
-            family_summaries = _import_krill_records(provider_account, snapshot)
-        else:
-            family_summaries = _import_arin_records(provider_account, snapshot)
+        family_summaries = adapter.sync_inventory(provider_account, snapshot)
 
         completed_at = timezone.now()
         summary = build_provider_sync_summary(

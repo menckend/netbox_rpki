@@ -13,6 +13,7 @@ from django.utils import timezone
 
 from netbox_rpki import __version__, models as rpki_models
 from netbox_rpki.compatibility import classify_runtime
+from netbox_rpki.services.provider_adapters import get_provider_adapter
 
 
 CHECK_STATUS_OK = 'ok'
@@ -115,23 +116,10 @@ def _provider_account_checks(provider_account: rpki_models.RpkiProviderAccount) 
             )
         ]
 
-    issues: list[str] = []
-    remediation: list[str] = []
-    if not (provider_account.org_handle or '').strip():
-        issues.append('organization handle is blank')
-        remediation.append('Set org_handle.')
-    if not (provider_account.api_key or '').strip():
-        issues.append('API key is blank')
-        remediation.append('Set api_key.')
-    if not (provider_account.api_base_url or '').strip():
-        issues.append('API base URL is blank')
-        remediation.append('Set api_base_url.')
-    if (
-        provider_account.provider_type == rpki_models.ProviderType.KRILL
-        and not provider_account.sync_target_handle
-    ):
-        issues.append('Krill CA handle is blank')
-        remediation.append('Set ca_handle for Krill-backed accounts.')
+    adapter = get_provider_adapter(provider_account)
+    credential_issues = adapter.credential_issues(provider_account)
+    issues = [issue.issue_text for issue in credential_issues]
+    remediation = [issue.remediation for issue in credential_issues]
 
     if issues:
         return [

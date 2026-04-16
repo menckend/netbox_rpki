@@ -3256,15 +3256,15 @@ class RpkiProviderAccount(NamedRpkiStandardModel):
 
     @property
     def sync_target_handle(self) -> str:
-        if self.provider_type == ProviderType.KRILL:
-            return self.ca_handle.strip()
-        return self.org_handle.strip()
+        from netbox_rpki.services.provider_adapters import get_provider_adapter_by_type
+
+        return get_provider_adapter_by_type(self.provider_type).sync_target_handle(self)
 
     @property
     def roa_write_mode(self) -> str:
-        if self.provider_type == ProviderType.KRILL:
-            return ProviderRoaWriteMode.KRILL_ROUTE_DELTA
-        return ProviderRoaWriteMode.UNSUPPORTED
+        from netbox_rpki.services.provider_adapters import get_provider_adapter_by_type
+
+        return get_provider_adapter_by_type(self.provider_type).profile.roa_write_mode
 
     @property
     def supports_roa_write(self) -> bool:
@@ -3272,20 +3272,20 @@ class RpkiProviderAccount(NamedRpkiStandardModel):
 
     @property
     def roa_write_capability(self) -> dict:
-        supported_actions = []
-        if self.supports_roa_write:
-            supported_actions = [ROAChangePlanAction.CREATE, ROAChangePlanAction.WITHDRAW]
+        from netbox_rpki.services.provider_adapters import get_provider_adapter_by_type
+
+        adapter = get_provider_adapter_by_type(self.provider_type)
         return {
             'supports_roa_write': self.supports_roa_write,
             'roa_write_mode': self.roa_write_mode,
-            'supported_roa_plan_actions': supported_actions,
+            'supported_roa_plan_actions': list(adapter.profile.supported_roa_plan_actions),
         }
 
     @property
     def aspa_write_mode(self) -> str:
-        if self.provider_type == ProviderType.KRILL:
-            return ProviderAspaWriteMode.KRILL_ASPA_DELTA
-        return ProviderAspaWriteMode.UNSUPPORTED
+        from netbox_rpki.services.provider_adapters import get_provider_adapter_by_type
+
+        return get_provider_adapter_by_type(self.provider_type).profile.aspa_write_mode
 
     @property
     def supports_aspa_write(self) -> bool:
@@ -3293,13 +3293,13 @@ class RpkiProviderAccount(NamedRpkiStandardModel):
 
     @property
     def aspa_write_capability(self) -> dict:
-        supported_actions = []
-        if self.supports_aspa_write:
-            supported_actions = [ASPAChangePlanAction.CREATE, ASPAChangePlanAction.WITHDRAW]
+        from netbox_rpki.services.provider_adapters import get_provider_adapter_by_type
+
+        adapter = get_provider_adapter_by_type(self.provider_type)
         return {
             'supports_aspa_write': self.supports_aspa_write,
             'aspa_write_mode': self.aspa_write_mode,
-            'supported_aspa_plan_actions': supported_actions,
+            'supported_aspa_plan_actions': list(adapter.profile.supported_aspa_plan_actions),
         }
 
     @property
@@ -3361,23 +3361,33 @@ class RpkiProviderAccount(NamedRpkiStandardModel):
 
     @property
     def supports_roa_read(self) -> bool:
-        return self.provider_type in (ProviderType.KRILL, ProviderType.ARIN)
+        from netbox_rpki.services.provider_adapters import get_provider_adapter_by_type
+
+        return get_provider_adapter_by_type(self.provider_type).profile.supports_roa_read
 
     @property
     def supports_aspa_read(self) -> bool:
-        return self.provider_type == ProviderType.KRILL
+        from netbox_rpki.services.provider_adapters import get_provider_adapter_by_type
+
+        return get_provider_adapter_by_type(self.provider_type).profile.supports_aspa_read
 
     @property
     def supports_certificate_inventory(self) -> bool:
-        return self.provider_type == ProviderType.KRILL
+        from netbox_rpki.services.provider_adapters import get_provider_adapter_by_type
+
+        return get_provider_adapter_by_type(self.provider_type).profile.supports_certificate_inventory
 
     @property
     def supports_repository_metadata(self) -> bool:
-        return self.provider_type == ProviderType.KRILL
+        from netbox_rpki.services.provider_adapters import get_provider_adapter_by_type
+
+        return get_provider_adapter_by_type(self.provider_type).profile.supports_repository_metadata
 
     @property
     def supports_bulk_operations(self) -> bool:
-        return self.provider_type == ProviderType.KRILL
+        from netbox_rpki.services.provider_adapters import get_provider_adapter_by_type
+
+        return get_provider_adapter_by_type(self.provider_type).profile.supports_bulk_operations
 
     @property
     def capability_matrix(self) -> dict:
