@@ -2257,7 +2257,7 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
             error='IRR delete rejected during dashboard test',
         )
 
-    def test_operations_dashboard_surfaces_sync_and_expiry_issues(self):
+    def add_dashboard_permissions(self):
         self.add_permissions(
             'netbox_rpki.view_rpkiprovideraccount',
             'netbox_rpki.view_providersnapshot',
@@ -2280,6 +2280,9 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
             'netbox_rpki.view_irrchangeplan',
             'netbox_rpki.view_irrwriteexecution',
         )
+
+    def test_operations_dashboard_surfaces_sync_and_expiry_issues(self):
+        self.add_dashboard_permissions()
         scenario = create_test_roa_change_plan_matrix(organization=self.organization)
 
         response = self.client.get(reverse('plugins:netbox_rpki:operations_dashboard'))
@@ -2357,27 +2360,7 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
         self.assertContains(response, 'IRR delete rejected during dashboard test')
 
     def test_operations_dashboard_surfaces_missing_simulation_attention(self):
-        self.add_permissions(
-            'netbox_rpki.view_rpkiprovideraccount',
-            'netbox_rpki.view_providersnapshot',
-            'netbox_rpki.view_providersnapshotdiff',
-            'netbox_rpki.view_roaobject',
-            'netbox_rpki.view_certificate',
-            'netbox_rpki.view_routingintenttemplatebinding',
-            'netbox_rpki.view_routingintentexception',
-            'netbox_rpki.view_bulkintentrun',
-            'netbox_rpki.view_roareconciliationrun',
-            'netbox_rpki.view_roachangeplan',
-            'netbox_rpki.view_aspareconciliationrun',
-            'netbox_rpki.view_aspachangeplan',
-            'netbox_rpki.view_validatorinstance',
-            'netbox_rpki.view_validationrun',
-            'netbox_rpki.view_telemetrysource',
-            'netbox_rpki.view_irrsource',
-            'netbox_rpki.view_irrcoordinationrun',
-            'netbox_rpki.view_irrchangeplan',
-            'netbox_rpki.view_irrwriteexecution',
-        )
+        self.add_dashboard_permissions()
         simulation_missing_plan = create_test_roa_change_plan(
             name='Dashboard Missing Simulation Plan',
             organization=self.organization,
@@ -2390,24 +2373,7 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
         self.assertContains(response, 'No simulation')
 
     def test_operations_dashboard_uses_effective_lifecycle_policy_thresholds(self):
-        self.add_permissions(
-            'netbox_rpki.view_rpkiprovideraccount',
-            'netbox_rpki.view_providersnapshot',
-            'netbox_rpki.view_providersnapshotdiff',
-            'netbox_rpki.view_roaobject',
-            'netbox_rpki.view_certificate',
-            'netbox_rpki.view_routingintenttemplatebinding',
-            'netbox_rpki.view_routingintentexception',
-            'netbox_rpki.view_bulkintentrun',
-            'netbox_rpki.view_roareconciliationrun',
-            'netbox_rpki.view_roachangeplan',
-            'netbox_rpki.view_aspareconciliationrun',
-            'netbox_rpki.view_aspachangeplan',
-            'netbox_rpki.view_irrsource',
-            'netbox_rpki.view_irrcoordinationrun',
-            'netbox_rpki.view_irrchangeplan',
-            'netbox_rpki.view_irrwriteexecution',
-        )
+        self.add_dashboard_permissions()
 
         policy_organization = create_test_organization(
             org_id='operations-policy-org',
@@ -2465,28 +2431,8 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
         self.assertNotContains(response, 'Policy Expiring ROA')
 
     def test_operations_dashboard_surfaces_blocking_simulation_posture_and_counts(self):
-        self.add_permissions(
-            'netbox_rpki.view_rpkiprovideraccount',
-            'netbox_rpki.view_providersnapshot',
-            'netbox_rpki.view_providersnapshotdiff',
-            'netbox_rpki.view_roaobject',
-            'netbox_rpki.view_certificate',
-            'netbox_rpki.view_routingintenttemplatebinding',
-            'netbox_rpki.view_routingintentexception',
-            'netbox_rpki.view_bulkintentrun',
-            'netbox_rpki.view_roareconciliationrun',
-            'netbox_rpki.view_roachangeplan',
-            'netbox_rpki.view_aspareconciliationrun',
-            'netbox_rpki.view_aspachangeplan',
-            'netbox_rpki.view_validatorinstance',
-            'netbox_rpki.view_validationrun',
-            'netbox_rpki.view_telemetrysource',
-            'netbox_rpki.view_irrsource',
-            'netbox_rpki.view_irrcoordinationrun',
-            'netbox_rpki.view_irrchangeplan',
-            'netbox_rpki.view_irrwriteexecution',
-            'netbox_rpki.view_roavalidationsimulationrun',
-        )
+        self.add_dashboard_permissions()
+        self.add_permissions('netbox_rpki.view_roavalidationsimulationrun')
         plan = create_test_roa_change_plan(
             name='Dashboard Blocking Simulation Plan',
             organization=self.organization,
@@ -2526,27 +2472,7 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
         self.assertContains(response, '/ stale')
 
     def test_operations_dashboard_shows_arin_roa_only_family_coverage(self):
-        self.add_permissions(
-            'netbox_rpki.view_rpkiprovideraccount',
-            'netbox_rpki.view_providersnapshot',
-            'netbox_rpki.view_providersnapshotdiff',
-            'netbox_rpki.view_roaobject',
-            'netbox_rpki.view_certificate',
-            'netbox_rpki.view_routingintenttemplatebinding',
-            'netbox_rpki.view_routingintentexception',
-            'netbox_rpki.view_bulkintentrun',
-            'netbox_rpki.view_roareconciliationrun',
-            'netbox_rpki.view_roachangeplan',
-            'netbox_rpki.view_aspareconciliationrun',
-            'netbox_rpki.view_aspachangeplan',
-            'netbox_rpki.view_validatorinstance',
-            'netbox_rpki.view_validationrun',
-            'netbox_rpki.view_telemetrysource',
-            'netbox_rpki.view_irrsource',
-            'netbox_rpki.view_irrcoordinationrun',
-            'netbox_rpki.view_irrchangeplan',
-            'netbox_rpki.view_irrwriteexecution',
-        )
+        self.add_dashboard_permissions()
 
         response = self.client.get(reverse('plugins:netbox_rpki:operations_dashboard'))
 
@@ -2558,6 +2484,46 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
         self.assertContains(response, 'Bulk Runs Requiring Attention')
 
     def test_operations_dashboard_shows_export_buttons(self):
+        self.add_dashboard_permissions()
+
+        response = self.client.get(reverse('plugins:netbox_rpki:operations_dashboard'))
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, reverse('plugins:netbox_rpki:operations_export') + '?format=json')
+        self.assertContains(response, reverse('plugins:netbox_rpki:operations_export') + '?format=csv')
+
+    def test_operations_dashboard_tiles_link_to_attention_workflows_and_activate_tabs(self):
+        self.add_dashboard_permissions()
+
+        response = self.client.get(
+            reverse('plugins:netbox_rpki:operations_dashboard'),
+            {'tab': 'workflow-attention'},
+        )
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(
+            response,
+            reverse('plugins:netbox_rpki:operations_dashboard') + '?tab=provider-health#provider-accounts-attention',
+        )
+        self.assertContains(
+            response,
+            reverse('plugins:netbox_rpki:operations_dashboard') + '?tab=workflow-attention#roa-change-plans-attention',
+        )
+        self.assertContains(
+            response,
+            reverse('plugins:netbox_rpki:operations_dashboard') + '?tab=external-evidence#validator-instances-attention',
+        )
+        self.assertContains(
+            response,
+            reverse('plugins:netbox_rpki:operations_dashboard') + '?tab=expiring-soon#roas-expiring',
+        )
+        self.assertContains(response, 'workflow-attention-tab')
+        self.assertContains(response, 'workflow-attention-panel')
+        self.assertContains(response, 'workflow-attention-panel" role="tabpanel"')
+
+
+class OperationsDashboardEmptyStateViewTestCase(PluginViewTestCase):
+    def add_dashboard_permissions(self):
         self.add_permissions(
             'netbox_rpki.view_rpkiprovideraccount',
             'netbox_rpki.view_providersnapshot',
@@ -2566,6 +2532,7 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
             'netbox_rpki.view_certificate',
             'netbox_rpki.view_routingintenttemplatebinding',
             'netbox_rpki.view_routingintentexception',
+            'netbox_rpki.view_externalmanagementexception',
             'netbox_rpki.view_bulkintentrun',
             'netbox_rpki.view_roareconciliationrun',
             'netbox_rpki.view_roachangeplan',
@@ -2580,11 +2547,17 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
             'netbox_rpki.view_irrwriteexecution',
         )
 
+    def test_operations_dashboard_empty_states_explain_how_tiles_are_populated(self):
+        self.add_dashboard_permissions()
+
         response = self.client.get(reverse('plugins:netbox_rpki:operations_dashboard'))
 
         self.assertHttpStatus(response, 200)
-        self.assertContains(response, reverse('plugins:netbox_rpki:operations_export') + '?format=json')
-        self.assertContains(response, reverse('plugins:netbox_rpki:operations_export') + '?format=csv')
+        self.assertContains(response, 'Run provider sync jobs or wait for lifecycle thresholds to surface failed, stale, or never-synced accounts here.')
+        self.assertContains(response, 'Create or edit intent templates and bindings; pending, stale, or invalid compilations will surface here.')
+        self.assertContains(response, 'Start bulk intent runs to populate this workflow with active or failed execution outcomes.')
+        self.assertContains(response, 'Configure validator instances and import validation evidence to populate this tile.')
+        self.assertContains(response, 'Author or import ROAs; objects nearing the configured lifecycle threshold will surface here.')
 
 
 class IrrDivergenceDashboardViewTestCase(PluginViewTestCase):

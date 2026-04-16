@@ -1663,6 +1663,12 @@ class IrrDivergenceDashboardView(ContentTypePermissionRequiredMixin, View):
 
 class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
     template_name = 'netbox_rpki/operations_dashboard.html'
+    valid_tabs = {
+        'provider-health',
+        'workflow-attention',
+        'external-evidence',
+        'expiring-soon',
+    }
     additional_permissions = [
         'netbox_rpki.view_roaobject',
         'netbox_rpki.view_certificate',
@@ -1687,6 +1693,7 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
         return 'netbox_rpki.view_rpkiprovideraccount'
 
     def get(self, request):
+        active_tab = self.get_active_tab(request)
         provider_accounts = self.get_provider_accounts(request)
         expiring_roas = self.get_expiring_roas(request)
         expiring_certificates = self.get_expiring_certificates(request)
@@ -1708,8 +1715,31 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
         irr_coordination_attention_runs = self.get_irr_coordination_attention_runs(request)
         irr_change_plans_requiring_attention = self.get_irr_change_plans_requiring_attention(request)
         irr_write_failures = self.get_recent_irr_write_failures(request)
+        attention_tiles = self.build_attention_tiles(
+            provider_accounts=provider_accounts,
+            stale_bindings=stale_bindings,
+            expiring_exceptions=expiring_exceptions,
+            external_management_exceptions_requiring_review=external_management_exceptions_requiring_review,
+            bulk_run_rollup=bulk_run_rollup,
+            reconciliation_attention_runs=reconciliation_attention_runs,
+            change_plans_requiring_attention=change_plans_requiring_attention,
+            aspa_reconciliation_attention_runs=aspa_reconciliation_attention_runs,
+            aspa_change_plans_requiring_attention=aspa_change_plans_requiring_attention,
+            validator_instances_requiring_attention=validator_instances_requiring_attention,
+            validation_runs_requiring_attention=validation_runs_requiring_attention,
+            telemetry_sources_requiring_attention=telemetry_sources_requiring_attention,
+            external_mismatch_items=external_mismatch_items,
+            irr_sources_requiring_attention=irr_sources_requiring_attention,
+            irr_coordination_attention_runs=irr_coordination_attention_runs,
+            irr_change_plans_requiring_attention=irr_change_plans_requiring_attention,
+            irr_write_failures=irr_write_failures,
+            expiring_roas=expiring_roas,
+            expiring_certificates=expiring_certificates,
+        )
 
         return render(request, self.template_name, {
+            'active_tab': active_tab,
+            'attention_tiles': attention_tiles,
             'provider_accounts': provider_accounts,
             'expiring_roas': expiring_roas,
             'expiring_certificates': expiring_certificates,
@@ -1732,6 +1762,293 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
             'irr_change_plans_requiring_attention': irr_change_plans_requiring_attention,
             'irr_write_failures': irr_write_failures,
         })
+
+    def get_active_tab(self, request):
+        active_tab = request.GET.get('tab', 'provider-health')
+        if active_tab not in self.valid_tabs:
+            return 'provider-health'
+        return active_tab
+
+    def build_dashboard_focus_url(self, *, tab, section_id):
+        return f"{reverse('plugins:netbox_rpki:operations_dashboard')}?tab={tab}#{section_id}"
+
+    def build_attention_tiles(
+        self,
+        *,
+        provider_accounts,
+        stale_bindings,
+        expiring_exceptions,
+        external_management_exceptions_requiring_review,
+        bulk_run_rollup,
+        reconciliation_attention_runs,
+        change_plans_requiring_attention,
+        aspa_reconciliation_attention_runs,
+        aspa_change_plans_requiring_attention,
+        validator_instances_requiring_attention,
+        validation_runs_requiring_attention,
+        telemetry_sources_requiring_attention,
+        external_mismatch_items,
+        irr_sources_requiring_attention,
+        irr_coordination_attention_runs,
+        irr_change_plans_requiring_attention,
+        irr_write_failures,
+        expiring_roas,
+        expiring_certificates,
+    ):
+        tiles = (
+            {
+                'title': 'Provider Accounts Requiring Attention',
+                'count': len(provider_accounts),
+                'description': 'Failed, stale, or never-synced provider accounts.',
+                'empty_message': (
+                    'Run provider sync jobs or wait for lifecycle thresholds to surface failed, stale, '
+                    'or never-synced accounts here.'
+                ),
+                'action_label': 'Review provider health',
+                'workflow_url': self.build_dashboard_focus_url(
+                    tab='provider-health',
+                    section_id='provider-accounts-attention',
+                ),
+            },
+            {
+                'title': 'Bindings Requiring Regeneration',
+                'count': len(stale_bindings),
+                'description': 'Pending, stale, or invalid template bindings.',
+                'empty_message': (
+                    'Create or edit intent templates and bindings; pending, stale, or invalid compilations '
+                    'will surface here.'
+                ),
+                'action_label': 'Review regeneration queue',
+                'workflow_url': self.build_dashboard_focus_url(
+                    tab='provider-health',
+                    section_id='bindings-regeneration-attention',
+                ),
+            },
+            {
+                'title': 'Exceptions Nearing Expiry',
+                'count': len(expiring_exceptions),
+                'description': 'Enabled intent exceptions nearing or past their lifecycle window.',
+                'empty_message': (
+                    'Create temporary intent exceptions with end dates to track renewals and cleanup here.'
+                ),
+                'action_label': 'Review exception lifecycle',
+                'workflow_url': self.build_dashboard_focus_url(
+                    tab='expiring-soon',
+                    section_id='intent-exceptions-expiring',
+                ),
+            },
+            {
+                'title': 'External Management Exceptions Due',
+                'count': len(external_management_exceptions_requiring_review),
+                'description': 'Review-due or expired externally managed exceptions.',
+                'empty_message': (
+                    'Create external management exceptions with review or end dates; due and expired items '
+                    'will surface here.'
+                ),
+                'action_label': 'Review external management',
+                'workflow_url': self.build_dashboard_focus_url(
+                    tab='provider-health',
+                    section_id='external-management-attention',
+                ),
+            },
+            {
+                'title': 'Bulk Runs Requiring Attention',
+                'count': bulk_run_rollup['attention_count'],
+                'description': f"{bulk_run_rollup['running_count']} active, {bulk_run_rollup['failed_count']} failed.",
+                'empty_message': (
+                    'Start bulk intent runs to populate this workflow with active or failed execution outcomes.'
+                ),
+                'action_label': 'Review bulk runs',
+                'workflow_url': self.build_dashboard_focus_url(
+                    tab='workflow-attention',
+                    section_id='bulk-runs-attention',
+                ),
+            },
+            {
+                'title': 'ROA Reconciliation Runs Requiring Attention',
+                'count': len(reconciliation_attention_runs),
+                'description': 'Replacement drift or lint findings need operator review.',
+                'empty_message': (
+                    'Run ROA reconciliation to surface replacement-required drift and lint findings here.'
+                ),
+                'action_label': 'Review ROA reconciliation',
+                'workflow_url': self.build_dashboard_focus_url(
+                    tab='workflow-attention',
+                    section_id='roa-reconciliation-attention',
+                ),
+            },
+            {
+                'title': 'ROA Change Plans Requiring Attention',
+                'count': len(change_plans_requiring_attention),
+                'description': 'Draft, approved, or failed plans with unresolved lint or simulation risk.',
+                'empty_message': (
+                    'Create ROA change plans and run lint or simulation; unresolved risk will appear here.'
+                ),
+                'action_label': 'Review ROA change plans',
+                'workflow_url': self.build_dashboard_focus_url(
+                    tab='workflow-attention',
+                    section_id='roa-change-plans-attention',
+                ),
+            },
+            {
+                'title': 'ASPA Reconciliation Runs Requiring Attention',
+                'count': len(aspa_reconciliation_attention_runs),
+                'description': 'Missing, extra, orphaned, or stale ASPA drift.',
+                'empty_message': (
+                    'Run ASPA reconciliation to surface missing, extra, orphaned, or stale provider sets here.'
+                ),
+                'action_label': 'Review ASPA reconciliation',
+                'workflow_url': self.build_dashboard_focus_url(
+                    tab='workflow-attention',
+                    section_id='aspa-reconciliation-attention',
+                ),
+            },
+            {
+                'title': 'ASPA Change Plans Requiring Attention',
+                'count': len(aspa_change_plans_requiring_attention),
+                'description': 'Draft, approved, or failed ASPA plans needing follow-up.',
+                'empty_message': (
+                    'Create ASPA change plans to surface open or failed provider updates here.'
+                ),
+                'action_label': 'Review ASPA change plans',
+                'workflow_url': self.build_dashboard_focus_url(
+                    tab='workflow-attention',
+                    section_id='aspa-change-plans-attention',
+                ),
+            },
+            {
+                'title': 'Validator Instances Requiring Attention',
+                'count': len(validator_instances_requiring_attention),
+                'description': 'Failed, missing, or stale external validation coverage.',
+                'empty_message': (
+                    'Configure validator instances and import validation evidence to populate this tile.'
+                ),
+                'action_label': 'Review validators',
+                'workflow_url': self.build_dashboard_focus_url(
+                    tab='external-evidence',
+                    section_id='validator-instances-attention',
+                ),
+            },
+            {
+                'title': 'Validation Runs Requiring Attention',
+                'count': len(validation_runs_requiring_attention),
+                'description': 'Failed runs or stale validator evidence.',
+                'empty_message': (
+                    'Run validator imports to surface failed runs and stale external evidence here.'
+                ),
+                'action_label': 'Review validation runs',
+                'workflow_url': self.build_dashboard_focus_url(
+                    tab='external-evidence',
+                    section_id='validation-runs-attention',
+                ),
+            },
+            {
+                'title': 'Telemetry Sources Requiring Attention',
+                'count': len(telemetry_sources_requiring_attention),
+                'description': 'Failed, stale, or never-synced route telemetry feeds.',
+                'empty_message': (
+                    'Configure telemetry sources and import route observations to populate this tile.'
+                ),
+                'action_label': 'Review telemetry sources',
+                'workflow_url': self.build_dashboard_focus_url(
+                    tab='external-evidence',
+                    section_id='telemetry-sources-attention',
+                ),
+            },
+            {
+                'title': 'External Evidence Mismatches',
+                'count': len(external_mismatch_items),
+                'description': 'Authored ROA or ASPA objects with conflicting external posture.',
+                'empty_message': (
+                    'Import validator or telemetry evidence; authored objects with conflicting posture will appear here.'
+                ),
+                'action_label': 'Review evidence mismatches',
+                'workflow_url': self.build_dashboard_focus_url(
+                    tab='external-evidence',
+                    section_id='external-evidence-mismatches',
+                ),
+            },
+            {
+                'title': 'IRR Sources Requiring Attention',
+                'count': len(irr_sources_requiring_attention),
+                'description': 'Failed, stale, or never-synced IRR sources.',
+                'empty_message': (
+                    'Configure and sync IRR sources to surface stale or failed imports here.'
+                ),
+                'action_label': 'Review IRR sources',
+                'workflow_url': self.build_dashboard_focus_url(
+                    tab='provider-health',
+                    section_id='irr-sources-attention',
+                ),
+            },
+            {
+                'title': 'IRR Coordination Runs Requiring Attention',
+                'count': len(irr_coordination_attention_runs),
+                'description': 'Cross-source conflicts, stale imports, or undraftable sources.',
+                'empty_message': (
+                    'Run IRR coordination to surface cross-source conflicts and stale imported evidence here.'
+                ),
+                'action_label': 'Review IRR coordination',
+                'workflow_url': self.build_dashboard_focus_url(
+                    tab='workflow-attention',
+                    section_id='irr-coordination-attention',
+                ),
+            },
+            {
+                'title': 'IRR Change Plans Requiring Attention',
+                'count': len(irr_change_plans_requiring_attention),
+                'description': 'Capability warnings, blocked items, or failed executions.',
+                'empty_message': (
+                    'Create IRR change plans to surface blocked items, capability warnings, or failed executions here.'
+                ),
+                'action_label': 'Review IRR change plans',
+                'workflow_url': self.build_dashboard_focus_url(
+                    tab='workflow-attention',
+                    section_id='irr-change-plans-attention',
+                ),
+            },
+            {
+                'title': 'IRR Write Failures',
+                'count': len(irr_write_failures),
+                'description': 'Recent failed or partial IRR write executions.',
+                'empty_message': (
+                    'Apply IRR change plans to surface failed or partial writes here for follow-up.'
+                ),
+                'action_label': 'Review IRR write failures',
+                'workflow_url': self.build_dashboard_focus_url(
+                    tab='workflow-attention',
+                    section_id='irr-write-failures-attention',
+                ),
+            },
+            {
+                'title': 'ROAs Nearing Expiry',
+                'count': len(expiring_roas),
+                'description': 'Sorted by earliest valid-to date under the effective lifecycle policy.',
+                'empty_message': (
+                    'Author or import ROAs; objects nearing the configured lifecycle threshold will surface here.'
+                ),
+                'action_label': 'Review expiring ROAs',
+                'workflow_url': self.build_dashboard_focus_url(
+                    tab='expiring-soon',
+                    section_id='roas-expiring',
+                ),
+            },
+            {
+                'title': 'Certificates Nearing Expiry',
+                'count': len(expiring_certificates),
+                'description': 'Includes already expired certificates under the effective lifecycle policy.',
+                'empty_message': (
+                    'Import or issue resource certificates; objects nearing the configured lifecycle threshold '
+                    'will surface here.'
+                ),
+                'action_label': 'Review expiring certificates',
+                'workflow_url': self.build_dashboard_focus_url(
+                    tab='expiring-soon',
+                    section_id='certificates-expiring',
+                ),
+            },
+        )
+        return list(tiles)
 
     def get_provider_accounts(self, request):
         provider_queryset = models.RpkiProviderAccount.objects.restrict(request.user, 'view').select_related('organization')

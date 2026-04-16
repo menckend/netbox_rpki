@@ -17,139 +17,22 @@
             <a href="{% url 'plugins:netbox_rpki:operations_export' %}?format=csv" class="btn btn-outline-secondary btn-sm">Export CSV</a>
           </div>
           <div class="row g-3">
-            <div class="col col-md-3">
-              <div class="border rounded p-3 h-100">
-                <div class="text-muted small text-uppercase">Provider Accounts Requiring Attention</div>
-                <div class="fs-2 fw-semibold">{{ provider_accounts|length }}</div>
-                <div class="text-muted">Failed or stale sync state</div>
+            {% for tile in attention_tiles %}
+              <div class="col col-md-3">
+                <a href="{{ tile.workflow_url }}" class="text-decoration-none text-reset d-block h-100">
+                  <div class="border rounded p-3 h-100">
+                    <div class="text-muted small text-uppercase">{{ tile.title }}</div>
+                    <div class="fs-2 fw-semibold">{{ tile.count }}</div>
+                    <div class="text-muted">{{ tile.description }}</div>
+                    {% if tile.count %}
+                      <div class="small mt-2 text-primary">{{ tile.action_label }}</div>
+                    {% else %}
+                      <div class="small mt-2 text-muted">{{ tile.empty_message }}</div>
+                    {% endif %}
+                  </div>
+                </a>
               </div>
-            </div>
-            <div class="col col-md-3">
-              <div class="border rounded p-3 h-100">
-                <div class="text-muted small text-uppercase">Bindings Requiring Regeneration</div>
-                <div class="fs-2 fw-semibold">{{ stale_bindings|length }}</div>
-                <div class="text-muted">Pending, stale, or invalid template bindings</div>
-              </div>
-            </div>
-            <div class="col col-md-3">
-              <div class="border rounded p-3 h-100">
-                <div class="text-muted small text-uppercase">Exceptions Nearing Expiry</div>
-                <div class="fs-2 fw-semibold">{{ expiring_exceptions|length }}</div>
-                <div class="text-muted">Enabled intent exceptions within their effective lifecycle policy window</div>
-              </div>
-            </div>
-            <div class="col col-md-3">
-              <div class="border rounded p-3 h-100">
-                <div class="text-muted small text-uppercase">External Management Exceptions Due</div>
-                <div class="fs-2 fw-semibold">{{ external_management_exceptions_requiring_review|length }}</div>
-                <div class="text-muted">Review-due or expired externally managed exceptions</div>
-              </div>
-            </div>
-            <div class="col col-md-3">
-              <div class="border rounded p-3 h-100">
-                <div class="text-muted small text-uppercase">Bulk Runs Requiring Attention</div>
-                <div class="fs-2 fw-semibold">{{ bulk_run_rollup.attention_count }}</div>
-                <div class="text-muted">{{ bulk_run_rollup.running_count }} active, {{ bulk_run_rollup.failed_count }} failed</div>
-              </div>
-            </div>
-            <div class="col col-md-3">
-              <div class="border rounded p-3 h-100">
-                <div class="text-muted small text-uppercase">Reconciliation Runs Requiring Attention</div>
-                <div class="fs-2 fw-semibold">{{ reconciliation_attention_runs|length }}</div>
-                <div class="text-muted">Replacement drift or lint warnings present</div>
-              </div>
-            </div>
-            <div class="col col-md-3">
-              <div class="border rounded p-3 h-100">
-                <div class="text-muted small text-uppercase">Open Change Plans Requiring Attention</div>
-                <div class="fs-2 fw-semibold">{{ change_plans_requiring_attention|length }}</div>
-                <div class="text-muted">Draft, approved, or failed plans with unresolved or acknowledged lint risk</div>
-              </div>
-            </div>
-            <div class="col col-md-3">
-              <div class="border rounded p-3 h-100">
-                <div class="text-muted small text-uppercase">ASPA Reconciliation Runs Requiring Attention</div>
-                <div class="fs-2 fw-semibold">{{ aspa_reconciliation_attention_runs|length }}</div>
-                <div class="text-muted">Missing, extra, orphaned, or stale ASPA drift</div>
-              </div>
-            </div>
-            <div class="col col-md-3">
-              <div class="border rounded p-3 h-100">
-                <div class="text-muted small text-uppercase">Open ASPA Change Plans Requiring Attention</div>
-                <div class="fs-2 fw-semibold">{{ aspa_change_plans_requiring_attention|length }}</div>
-                <div class="text-muted">Draft, approved, or failed ASPA plans</div>
-              </div>
-            </div>
-            <div class="col col-md-3">
-              <div class="border rounded p-3 h-100">
-                <div class="text-muted small text-uppercase">Validator Instances Requiring Attention</div>
-                <div class="fs-2 fw-semibold">{{ validator_instances_requiring_attention|length }}</div>
-                <div class="text-muted">Failed, missing, or stale external validation coverage</div>
-              </div>
-            </div>
-            <div class="col col-md-3">
-              <div class="border rounded p-3 h-100">
-                <div class="text-muted small text-uppercase">Validation Runs Requiring Attention</div>
-                <div class="fs-2 fw-semibold">{{ validation_runs_requiring_attention|length }}</div>
-                <div class="text-muted">Failed runs or stale validator evidence</div>
-              </div>
-            </div>
-            <div class="col col-md-3">
-              <div class="border rounded p-3 h-100">
-                <div class="text-muted small text-uppercase">Telemetry Sources Requiring Attention</div>
-                <div class="fs-2 fw-semibold">{{ telemetry_sources_requiring_attention|length }}</div>
-                <div class="text-muted">Failed, stale, or never-synced route telemetry sources</div>
-              </div>
-            </div>
-            <div class="col col-md-3">
-              <div class="border rounded p-3 h-100">
-                <div class="text-muted small text-uppercase">External Evidence Mismatches</div>
-                <div class="fs-2 fw-semibold">{{ external_mismatch_items|length }}</div>
-                <div class="text-muted">Authored ROA or ASPA objects with invalid or conflicting external posture</div>
-              </div>
-            </div>
-            <div class="col col-md-3">
-              <div class="border rounded p-3 h-100">
-                <div class="text-muted small text-uppercase">IRR Sources Requiring Attention</div>
-                <div class="fs-2 fw-semibold">{{ irr_sources_requiring_attention|length }}</div>
-                <div class="text-muted">Failed, stale, or never-synced IRR sources</div>
-              </div>
-            </div>
-            <div class="col col-md-3">
-              <div class="border rounded p-3 h-100">
-                <div class="text-muted small text-uppercase">IRR Coordination Runs Requiring Attention</div>
-                <div class="fs-2 fw-semibold">{{ irr_coordination_attention_runs|length }}</div>
-                <div class="text-muted">Cross-source conflicts, stale imports, or undraftable sources</div>
-              </div>
-            </div>
-            <div class="col col-md-3">
-              <div class="border rounded p-3 h-100">
-                <div class="text-muted small text-uppercase">IRR Change Plans Requiring Attention</div>
-                <div class="fs-2 fw-semibold">{{ irr_change_plans_requiring_attention|length }}</div>
-                <div class="text-muted">Capability warnings, blocked items, or failed executions</div>
-              </div>
-            </div>
-            <div class="col col-md-3">
-              <div class="border rounded p-3 h-100">
-                <div class="text-muted small text-uppercase">IRR Write Failures</div>
-                <div class="fs-2 fw-semibold">{{ irr_write_failures|length }}</div>
-                <div class="text-muted">Recent failed or partial IRR write executions</div>
-              </div>
-            </div>
-            <div class="col col-md-3">
-              <div class="border rounded p-3 h-100">
-                <div class="text-muted small text-uppercase">ROAs Nearing Expiry</div>
-                <div class="fs-2 fw-semibold">{{ expiring_roas|length }}</div>
-                <div class="text-muted">Sorted by earliest valid-to date under the effective lifecycle policy</div>
-              </div>
-            </div>
-            <div class="col col-md-3">
-              <div class="border rounded p-3 h-100">
-                <div class="text-muted small text-uppercase">Certificates Nearing Expiry</div>
-                <div class="fs-2 fw-semibold">{{ expiring_certificates|length }}</div>
-                <div class="text-muted">Includes already expired certificates under the effective lifecycle policy</div>
-              </div>
-            </div>
+            {% endfor %}
           </div>
         </div>
       </div>
@@ -158,32 +41,32 @@
 
         <ul class="nav nav-tabs mb-4" role="tablist">
           <li class="nav-item" role="presentation">
-            <button class="nav-link active" id="provider-health-tab" data-bs-toggle="tab" data-bs-target="#provider-health-panel" type="button" role="tab" aria-controls="provider-health-panel" aria-selected="true">
+            <button class="nav-link{% if active_tab == 'provider-health' %} active{% endif %}" id="provider-health-tab" data-bs-toggle="tab" data-bs-target="#provider-health-panel" type="button" role="tab" aria-controls="provider-health-panel" aria-selected="{% if active_tab == 'provider-health' %}true{% else %}false{% endif %}">
               Provider and Source Health
             </button>
           </li>
           <li class="nav-item" role="presentation">
-            <button class="nav-link" id="workflow-attention-tab" data-bs-toggle="tab" data-bs-target="#workflow-attention-panel" type="button" role="tab" aria-controls="workflow-attention-panel" aria-selected="false">
+            <button class="nav-link{% if active_tab == 'workflow-attention' %} active{% endif %}" id="workflow-attention-tab" data-bs-toggle="tab" data-bs-target="#workflow-attention-panel" type="button" role="tab" aria-controls="workflow-attention-panel" aria-selected="{% if active_tab == 'workflow-attention' %}true{% else %}false{% endif %}">
               Workflow Runs Requiring Attention
             </button>
           </li>
           <li class="nav-item" role="presentation">
-            <button class="nav-link" id="external-evidence-tab" data-bs-toggle="tab" data-bs-target="#external-evidence-panel" type="button" role="tab" aria-controls="external-evidence-panel" aria-selected="false">
+            <button class="nav-link{% if active_tab == 'external-evidence' %} active{% endif %}" id="external-evidence-tab" data-bs-toggle="tab" data-bs-target="#external-evidence-panel" type="button" role="tab" aria-controls="external-evidence-panel" aria-selected="{% if active_tab == 'external-evidence' %}true{% else %}false{% endif %}">
               External Evidence and Telemetry
             </button>
           </li>
           <li class="nav-item" role="presentation">
-            <button class="nav-link" id="expiring-soon-tab" data-bs-toggle="tab" data-bs-target="#expiring-soon-panel" type="button" role="tab" aria-controls="expiring-soon-panel" aria-selected="false">
+            <button class="nav-link{% if active_tab == 'expiring-soon' %} active{% endif %}" id="expiring-soon-tab" data-bs-toggle="tab" data-bs-target="#expiring-soon-panel" type="button" role="tab" aria-controls="expiring-soon-panel" aria-selected="{% if active_tab == 'expiring-soon' %}true{% else %}false{% endif %}">
               Expiring Soon
             </button>
           </li>
         </ul>
 
         <div class="tab-content">
-          <div class="tab-pane show active" id="provider-health-panel" role="tabpanel" aria-labelledby="provider-health-tab">
+          <div class="tab-pane{% if active_tab == 'provider-health' %} show active{% endif %}" id="provider-health-panel" role="tabpanel" aria-labelledby="provider-health-tab">
             <div class="row mb-4">
               <div class="col col-md-12">
-                <div class="card">
+                <div class="card" id="provider-accounts-attention">
                   <h5 class="card-header">Provider Accounts Requiring Attention</h5>
                   {% if provider_accounts %}
                     <div class="card-body table-responsive">
@@ -241,7 +124,7 @@
                       </table>
                     </div>
                   {% else %}
-                    <div class="card-body text-muted">No provider accounts currently require lifecycle attention.</div>
+                    <div class="card-body text-muted">No provider accounts currently require lifecycle attention. Run provider sync jobs or wait for lifecycle thresholds to surface failed, stale, or never-synced accounts here.</div>
                   {% endif %}
                 </div>
               </div>
@@ -249,7 +132,7 @@
 
             <div class="row mb-4">
               <div class="col col-md-12">
-                <div class="card">
+                <div class="card" id="bindings-regeneration-attention">
                   <h5 class="card-header">Bindings Requiring Regeneration</h5>
                   {% if stale_bindings %}
                     <div class="card-body table-responsive">
@@ -279,7 +162,7 @@
                       </table>
                     </div>
                   {% else %}
-                    <div class="card-body text-muted">No template bindings currently require regeneration.</div>
+                    <div class="card-body text-muted">No template bindings currently require regeneration. Create or edit intent templates and bindings; pending, stale, or invalid compilations will surface here.</div>
                   {% endif %}
                 </div>
               </div>
@@ -287,7 +170,7 @@
 
             <div class="row mb-4">
               <div class="col col-md-12">
-                <div class="card">
+                <div class="card" id="external-management-attention">
                   <h5 class="card-header">External Management Exceptions Requiring Review</h5>
                   {% if external_management_exceptions_requiring_review %}
                     <div class="card-body table-responsive">
@@ -327,7 +210,7 @@
 
             <div class="row">
               <div class="col col-md-12">
-                <div class="card">
+                <div class="card" id="irr-sources-attention">
                   <h5 class="card-header">IRR Sources Requiring Attention</h5>
                   {% if irr_sources_requiring_attention %}
                     <div class="card-body table-responsive">
@@ -363,17 +246,17 @@
                       </table>
                     </div>
                   {% else %}
-                    <div class="card-body text-muted">No IRR sources currently require sync attention.</div>
+                    <div class="card-body text-muted">No IRR sources currently require sync attention. Configure and sync IRR sources to surface stale or failed imports here.</div>
                   {% endif %}
                 </div>
               </div>
             </div>
           </div>
 
-          <div class="tab-pane" id="workflow-attention-panel" role="tabpanel" aria-labelledby="workflow-attention-tab">
+          <div class="tab-pane{% if active_tab == 'workflow-attention' %} show active{% endif %}" id="workflow-attention-panel" role="tabpanel" aria-labelledby="workflow-attention-tab">
             <div class="row mb-4">
               <div class="col col-md-12">
-                <div class="card">
+                <div class="card" id="bulk-runs-attention">
                   <h5 class="card-header">Recent Bulk Intent Runs</h5>
                   {% if bulk_run_rollup.runs %}
                     <div class="card-body table-responsive">
@@ -408,7 +291,7 @@
                       </table>
                     </div>
                   {% else %}
-                    <div class="card-body text-muted">No bulk intent runs have been recorded yet.</div>
+                    <div class="card-body text-muted">No bulk intent runs have been recorded yet. Start bulk intent runs to populate this workflow with active or failed execution outcomes.</div>
                   {% endif %}
                 </div>
               </div>
@@ -416,7 +299,7 @@
 
             <div class="row mb-4">
               <div class="col col-md-12">
-                <div class="card">
+                <div class="card" id="roa-reconciliation-attention">
                   <div class="card-header">
                     <h5 class="mb-1">ROA Reconciliation Runs Requiring Attention</h5>
                     <div class="text-muted small">
@@ -456,7 +339,7 @@
                       </table>
                     </div>
                   {% else %}
-                    <div class="card-body text-muted">No reconciliation runs currently require operator attention.</div>
+                    <div class="card-body text-muted">No reconciliation runs currently require operator attention. Run ROA reconciliation to surface replacement-required drift and lint findings here.</div>
                   {% endif %}
                 </div>
               </div>
@@ -464,7 +347,7 @@
 
             <div class="row mb-4">
               <div class="col col-md-12">
-                <div class="card">
+                <div class="card" id="roa-change-plans-attention">
                   <div class="card-header">
                     <h5 class="mb-1">Open ROA Change Plans Requiring Attention</h5>
                     <div class="text-muted small">
@@ -526,7 +409,7 @@
                       </table>
                     </div>
                   {% else %}
-                    <div class="card-body text-muted">No open change plans currently require attention.</div>
+                    <div class="card-body text-muted">No open change plans currently require attention. Create ROA change plans and run lint or simulation; unresolved risk will appear here.</div>
                   {% endif %}
                 </div>
               </div>
@@ -534,7 +417,7 @@
 
             <div class="row mb-4">
               <div class="col col-md-12">
-                <div class="card">
+                <div class="card" id="aspa-reconciliation-attention">
                   <h5 class="card-header">ASPA Reconciliation Runs Requiring Attention</h5>
                   {% if aspa_reconciliation_attention_runs %}
                     <div class="card-body table-responsive">
@@ -568,7 +451,7 @@
                       </table>
                     </div>
                   {% else %}
-                    <div class="card-body text-muted">No ASPA reconciliation runs currently require operator attention.</div>
+                    <div class="card-body text-muted">No ASPA reconciliation runs currently require operator attention. Run ASPA reconciliation to surface missing, extra, orphaned, or stale provider sets here.</div>
                   {% endif %}
                 </div>
               </div>
@@ -576,7 +459,7 @@
 
             <div class="row mb-4">
               <div class="col col-md-12">
-                <div class="card">
+                <div class="card" id="aspa-change-plans-attention">
                   <h5 class="card-header">Open ASPA Change Plans Requiring Attention</h5>
                   {% if aspa_change_plans_requiring_attention %}
                     <div class="card-body table-responsive">
@@ -606,7 +489,7 @@
                       </table>
                     </div>
                   {% else %}
-                    <div class="card-body text-muted">No open ASPA change plans currently require operator attention.</div>
+                    <div class="card-body text-muted">No open ASPA change plans currently require operator attention. Create ASPA change plans to surface open or failed provider updates here.</div>
                   {% endif %}
                 </div>
               </div>
@@ -614,7 +497,7 @@
 
             <div class="row mb-4">
               <div class="col col-md-12">
-                <div class="card">
+                <div class="card" id="irr-coordination-attention">
                   <h5 class="card-header">IRR Coordination Runs Requiring Attention</h5>
                   {% if irr_coordination_attention_runs %}
                     <div class="card-body table-responsive">
@@ -646,7 +529,7 @@
                       </table>
                     </div>
                   {% else %}
-                    <div class="card-body text-muted">No IRR coordination runs currently require attention.</div>
+                    <div class="card-body text-muted">No IRR coordination runs currently require attention. Run IRR coordination to surface cross-source conflicts and stale imported evidence here.</div>
                   {% endif %}
                 </div>
               </div>
@@ -654,7 +537,7 @@
 
             <div class="row mb-4">
               <div class="col col-md-12">
-                <div class="card">
+                <div class="card" id="irr-change-plans-attention">
                   <h5 class="card-header">IRR Change Plans Requiring Attention</h5>
                   {% if irr_change_plans_requiring_attention %}
                     <div class="card-body table-responsive">
@@ -698,7 +581,7 @@
                       </table>
                     </div>
                   {% else %}
-                    <div class="card-body text-muted">No IRR change plans currently require attention.</div>
+                    <div class="card-body text-muted">No IRR change plans currently require attention. Create IRR change plans to surface blocked items, capability warnings, or failed executions here.</div>
                   {% endif %}
                 </div>
               </div>
@@ -706,7 +589,7 @@
 
             <div class="row">
               <div class="col col-md-12">
-                <div class="card">
+                <div class="card" id="irr-write-failures-attention">
                   <h5 class="card-header">Recent IRR Write Failures</h5>
                   {% if irr_write_failures %}
                     <div class="card-body table-responsive">
@@ -745,7 +628,7 @@
             </div>
           </div>
 
-          <div class="tab-pane" id="external-evidence-panel" role="tabpanel" aria-labelledby="external-evidence-tab">
+          <div class="tab-pane{% if active_tab == 'external-evidence' %} show active{% endif %}" id="external-evidence-panel" role="tabpanel" aria-labelledby="external-evidence-tab">
             <div class="row mb-4">
               <div class="col col-md-12">
                 <div class="card">
@@ -762,7 +645,7 @@
 
             <div class="row mb-4">
               <div class="col col-md-6">
-                <div class="card h-100">
+                <div class="card h-100" id="validator-instances-attention">
                   <h5 class="card-header">Validator Instances Requiring Attention</h5>
                   {% if validator_instances_requiring_attention %}
                     <div class="card-body table-responsive">
@@ -794,12 +677,12 @@
                       </table>
                     </div>
                   {% else %}
-                    <div class="card-body text-muted">No validator instances currently require attention.</div>
+                    <div class="card-body text-muted">No validator instances currently require attention. Configure validator instances and import validation evidence to populate this tile.</div>
                   {% endif %}
                 </div>
               </div>
               <div class="col col-md-6">
-                <div class="card h-100">
+                <div class="card h-100" id="validation-runs-attention">
                   <h5 class="card-header">Validation Runs Requiring Attention</h5>
                   {% if validation_runs_requiring_attention %}
                     <div class="card-body table-responsive">
@@ -825,7 +708,7 @@
                       </table>
                     </div>
                   {% else %}
-                    <div class="card-body text-muted">No validation runs currently require attention.</div>
+                    <div class="card-body text-muted">No validation runs currently require attention. Run validator imports to surface failed runs and stale external evidence here.</div>
                   {% endif %}
                 </div>
               </div>
@@ -833,7 +716,7 @@
 
             <div class="row mb-4">
               <div class="col col-md-6">
-                <div class="card h-100">
+                <div class="card h-100" id="telemetry-sources-attention">
                   <h5 class="card-header">Telemetry Sources Requiring Attention</h5>
                   {% if telemetry_sources_requiring_attention %}
                     <div class="card-body table-responsive">
@@ -865,12 +748,12 @@
                       </table>
                     </div>
                   {% else %}
-                    <div class="card-body text-muted">No telemetry sources currently require attention.</div>
+                    <div class="card-body text-muted">No telemetry sources currently require attention. Configure telemetry sources and import route observations to populate this workflow.</div>
                   {% endif %}
                 </div>
               </div>
               <div class="col col-md-6">
-                <div class="card h-100">
+                <div class="card h-100" id="external-evidence-mismatches">
                   <h5 class="card-header">Authored Objects With External Evidence Mismatches</h5>
                   {% if external_mismatch_items %}
                     <div class="card-body table-responsive">
@@ -911,10 +794,10 @@
             </div>
           </div>
 
-          <div class="tab-pane" id="expiring-soon-panel" role="tabpanel" aria-labelledby="expiring-soon-tab">
+          <div class="tab-pane{% if active_tab == 'expiring-soon' %} show active{% endif %}" id="expiring-soon-panel" role="tabpanel" aria-labelledby="expiring-soon-tab">
             <div class="row mb-4">
               <div class="col col-md-12">
-                <div class="card">
+                <div class="card" id="intent-exceptions-expiring">
                   <h5 class="card-header">Intent Exceptions Nearing Expiry</h5>
                   {% if expiring_exceptions %}
                     <div class="card-body table-responsive">
@@ -968,7 +851,7 @@
 
             <div class="row mb-4">
               <div class="col col-md-12">
-                <div class="card">
+                <div class="card" id="roas-expiring">
                   <h5 class="card-header">ROAs Nearing Expiry</h5>
                   {% if expiring_roas %}
                     <div class="card-body table-responsive">
@@ -1006,7 +889,7 @@
 
             <div class="row">
               <div class="col col-md-12">
-                <div class="card">
+                <div class="card" id="certificates-expiring">
                   <h5 class="card-header">Certificates Nearing Expiry</h5>
                   {% if expiring_certificates %}
                     <div class="card-body table-responsive">
