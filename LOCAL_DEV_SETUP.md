@@ -130,7 +130,7 @@ source ~/.virtualenvs/netbox-4.5.7/bin/activate
 pip install -e ".[test]"
 ```
 
-The `[test]` extra installs development tooling (`black`, `flake8`, `pre-commit`, `pytest`). Use `pip install -e .` if you only need the plugin itself.
+The `[test]` extra installs development tooling (`black`, `flake8`, `pre-commit`). Use `pip install -e .` if you only need the plugin itself.
 
 ### 6. Start the local environment
 
