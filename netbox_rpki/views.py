@@ -21,6 +21,7 @@ from netbox_rpki.detail_specs import (
     DETAIL_SPEC_BY_MODEL,
     DetailFieldSpec,
     ORGANIZATION_DETAIL_SPEC,
+    ROA_CHANGE_PLAN_DETAIL_SPEC,
     ROA_OBJECT_DETAIL_SPEC,
     ROUTING_INTENT_TEMPLATE_BINDING_DETAIL_SPEC,
 )
@@ -39,6 +40,7 @@ from netbox_rpki.services import (
     approve_aspa_change_plan_secondary,
     build_aspa_change_plan_delta,
     build_roa_change_plan_lint_posture,
+    build_roa_change_plan_simulation_review,
     build_roa_change_plan_simulation_posture,
     build_external_mismatch_items,
     build_telemetry_source_attention_items,
@@ -303,6 +305,23 @@ for object_spec in VIEW_OBJECT_SPECS:
 
 for object_spec in SIMPLE_DETAIL_VIEW_OBJECT_SPECS:
     globals()[object_spec.view.detail_class_name] = build_detail_view_class(object_spec)
+
+
+class ROAChangePlanView(MetadataDrivenDetailView):
+    queryset = models.ROAChangePlan.objects.all()
+    detail_spec = ROA_CHANGE_PLAN_DETAIL_SPEC
+    template_name = 'netbox_rpki/roachangeplan_detail.html'
+    actions = ()
+
+    def get_extra_context(self, request, instance):
+        context = super().get_extra_context(request, instance)
+        context.update({
+            'simulation_review': build_roa_change_plan_simulation_review(instance),
+            'can_view_simulation_run': request.user.has_perm('netbox_rpki.view_roavalidationsimulationrun'),
+            'can_view_simulation_result': request.user.has_perm('netbox_rpki.view_roavalidationsimulationresult'),
+            'can_view_change_plan_item': request.user.has_perm('netbox_rpki.view_roachangeplanitem'),
+        })
+        return context
 
 
 class ROAChangePlanActionView(generic.ObjectEditView):

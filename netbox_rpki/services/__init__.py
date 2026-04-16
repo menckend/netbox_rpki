@@ -29,7 +29,10 @@ from .roa_lint import (
     suppress_roa_lint_finding,
 )
 from .rov_simulation import (
+    build_roa_change_plan_simulation_review,
     build_roa_change_plan_simulation_posture,
+    normalize_roa_validation_simulation_result_details,
+    normalize_roa_validation_simulation_run_summary,
     require_roa_change_plan_simulation_approvable,
     simulate_roa_change_plan,
 )
@@ -148,8 +151,11 @@ __all__ = (
     'build_aspa_change_plan_delta',
     'build_bulk_routing_intent_baseline_fingerprint',
     'build_roa_change_plan_lint_posture',
+    'build_roa_change_plan_simulation_review',
     'build_roa_change_plan_delta',
     'build_roa_change_plan_simulation_posture',
+    'normalize_roa_validation_simulation_result_details',
+    'normalize_roa_validation_simulation_run_summary',
     'compile_routing_intent_policy',
     'create_roa_change_plan',
     'create_aspa_change_plan',

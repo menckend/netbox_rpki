@@ -14,6 +14,15 @@ SIMULATION_APPROVAL_IMPACT_ACKNOWLEDGEMENT_REQUIRED = (
     rpki_models.ROAValidationSimulationApprovalImpact.ACKNOWLEDGEMENT_REQUIRED
 )
 SIMULATION_APPROVAL_IMPACT_BLOCKING = rpki_models.ROAValidationSimulationApprovalImpact.BLOCKING
+SIMULATION_OUTCOME_VALID = rpki_models.ROAValidationSimulationOutcome.VALID
+SIMULATION_OUTCOME_INVALID = rpki_models.ROAValidationSimulationOutcome.INVALID
+SIMULATION_OUTCOME_NOT_FOUND = rpki_models.ROAValidationSimulationOutcome.NOT_FOUND
+
+SIMULATION_OUTCOME_LABELS = {
+    SIMULATION_OUTCOME_VALID: "Valid",
+    SIMULATION_OUTCOME_INVALID: "Invalid",
+    SIMULATION_OUTCOME_NOT_FOUND: "Not Found",
+}
 
 
 @dataclass(slots=True)
@@ -96,6 +105,123 @@ def _build_plan_fingerprint(plan: rpki_models.ROAChangePlan) -> str:
         'items': item_rows,
     }
     return hashlib.sha256(_canonical_json(payload).encode('utf-8')).hexdigest()
+
+
+def normalize_roa_validation_simulation_run_summary(
+    run: rpki_models.ROAValidationSimulationRun,
+) -> dict:
+    summary = dict(run.summary_json or {})
+    summary.setdefault('plan_fingerprint', run.plan_fingerprint)
+    summary.setdefault('overall_approval_posture', run.overall_approval_posture)
+    summary.setdefault('is_current_for_plan', run.is_current_for_plan)
+    summary.setdefault('partially_constrained', run.partially_constrained)
+    summary.setdefault('predicted_outcome_counts', {
+        SIMULATION_OUTCOME_VALID: run.predicted_valid_count,
+        SIMULATION_OUTCOME_INVALID: run.predicted_invalid_count,
+        SIMULATION_OUTCOME_NOT_FOUND: run.predicted_not_found_count,
+    })
+    return summary
+
+
+def normalize_roa_validation_simulation_result_details(
+    result: rpki_models.ROAValidationSimulationResult,
+) -> dict:
+    details = dict(result.details_json or {})
+    details.setdefault('approval_impact', result.approval_impact)
+    details.setdefault('scenario_type', result.scenario_type)
+    details.setdefault('affected_prefixes', [])
+    details.setdefault('affected_origin_asns', [])
+    return details
+
+
+def _get_change_plan_simulation_run(
+    plan: rpki_models.ROAChangePlan,
+) -> rpki_models.ROAValidationSimulationRun | None:
+    simulation_runs = plan.simulation_runs.prefetch_related('results__change_plan_item')
+    simulation_run_id = (plan.summary_json or {}).get('simulation_run_id')
+    if simulation_run_id:
+        simulation_run = simulation_runs.filter(pk=simulation_run_id).first()
+        if simulation_run is not None:
+            return simulation_run
+    return simulation_runs.order_by('-started_at', '-created').first()
+
+
+def _serialize_simulation_result_review(
+    result: rpki_models.ROAValidationSimulationResult,
+) -> dict:
+    details = normalize_roa_validation_simulation_result_details(result)
+    change_plan_item = result.change_plan_item
+    return {
+        'id': result.pk,
+        'name': result.name,
+        'object_url': result.get_absolute_url(),
+        'approval_impact': details.get('approval_impact'),
+        'scenario_type': details.get('scenario_type'),
+        'impact_scope': details.get('impact_scope'),
+        'operator_message': details.get('operator_message'),
+        'why_it_matters': details.get('why_it_matters'),
+        'operator_action': details.get('operator_action'),
+        'affected_prefixes': [str(prefix) for prefix in details.get('affected_prefixes') or []],
+        'affected_origin_asns': [str(asn) for asn in details.get('affected_origin_asns') or []],
+        'change_plan_item': None if change_plan_item is None else {
+            'id': change_plan_item.pk,
+            'name': str(change_plan_item),
+            'object_url': change_plan_item.get_absolute_url(),
+        },
+    }
+
+
+def build_roa_change_plan_simulation_review(
+    plan: rpki_models.ROAChangePlan | int,
+) -> dict | None:
+    plan = _normalize_plan(plan)
+    simulation_run = _get_change_plan_simulation_run(plan)
+    if simulation_run is None:
+        return None
+
+    summary = normalize_roa_validation_simulation_run_summary(simulation_run)
+    grouped_results = {
+        SIMULATION_OUTCOME_VALID: {
+            'label': SIMULATION_OUTCOME_LABELS[SIMULATION_OUTCOME_VALID],
+            'count': 0,
+            'results': [],
+        },
+        SIMULATION_OUTCOME_INVALID: {
+            'label': SIMULATION_OUTCOME_LABELS[SIMULATION_OUTCOME_INVALID],
+            'count': 0,
+            'results': [],
+        },
+        SIMULATION_OUTCOME_NOT_FOUND: {
+            'label': SIMULATION_OUTCOME_LABELS[SIMULATION_OUTCOME_NOT_FOUND],
+            'count': 0,
+            'results': [],
+        },
+    }
+
+    for result in simulation_run.results.all():
+        outcome_type = result.outcome_type or SIMULATION_OUTCOME_NOT_FOUND
+        group = grouped_results.setdefault(
+            outcome_type,
+            {'label': outcome_type.replace('_', ' ').title(), 'count': 0, 'results': []},
+        )
+        group['results'].append(_serialize_simulation_result_review(result))
+        group['count'] += 1
+
+    return {
+        'run': {
+            'id': simulation_run.pk,
+            'name': str(simulation_run),
+            'object_url': simulation_run.get_absolute_url(),
+            'status': simulation_run.status,
+        },
+        'plan_fingerprint': summary.get('plan_fingerprint'),
+        'overall_approval_posture': summary.get('overall_approval_posture'),
+        'is_current_for_plan': summary.get('is_current_for_plan'),
+        'partially_constrained': summary.get('partially_constrained'),
+        'predicted_outcome_counts': summary.get('predicted_outcome_counts') or {},
+        'approval_impact_counts': summary.get('approval_impact_counts') or {},
+        'grouped_results': grouped_results,
+    }
 
 
 def _extract_authorization_fact(

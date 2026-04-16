@@ -3634,28 +3634,49 @@ class ROAValidationSimulationDetailViewTestCase(PluginViewTestCase):
             action_type=rpki_models.ROAChangePlanAction.CREATE,
             plan_semantic='reshape',
         )
+        cls.invalid_plan_item = create_test_roa_change_plan_item(
+            name='Simulation View Invalid Item',
+            change_plan=cls.plan,
+            action_type=rpki_models.ROAChangePlanAction.WITHDRAW,
+            plan_semantic='withdraw',
+        )
+        cls.not_found_plan_item = create_test_roa_change_plan_item(
+            name='Simulation View Not Found Item',
+            change_plan=cls.plan,
+            action_type=rpki_models.ROAChangePlanAction.CREATE,
+            plan_semantic='replace',
+        )
         cls.simulation_run = create_test_roa_validation_simulation_run(
             name='Simulation View Run',
             change_plan=cls.plan,
             plan_fingerprint='plan-fingerprint-123',
-            overall_approval_posture=rpki_models.ROAValidationSimulationApprovalImpact.ACKNOWLEDGEMENT_REQUIRED,
+            overall_approval_posture=rpki_models.ROAValidationSimulationApprovalImpact.BLOCKING,
             is_current_for_plan=True,
             partially_constrained=True,
-            result_count=1,
+            result_count=3,
             predicted_valid_count=1,
+            predicted_invalid_count=1,
+            predicted_not_found_count=1,
             summary_json={
                 'plan_fingerprint': 'plan-fingerprint-123',
                 'approval_impact_counts': {
                     rpki_models.ROAValidationSimulationApprovalImpact.INFORMATIONAL: 0,
                     rpki_models.ROAValidationSimulationApprovalImpact.ACKNOWLEDGEMENT_REQUIRED: 1,
-                    rpki_models.ROAValidationSimulationApprovalImpact.BLOCKING: 0,
+                    rpki_models.ROAValidationSimulationApprovalImpact.BLOCKING: 2,
                 },
                 'scenario_type_counts': {
                     'authorization_broadened_requires_ack': 1,
+                    'replacement_breaks_coverage': 1,
+                    'withdraw_without_replacement_blocks_intended_route': 1,
                 },
-                'overall_approval_posture': rpki_models.ROAValidationSimulationApprovalImpact.ACKNOWLEDGEMENT_REQUIRED,
+                'overall_approval_posture': rpki_models.ROAValidationSimulationApprovalImpact.BLOCKING,
                 'is_current_for_plan': True,
                 'partially_constrained': True,
+                'predicted_outcome_counts': {
+                    rpki_models.ROAValidationSimulationOutcome.VALID: 1,
+                    rpki_models.ROAValidationSimulationOutcome.INVALID: 1,
+                    rpki_models.ROAValidationSimulationOutcome.NOT_FOUND: 1,
+                },
             },
         )
         cls.plan.summary_json = {
@@ -3684,20 +3705,66 @@ class ROAValidationSimulationDetailViewTestCase(PluginViewTestCase):
                 'affected_origin_asns': [64496],
             },
         )
+        cls.invalid_simulation_result = create_test_roa_validation_simulation_result(
+            name='Simulation View Invalid Result',
+            simulation_run=cls.simulation_run,
+            change_plan_item=cls.invalid_plan_item,
+            outcome_type=rpki_models.ROAValidationSimulationOutcome.INVALID,
+            approval_impact=rpki_models.ROAValidationSimulationApprovalImpact.BLOCKING,
+            scenario_type='replacement_breaks_coverage',
+            details_json={
+                'scenario_type': 'replacement_breaks_coverage',
+                'impact_scope': 'intended',
+                'approval_impact': rpki_models.ROAValidationSimulationApprovalImpact.BLOCKING,
+                'plan_fingerprint': 'plan-fingerprint-123',
+                'operator_message': 'The replacement would invalidate the intended route.',
+                'affected_prefixes': ['10.0.1.0/24'],
+                'affected_origin_asns': [64497],
+            },
+        )
+        cls.not_found_simulation_result = create_test_roa_validation_simulation_result(
+            name='Simulation View Not Found Result',
+            simulation_run=cls.simulation_run,
+            change_plan_item=cls.not_found_plan_item,
+            outcome_type=rpki_models.ROAValidationSimulationOutcome.NOT_FOUND,
+            approval_impact=rpki_models.ROAValidationSimulationApprovalImpact.BLOCKING,
+            scenario_type='withdraw_without_replacement_blocks_intended_route',
+            details_json={
+                'scenario_type': 'withdraw_without_replacement_blocks_intended_route',
+                'impact_scope': 'intended',
+                'approval_impact': rpki_models.ROAValidationSimulationApprovalImpact.BLOCKING,
+                'plan_fingerprint': 'plan-fingerprint-123',
+                'operator_message': 'The withdrawal would leave the route without VRP coverage.',
+                'affected_prefixes': ['10.0.2.0/24'],
+                'affected_origin_asns': [64498],
+            },
+        )
 
     def test_change_plan_detail_shows_latest_simulation_posture(self):
         self.add_permissions(
             'netbox_rpki.view_roachangeplan',
+            'netbox_rpki.view_roachangeplanitem',
             'netbox_rpki.view_roavalidationsimulationrun',
+            'netbox_rpki.view_roavalidationsimulationresult',
         )
 
         response = self.client.get(self.plan.get_absolute_url())
 
         self.assertHttpStatus(response, 200)
         self.assertContains(response, 'Latest Simulation Posture')
-        self.assertContains(response, 'acknowledgement_required')
+        self.assertContains(response, 'blocking')
         self.assertContains(response, 'Latest Simulation Is Current')
         self.assertContains(response, 'plan-fingerprint-123')
+        self.assertContains(response, 'Simulation Review')
+        self.assertContains(response, 'Valid Outcomes')
+        self.assertContains(response, 'Invalid Outcomes')
+        self.assertContains(response, 'Not Found Outcomes')
+        self.assertContains(response, '10.0.0.0/24')
+        self.assertContains(response, '10.0.1.0/24')
+        self.assertContains(response, '10.0.2.0/24')
+        self.assertContains(response, '64496')
+        self.assertContains(response, '64497')
+        self.assertContains(response, '64498')
 
     def test_simulation_run_detail_shows_normalized_summary_fields(self):
         self.add_permissions('netbox_rpki.view_roavalidationsimulationrun')

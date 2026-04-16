@@ -1,0 +1,95 @@
+{% extends 'netbox_rpki/object_detail.html' %}
+
+{% block detail_primary_extras %}
+  {% if simulation_review %}
+    <div class="card mt-3">
+      <h5 class="card-header">Simulation Review</h5>
+      <div class="card-body">
+        <dl class="row mb-3">
+          <dt class="col-sm-4">Latest Run</dt>
+          <dd class="col-sm-8">
+            {% if can_view_simulation_run %}
+              <a href="{{ simulation_review.run.object_url }}">{{ simulation_review.run.name }}</a>
+            {% else %}
+              {{ simulation_review.run.name }}
+            {% endif %}
+            <span class="text-muted">({{ simulation_review.run.status }})</span>
+          </dd>
+          <dt class="col-sm-4">Approval Posture</dt>
+          <dd class="col-sm-8">{{ simulation_review.overall_approval_posture|default:'None' }}</dd>
+          <dt class="col-sm-4">Current For Plan</dt>
+          <dd class="col-sm-8">{{ simulation_review.is_current_for_plan }}</dd>
+          <dt class="col-sm-4">Partially Constrained</dt>
+          <dd class="col-sm-8">{{ simulation_review.partially_constrained }}</dd>
+          <dt class="col-sm-4">Plan Fingerprint</dt>
+          <dd class="col-sm-8"><code>{{ simulation_review.plan_fingerprint|default:'None' }}</code></dd>
+        </dl>
+
+        <div class="row g-3 mb-3">
+          {% for outcome_type, group in simulation_review.grouped_results.items %}
+            <div class="col col-md-4">
+              <div class="border rounded p-2 text-center h-100">
+                <div class="text-muted small text-uppercase">{{ group.label }}</div>
+                <div class="fs-4 fw-semibold">{{ group.count }}</div>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+
+        {% for outcome_type, group in simulation_review.grouped_results.items %}
+          <div class="mb-4">
+            <h6 class="mb-2">{{ group.label }} Outcomes</h6>
+            {% if group.results %}
+              <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                  <thead>
+                    <tr>
+                      <th>Result</th>
+                      <th>Plan Item</th>
+                      <th>Approval Impact</th>
+                      <th>Scenario</th>
+                      <th>Affected Prefixes</th>
+                      <th>Affected Origin ASNs</th>
+                      <th>Operator Message</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for result in group.results %}
+                      <tr>
+                        <td>
+                          {% if can_view_simulation_result %}
+                            <a href="{{ result.object_url }}">{{ result.name }}</a>
+                          {% else %}
+                            {{ result.name }}
+                          {% endif %}
+                        </td>
+                        <td>
+                          {% if result.change_plan_item %}
+                            {% if can_view_change_plan_item %}
+                              <a href="{{ result.change_plan_item.object_url }}">{{ result.change_plan_item.name }}</a>
+                            {% else %}
+                              {{ result.change_plan_item.name }}
+                            {% endif %}
+                          {% else %}
+                            <span class="text-muted">None</span>
+                          {% endif %}
+                        </td>
+                        <td>{{ result.approval_impact|default:'None' }}</td>
+                        <td>{{ result.scenario_type|default:'None' }}</td>
+                        <td>{{ result.affected_prefixes|join:', '|default:'None' }}</td>
+                        <td>{{ result.affected_origin_asns|join:', '|default:'None' }}</td>
+                        <td>{{ result.operator_message|default:'None' }}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            {% else %}
+              <div class="text-muted">No {{ group.label|lower }} outcomes in this simulation run.</div>
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  {% endif %}
+{% endblock detail_primary_extras %}

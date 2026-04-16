@@ -8,6 +8,11 @@ from netbox_rpki.services import build_roa_change_plan_lint_posture
 from netbox_rpki.services.roa_lint import build_roa_lint_lifecycle_summary
 from netbox_rpki.object_registry import API_OBJECT_SPECS
 from netbox_rpki.object_specs import ObjectSpec
+from netbox_rpki.services.rov_simulation import (
+    build_roa_change_plan_simulation_review,
+    normalize_roa_validation_simulation_result_details,
+    normalize_roa_validation_simulation_run_summary,
+)
 from netbox_rpki.services.lifecycle_reporting import (
     build_provider_lifecycle_health_summary,
     build_diff_publication_health_rollup,
@@ -61,22 +66,6 @@ from netbox_rpki.services.overlay_history import (
     build_validation_run_comparison,
     build_validator_run_history_summary,
 )
-
-def _simulation_run_summary(run):
-    summary = dict(run.summary_json or {})
-    summary.setdefault('plan_fingerprint', run.plan_fingerprint)
-    summary.setdefault('overall_approval_posture', run.overall_approval_posture)
-    summary.setdefault('is_current_for_plan', run.is_current_for_plan)
-    summary.setdefault('partially_constrained', run.partially_constrained)
-    return summary
-
-
-def _simulation_result_details(result):
-    details = dict(result.details_json or {})
-    details.setdefault('approval_impact', result.approval_impact)
-    details.setdefault('scenario_type', result.scenario_type)
-    return details
-
 
 def _brief_related_object(obj, *, extra_fields=None):
     payload = {
@@ -514,6 +503,7 @@ class ROAChangePlanSerializer(SERIALIZER_CLASS_MAP['roachangeplan']):
     latest_simulation_run = serializers.SerializerMethodField()
     latest_simulation_summary = serializers.SerializerMethodField()
     latest_simulation_posture = serializers.SerializerMethodField()
+    latest_simulation_review = serializers.SerializerMethodField()
     external_overlay_summary = serializers.SerializerMethodField()
 
     class Meta(SERIALIZER_CLASS_MAP['roachangeplan'].Meta):
@@ -526,6 +516,7 @@ class ROAChangePlanSerializer(SERIALIZER_CLASS_MAP['roachangeplan']):
             'latest_simulation_run',
             'latest_simulation_summary',
             'latest_simulation_posture',
+            'latest_simulation_review',
             'external_overlay_summary',
         )
 
@@ -562,13 +553,13 @@ class ROAChangePlanSerializer(SERIALIZER_CLASS_MAP['roachangeplan']):
         simulation_run = obj.simulation_runs.order_by('-started_at', '-created').first()
         if simulation_run is None:
             return None
-        return _simulation_run_summary(simulation_run)
+        return normalize_roa_validation_simulation_run_summary(simulation_run)
 
     def get_latest_simulation_posture(self, obj):
         simulation_run = obj.simulation_runs.order_by('-started_at', '-created').first()
         if simulation_run is None:
             return None
-        summary = _simulation_run_summary(simulation_run)
+        summary = normalize_roa_validation_simulation_run_summary(simulation_run)
         return {
             'run_id': simulation_run.pk,
             'plan_fingerprint': summary.get('plan_fingerprint'),
@@ -578,6 +569,9 @@ class ROAChangePlanSerializer(SERIALIZER_CLASS_MAP['roachangeplan']):
             'approval_impact_counts': summary.get('approval_impact_counts') or {},
             'scenario_type_counts': summary.get('scenario_type_counts') or {},
         }
+
+    def get_latest_simulation_review(self, obj):
+        return build_roa_change_plan_simulation_review(obj)
 
     def get_publication_state(self, obj):
         return derive_change_plan_publication_state(obj).as_dict()
@@ -664,19 +658,19 @@ class ROAValidationSimulationRunSerializer(SERIALIZER_CLASS_MAP['roavalidationsi
         )
 
     def get_approval_impact_counts(self, obj):
-        return _simulation_run_summary(obj).get('approval_impact_counts') or {}
+        return normalize_roa_validation_simulation_run_summary(obj).get('approval_impact_counts') or {}
 
     def get_scenario_type_counts(self, obj):
-        return _simulation_run_summary(obj).get('scenario_type_counts') or {}
+        return normalize_roa_validation_simulation_run_summary(obj).get('scenario_type_counts') or {}
 
     def get_affected_intended_route_count(self, obj):
-        return _simulation_run_summary(obj).get('affected_intended_route_count', 0)
+        return normalize_roa_validation_simulation_run_summary(obj).get('affected_intended_route_count', 0)
 
     def get_affected_collateral_route_count(self, obj):
-        return _simulation_run_summary(obj).get('affected_collateral_route_count', 0)
+        return normalize_roa_validation_simulation_run_summary(obj).get('affected_collateral_route_count', 0)
 
     def get_normalized_summary(self, obj):
-        return _simulation_run_summary(obj)
+        return normalize_roa_validation_simulation_run_summary(obj)
 
 
 SERIALIZER_CLASS_MAP['roavalidationsimulationrun'] = ROAValidationSimulationRunSerializer
@@ -718,43 +712,43 @@ class ROAValidationSimulationResultSerializer(SERIALIZER_CLASS_MAP['roavalidatio
         )
 
     def get_operator_message(self, obj):
-        return _simulation_result_details(obj).get('operator_message')
+        return normalize_roa_validation_simulation_result_details(obj).get('operator_message')
 
     def get_why_it_matters(self, obj):
-        return _simulation_result_details(obj).get('why_it_matters')
+        return normalize_roa_validation_simulation_result_details(obj).get('why_it_matters')
 
     def get_operator_action(self, obj):
-        return _simulation_result_details(obj).get('operator_action')
+        return normalize_roa_validation_simulation_result_details(obj).get('operator_action')
 
     def get_impact_scope(self, obj):
-        return _simulation_result_details(obj).get('impact_scope')
+        return normalize_roa_validation_simulation_result_details(obj).get('impact_scope')
 
     def get_plan_fingerprint(self, obj):
-        return _simulation_result_details(obj).get('plan_fingerprint')
+        return normalize_roa_validation_simulation_result_details(obj).get('plan_fingerprint')
 
     def get_before_coverage(self, obj):
-        return _simulation_result_details(obj).get('before_coverage') or {}
+        return normalize_roa_validation_simulation_result_details(obj).get('before_coverage') or {}
 
     def get_after_coverage(self, obj):
-        return _simulation_result_details(obj).get('after_coverage') or {}
+        return normalize_roa_validation_simulation_result_details(obj).get('after_coverage') or {}
 
     def get_affected_prefixes(self, obj):
-        return _simulation_result_details(obj).get('affected_prefixes') or []
+        return normalize_roa_validation_simulation_result_details(obj).get('affected_prefixes') or []
 
     def get_affected_origin_asns(self, obj):
-        return _simulation_result_details(obj).get('affected_origin_asns') or []
+        return normalize_roa_validation_simulation_result_details(obj).get('affected_origin_asns') or []
 
     def get_collateral_impact_count(self, obj):
-        return _simulation_result_details(obj).get('collateral_impact_count', 0)
+        return normalize_roa_validation_simulation_result_details(obj).get('collateral_impact_count', 0)
 
     def get_transition_risk(self, obj):
-        return _simulation_result_details(obj).get('transition_risk')
+        return normalize_roa_validation_simulation_result_details(obj).get('transition_risk')
 
     def get_explanation(self, obj):
-        return _simulation_result_details(obj).get('explanation')
+        return normalize_roa_validation_simulation_result_details(obj).get('explanation')
 
     def get_normalized_details(self, obj):
-        return _simulation_result_details(obj)
+        return normalize_roa_validation_simulation_result_details(obj)
 
 
 SERIALIZER_CLASS_MAP['roavalidationsimulationresult'] = ROAValidationSimulationResultSerializer
