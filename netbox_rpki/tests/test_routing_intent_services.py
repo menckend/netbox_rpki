@@ -23,7 +23,6 @@ from netbox_rpki.services import (
     run_bulk_routing_intent_pipeline,
     run_roa_lint,
     run_routing_intent_template_binding_pipeline,
-    run_routing_intent_pipeline,
     simulate_roa_change_plan,
     suppress_roa_lint_finding,
 )

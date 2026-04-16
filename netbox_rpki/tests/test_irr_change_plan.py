@@ -9,8 +9,6 @@ from netbox_rpki.services import create_irr_change_plans
 from netbox_rpki.tests.utils import (
     create_test_authored_as_set,
     create_test_authored_as_set_member,
-    create_test_imported_irr_as_set,
-    create_test_imported_irr_as_set_member,
     create_test_imported_irr_route_set,
     create_test_imported_irr_route_set_member,
     create_test_imported_irr_maintainer,

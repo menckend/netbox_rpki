@@ -12,7 +12,6 @@ from django.utils import timezone
 from netbox_rpki import models as rpki_models
 from netbox_rpki.services.publication_state import (
     derive_change_plan_publication_state,
-    derive_rollback_bundle_publication_state,
 )
 from netbox_rpki.services.bulk_intent_governance import is_bulk_intent_run_approved
 

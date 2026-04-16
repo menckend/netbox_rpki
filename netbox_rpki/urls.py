@@ -327,6 +327,7 @@ def build_object_urlpatterns(spec):
 urlpatterns = [
     path('operations/', views.OperationsDashboardView.as_view(), name='operations_dashboard'),
     path('operations/export/', views.OperationsDashboardExportView.as_view(), name='operations_export'),
+    path('irr/divergence/', views.IrrDivergenceDashboardView.as_view(), name='irr_divergence_dashboard'),
 ]
 for object_spec in VIEW_OBJECT_SPECS:
     urlpatterns.extend(build_object_urlpatterns(object_spec))

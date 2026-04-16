@@ -11,7 +11,6 @@ from datetime import date, datetime, time, timedelta
 from django.utils.text import slugify
 
 from django.http import HttpResponse, JsonResponse
-from django.db.models import Count, Q
 from django.utils import timezone
 from urllib.request import Request, urlopen
 

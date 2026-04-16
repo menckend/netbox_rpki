@@ -14,6 +14,14 @@ OPERATIONS_MENU_ITEM = PluginMenuItem(
     ],
 )
 
+IRR_DIVERGENCE_MENU_ITEM = PluginMenuItem(
+    link='plugins:netbox_rpki:irr_divergence_dashboard',
+    link_text='IRR Divergence Dashboard',
+    permissions=[
+        'netbox_rpki.view_irrcoordinationresult',
+    ],
+)
+
 
 def build_menu_item(spec):
     buttons = ()
@@ -37,6 +45,7 @@ navigation_groups = {
     group_name: tuple(build_menu_item(spec) for spec in specs)
     for group_name, specs in get_navigation_groups()
 }
+navigation_groups['IRR'] = navigation_groups.get('IRR', ()) + (IRR_DIVERGENCE_MENU_ITEM,)
 navigation_groups['Resources'] = navigation_groups.get('Resources', ()) + (OPERATIONS_MENU_ITEM,)
 
 menu_groups = tuple(

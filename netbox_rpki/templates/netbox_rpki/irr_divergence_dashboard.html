@@ -1,0 +1,144 @@
+{% extends 'generic/_base.html' %}
+
+{% block title %}IRR Divergence Dashboard{% endblock %}
+
+{% block content %}
+  <div class="row mb-4">
+    <div class="col col-md-12">
+      <div class="card border-primary">
+        <h2 class="card-header">IRR Divergence Dashboard</h2>
+        <div class="card-body">
+          <p class="mb-3">
+            Review IRR versus RPKI coordination findings grouped by divergence type. Filters let operators narrow the
+            dashboard by source, tenant, or ASN before drafting remediation.
+          </p>
+          <form method="get" class="row g-3 align-items-end mb-3">
+            <div class="col col-md-4">
+              <label class="form-label" for="{{ filter_form.source.id_for_label }}">{{ filter_form.source.label }}</label>
+              {{ filter_form.source }}
+              {% if filter_form.source.help_text %}
+                <div class="form-text">{{ filter_form.source.help_text }}</div>
+              {% endif %}
+            </div>
+            <div class="col col-md-4">
+              <label class="form-label" for="{{ filter_form.tenant.id_for_label }}">{{ filter_form.tenant.label }}</label>
+              {{ filter_form.tenant }}
+              {% if filter_form.tenant.help_text %}
+                <div class="form-text">{{ filter_form.tenant.help_text }}</div>
+              {% endif %}
+            </div>
+            <div class="col col-md-2">
+              <label class="form-label" for="{{ filter_form.asn.id_for_label }}">{{ filter_form.asn.label }}</label>
+              {{ filter_form.asn }}
+              {% if filter_form.asn.help_text %}
+                <div class="form-text">{{ filter_form.asn.help_text }}</div>
+              {% endif %}
+            </div>
+            <div class="col col-md-2 d-flex gap-2">
+              <button type="submit" class="btn btn-primary">Apply</button>
+              <a href="{% url 'plugins:netbox_rpki:irr_divergence_dashboard' %}" class="btn btn-outline-secondary">Reset</a>
+            </div>
+          </form>
+          <div class="row g-3">
+            <div class="col col-md-3">
+              <div class="border rounded p-3 h-100">
+                <div class="text-muted small text-uppercase">Visible Findings</div>
+                <div class="fs-2 fw-semibold">{{ total_finding_count }}</div>
+                <div class="text-muted">Non-match IRR coordination results after filters</div>
+              </div>
+            </div>
+            {% for group in grouped_findings %}
+              <div class="col col-md-3">
+                <div class="border rounded p-3 h-100">
+                  <div class="text-muted small text-uppercase">{{ group.title }}</div>
+                  <div class="fs-2 fw-semibold">{{ group.count }}</div>
+                  <div class="text-muted">{{ group.description }}</div>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% if grouped_findings %}
+    {% for group in grouped_findings %}
+      <div class="row mb-4">
+        <div class="col col-md-12">
+          <div class="card">
+            <h5 class="card-header">{{ group.title }} <span class="text-muted">({{ group.count }})</span></h5>
+            <div class="card-body">
+              <p class="text-muted">{{ group.description }}</p>
+              <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                  <thead>
+                    <tr>
+                      <th>Finding</th>
+                      <th>Source</th>
+                      <th>Tenant</th>
+                      <th>Prefixes</th>
+                      <th>ASNs</th>
+                      <th>Affected Objects</th>
+                      <th>Recommended Remediation</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for finding in group.findings %}
+                      <tr>
+                        <td>
+                          <div><a href="{{ finding.object.get_absolute_url }}">{{ finding.name }}</a></div>
+                          <div class="text-muted small">{{ finding.coordination_family_display }} / {{ finding.severity_display }}</div>
+                          {% if finding.summary_message %}
+                            <div class="text-muted small">{{ finding.summary_message }}</div>
+                          {% endif %}
+                        </td>
+                        <td>
+                          {% if finding.object.source %}
+                            <a href="{{ finding.object.source.get_absolute_url }}">{{ finding.object.source.name }}</a>
+                          {% else %}
+                            <span class="text-muted">None</span>
+                          {% endif %}
+                        </td>
+                        <td>
+                          {% if finding.tenant %}
+                            <a href="{{ finding.tenant.get_absolute_url }}">{{ finding.tenant }}</a>
+                          {% else %}
+                            <span class="text-muted">None</span>
+                          {% endif %}
+                        </td>
+                        <td>{{ finding.prefixes_text }}</td>
+                        <td>{{ finding.asns_text }}</td>
+                        <td>
+                          {% for affected in finding.affected_objects %}
+                            <div class="small">
+                              <a href="{{ affected.url }}">{{ affected.label }}</a>: {{ affected.name }}
+                            </div>
+                          {% endfor %}
+                        </td>
+                        <td>
+                          <div class="fw-semibold">{{ finding.recommended_action }}</div>
+                          <div class="text-muted small">{{ finding.recommended_remediation }}</div>
+                        </td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+  {% else %}
+    <div class="row">
+      <div class="col col-md-12">
+        <div class="card">
+          <div class="card-body text-muted">
+            No IRR divergence findings match the current filters.
+          </div>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+{% endblock %}

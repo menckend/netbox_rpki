@@ -3,7 +3,7 @@ import django_tables2 as tables
 from django.utils.safestring import mark_safe
 
 from netbox.tables import NetBoxTable
-from netbox.tables.columns import ActionsColumn, ChoiceFieldColumn, TagColumn
+from netbox.tables.columns import ActionsColumn, TagColumn
 from netbox_rpki import models
 from netbox_rpki.object_registry import TABLE_OBJECT_SPECS
 from netbox_rpki.object_specs import ObjectSpec

@@ -28,10 +28,6 @@ from netbox_rpki.services.publication_state import (
     derive_change_plan_publication_state,
     derive_rollback_bundle_publication_state,
 )
-from netbox_rpki.services.governance_summary import (
-    build_change_plan_governance_summary,
-    build_rollback_bundle_governance_summary,
-)
 from netbox_rpki.services.governance_rollup import build_organization_governance_rollup
 from netbox_rpki.services.delegated_workflow import (
     build_authored_ca_relationship_delegated_summary,

@@ -4,7 +4,6 @@ from django.utils import timezone
 
 from netbox_rpki import models as rpki_models
 from netbox_rpki.services.publication_state import (
-    PublicationStateResult,
     derive_change_plan_publication_state,
     derive_rollback_bundle_publication_state,
 )

@@ -1,9 +1,9 @@
-from datetime import date, timedelta
 from types import SimpleNamespace
 from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied
+from django.db.models import Q
 from django.http import HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -23,7 +23,6 @@ from netbox_rpki.detail_specs import (
     ORGANIZATION_DETAIL_SPEC,
     ROA_CHANGE_PLAN_DETAIL_SPEC,
     ROA_OBJECT_DETAIL_SPEC,
-    ROUTING_INTENT_TEMPLATE_BINDING_DETAIL_SPEC,
 )
 from netbox_rpki.object_registry import SIMPLE_DETAIL_VIEW_OBJECT_SPECS, VIEW_OBJECT_SPECS
 from netbox_rpki.object_specs import ObjectSpec
@@ -63,6 +62,7 @@ from netbox_rpki.services import (
     simulate_roa_change_plan,
     suppress_roa_lint_finding,
 )
+from netbox_rpki.services.irr_write import describe_irr_coordination_result_remediation
 from netbox_rpki.services.lifecycle_reporting import (
     LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_LIFECYCLE_SUMMARY,
     LIFECYCLE_EXPORT_KIND_PROVIDER_ACCOUNT_SUMMARY,
@@ -72,7 +72,6 @@ from netbox_rpki.services.lifecycle_reporting import (
     build_provider_publication_diff_timeline,
     build_lifecycle_export_response,
     get_effective_lifecycle_thresholds,
-    get_lifecycle_export_filename,
     is_within_lifecycle_expiry_threshold,
 )
 from netbox_rpki.services.provider_sync_contract import build_provider_account_rollup
@@ -1428,6 +1427,238 @@ class ASPAReconciliationRunCreatePlanView(generic.ObjectEditView):
 
         messages.success(request, f'Created ASPA change plan {plan.name}.')
         return redirect(plan.get_absolute_url())
+
+
+class IrrDivergenceDashboardView(ContentTypePermissionRequiredMixin, View):
+    template_name = 'netbox_rpki/irr_divergence_dashboard.html'
+    divergence_group_metadata = {
+        models.IrrCoordinationResultType.MISSING_IN_SOURCE: {
+            'title': 'Missing In Source',
+            'description': 'NetBox intent expects an IRR object that the selected source does not currently publish.',
+        },
+        models.IrrCoordinationResultType.SOURCE_CONFLICT: {
+            'title': 'Source Conflict',
+            'description': 'IRR and NetBox disagree on origin or cross-source coverage for the same policy object.',
+        },
+        models.IrrCoordinationResultType.EXTRA_IN_SOURCE: {
+            'title': 'Extra In Source',
+            'description': 'The IRR source publishes state that is no longer represented by current NetBox intent.',
+        },
+        models.IrrCoordinationResultType.POLICY_CONTEXT_GAP: {
+            'title': 'Policy Context Gap',
+            'description': 'A route delta depends on additional policy context before a safe draft can be produced.',
+        },
+        models.IrrCoordinationResultType.UNSUPPORTED_WRITE: {
+            'title': 'Unsupported Write',
+            'description': 'The source can be reviewed, but the current adapter cannot safely synthesize the change.',
+        },
+        models.IrrCoordinationResultType.AMBIGUOUS_LINKAGE: {
+            'title': 'Ambiguous Linkage',
+            'description': 'The linkage between authored policy and imported IRR state needs operator review.',
+        },
+        models.IrrCoordinationResultType.STALE_SOURCE: {
+            'title': 'Stale Source',
+            'description': 'Imported IRR evidence is stale and should be refreshed before it is treated as authoritative.',
+        },
+    }
+    divergence_group_order = (
+        models.IrrCoordinationResultType.MISSING_IN_SOURCE,
+        models.IrrCoordinationResultType.SOURCE_CONFLICT,
+        models.IrrCoordinationResultType.EXTRA_IN_SOURCE,
+        models.IrrCoordinationResultType.POLICY_CONTEXT_GAP,
+        models.IrrCoordinationResultType.UNSUPPORTED_WRITE,
+        models.IrrCoordinationResultType.AMBIGUOUS_LINKAGE,
+        models.IrrCoordinationResultType.STALE_SOURCE,
+    )
+    severity_rank = {
+        models.ReconciliationSeverity.ERROR: 0,
+        models.ReconciliationSeverity.WARNING: 1,
+        models.ReconciliationSeverity.INFO: 2,
+    }
+
+    def get_required_permission(self):
+        return 'netbox_rpki.view_irrcoordinationresult'
+
+    def get(self, request):
+        filter_form = forms.IrrDivergenceDashboardFilterForm(request.GET or None)
+        selected_source = None
+        selected_tenant = None
+        asn_filter = ''
+        if filter_form.is_valid():
+            selected_source = filter_form.cleaned_data.get('source')
+            selected_tenant = filter_form.cleaned_data.get('tenant')
+            asn_filter = self.canonicalize_asn(filter_form.cleaned_data.get('asn'))
+
+        queryset = models.IrrCoordinationResult.objects.restrict(request.user, 'view').select_related(
+            'coordination_run',
+            'coordination_run__organization',
+            'source',
+            'snapshot',
+            'tenant',
+            'roa_intent',
+            'roa_intent__tenant',
+            'imported_route_object',
+            'imported_aut_num',
+            'imported_maintainer',
+        ).exclude(
+            result_type=models.IrrCoordinationResultType.MATCH,
+        ).order_by(
+            'result_type',
+            'source__name',
+            'coordination_family',
+            'stable_object_key',
+            'name',
+            'pk',
+        )
+        if selected_source is not None:
+            queryset = queryset.filter(source=selected_source)
+        if selected_tenant is not None:
+            queryset = queryset.filter(
+                Q(tenant=selected_tenant)
+                | Q(roa_intent__tenant=selected_tenant)
+                | Q(coordination_run__tenant=selected_tenant)
+                | Q(source__tenant=selected_tenant)
+            ).distinct()
+
+        findings = [
+            finding
+            for finding in (self.build_finding(result) for result in queryset)
+            if not asn_filter or asn_filter in finding['asn_tokens']
+        ]
+        findings.sort(
+            key=lambda finding: (
+                self.divergence_group_order.index(finding['result_type']),
+                self.severity_rank.get(finding['severity'], 99),
+                (finding['source_name'] or '').lower(),
+                finding['stable_object_key'],
+                finding['name'].lower(),
+            )
+        )
+
+        grouped_findings = []
+        for result_type in self.divergence_group_order:
+            group_findings = [finding for finding in findings if finding['result_type'] == result_type]
+            if not group_findings:
+                continue
+            metadata = self.divergence_group_metadata[result_type]
+            grouped_findings.append({
+                'result_type': result_type,
+                'title': metadata['title'],
+                'description': metadata['description'],
+                'count': len(group_findings),
+                'findings': group_findings,
+            })
+
+        return render(request, self.template_name, {
+            'filter_form': filter_form,
+            'grouped_findings': grouped_findings,
+            'selected_source': selected_source,
+            'selected_tenant': selected_tenant,
+            'selected_asn': asn_filter,
+            'total_finding_count': len(findings),
+            'group_counts': {group['title']: group['count'] for group in grouped_findings},
+        })
+
+    def canonicalize_asn(self, value: str | None) -> str:
+        candidate = str(value or '').strip().upper()
+        if not candidate:
+            return ''
+        if candidate.startswith('AS'):
+            return candidate
+        return f'AS{candidate}'
+
+    def build_finding(self, result):
+        remediation = describe_irr_coordination_result_remediation(result)
+        effective_tenant = (
+            result.tenant
+            or getattr(result.roa_intent, 'tenant', None)
+            or getattr(result.coordination_run, 'tenant', None)
+            or getattr(result.source, 'tenant', None)
+        )
+        prefixes = self.extract_prefixes(result)
+        asn_tokens = self.extract_asn_tokens(result)
+        return {
+            'object': result,
+            'name': result.name,
+            'result_type': result.result_type,
+            'result_type_display': result.get_result_type_display(),
+            'coordination_family_display': result.get_coordination_family_display(),
+            'severity': result.severity,
+            'severity_display': result.get_severity_display(),
+            'source_name': getattr(result.source, 'name', ''),
+            'tenant': effective_tenant,
+            'prefixes': prefixes,
+            'prefixes_text': ', '.join(prefixes) if prefixes else 'None',
+            'asn_tokens': asn_tokens,
+            'asns_text': ', '.join(asn_tokens) if asn_tokens else 'None',
+            'stable_object_key': result.stable_object_key or '',
+            'summary_message': (result.summary_json or {}).get('message', ''),
+            'affected_objects': self.build_affected_objects(result),
+            'recommended_action': remediation['action_display'],
+            'recommended_remediation': remediation['reason'],
+        }
+
+    def extract_prefixes(self, result):
+        prefixes = []
+        seen = set()
+
+        def remember(value):
+            candidate = str(value or '').strip()
+            if not candidate or candidate in seen:
+                return
+            seen.add(candidate)
+            prefixes.append(candidate)
+
+        summary = result.summary_json or {}
+        remember(getattr(result.roa_intent, 'prefix_cidr_text', ''))
+        remember(getattr(result.imported_route_object, 'prefix', ''))
+        remember(summary.get('netbox_prefix'))
+        remember(summary.get('source_prefix'))
+        for conflict in summary.get('source_conflicts') or []:
+            remember(conflict.get('prefix'))
+        return tuple(prefixes)
+
+    def extract_asn_tokens(self, result):
+        tokens = []
+        seen = set()
+
+        def remember(value):
+            candidate = self.canonicalize_asn(value)
+            if not candidate or candidate in seen or candidate == 'AS':
+                return
+            seen.add(candidate)
+            tokens.append(candidate)
+
+        summary = result.summary_json or {}
+        remember(getattr(result.imported_route_object, 'origin_asn', ''))
+        remember(getattr(result.imported_aut_num, 'asn', ''))
+        remember(summary.get('netbox_origin_asn'))
+        remember(summary.get('source_origin_asn'))
+        if getattr(result.roa_intent, 'origin_asn_value', None) is not None:
+            remember(result.roa_intent.origin_asn_value)
+        for conflict in summary.get('source_conflicts') or []:
+            remember(conflict.get('origin_asn'))
+        return tuple(tokens)
+
+    def build_affected_objects(self, result):
+        objects = []
+        for label, obj in (
+            ('Coordination Result', result),
+            ('Coordination Run', result.coordination_run),
+            ('Source', result.source),
+            ('ROA Intent', result.roa_intent),
+            ('Imported Route', result.imported_route_object),
+            ('Imported Aut-Num', result.imported_aut_num),
+            ('Imported Maintainer', result.imported_maintainer),
+        ):
+            if obj is None:
+                continue
+            objects.append({
+                'label': label,
+                'name': str(obj),
+                'url': obj.get_absolute_url(),
+            })
+        return tuple(objects)
 
 
 class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):

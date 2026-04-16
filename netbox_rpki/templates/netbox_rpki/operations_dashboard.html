@@ -156,856 +156,889 @@
     </div>
   </div>
 
-  <div class="row mb-4">
-    <div class="col col-md-12">
-      <div class="card">
-        <h5 class="card-header">External Evidence Overview</h5>
-        <div class="card-body">
-          <p class="mb-0 text-muted">
-            Validator and telemetry freshness are shown separately from provider sync health so operators can tell
-            whether publication drift or outside observation lag is driving the attention state.
-          </p>
+        <ul class="nav nav-tabs mb-4" role="tablist">
+          <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="provider-health-tab" data-bs-toggle="tab" data-bs-target="#provider-health-panel" type="button" role="tab" aria-controls="provider-health-panel" aria-selected="true">
+              Provider and Source Health
+            </button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" id="workflow-attention-tab" data-bs-toggle="tab" data-bs-target="#workflow-attention-panel" type="button" role="tab" aria-controls="workflow-attention-panel" aria-selected="false">
+              Workflow Runs Requiring Attention
+            </button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" id="external-evidence-tab" data-bs-toggle="tab" data-bs-target="#external-evidence-panel" type="button" role="tab" aria-controls="external-evidence-panel" aria-selected="false">
+              External Evidence and Telemetry
+            </button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" id="expiring-soon-tab" data-bs-toggle="tab" data-bs-target="#expiring-soon-panel" type="button" role="tab" aria-controls="expiring-soon-panel" aria-selected="false">
+              Expiring Soon
+            </button>
+          </li>
+        </ul>
+
+        <div class="tab-content">
+          <div class="tab-pane show active" id="provider-health-panel" role="tabpanel" aria-labelledby="provider-health-tab">
+            <div class="row mb-4">
+              <div class="col col-md-12">
+                <div class="card">
+                  <h5 class="card-header">Provider Accounts Requiring Attention</h5>
+                  {% if provider_accounts %}
+                    <div class="card-body table-responsive">
+                      <table class="table table-hover align-middle mb-0">
+                        <thead>
+                          <tr>
+                            <th>Name</th>
+                            <th>Organization</th>
+                            <th>Provider Type</th>
+                            <th>Sync Health</th>
+                            <th>Last Sync Status</th>
+                            <th>Freshness</th>
+                            <th>Family Coverage</th>
+                            <th>Publication Health</th>
+                            <th>Latest Snapshot</th>
+                            <th>Latest Diff</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {% for provider_account in provider_accounts %}
+                            <tr>
+                              <td><a href="{{ provider_account.get_absolute_url }}">{{ provider_account.name }}</a></td>
+                              <td><a href="{{ provider_account.organization.get_absolute_url }}">{{ provider_account.organization }}</a></td>
+                              <td>{{ provider_account.get_provider_type_display }}</td>
+                              <td><span class="badge bg-danger">{{ provider_account.sync_health_display }}</span></td>
+                              <td>{{ provider_account.last_sync_status }}</td>
+                              <td>
+                                <div>{{ provider_account.last_sync_rollup.freshness_text }}</div>
+                                <div class="text-muted small">{{ provider_account.last_sync_rollup.sync_threshold_text }}</div>
+                              </td>
+                              <td>
+                                <div>{{ provider_account.last_sync_rollup.family_status_text }}</div>
+                              </td>
+                              <td>
+                                <div>{{ provider_account.last_sync_rollup.publication_health_text }}</div>
+                              </td>
+                              <td>
+                                {% if provider_account.last_sync_rollup.latest_snapshot_url %}
+                                  <a href="{{ provider_account.last_sync_rollup.latest_snapshot_url }}">{{ provider_account.last_sync_rollup.latest_snapshot_label }}</a>
+                                  <div class="text-muted small">{{ provider_account.last_sync_rollup.latest_snapshot_completed_at|default:'Not completed yet' }}</div>
+                                {% else %}
+                                  <span class="text-muted">No snapshot</span>
+                                {% endif %}
+                              </td>
+                              <td>
+                                {% if provider_account.last_sync_rollup.latest_diff_url %}
+                                  <a href="{{ provider_account.last_sync_rollup.latest_diff_url }}">{{ provider_account.last_sync_rollup.latest_diff_label }}</a>
+                                {% else %}
+                                  <span class="text-muted">No diff</span>
+                                {% endif %}
+                              </td>
+                            </tr>
+                          {% endfor %}
+                        </tbody>
+                      </table>
+                    </div>
+                  {% else %}
+                    <div class="card-body text-muted">No provider accounts currently require lifecycle attention.</div>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+
+            <div class="row mb-4">
+              <div class="col col-md-12">
+                <div class="card">
+                  <h5 class="card-header">Bindings Requiring Regeneration</h5>
+                  {% if stale_bindings %}
+                    <div class="card-body table-responsive">
+                      <table class="table table-hover align-middle mb-0">
+                        <thead>
+                          <tr>
+                            <th>Name</th>
+                            <th>Organization</th>
+                            <th>Template</th>
+                            <th>Intent Profile</th>
+                            <th>State</th>
+                            <th>Reason</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {% for item in stale_bindings %}
+                            <tr>
+                              <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
+                              <td><a href="{{ item.organization.get_absolute_url }}">{{ item.organization }}</a></td>
+                              <td><a href="{{ item.object.template.get_absolute_url }}">{{ item.object.template }}</a></td>
+                              <td><a href="{{ item.object.intent_profile.get_absolute_url }}">{{ item.object.intent_profile }}</a></td>
+                              <td><span class="badge bg-{{ item.status_badge_class }}">{{ item.object.get_state_display }}</span></td>
+                              <td>{{ item.reason_summary }}</td>
+                            </tr>
+                          {% endfor %}
+                        </tbody>
+                      </table>
+                    </div>
+                  {% else %}
+                    <div class="card-body text-muted">No template bindings currently require regeneration.</div>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+
+            <div class="row mb-4">
+              <div class="col col-md-12">
+                <div class="card">
+                  <h5 class="card-header">External Management Exceptions Requiring Review</h5>
+                  {% if external_management_exceptions_requiring_review %}
+                    <div class="card-body table-responsive">
+                      <table class="table table-hover align-middle mb-0">
+                        <thead>
+                          <tr>
+                            <th>Name</th>
+                            <th>Organization</th>
+                            <th>Scope</th>
+                            <th>Owner</th>
+                            <th>Review At</th>
+                            <th>Ends At</th>
+                            <th>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {% for item in external_management_exceptions_requiring_review %}
+                            <tr>
+                              <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
+                              <td><a href="{{ item.organization.get_absolute_url }}">{{ item.organization }}</a></td>
+                              <td>{{ item.scope_text }}</td>
+                              <td>{{ item.object.owner }}</td>
+                              <td>{{ item.object.review_at|default:'-' }}</td>
+                              <td>{{ item.object.ends_at|default:'-' }}</td>
+                              <td><span class="badge bg-{{ item.status_badge_class }}">{{ item.status_text }}</span></td>
+                            </tr>
+                          {% endfor %}
+                        </tbody>
+                      </table>
+                    </div>
+                  {% else %}
+                    <div class="card-body text-muted">No external management exceptions are currently review-due or expired.</div>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="col col-md-12">
+                <div class="card">
+                  <h5 class="card-header">IRR Sources Requiring Attention</h5>
+                  {% if irr_sources_requiring_attention %}
+                    <div class="card-body table-responsive">
+                      <table class="table table-hover align-middle mb-0">
+                        <thead>
+                          <tr>
+                            <th>Name</th>
+                            <th>Organization</th>
+                            <th>Sync Health</th>
+                            <th>Freshness</th>
+                            <th>Write Support</th>
+                            <th>Latest Snapshot</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {% for item in irr_sources_requiring_attention %}
+                            <tr>
+                              <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
+                              <td><a href="{{ item.object.organization.get_absolute_url }}">{{ item.object.organization }}</a></td>
+                              <td>{{ item.sync_health_display }}</td>
+                              <td>{{ item.freshness_text }}</td>
+                              <td>{{ item.write_support_mode }}</td>
+                              <td>
+                                {% if item.latest_snapshot %}
+                                  <a href="{{ item.latest_snapshot_url }}">{{ item.latest_snapshot.name }}</a>
+                                {% else %}
+                                  <span class="text-muted">None</span>
+                                {% endif %}
+                              </td>
+                            </tr>
+                          {% endfor %}
+                        </tbody>
+                      </table>
+                    </div>
+                  {% else %}
+                    <div class="card-body text-muted">No IRR sources currently require sync attention.</div>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tab-pane" id="workflow-attention-panel" role="tabpanel" aria-labelledby="workflow-attention-tab">
+            <div class="row mb-4">
+              <div class="col col-md-12">
+                <div class="card">
+                  <h5 class="card-header">Recent Bulk Intent Runs</h5>
+                  {% if bulk_run_rollup.runs %}
+                    <div class="card-body table-responsive">
+                      <table class="table table-hover align-middle mb-0">
+                        <thead>
+                          <tr>
+                            <th>Name</th>
+                            <th>Organization</th>
+                            <th>Status</th>
+                            <th>Target Mode</th>
+                            <th>Started At</th>
+                            <th>Completed At</th>
+                            <th>Outcome</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {% for item in bulk_run_rollup.runs %}
+                            <tr>
+                              <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
+                              <td><a href="{{ item.object.organization.get_absolute_url }}">{{ item.object.organization }}</a></td>
+                              <td><span class="badge bg-{{ item.status_badge_class }}">{{ item.status_text }}</span></td>
+                              <td>{{ item.object.get_target_mode_display }}</td>
+                              <td>{{ item.object.started_at|default:'-' }}</td>
+                              <td>{{ item.object.completed_at|default:'-' }}</td>
+                              <td>
+                                <div>{{ item.summary_text }}</div>
+                                <div class="text-muted small">{{ item.failed_scope_count }} failed scope(s)</div>
+                              </td>
+                            </tr>
+                          {% endfor %}
+                        </tbody>
+                      </table>
+                    </div>
+                  {% else %}
+                    <div class="card-body text-muted">No bulk intent runs have been recorded yet.</div>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+
+            <div class="row mb-4">
+              <div class="col col-md-12">
+                <div class="card">
+                  <div class="card-header">
+                    <h5 class="mb-1">ROA Reconciliation Runs Requiring Attention</h5>
+                    <div class="text-muted small">
+                      {{ roa_reconciliation_summary.total_runs }} total / {{ roa_reconciliation_summary.completed_runs }} completed /
+                      {{ roa_reconciliation_summary.replacement_required_intent_total }} replacement-required intents /
+                      {{ roa_reconciliation_summary.lint_warning_total }} lint warnings /
+                      {{ roa_reconciliation_summary.lint_error_total }} lint errors
+                    </div>
+                  </div>
+                  {% if reconciliation_attention_runs %}
+                    <div class="card-body table-responsive">
+                      <table class="table table-hover align-middle mb-0">
+                        <thead>
+                          <tr>
+                            <th>Name</th>
+                            <th>Organization</th>
+                            <th>Intent Profile</th>
+                            <th>Comparison Scope</th>
+                            <th>Replacement Drift</th>
+                            <th>Lint Warnings</th>
+                            <th>Lint Errors</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {% for item in reconciliation_attention_runs %}
+                            <tr>
+                              <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
+                              <td><a href="{{ item.object.organization.get_absolute_url }}">{{ item.object.organization }}</a></td>
+                              <td><a href="{{ item.object.intent_profile.get_absolute_url }}">{{ item.object.intent_profile }}</a></td>
+                              <td>{{ item.object.comparison_scope }}</td>
+                              <td>{{ item.replacement_count }}</td>
+                              <td>{{ item.warning_count }}</td>
+                              <td>{{ item.error_count }}</td>
+                            </tr>
+                          {% endfor %}
+                        </tbody>
+                      </table>
+                    </div>
+                  {% else %}
+                    <div class="card-body text-muted">No reconciliation runs currently require operator attention.</div>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+
+            <div class="row mb-4">
+              <div class="col col-md-12">
+                <div class="card">
+                  <div class="card-header">
+                    <h5 class="mb-1">Open ROA Change Plans Requiring Attention</h5>
+                    <div class="text-muted small">
+                      {{ roa_change_plan_summary.total_plans }} total /
+                      {{ roa_change_plan_summary.by_status.draft|default:0 }} draft /
+                      {{ roa_change_plan_summary.by_status.approved|default:0 }} approved /
+                      {{ roa_change_plan_summary.by_status.failed|default:0 }} failed /
+                      {{ roa_change_plan_summary.simulated_plan_count }} simulated /
+                      {{ roa_change_plan_summary.simulation_missing_count }} without simulation /
+                      {{ roa_change_plan_summary.simulation_blocking_plan_count }} simulation blocking /
+                      {{ roa_change_plan_summary.simulation_ack_required_plan_count }} simulation ack-required /
+                      {{ roa_change_plan_summary.lint_blocking_total }} lint blocking
+                    </div>
+                  </div>
+                  {% if change_plans_requiring_attention %}
+                    <div class="card-body table-responsive">
+                      <table class="table table-hover align-middle mb-0">
+                        <thead>
+                          <tr>
+                            <th>Name</th>
+                            <th>Organization</th>
+                            <th>Status</th>
+                            <th>Replacement Actions</th>
+                            <th>Blocking</th>
+                            <th>Ack Required</th>
+                            <th>Acknowledged</th>
+                            <th>Suppressed</th>
+                            <th>Simulation</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {% for item in change_plans_requiring_attention %}
+                            <tr>
+                              <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
+                              <td><a href="{{ item.object.organization.get_absolute_url }}">{{ item.object.organization }}</a></td>
+                              <td>{{ item.object.status }}</td>
+                              <td>{{ item.replacement_count }}</td>
+                              <td>{{ item.blocking_count }}</td>
+                              <td>{{ item.ack_required_count }}</td>
+                              <td>{{ item.acknowledged_count }}</td>
+                              <td>{{ item.suppressed_count }}</td>
+                              <td>
+                                {% if item.simulation_run %}
+                                  <div><a href="{{ item.simulation_run.get_absolute_url }}">{{ item.simulation_posture.status }}</a></div>
+                                  <div class="text-muted small">
+                                    {{ item.simulation_run.predicted_valid_count }} valid / {{ item.simulation_run.predicted_invalid_count }} invalid / {{ item.simulation_run.predicted_not_found_count }} not-found
+                                  </div>
+                                  <div class="text-muted small">
+                                    {{ item.simulation_blocking_count }} blocking / {{ item.simulation_ack_required_count }} ack-required
+                                    {% if not item.simulation_posture.is_current_for_plan %} / stale{% endif %}
+                                  </div>
+                                {% else %}
+                                  <span class="text-muted">No simulation</span>
+                                {% endif %}
+                              </td>
+                            </tr>
+                          {% endfor %}
+                        </tbody>
+                      </table>
+                    </div>
+                  {% else %}
+                    <div class="card-body text-muted">No open change plans currently require attention.</div>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+
+            <div class="row mb-4">
+              <div class="col col-md-12">
+                <div class="card">
+                  <h5 class="card-header">ASPA Reconciliation Runs Requiring Attention</h5>
+                  {% if aspa_reconciliation_attention_runs %}
+                    <div class="card-body table-responsive">
+                      <table class="table table-hover align-middle mb-0">
+                        <thead>
+                          <tr>
+                            <th>Name</th>
+                            <th>Organization</th>
+                            <th>Comparison Scope</th>
+                            <th>Missing</th>
+                            <th>Missing Provider</th>
+                            <th>Extra Provider</th>
+                            <th>Orphaned</th>
+                            <th>Stale</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {% for item in aspa_reconciliation_attention_runs %}
+                            <tr>
+                              <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
+                              <td><a href="{{ item.object.organization.get_absolute_url }}">{{ item.object.organization }}</a></td>
+                              <td>{{ item.object.comparison_scope }}</td>
+                              <td>{{ item.missing_count }}</td>
+                              <td>{{ item.missing_provider_count }}</td>
+                              <td>{{ item.extra_provider_count }}</td>
+                              <td>{{ item.orphaned_count }}</td>
+                              <td>{{ item.stale_count }}</td>
+                            </tr>
+                          {% endfor %}
+                        </tbody>
+                      </table>
+                    </div>
+                  {% else %}
+                    <div class="card-body text-muted">No ASPA reconciliation runs currently require operator attention.</div>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+
+            <div class="row mb-4">
+              <div class="col col-md-12">
+                <div class="card">
+                  <h5 class="card-header">Open ASPA Change Plans Requiring Attention</h5>
+                  {% if aspa_change_plans_requiring_attention %}
+                    <div class="card-body table-responsive">
+                      <table class="table table-hover align-middle mb-0">
+                        <thead>
+                          <tr>
+                            <th>Name</th>
+                            <th>Organization</th>
+                            <th>Status</th>
+                            <th>Replacement Actions</th>
+                            <th>Provider Adds</th>
+                            <th>Provider Removes</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {% for item in aspa_change_plans_requiring_attention %}
+                            <tr>
+                              <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
+                              <td><a href="{{ item.object.organization.get_absolute_url }}">{{ item.object.organization }}</a></td>
+                              <td>{{ item.object.status }}</td>
+                              <td>{{ item.replacement_count }}</td>
+                              <td>{{ item.provider_add_count }}</td>
+                              <td>{{ item.provider_remove_count }}</td>
+                            </tr>
+                          {% endfor %}
+                        </tbody>
+                      </table>
+                    </div>
+                  {% else %}
+                    <div class="card-body text-muted">No open ASPA change plans currently require operator attention.</div>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+
+            <div class="row mb-4">
+              <div class="col col-md-12">
+                <div class="card">
+                  <h5 class="card-header">IRR Coordination Runs Requiring Attention</h5>
+                  {% if irr_coordination_attention_runs %}
+                    <div class="card-body table-responsive">
+                      <table class="table table-hover align-middle mb-0">
+                        <thead>
+                          <tr>
+                            <th>Name</th>
+                            <th>Organization</th>
+                            <th>Status</th>
+                            <th>Cross-Source Conflicts</th>
+                            <th>Stale Sources</th>
+                            <th>Undraftable Sources</th>
+                            <th>Draftable Sources</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {% for item in irr_coordination_attention_runs %}
+                            <tr>
+                              <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
+                              <td><a href="{{ item.object.organization.get_absolute_url }}">{{ item.object.organization }}</a></td>
+                              <td>{{ item.object.status }}</td>
+                              <td>{{ item.cross_source_conflict_count }}</td>
+                              <td>{{ item.stale_source_count }}</td>
+                              <td>{{ item.non_draftable_source_count }}</td>
+                              <td>{{ item.draftable_source_count }}</td>
+                            </tr>
+                          {% endfor %}
+                        </tbody>
+                      </table>
+                    </div>
+                  {% else %}
+                    <div class="card-body text-muted">No IRR coordination runs currently require attention.</div>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+
+            <div class="row mb-4">
+              <div class="col col-md-12">
+                <div class="card">
+                  <h5 class="card-header">IRR Change Plans Requiring Attention</h5>
+                  {% if irr_change_plans_requiring_attention %}
+                    <div class="card-body table-responsive">
+                      <table class="table table-hover align-middle mb-0">
+                        <thead>
+                          <tr>
+                            <th>Name</th>
+                            <th>Organization</th>
+                            <th>Source</th>
+                            <th>Status</th>
+                            <th>Blocked Items</th>
+                            <th>Capability Warnings</th>
+                            <th>Latest Execution</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {% for item in irr_change_plans_requiring_attention %}
+                            <tr>
+                              <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
+                              <td><a href="{{ item.object.organization.get_absolute_url }}">{{ item.object.organization }}</a></td>
+                              <td><a href="{{ item.object.source.get_absolute_url }}">{{ item.object.source.name }}</a></td>
+                              <td>{{ item.object.status }}</td>
+                              <td>{{ item.noop_count }}</td>
+                              <td>
+                                {% if item.capability_warnings %}
+                                  {{ item.capability_warnings|join:', ' }}
+                                {% else %}
+                                  <span class="text-muted">None</span>
+                                {% endif %}
+                              </td>
+                              <td>
+                                {% if item.latest_execution.id %}
+                                  {{ item.latest_execution.mode }} / {{ item.latest_execution.status }}
+                                {% else %}
+                                  <span class="text-muted">None</span>
+                                {% endif %}
+                              </td>
+                            </tr>
+                          {% endfor %}
+                        </tbody>
+                      </table>
+                    </div>
+                  {% else %}
+                    <div class="card-body text-muted">No IRR change plans currently require attention.</div>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="col col-md-12">
+                <div class="card">
+                  <h5 class="card-header">Recent IRR Write Failures</h5>
+                  {% if irr_write_failures %}
+                    <div class="card-body table-responsive">
+                      <table class="table table-hover align-middle mb-0">
+                        <thead>
+                          <tr>
+                            <th>Name</th>
+                            <th>Organization</th>
+                            <th>Source</th>
+                            <th>Change Plan</th>
+                            <th>Mode</th>
+                            <th>Status</th>
+                            <th>Error</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {% for execution in irr_write_failures %}
+                            <tr>
+                              <td><a href="{{ execution.get_absolute_url }}">{{ execution.name }}</a></td>
+                              <td><a href="{{ execution.organization.get_absolute_url }}">{{ execution.organization }}</a></td>
+                              <td><a href="{{ execution.source.get_absolute_url }}">{{ execution.source.name }}</a></td>
+                              <td><a href="{{ execution.change_plan.get_absolute_url }}">{{ execution.change_plan.name }}</a></td>
+                              <td>{{ execution.execution_mode }}</td>
+                              <td>{{ execution.status }}</td>
+                              <td>{{ execution.error|default:'-' }}</td>
+                            </tr>
+                          {% endfor %}
+                        </tbody>
+                      </table>
+                    </div>
+                  {% else %}
+                    <div class="card-body text-muted">No recent IRR write failures recorded.</div>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tab-pane" id="external-evidence-panel" role="tabpanel" aria-labelledby="external-evidence-tab">
+            <div class="row mb-4">
+              <div class="col col-md-12">
+                <div class="card">
+                  <h5 class="card-header">External Evidence Overview</h5>
+                  <div class="card-body">
+                    <p class="mb-0 text-muted">
+                      Validator and telemetry freshness are shown separately from provider sync health so operators can tell
+                      whether publication drift or outside observation lag is driving the attention state.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="row mb-4">
+              <div class="col col-md-6">
+                <div class="card h-100">
+                  <h5 class="card-header">Validator Instances Requiring Attention</h5>
+                  {% if validator_instances_requiring_attention %}
+                    <div class="card-body table-responsive">
+                      <table class="table table-hover align-middle mb-0">
+                        <thead>
+                          <tr>
+                            <th>Name</th>
+                            <th>Status</th>
+                            <th>Freshness</th>
+                            <th>Latest Run</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {% for item in validator_instances_requiring_attention %}
+                            <tr>
+                              <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
+                              <td>{{ item.status }}</td>
+                              <td>{{ item.freshness_status }}</td>
+                              <td>
+                                {% if item.latest_run %}
+                                  <a href="{{ item.latest_run.get_absolute_url }}">{{ item.latest_run.name }}</a>
+                                {% else %}
+                                  <span class="text-muted">None</span>
+                                {% endif %}
+                              </td>
+                            </tr>
+                          {% endfor %}
+                        </tbody>
+                      </table>
+                    </div>
+                  {% else %}
+                    <div class="card-body text-muted">No validator instances currently require attention.</div>
+                  {% endif %}
+                </div>
+              </div>
+              <div class="col col-md-6">
+                <div class="card h-100">
+                  <h5 class="card-header">Validation Runs Requiring Attention</h5>
+                  {% if validation_runs_requiring_attention %}
+                    <div class="card-body table-responsive">
+                      <table class="table table-hover align-middle mb-0">
+                        <thead>
+                          <tr>
+                            <th>Name</th>
+                            <th>Validator</th>
+                            <th>Status</th>
+                            <th>Freshness</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {% for item in validation_runs_requiring_attention %}
+                            <tr>
+                              <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
+                              <td><a href="{{ item.validator.get_absolute_url }}">{{ item.validator.name }}</a></td>
+                              <td>{{ item.status }}</td>
+                              <td>{{ item.freshness_status }}</td>
+                            </tr>
+                          {% endfor %}
+                        </tbody>
+                      </table>
+                    </div>
+                  {% else %}
+                    <div class="card-body text-muted">No validation runs currently require attention.</div>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+
+            <div class="row mb-4">
+              <div class="col col-md-6">
+                <div class="card h-100">
+                  <h5 class="card-header">Telemetry Sources Requiring Attention</h5>
+                  {% if telemetry_sources_requiring_attention %}
+                    <div class="card-body table-responsive">
+                      <table class="table table-hover align-middle mb-0">
+                        <thead>
+                          <tr>
+                            <th>Name</th>
+                            <th>Organization</th>
+                            <th>Sync Health</th>
+                            <th>Latest Run</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {% for item in telemetry_sources_requiring_attention %}
+                            <tr>
+                              <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
+                              <td><a href="{{ item.object.organization.get_absolute_url }}">{{ item.object.organization }}</a></td>
+                              <td>{{ item.sync_health_display }}</td>
+                              <td>
+                                {% if item.latest_run %}
+                                  <a href="{{ item.latest_run.get_absolute_url }}">{{ item.latest_run.name }}</a>
+                                {% else %}
+                                  <span class="text-muted">None</span>
+                                {% endif %}
+                              </td>
+                            </tr>
+                          {% endfor %}
+                        </tbody>
+                      </table>
+                    </div>
+                  {% else %}
+                    <div class="card-body text-muted">No telemetry sources currently require attention.</div>
+                  {% endif %}
+                </div>
+              </div>
+              <div class="col col-md-6">
+                <div class="card h-100">
+                  <h5 class="card-header">Authored Objects With External Evidence Mismatches</h5>
+                  {% if external_mismatch_items %}
+                    <div class="card-body table-responsive">
+                      <table class="table table-hover align-middle mb-0">
+                        <thead>
+                          <tr>
+                            <th>Name</th>
+                            <th>Family</th>
+                            <th>Validator State</th>
+                            <th>Evidence Freshness</th>
+                            <th>Mismatches</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {% for item in external_mismatch_items %}
+                            <tr>
+                              <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
+                              <td>{{ item.object_family }}</td>
+                              <td>{{ item.validator_state|default:"unknown" }}</td>
+                              <td>{{ item.evidence_freshness }}</td>
+                              <td>
+                                {% if item.mismatch_categories %}
+                                  {{ item.mismatch_categories|join:', ' }}
+                                {% else %}
+                                  <span class="text-muted">Validator-only concern</span>
+                                {% endif %}
+                              </td>
+                            </tr>
+                          {% endfor %}
+                        </tbody>
+                      </table>
+                    </div>
+                  {% else %}
+                    <div class="card-body text-muted">No authored objects currently show conflicting external evidence.</div>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tab-pane" id="expiring-soon-panel" role="tabpanel" aria-labelledby="expiring-soon-tab">
+            <div class="row mb-4">
+              <div class="col col-md-12">
+                <div class="card">
+                  <h5 class="card-header">Intent Exceptions Nearing Expiry</h5>
+                  {% if expiring_exceptions %}
+                    <div class="card-body table-responsive">
+                      <table class="table table-hover align-middle mb-0">
+                        <thead>
+                          <tr>
+                            <th>Name</th>
+                            <th>Organization</th>
+                            <th>Intent Profile</th>
+                            <th>Template Binding</th>
+                            <th>Effect</th>
+                            <th>Lifecycle</th>
+                            <th>Ends At</th>
+                            <th>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {% for item in expiring_exceptions %}
+                            <tr>
+                              <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
+                              <td><a href="{{ item.organization.get_absolute_url }}">{{ item.organization }}</a></td>
+                              <td>
+                                {% if item.object.intent_profile %}
+                                  <a href="{{ item.object.intent_profile.get_absolute_url }}">{{ item.object.intent_profile }}</a>
+                                {% else %}
+                                  <span class="text-muted">None</span>
+                                {% endif %}
+                              </td>
+                              <td>
+                                {% if item.object.template_binding %}
+                                  <a href="{{ item.object.template_binding.get_absolute_url }}">{{ item.object.template_binding }}</a>
+                                {% else %}
+                                  <span class="text-muted">None</span>
+                                {% endif %}
+                              </td>
+                              <td>{{ item.object.get_effect_mode_display }}</td>
+                              <td>{{ item.lifecycle_text }}</td>
+                              <td>{{ item.object.ends_at }}</td>
+                              <td><span class="badge bg-{{ item.expiry_badge_class }}">{{ item.expiry_text }}</span></td>
+                            </tr>
+                          {% endfor %}
+                        </tbody>
+                      </table>
+                    </div>
+                  {% else %}
+                    <div class="card-body text-muted">No enabled intent exceptions are currently within the effective lifecycle policy threshold.</div>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+
+            <div class="row mb-4">
+              <div class="col col-md-12">
+                <div class="card">
+                  <h5 class="card-header">ROAs Nearing Expiry</h5>
+                  {% if expiring_roas %}
+                    <div class="card-body table-responsive">
+                      <table class="table table-hover align-middle mb-0">
+                        <thead>
+                          <tr>
+                            <th>Name</th>
+                            <th>Organization</th>
+                            <th>Origin AS</th>
+                            <th>Signed By</th>
+                            <th>Valid To</th>
+                            <th>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {% for item in expiring_roas %}
+                            <tr>
+                              <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
+                              <td><a href="{{ item.organization.get_absolute_url }}">{{ item.organization }}</a></td>
+                              <td>{{ item.object.origin_as|default:'-' }}</td>
+                              <td><a href="{{ item.related_object.get_absolute_url }}">{{ item.related_object }}</a></td>
+                              <td>{{ item.object.valid_to }}</td>
+                              <td><span class="badge bg-{{ item.expiry_badge_class }}">{{ item.expiry_text }}</span></td>
+                            </tr>
+                          {% endfor %}
+                        </tbody>
+                      </table>
+                    </div>
+                  {% else %}
+                    <div class="card-body text-muted">No ROAs are currently within the effective lifecycle policy threshold.</div>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="col col-md-12">
+                <div class="card">
+                  <h5 class="card-header">Certificates Nearing Expiry</h5>
+                  {% if expiring_certificates %}
+                    <div class="card-body table-responsive">
+                      <table class="table table-hover align-middle mb-0">
+                        <thead>
+                          <tr>
+                            <th>Name</th>
+                            <th>Organization</th>
+                            <th>Issuer</th>
+                            <th>Valid To</th>
+                            <th>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {% for item in expiring_certificates %}
+                            <tr>
+                              <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
+                              <td><a href="{{ item.organization.get_absolute_url }}">{{ item.organization }}</a></td>
+                              <td>{{ item.object.issuer|default:'-' }}</td>
+                              <td>{{ item.object.valid_to }}</td>
+                              <td><span class="badge bg-{{ item.expiry_badge_class }}">{{ item.expiry_text }}</span></td>
+                            </tr>
+                          {% endfor %}
+                        </tbody>
+                      </table>
+                    </div>
+                  {% else %}
+                    <div class="card-body text-muted">No certificates are currently within the effective lifecycle policy threshold.</div>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="row mb-4">
-    <div class="col col-md-6">
-      <div class="card h-100">
-        <h5 class="card-header">Validator Instances Requiring Attention</h5>
-        {% if validator_instances_requiring_attention %}
-          <div class="card-body table-responsive">
-            <table class="table table-hover align-middle mb-0">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Status</th>
-                  <th>Freshness</th>
-                  <th>Latest Run</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for item in validator_instances_requiring_attention %}
-                  <tr>
-                    <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
-                    <td>{{ item.status }}</td>
-                    <td>{{ item.freshness_status }}</td>
-                    <td>
-                      {% if item.latest_run %}
-                        <a href="{{ item.latest_run.get_absolute_url }}">{{ item.latest_run.name }}</a>
-                      {% else %}
-                        <span class="text-muted">None</span>
-                      {% endif %}
-                    </td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        {% else %}
-          <div class="card-body text-muted">No validator instances currently require attention.</div>
-        {% endif %}
-      </div>
-    </div>
-    <div class="col col-md-6">
-      <div class="card h-100">
-        <h5 class="card-header">Validation Runs Requiring Attention</h5>
-        {% if validation_runs_requiring_attention %}
-          <div class="card-body table-responsive">
-            <table class="table table-hover align-middle mb-0">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Validator</th>
-                  <th>Status</th>
-                  <th>Freshness</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for item in validation_runs_requiring_attention %}
-                  <tr>
-                    <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
-                    <td><a href="{{ item.validator.get_absolute_url }}">{{ item.validator.name }}</a></td>
-                    <td>{{ item.status }}</td>
-                    <td>{{ item.freshness_status }}</td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        {% else %}
-          <div class="card-body text-muted">No validation runs currently require attention.</div>
-        {% endif %}
-      </div>
-    </div>
-  </div>
-
-  <div class="row mb-4">
-    <div class="col col-md-6">
-      <div class="card h-100">
-        <h5 class="card-header">Telemetry Sources Requiring Attention</h5>
-        {% if telemetry_sources_requiring_attention %}
-          <div class="card-body table-responsive">
-            <table class="table table-hover align-middle mb-0">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Organization</th>
-                  <th>Sync Health</th>
-                  <th>Latest Run</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for item in telemetry_sources_requiring_attention %}
-                  <tr>
-                    <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
-                    <td><a href="{{ item.object.organization.get_absolute_url }}">{{ item.object.organization }}</a></td>
-                    <td>{{ item.sync_health_display }}</td>
-                    <td>
-                      {% if item.latest_run %}
-                        <a href="{{ item.latest_run.get_absolute_url }}">{{ item.latest_run.name }}</a>
-                      {% else %}
-                        <span class="text-muted">None</span>
-                      {% endif %}
-                    </td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        {% else %}
-          <div class="card-body text-muted">No telemetry sources currently require attention.</div>
-        {% endif %}
-      </div>
-    </div>
-    <div class="col col-md-6">
-      <div class="card h-100">
-        <h5 class="card-header">Authored Objects With External Evidence Mismatches</h5>
-        {% if external_mismatch_items %}
-          <div class="card-body table-responsive">
-            <table class="table table-hover align-middle mb-0">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Family</th>
-                  <th>Validator State</th>
-                  <th>Evidence Freshness</th>
-                  <th>Mismatches</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for item in external_mismatch_items %}
-                  <tr>
-                    <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
-                    <td>{{ item.object_family }}</td>
-                    <td>{{ item.validator_state|default:"unknown" }}</td>
-                    <td>{{ item.evidence_freshness }}</td>
-                    <td>
-                      {% if item.mismatch_categories %}
-                        {{ item.mismatch_categories|join:', ' }}
-                      {% else %}
-                        <span class="text-muted">Validator-only concern</span>
-                      {% endif %}
-                    </td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        {% else %}
-          <div class="card-body text-muted">No authored objects currently show conflicting external evidence.</div>
-        {% endif %}
-      </div>
-    </div>
-  </div>
-
-  <div class="row mb-4">
-    <div class="col col-md-12">
-      <div class="card">
-        <h5 class="card-header">IRR Sources Requiring Attention</h5>
-        {% if irr_sources_requiring_attention %}
-          <div class="card-body table-responsive">
-            <table class="table table-hover align-middle mb-0">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Organization</th>
-                  <th>Sync Health</th>
-                  <th>Freshness</th>
-                  <th>Write Support</th>
-                  <th>Latest Snapshot</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for item in irr_sources_requiring_attention %}
-                  <tr>
-                    <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
-                    <td><a href="{{ item.object.organization.get_absolute_url }}">{{ item.object.organization }}</a></td>
-                    <td>{{ item.sync_health_display }}</td>
-                    <td>{{ item.freshness_text }}</td>
-                    <td>{{ item.write_support_mode }}</td>
-                    <td>
-                      {% if item.latest_snapshot %}
-                        <a href="{{ item.latest_snapshot_url }}">{{ item.latest_snapshot.name }}</a>
-                      {% else %}
-                        <span class="text-muted">None</span>
-                      {% endif %}
-                    </td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        {% else %}
-          <div class="card-body text-muted">No IRR sources currently require sync attention.</div>
-        {% endif %}
-      </div>
-    </div>
-  </div>
-
-  <div class="row mb-4">
-    <div class="col col-md-12">
-      <div class="card">
-        <h5 class="card-header">IRR Coordination Runs Requiring Attention</h5>
-        {% if irr_coordination_attention_runs %}
-          <div class="card-body table-responsive">
-            <table class="table table-hover align-middle mb-0">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Organization</th>
-                  <th>Status</th>
-                  <th>Cross-Source Conflicts</th>
-                  <th>Stale Sources</th>
-                  <th>Undraftable Sources</th>
-                  <th>Draftable Sources</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for item in irr_coordination_attention_runs %}
-                  <tr>
-                    <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
-                    <td><a href="{{ item.object.organization.get_absolute_url }}">{{ item.object.organization }}</a></td>
-                    <td>{{ item.object.status }}</td>
-                    <td>{{ item.cross_source_conflict_count }}</td>
-                    <td>{{ item.stale_source_count }}</td>
-                    <td>{{ item.non_draftable_source_count }}</td>
-                    <td>{{ item.draftable_source_count }}</td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        {% else %}
-          <div class="card-body text-muted">No IRR coordination runs currently require attention.</div>
-        {% endif %}
-      </div>
-    </div>
-  </div>
-
-  <div class="row mb-4">
-    <div class="col col-md-12">
-      <div class="card">
-        <h5 class="card-header">IRR Change Plans Requiring Attention</h5>
-        {% if irr_change_plans_requiring_attention %}
-          <div class="card-body table-responsive">
-            <table class="table table-hover align-middle mb-0">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Organization</th>
-                  <th>Source</th>
-                  <th>Status</th>
-                  <th>Blocked Items</th>
-                  <th>Capability Warnings</th>
-                  <th>Latest Execution</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for item in irr_change_plans_requiring_attention %}
-                  <tr>
-                    <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
-                    <td><a href="{{ item.object.organization.get_absolute_url }}">{{ item.object.organization }}</a></td>
-                    <td><a href="{{ item.object.source.get_absolute_url }}">{{ item.object.source.name }}</a></td>
-                    <td>{{ item.object.status }}</td>
-                    <td>{{ item.noop_count }}</td>
-                    <td>
-                      {% if item.capability_warnings %}
-                        {{ item.capability_warnings|join:', ' }}
-                      {% else %}
-                        <span class="text-muted">None</span>
-                      {% endif %}
-                    </td>
-                    <td>
-                      {% if item.latest_execution.id %}
-                        {{ item.latest_execution.mode }} / {{ item.latest_execution.status }}
-                      {% else %}
-                        <span class="text-muted">None</span>
-                      {% endif %}
-                    </td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        {% else %}
-          <div class="card-body text-muted">No IRR change plans currently require attention.</div>
-        {% endif %}
-      </div>
-    </div>
-  </div>
-
-  <div class="row mb-4">
-    <div class="col col-md-12">
-      <div class="card">
-        <h5 class="card-header">Recent IRR Write Failures</h5>
-        {% if irr_write_failures %}
-          <div class="card-body table-responsive">
-            <table class="table table-hover align-middle mb-0">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Organization</th>
-                  <th>Source</th>
-                  <th>Change Plan</th>
-                  <th>Mode</th>
-                  <th>Status</th>
-                  <th>Error</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for execution in irr_write_failures %}
-                  <tr>
-                    <td><a href="{{ execution.get_absolute_url }}">{{ execution.name }}</a></td>
-                    <td><a href="{{ execution.organization.get_absolute_url }}">{{ execution.organization }}</a></td>
-                    <td><a href="{{ execution.source.get_absolute_url }}">{{ execution.source.name }}</a></td>
-                    <td><a href="{{ execution.change_plan.get_absolute_url }}">{{ execution.change_plan.name }}</a></td>
-                    <td>{{ execution.execution_mode }}</td>
-                    <td>{{ execution.status }}</td>
-                    <td>{{ execution.error|default:'-' }}</td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        {% else %}
-          <div class="card-body text-muted">No recent IRR write failures recorded.</div>
-        {% endif %}
-      </div>
-    </div>
-  </div>
-
-  <div class="row mb-4">
-    <div class="col col-md-12">
-      <div class="card">
-        <h5 class="card-header">Bindings Requiring Regeneration</h5>
-        {% if stale_bindings %}
-          <div class="card-body table-responsive">
-            <table class="table table-hover align-middle mb-0">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Organization</th>
-                  <th>Template</th>
-                  <th>Intent Profile</th>
-                  <th>State</th>
-                  <th>Reason</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for item in stale_bindings %}
-                  <tr>
-                    <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
-                    <td><a href="{{ item.organization.get_absolute_url }}">{{ item.organization }}</a></td>
-                    <td><a href="{{ item.object.template.get_absolute_url }}">{{ item.object.template }}</a></td>
-                    <td><a href="{{ item.object.intent_profile.get_absolute_url }}">{{ item.object.intent_profile }}</a></td>
-                    <td><span class="badge bg-{{ item.status_badge_class }}">{{ item.object.get_state_display }}</span></td>
-                    <td>{{ item.reason_summary }}</td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        {% else %}
-          <div class="card-body text-muted">No template bindings currently require regeneration.</div>
-        {% endif %}
-      </div>
-    </div>
-  </div>
-
-  <div class="row mb-4">
-    <div class="col col-md-12">
-      <div class="card">
-        <h5 class="card-header">Intent Exceptions Nearing Expiry</h5>
-        {% if expiring_exceptions %}
-          <div class="card-body table-responsive">
-            <table class="table table-hover align-middle mb-0">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Organization</th>
-                  <th>Intent Profile</th>
-                  <th>Template Binding</th>
-                  <th>Effect</th>
-                  <th>Lifecycle</th>
-                  <th>Ends At</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for item in expiring_exceptions %}
-                  <tr>
-                    <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
-                    <td><a href="{{ item.organization.get_absolute_url }}">{{ item.organization }}</a></td>
-                    <td>
-                      {% if item.object.intent_profile %}
-                        <a href="{{ item.object.intent_profile.get_absolute_url }}">{{ item.object.intent_profile }}</a>
-                      {% else %}
-                        <span class="text-muted">None</span>
-                      {% endif %}
-                    </td>
-                    <td>
-                      {% if item.object.template_binding %}
-                        <a href="{{ item.object.template_binding.get_absolute_url }}">{{ item.object.template_binding }}</a>
-                      {% else %}
-                        <span class="text-muted">None</span>
-                      {% endif %}
-                    </td>
-                    <td>{{ item.object.get_effect_mode_display }}</td>
-                    <td>{{ item.lifecycle_text }}</td>
-                    <td>{{ item.object.ends_at }}</td>
-                    <td><span class="badge bg-{{ item.expiry_badge_class }}">{{ item.expiry_text }}</span></td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        {% else %}
-          <div class="card-body text-muted">No enabled intent exceptions are currently within the effective lifecycle policy threshold.</div>
-        {% endif %}
-      </div>
-    </div>
-  </div>
-
-  <div class="row mb-4">
-    <div class="col col-md-12">
-      <div class="card">
-        <h5 class="card-header">External Management Exceptions Requiring Review</h5>
-        {% if external_management_exceptions_requiring_review %}
-          <div class="card-body table-responsive">
-            <table class="table table-hover align-middle mb-0">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Organization</th>
-                  <th>Scope</th>
-                  <th>Owner</th>
-                  <th>Review At</th>
-                  <th>Ends At</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for item in external_management_exceptions_requiring_review %}
-                  <tr>
-                    <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
-                    <td><a href="{{ item.organization.get_absolute_url }}">{{ item.organization }}</a></td>
-                    <td>{{ item.scope_text }}</td>
-                    <td>{{ item.object.owner }}</td>
-                    <td>{{ item.object.review_at|default:'-' }}</td>
-                    <td>{{ item.object.ends_at|default:'-' }}</td>
-                    <td><span class="badge bg-{{ item.status_badge_class }}">{{ item.status_text }}</span></td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        {% else %}
-          <div class="card-body text-muted">No external management exceptions are currently review-due or expired.</div>
-        {% endif %}
-      </div>
-    </div>
-  </div>
-
-  <div class="row mb-4">
-    <div class="col col-md-12">
-      <div class="card">
-        <h5 class="card-header">Recent Bulk Intent Runs</h5>
-        {% if bulk_run_rollup.runs %}
-          <div class="card-body table-responsive">
-            <table class="table table-hover align-middle mb-0">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Organization</th>
-                  <th>Status</th>
-                  <th>Target Mode</th>
-                  <th>Started At</th>
-                  <th>Completed At</th>
-                  <th>Outcome</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for item in bulk_run_rollup.runs %}
-                  <tr>
-                    <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
-                    <td><a href="{{ item.object.organization.get_absolute_url }}">{{ item.object.organization }}</a></td>
-                    <td><span class="badge bg-{{ item.status_badge_class }}">{{ item.status_text }}</span></td>
-                    <td>{{ item.object.get_target_mode_display }}</td>
-                    <td>{{ item.object.started_at|default:'-' }}</td>
-                    <td>{{ item.object.completed_at|default:'-' }}</td>
-                    <td>
-                      <div>{{ item.summary_text }}</div>
-                      <div class="text-muted small">{{ item.failed_scope_count }} failed scope(s)</div>
-                    </td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        {% else %}
-          <div class="card-body text-muted">No bulk intent runs have been recorded yet.</div>
-        {% endif %}
-      </div>
-    </div>
-  </div>
-
-  <div class="row mb-4">
-    <div class="col col-md-12">
-      <div class="card">
-        <h5 class="card-header">Provider Accounts Requiring Attention</h5>
-        {% if provider_accounts %}
-          <div class="card-body table-responsive">
-            <table class="table table-hover align-middle mb-0">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Organization</th>
-                  <th>Provider Type</th>
-                  <th>Sync Health</th>
-                  <th>Last Sync Status</th>
-                  <th>Freshness</th>
-                  <th>Family Coverage</th>
-                  <th>Publication Health</th>
-                  <th>Latest Snapshot</th>
-                  <th>Latest Diff</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for provider_account in provider_accounts %}
-                  <tr>
-                    <td><a href="{{ provider_account.get_absolute_url }}">{{ provider_account.name }}</a></td>
-                    <td><a href="{{ provider_account.organization.get_absolute_url }}">{{ provider_account.organization }}</a></td>
-                    <td>{{ provider_account.get_provider_type_display }}</td>
-                    <td><span class="badge bg-danger">{{ provider_account.sync_health_display }}</span></td>
-                    <td>{{ provider_account.last_sync_status }}</td>
-                    <td>
-                      <div>{{ provider_account.last_sync_rollup.freshness_text }}</div>
-                      <div class="text-muted small">{{ provider_account.last_sync_rollup.sync_threshold_text }}</div>
-                    </td>
-                    <td>
-                      <div>{{ provider_account.last_sync_rollup.family_status_text }}</div>
-                    </td>
-                    <td>
-                      <div>{{ provider_account.last_sync_rollup.publication_health_text }}</div>
-                    </td>
-                    <td>
-                      {% if provider_account.last_sync_rollup.latest_snapshot_url %}
-                        <a href="{{ provider_account.last_sync_rollup.latest_snapshot_url }}">{{ provider_account.last_sync_rollup.latest_snapshot_label }}</a>
-                        <div class="text-muted small">{{ provider_account.last_sync_rollup.latest_snapshot_completed_at|default:'Not completed yet' }}</div>
-                      {% else %}
-                        <span class="text-muted">No snapshot</span>
-                      {% endif %}
-                    </td>
-                    <td>
-                      {% if provider_account.last_sync_rollup.latest_diff_url %}
-                        <a href="{{ provider_account.last_sync_rollup.latest_diff_url }}">{{ provider_account.last_sync_rollup.latest_diff_label }}</a>
-                      {% else %}
-                        <span class="text-muted">No diff</span>
-                      {% endif %}
-                    </td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        {% else %}
-          <div class="card-body text-muted">No provider accounts currently require lifecycle attention.</div>
-        {% endif %}
-      </div>
-    </div>
-  </div>
-
-  <div class="row mb-4">
-    <div class="col col-md-12">
-      <div class="card">
-        <h5 class="card-header">ROAs Nearing Expiry</h5>
-        {% if expiring_roas %}
-          <div class="card-body table-responsive">
-            <table class="table table-hover align-middle mb-0">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Organization</th>
-                  <th>Origin AS</th>
-                  <th>Signed By</th>
-                  <th>Valid To</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for item in expiring_roas %}
-                  <tr>
-                    <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
-                    <td><a href="{{ item.organization.get_absolute_url }}">{{ item.organization }}</a></td>
-                    <td>{{ item.object.origin_as|default:'-' }}</td>
-                    <td><a href="{{ item.related_object.get_absolute_url }}">{{ item.related_object }}</a></td>
-                    <td>{{ item.object.valid_to }}</td>
-                    <td><span class="badge bg-{{ item.expiry_badge_class }}">{{ item.expiry_text }}</span></td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        {% else %}
-          <div class="card-body text-muted">No ROAs are currently within the effective lifecycle policy threshold.</div>
-        {% endif %}
-      </div>
-    </div>
-  </div>
-
-  <div class="row mb-4">
-    <div class="col col-md-12">
-      <div class="card">
-        <h5 class="card-header">ASPA Reconciliation Runs Requiring Attention</h5>
-        {% if aspa_reconciliation_attention_runs %}
-          <div class="card-body table-responsive">
-            <table class="table table-hover align-middle mb-0">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Organization</th>
-                  <th>Comparison Scope</th>
-                  <th>Missing</th>
-                  <th>Missing Provider</th>
-                  <th>Extra Provider</th>
-                  <th>Orphaned</th>
-                  <th>Stale</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for item in aspa_reconciliation_attention_runs %}
-                  <tr>
-                    <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
-                    <td><a href="{{ item.object.organization.get_absolute_url }}">{{ item.object.organization }}</a></td>
-                    <td>{{ item.object.comparison_scope }}</td>
-                    <td>{{ item.missing_count }}</td>
-                    <td>{{ item.missing_provider_count }}</td>
-                    <td>{{ item.extra_provider_count }}</td>
-                    <td>{{ item.orphaned_count }}</td>
-                    <td>{{ item.stale_count }}</td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        {% else %}
-          <div class="card-body text-muted">No ASPA reconciliation runs currently require operator attention.</div>
-        {% endif %}
-      </div>
-    </div>
-  </div>
-
-  <div class="row mb-4">
-    <div class="col col-md-12">
-      <div class="card">
-        <div class="card-header">
-          <h5 class="mb-1">ROA Reconciliation Runs Requiring Attention</h5>
-          <div class="text-muted small">
-            {{ roa_reconciliation_summary.total_runs }} total / {{ roa_reconciliation_summary.completed_runs }} completed /
-            {{ roa_reconciliation_summary.replacement_required_intent_total }} replacement-required intents /
-            {{ roa_reconciliation_summary.lint_warning_total }} lint warnings /
-            {{ roa_reconciliation_summary.lint_error_total }} lint errors
-          </div>
-        </div>
-        {% if reconciliation_attention_runs %}
-          <div class="card-body table-responsive">
-            <table class="table table-hover align-middle mb-0">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Organization</th>
-                  <th>Intent Profile</th>
-                  <th>Comparison Scope</th>
-                  <th>Replacement Drift</th>
-                  <th>Lint Warnings</th>
-                  <th>Lint Errors</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for item in reconciliation_attention_runs %}
-                  <tr>
-                    <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
-                    <td><a href="{{ item.object.organization.get_absolute_url }}">{{ item.object.organization }}</a></td>
-                    <td><a href="{{ item.object.intent_profile.get_absolute_url }}">{{ item.object.intent_profile }}</a></td>
-                    <td>{{ item.object.comparison_scope }}</td>
-                    <td>{{ item.replacement_count }}</td>
-                    <td>{{ item.warning_count }}</td>
-                    <td>{{ item.error_count }}</td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        {% else %}
-          <div class="card-body text-muted">No reconciliation runs currently require operator attention.</div>
-        {% endif %}
-      </div>
-    </div>
-  </div>
-
-  <div class="row mb-4">
-    <div class="col col-md-12">
-      <div class="card">
-        <h5 class="card-header">Open ASPA Change Plans Requiring Attention</h5>
-        {% if aspa_change_plans_requiring_attention %}
-          <div class="card-body table-responsive">
-            <table class="table table-hover align-middle mb-0">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Organization</th>
-                  <th>Status</th>
-                  <th>Replacement Actions</th>
-                  <th>Provider Adds</th>
-                  <th>Provider Removes</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for item in aspa_change_plans_requiring_attention %}
-                  <tr>
-                    <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
-                    <td><a href="{{ item.object.organization.get_absolute_url }}">{{ item.object.organization }}</a></td>
-                    <td>{{ item.object.status }}</td>
-                    <td>{{ item.replacement_count }}</td>
-                    <td>{{ item.provider_add_count }}</td>
-                    <td>{{ item.provider_remove_count }}</td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        {% else %}
-          <div class="card-body text-muted">No open ASPA change plans currently require operator attention.</div>
-        {% endif %}
-      </div>
-    </div>
-  </div>
-
-  <div class="row mb-4">
-    <div class="col col-md-12">
-      <div class="card">
-        <div class="card-header">
-          <h5 class="mb-1">Open ROA Change Plans Requiring Attention</h5>
-          <div class="text-muted small">
-            {{ roa_change_plan_summary.total_plans }} total /
-            {{ roa_change_plan_summary.by_status.draft|default:0 }} draft /
-            {{ roa_change_plan_summary.by_status.approved|default:0 }} approved /
-            {{ roa_change_plan_summary.by_status.failed|default:0 }} failed /
-            {{ roa_change_plan_summary.simulated_plan_count }} simulated /
-            {{ roa_change_plan_summary.simulation_missing_count }} without simulation /
-            {{ roa_change_plan_summary.simulation_blocking_plan_count }} simulation blocking /
-            {{ roa_change_plan_summary.simulation_ack_required_plan_count }} simulation ack-required /
-            {{ roa_change_plan_summary.lint_blocking_total }} lint blocking
-          </div>
-        </div>
-        {% if change_plans_requiring_attention %}
-          <div class="card-body table-responsive">
-            <table class="table table-hover align-middle mb-0">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Organization</th>
-                  <th>Status</th>
-                  <th>Replacement Actions</th>
-                  <th>Blocking</th>
-                  <th>Ack Required</th>
-                  <th>Acknowledged</th>
-                  <th>Suppressed</th>
-                  <th>Simulation</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for item in change_plans_requiring_attention %}
-                  <tr>
-                    <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
-                    <td><a href="{{ item.object.organization.get_absolute_url }}">{{ item.object.organization }}</a></td>
-                    <td>{{ item.object.status }}</td>
-                    <td>{{ item.replacement_count }}</td>
-                    <td>{{ item.blocking_count }}</td>
-                    <td>{{ item.ack_required_count }}</td>
-                    <td>{{ item.acknowledged_count }}</td>
-                    <td>{{ item.suppressed_count }}</td>
-                    <td>
-                      {% if item.simulation_run %}
-                        <div><a href="{{ item.simulation_run.get_absolute_url }}">{{ item.simulation_posture.status }}</a></div>
-                        <div class="text-muted small">
-                          {{ item.simulation_run.predicted_valid_count }} valid / {{ item.simulation_run.predicted_invalid_count }} invalid / {{ item.simulation_run.predicted_not_found_count }} not-found
-                        </div>
-                        <div class="text-muted small">
-                          {{ item.simulation_blocking_count }} blocking / {{ item.simulation_ack_required_count }} ack-required
-                          {% if not item.simulation_posture.is_current_for_plan %} / stale{% endif %}
-                        </div>
-                      {% else %}
-                        <span class="text-muted">No simulation</span>
-                      {% endif %}
-                    </td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        {% else %}
-          <div class="card-body text-muted">No open change plans currently require operator attention.</div>
-        {% endif %}
-      </div>
-    </div>
-  </div>
-
-  <div class="row">
-    <div class="col col-md-12">
-      <div class="card">
-        <h5 class="card-header">Certificates Nearing Expiry</h5>
-        {% if expiring_certificates %}
-          <div class="card-body table-responsive">
-            <table class="table table-hover align-middle mb-0">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Organization</th>
-                  <th>Issuer</th>
-                  <th>Valid To</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for item in expiring_certificates %}
-                  <tr>
-                    <td><a href="{{ item.object.get_absolute_url }}">{{ item.object.name }}</a></td>
-                    <td><a href="{{ item.organization.get_absolute_url }}">{{ item.organization }}</a></td>
-                    <td>{{ item.object.issuer|default:'-' }}</td>
-                    <td>{{ item.object.valid_to }}</td>
-                    <td><span class="badge bg-{{ item.expiry_badge_class }}">{{ item.expiry_text }}</span></td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        {% else %}
-          <div class="card-body text-muted">No certificates are currently within the effective lifecycle policy threshold.</div>
-        {% endif %}
-      </div>
-    </div>
-  </div>
 {% endblock %}

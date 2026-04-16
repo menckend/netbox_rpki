@@ -12,25 +12,9 @@ from netbox_rpki import filtersets
 from netbox_rpki.api import serializers as api_serializers
 from netbox_rpki.api import views as api_views
 from netbox_rpki.api.urls import router
-from netbox_rpki.api.serializers import (
-    CertificateAsnSerializer,
-    CertificatePrefixSerializer,
-    CertificateSerializer,
-    OrganizationSerializer,
-    RoaObjectPrefixSerializer,
-    RoaObjectSerializer,
-)
 from netbox_rpki.api.views import RootView
 from netbox_rpki.graphql import filters as graphql_filters
 from netbox_rpki.graphql import types as graphql_types
-from netbox_rpki.models import (
-    Certificate,
-    CertificateAsn,
-    CertificatePrefix,
-    Organization,
-    Roa,
-    RoaPrefix,
-)
 from netbox_rpki.object_registry import API_OBJECT_SPECS, GRAPHQL_OBJECT_SPECS, get_object_spec
 from netbox_rpki.services.lifecycle_reporting import (
     LIFECYCLE_EXPORT_SCHEMA_VERSION,
@@ -82,7 +66,6 @@ from netbox_rpki.tests.utils import (
     create_test_roa,
     create_test_roa_change_plan,
     create_test_roa_change_plan_item,
-    create_test_roa_change_plan_matrix,
     create_test_roa_prefix,
     create_test_roa_reconciliation_run,
     create_test_roa_validation_simulation_result,

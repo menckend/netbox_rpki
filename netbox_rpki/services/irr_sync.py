@@ -12,7 +12,6 @@ from urllib.request import Request, urlopen
 
 from django.db import transaction
 from django.utils import timezone
-from django.utils.text import slugify
 
 from netbox_rpki import models as rpki_models
 

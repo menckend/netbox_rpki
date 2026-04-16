@@ -4,7 +4,6 @@ from collections.abc import Callable
 from datetime import date, datetime
 from dataclasses import dataclass
 from itertools import count
-from typing import Any
 
 from django.urls import reverse
 from django.urls.resolvers import URLResolver
@@ -12,7 +11,6 @@ from django.urls.resolvers import URLResolver
 from netbox_rpki import models as rpki_models
 from netbox_rpki import forms
 from netbox_rpki.object_registry import (
-    API_OBJECT_SPECS,
     FILTERSET_OBJECT_SPECS,
     FILTER_FORM_OBJECT_SPECS,
     FORM_OBJECT_SPECS,
@@ -52,7 +50,6 @@ from netbox_rpki.tests.utils import (
     create_test_provider_snapshot_diff_item,
     create_test_approval_record,
     create_test_imported_aspa,
-    create_test_imported_aspa_provider,
     create_test_provider_write_execution,
     create_test_authored_as_set,
     create_test_authored_as_set_member,
@@ -95,7 +92,6 @@ from netbox_rpki.tests.utils import (
     create_test_repository,
     create_test_rir,
     create_test_revoked_certificate,
-    create_test_roa_change_plan,
     create_test_roa_change_plan_rollback_bundle,
     create_test_roa_change_plan_item,
     create_test_roa_change_plan_matrix,
@@ -835,6 +831,35 @@ class TableScenario:
     build_rows: Callable[[], None]
 
 
+class LazyScenarioCollection:
+    """
+    Defer scenario construction until test execution time.
+
+    Import-time form instantiation during test discovery can populate
+    ContentType's per-alias cache from the non-test database. The Django test
+    runner later repoints the `default` alias at the test database without
+    clearing that cache, which leaves stale content type IDs in memory.
+    """
+
+    def __init__(self, builder: Callable[[], tuple[object, ...]]):
+        self._builder = builder
+        self._scenarios: tuple[object, ...] | None = None
+
+    def _evaluate(self) -> tuple[object, ...]:
+        if self._scenarios is None:
+            self._scenarios = tuple(self._builder())
+        return self._scenarios
+
+    def __iter__(self):
+        return iter(self._evaluate())
+
+    def __len__(self):
+        return len(self._evaluate())
+
+    def __getitem__(self, item):
+        return self._evaluate()[item]
+
+
 def build_organization_form_data() -> dict[str, object]:
     token = unique_token("form-org")
     return {
@@ -1512,7 +1537,11 @@ _register_scenario_builders()
 
 # Rebuild the generated scenarios after registering specialized builders so
 # the closures capture the override callables instead of the generic fallbacks.
-FORM_SCENARIOS = tuple(_build_form_scenario(spec) for spec in FORM_OBJECT_SPECS)
+# Keep form scenarios lazy so generated forms are instantiated only after the
+# test database is active.
+FORM_SCENARIOS = LazyScenarioCollection(
+    lambda: (_build_form_scenario(spec) for spec in FORM_OBJECT_SPECS)
+)
 FILTERSET_SCENARIOS = tuple(_build_filterset_scenario(spec) for spec in FILTERSET_OBJECT_SPECS)
 
 

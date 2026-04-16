@@ -6,8 +6,6 @@ useful for organization-level dashboards and operator overviews.
 """
 from __future__ import annotations
 
-from django.db.models import QuerySet
-
 from netbox_rpki import models as rpki_models
 from netbox_rpki.services.publication_state import (
     derive_change_plan_publication_state,

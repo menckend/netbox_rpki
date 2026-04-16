@@ -6,6 +6,7 @@ from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 from django.utils.formats import date_format
 from django.utils import timezone
+from tenancy.models import Tenant
 
 from netbox_rpki import filtersets, forms, tables, views
 from netbox_rpki import models as rpki_models
@@ -41,8 +42,12 @@ from netbox_rpki.tests.utils import (
     create_test_irr_change_plan,
     create_test_irr_change_plan_item,
     create_test_irr_coordination_run,
+    create_test_irr_coordination_result,
+    create_test_irr_snapshot,
     create_test_irr_source,
     create_test_irr_write_execution,
+    create_test_imported_irr_aut_num,
+    create_test_imported_irr_route_object,
     create_test_intent_derivation_run,
     create_test_lifecycle_health_policy,
     create_test_organization,
@@ -2281,6 +2286,10 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
 
         self.assertHttpStatus(response, 200)
         self.assertContains(response, 'Operations Dashboard')
+        self.assertContains(response, 'Provider and Source Health')
+        self.assertContains(response, 'Workflow Runs Requiring Attention')
+        self.assertContains(response, 'External Evidence and Telemetry')
+        self.assertContains(response, 'Expiring Soon')
         self.assertContains(response, self.failed_provider_account.name)
         self.assertContains(response, self.stale_provider_account.name)
         self.assertNotContains(response, self.healthy_provider_account.name)
@@ -2576,6 +2585,252 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
         self.assertHttpStatus(response, 200)
         self.assertContains(response, reverse('plugins:netbox_rpki:operations_export') + '?format=json')
         self.assertContains(response, reverse('plugins:netbox_rpki:operations_export') + '?format=csv')
+
+
+class IrrDivergenceDashboardViewTestCase(PluginViewTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(
+            org_id='irr-divergence-org',
+            name='IRR Divergence Org',
+        )
+        cls.tenant_a = Tenant.objects.create(name='IRR Tenant A', slug='irr-tenant-a')
+        cls.tenant_b = Tenant.objects.create(name='IRR Tenant B', slug='irr-tenant-b')
+        cls.source_a = create_test_irr_source(
+            name='IRR Source A',
+            slug='irr-source-a',
+            organization=cls.organization,
+        )
+        cls.source_b = create_test_irr_source(
+            name='IRR Source B',
+            slug='irr-source-b',
+            organization=cls.organization,
+        )
+        cls.snapshot_a = create_test_irr_snapshot(
+            name='IRR Snapshot A',
+            source=cls.source_a,
+        )
+        cls.snapshot_b = create_test_irr_snapshot(
+            name='IRR Snapshot B',
+            source=cls.source_b,
+        )
+        cls.coordination_run = create_test_irr_coordination_run(
+            name='IRR Divergence Run',
+            organization=cls.organization,
+            tenant=cls.tenant_a,
+            compared_sources=[cls.source_a, cls.source_b],
+        )
+        cls.prefix_a = create_test_prefix('198.51.100.0/24', tenant=cls.tenant_a, status='active')
+        cls.asn_a = create_test_asn(64512)
+        cls.roa_intent_a = create_test_roa_intent(
+            name='IRR Divergence Intent A',
+            organization=cls.organization,
+            prefix=cls.prefix_a,
+            prefix_cidr_text='198.51.100.0/24',
+            origin_asn=cls.asn_a,
+            origin_asn_value=cls.asn_a.asn,
+            max_length=24,
+            tenant=cls.tenant_a,
+        )
+        cls.conflicting_route = create_test_imported_irr_route_object(
+            name='route:198.51.100.0/24AS64513',
+            source=cls.source_a,
+            snapshot=cls.snapshot_a,
+            stable_key='route:198.51.100.0/24AS64513',
+            rpsl_pk='198.51.100.0/24AS64513',
+            prefix='198.51.100.0/24',
+            origin_asn='AS64513',
+        )
+        cls.imported_aut_num = create_test_imported_irr_aut_num(
+            name='aut_num:AS64512',
+            source=cls.source_a,
+            snapshot=cls.snapshot_a,
+            stable_key='aut_num:AS64512',
+            rpsl_pk='AS64512',
+            asn='AS64512',
+        )
+        cls.extra_route = create_test_imported_irr_route_object(
+            name='route:203.0.113.0/24AS64513',
+            source=cls.source_b,
+            snapshot=cls.snapshot_b,
+            stable_key='route:203.0.113.0/24AS64513',
+            rpsl_pk='203.0.113.0/24AS64513',
+            prefix='203.0.113.0/24',
+            origin_asn='AS64513',
+        )
+        cls.missing_result = create_test_irr_coordination_result(
+            name='Missing Route Object',
+            coordination_run=cls.coordination_run,
+            source=cls.source_a,
+            snapshot=cls.snapshot_a,
+            result_type=rpki_models.IrrCoordinationResultType.MISSING_IN_SOURCE,
+            severity=rpki_models.ReconciliationSeverity.WARNING,
+            stable_object_key='route:198.51.100.0/24AS64512',
+            netbox_object_key='route:198.51.100.0/24AS64512',
+            source_object_key='',
+            roa_intent=cls.roa_intent_a,
+            tenant=cls.tenant_a,
+            summary_json={
+                'netbox_prefix': '198.51.100.0/24',
+                'netbox_origin_asn': 'AS64512',
+                'source_name': cls.source_a.name,
+                'snapshot_id': cls.snapshot_a.pk,
+            },
+        )
+        cls.conflict_result = create_test_irr_coordination_result(
+            name='Origin Mismatch',
+            coordination_run=cls.coordination_run,
+            source=cls.source_a,
+            snapshot=cls.snapshot_a,
+            result_type=rpki_models.IrrCoordinationResultType.SOURCE_CONFLICT,
+            severity=rpki_models.ReconciliationSeverity.ERROR,
+            stable_object_key='route:198.51.100.0/24AS64512',
+            netbox_object_key='route:198.51.100.0/24AS64512',
+            source_object_key=cls.conflicting_route.stable_key,
+            roa_intent=cls.roa_intent_a,
+            imported_route_object=cls.conflicting_route,
+            tenant=cls.tenant_a,
+            summary_json={
+                'netbox_prefix': '198.51.100.0/24',
+                'netbox_origin_asn': 'AS64512',
+                'source_name': cls.source_a.name,
+                'snapshot_id': cls.snapshot_a.pk,
+                'message': 'Target source origin differs from NetBox intent.',
+                'source_conflicts': [
+                    {
+                        'stable_key': cls.conflicting_route.stable_key,
+                        'origin_asn': cls.conflicting_route.origin_asn,
+                        'prefix': cls.conflicting_route.prefix,
+                    },
+                ],
+            },
+        )
+        cls.policy_gap_result = create_test_irr_coordination_result(
+            name='Policy Context Gap',
+            coordination_run=cls.coordination_run,
+            source=cls.source_a,
+            snapshot=cls.snapshot_a,
+            coordination_family=rpki_models.IrrCoordinationFamily.AUT_NUM_CONTEXT,
+            result_type=rpki_models.IrrCoordinationResultType.POLICY_CONTEXT_GAP,
+            severity=rpki_models.ReconciliationSeverity.WARNING,
+            stable_object_key='aut_num:AS64512',
+            netbox_object_key='aut_num:AS64512',
+            imported_aut_num=cls.imported_aut_num,
+            tenant=cls.tenant_a,
+            summary_json={
+                'message': 'Additional routing policy context is required before drafting.',
+            },
+        )
+        cls.extra_result = create_test_irr_coordination_result(
+            name='Extra Route Object',
+            coordination_run=cls.coordination_run,
+            source=cls.source_b,
+            snapshot=cls.snapshot_b,
+            result_type=rpki_models.IrrCoordinationResultType.EXTRA_IN_SOURCE,
+            severity=rpki_models.ReconciliationSeverity.WARNING,
+            stable_object_key=cls.extra_route.stable_key,
+            source_object_key=cls.extra_route.stable_key,
+            imported_route_object=cls.extra_route,
+            tenant=cls.tenant_b,
+            summary_json={
+                'source_prefix': cls.extra_route.prefix,
+                'source_origin_asn': cls.extra_route.origin_asn,
+                'source_name': cls.source_b.name,
+                'snapshot_id': cls.snapshot_b.pk,
+            },
+        )
+        cls.stale_result = create_test_irr_coordination_result(
+            name='Stale Snapshot',
+            coordination_run=cls.coordination_run,
+            source=cls.source_b,
+            snapshot=cls.snapshot_b,
+            result_type=rpki_models.IrrCoordinationResultType.STALE_SOURCE,
+            severity=rpki_models.ReconciliationSeverity.WARNING,
+            stable_object_key='',
+            source_object_key='',
+            tenant=cls.tenant_b,
+            summary_json={
+                'message': 'Latest imported IRR snapshot is stale relative to source sync policy.',
+            },
+        )
+        cls.match_result = create_test_irr_coordination_result(
+            name='Matched Result Hidden',
+            coordination_run=cls.coordination_run,
+            source=cls.source_a,
+            snapshot=cls.snapshot_a,
+            result_type=rpki_models.IrrCoordinationResultType.MATCH,
+            severity=rpki_models.ReconciliationSeverity.INFO,
+            stable_object_key='route:198.51.100.0/24AS64512',
+            roa_intent=cls.roa_intent_a,
+            tenant=cls.tenant_a,
+            summary_json={
+                'netbox_prefix': '198.51.100.0/24',
+                'netbox_origin_asn': 'AS64512',
+            },
+        )
+
+    def add_dashboard_permissions(self):
+        self.add_permissions(
+            'netbox_rpki.view_irrcoordinationresult',
+            'netbox_rpki.view_irrcoordinationrun',
+            'netbox_rpki.view_irrsource',
+            'netbox_rpki.view_roaintent',
+            'netbox_rpki.view_importedirrrouteobject',
+            'netbox_rpki.view_importedirrautnum',
+        )
+
+    def test_irr_divergence_dashboard_groups_findings_and_surfaces_remediation(self):
+        self.add_dashboard_permissions()
+
+        response = self.client.get(reverse('plugins:netbox_rpki:irr_divergence_dashboard'))
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'IRR Divergence Dashboard')
+        self.assertContains(response, 'Missing In Source')
+        self.assertContains(response, 'Source Conflict')
+        self.assertContains(response, 'Extra In Source')
+        self.assertContains(response, 'Policy Context Gap')
+        self.assertContains(response, 'Stale Source')
+        self.assertContains(response, self.missing_result.name)
+        self.assertContains(response, self.conflict_result.name)
+        self.assertContains(response, self.extra_result.name)
+        self.assertContains(response, self.policy_gap_result.name)
+        self.assertContains(response, self.stale_result.name)
+        self.assertNotContains(response, self.match_result.name)
+        self.assertContains(
+            response,
+            'NetBox policy expects a route object that is currently missing from the target IRR source.',
+        )
+        self.assertContains(
+            response,
+            'Target IRR source publishes a conflicting route object and needs a source-specific replacement draft.',
+        )
+        self.assertContains(
+            response,
+            'The route object delta depends on additional policy-context work that is not synthesized automatically.',
+        )
+        self.assertContains(response, reverse('plugins:netbox_rpki:irr_divergence_dashboard'))
+
+    def test_irr_divergence_dashboard_filters_by_source_tenant_and_asn(self):
+        self.add_dashboard_permissions()
+
+        response = self.client.get(
+            reverse('plugins:netbox_rpki:irr_divergence_dashboard'),
+            {
+                'source': self.source_a.pk,
+                'tenant': self.tenant_a.pk,
+                'asn': '64512',
+            },
+        )
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, self.missing_result.name)
+        self.assertContains(response, self.conflict_result.name)
+        self.assertContains(response, self.policy_gap_result.name)
+        self.assertNotContains(response, self.extra_result.name)
+        self.assertNotContains(response, self.stale_result.name)
+        self.assertContains(response, 'AS64512')
+        self.assertNotContains(response, 'IRR Tenant B')
 
 
 class GeneratedSurfaceContractTestCase(PluginViewTestCase):

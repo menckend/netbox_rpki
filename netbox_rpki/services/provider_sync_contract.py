@@ -2,10 +2,8 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Mapping
-from datetime import timedelta
 
-from django.db.models import Count, Q
-from django.utils import timezone
+from django.db.models import Count
 
 from netbox_rpki import models as rpki_models
 from netbox_rpki.services.lifecycle_reporting import (

@@ -1,32 +1,21 @@
 from django import forms
 from utilities.forms.rendering import FieldSet
 from django.core.exceptions import (
-    MultipleObjectsReturned,
-    ObjectDoesNotExist,
     ValidationError,
 )
 from django.utils.translation import gettext as _
 
 from tenancy.models import Tenant
-from dcim.models import Device, Site
-from ipam.models import IPAddress, Prefix, ASN
-from ipam.formfields import IPNetworkFormField
 from utilities.forms.fields import (
     DynamicModelChoiceField,
-    CSVModelChoiceField,
-    CSVModelMultipleChoiceField,
     DynamicModelMultipleChoiceField,
     TagFilterField,
-    CSVChoiceField,
     CommentField,
 )
 from utilities.forms import ConfirmationForm
-from utilities.forms.widgets import APISelect, APISelectMultiple
 from netbox.forms import (
     NetBoxModelForm,
-    NetBoxModelBulkEditForm,
     NetBoxModelFilterSetForm,
-    NetBoxModelImportForm,
 )
 import netbox_rpki
 from netbox_rpki.object_registry import FILTER_FORM_OBJECT_SPECS, FORM_OBJECT_SPECS
@@ -39,12 +28,6 @@ from netbox_rpki.services.roa_lint import build_roa_change_plan_lint_posture
 # )
 
 from netbox_rpki.models import (
-    Certificate,
-    Organization,
-    RoaObject,
-    RoaObjectPrefix,
-    CertificatePrefix,
-    CertificateAsn,
     validate_maintenance_window_bounds,
 )
 
@@ -119,6 +102,28 @@ def build_filter_form_class(spec: ObjectSpec) -> type[NetBoxModelFilterSetForm]:
 
 for object_spec in FILTER_FORM_OBJECT_SPECS:
     globals()[object_spec.filter_form.class_name] = build_filter_form_class(object_spec)
+
+
+class IrrDivergenceDashboardFilterForm(forms.Form):
+    source = DynamicModelChoiceField(
+        queryset=netbox_rpki.models.IrrSource.objects.select_related('organization').order_by(
+            'organization__name',
+            'name',
+            'pk',
+        ),
+        required=False,
+        label='Source',
+    )
+    tenant = DynamicModelChoiceField(
+        queryset=Tenant.objects.order_by('name', 'pk'),
+        required=False,
+        label='Tenant',
+    )
+    asn = forms.CharField(
+        required=False,
+        label='ASN',
+        help_text='Accepts values like 64500 or AS64500.',
+    )
 
 
 _BaseRoutingIntentProfileForm = RoutingIntentProfileForm

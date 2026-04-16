@@ -33,6 +33,29 @@ REVIEW_ONLY_RESULT_TYPES = {
 }
 
 
+def describe_irr_coordination_result_remediation(
+    result: rpki_models.IrrCoordinationResult,
+    *,
+    source: rpki_models.IrrSource | None = None,
+) -> dict[str, str]:
+    target_source = source or result.source
+    action = (
+        _derive_action(result=result, source=target_source)
+        if target_source is not None
+        else rpki_models.IrrChangePlanAction.NOOP
+    )
+    action_display = (
+        rpki_models.IrrChangePlanAction(action).label
+        if action in rpki_models.IrrChangePlanAction.values
+        else 'No-op'
+    )
+    return {
+        'action': action,
+        'action_display': action_display,
+        'reason': _build_item_reason(result=result, action=action),
+    }
+
+
 def create_irr_change_plans(
     coordination_run: rpki_models.IrrCoordinationRun,
     *,
