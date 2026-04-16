@@ -1,0 +1,213 @@
+name: Certification CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: certification-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract-matrix:
+    name: Contract suite (${{ matrix.netbox-version }}, py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.12']
+        netbox-version: ['v4.5.0', 'v4.5.7']
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: netbox
+          POSTGRES_USER: netbox
+          POSTGRES_PASSWORD: netbox
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U netbox -d netbox"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      NETBOX_CONFIGURATION: netbox_rpki.tests.netbox_configuration
+      NETBOX_RPKI_ENABLE: '1'
+      NETBOX_TEST_DB_NAME: netbox
+      NETBOX_TEST_DB_USER: netbox
+      NETBOX_TEST_DB_PASSWORD: netbox
+      NETBOX_TEST_DB_HOST: 127.0.0.1
+      NETBOX_TEST_DB_PORT: '5432'
+      NETBOX_TEST_DB_TEST_NAME: test_netbox_rpki
+      NETBOX_TEST_REDIS_HOST: 127.0.0.1
+      NETBOX_TEST_REDIS_PORT: '6379'
+      NETBOX_TEST_REDIS_PASSWORD: ''
+      CI_ARTIFACTS_DIR: ${{ github.workspace }}/ci-artifacts
+    steps:
+      - name: Checkout plugin
+        uses: actions/checkout@v4
+
+      - name: Clone NetBox
+        run: git clone --depth 1 --branch "${{ matrix.netbox-version }}" https://github.com/netbox-community/netbox.git ../netbox
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            ../netbox/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r ../netbox/requirements.txt
+          python -m pip install -e .[test]
+
+      - name: Prepare CI artifacts directory
+        run: mkdir -p "$CI_ARTIFACTS_DIR"
+
+      - name: Capture environment snapshot
+        run: |
+          python --version | tee "$CI_ARTIFACTS_DIR/python-version.txt"
+          python -m pip --version | tee "$CI_ARTIFACTS_DIR/pip-version.txt"
+          python -m pip freeze | tee "$CI_ARTIFACTS_DIR/pip-freeze.txt"
+          git -C ../netbox rev-parse HEAD | tee "$CI_ARTIFACTS_DIR/netbox-commit.txt"
+
+      - name: Run migrations
+        working-directory: ../netbox
+        run: python manage.py migrate --noinput 2>&1 | tee "$CI_ARTIFACTS_DIR/migrate.log"
+
+      - name: Run system checks
+        working-directory: ../netbox
+        run: python manage.py check 2>&1 | tee "$CI_ARTIFACTS_DIR/check.log"
+
+      - name: Run contract suite
+        working-directory: ../netbox
+        run: |
+          python manage.py test --keepdb --noinput \
+            netbox_rpki.tests.test_views \
+            netbox_rpki.tests.test_api \
+            netbox_rpki.tests.test_forms \
+            netbox_rpki.tests.test_filtersets \
+            netbox_rpki.tests.test_tables \
+            netbox_rpki.tests.test_urls \
+            netbox_rpki.tests.test_navigation \
+            netbox_rpki.tests.test_graphql 2>&1 | tee "$CI_ARTIFACTS_DIR/contract-suite.log"
+
+      - name: Upload contract job artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: certification-contract-${{ matrix.netbox-version }}-py${{ matrix.python-version }}
+          path: ci-artifacts/
+
+  full-suite:
+    name: Full suite (v4.5.7)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: contract-matrix
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: netbox
+          POSTGRES_USER: netbox
+          POSTGRES_PASSWORD: netbox
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U netbox -d netbox"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      NETBOX_CONFIGURATION: netbox_rpki.tests.netbox_configuration
+      NETBOX_RPKI_ENABLE: '1'
+      NETBOX_TEST_DB_NAME: netbox
+      NETBOX_TEST_DB_USER: netbox
+      NETBOX_TEST_DB_PASSWORD: netbox
+      NETBOX_TEST_DB_HOST: 127.0.0.1
+      NETBOX_TEST_DB_PORT: '5432'
+      NETBOX_TEST_DB_TEST_NAME: test_netbox_rpki
+      NETBOX_TEST_REDIS_HOST: 127.0.0.1
+      NETBOX_TEST_REDIS_PORT: '6379'
+      NETBOX_TEST_REDIS_PASSWORD: ''
+      CI_ARTIFACTS_DIR: ${{ github.workspace }}/ci-artifacts
+    steps:
+      - name: Checkout plugin
+        uses: actions/checkout@v4
+
+      - name: Clone NetBox
+        run: git clone --depth 1 --branch v4.5.7 https://github.com/netbox-community/netbox.git ../netbox
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            ../netbox/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r ../netbox/requirements.txt
+          python -m pip install -e .[test]
+
+      - name: Prepare CI artifacts directory
+        run: mkdir -p "$CI_ARTIFACTS_DIR"
+
+      - name: Capture environment snapshot
+        run: |
+          python --version | tee "$CI_ARTIFACTS_DIR/python-version.txt"
+          python -m pip --version | tee "$CI_ARTIFACTS_DIR/pip-version.txt"
+          python -m pip freeze | tee "$CI_ARTIFACTS_DIR/pip-freeze.txt"
+          git -C ../netbox rev-parse HEAD | tee "$CI_ARTIFACTS_DIR/netbox-commit.txt"
+
+      - name: Run migrations
+        working-directory: ../netbox
+        run: python manage.py migrate --noinput 2>&1 | tee "$CI_ARTIFACTS_DIR/migrate.log"
+
+      - name: Run system checks
+        working-directory: ../netbox
+        run: python manage.py check 2>&1 | tee "$CI_ARTIFACTS_DIR/check.log"
+
+      - name: Run full plugin suite
+        working-directory: ../netbox
+        run: python manage.py test --keepdb --noinput netbox_rpki.tests 2>&1 | tee "$CI_ARTIFACTS_DIR/full-suite.log"
+
+      - name: Upload full-suite artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: certification-full-suite-v4.5.7-py3.12
+          path: ci-artifacts/

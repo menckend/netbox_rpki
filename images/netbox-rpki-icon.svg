@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">NetBox RPKI plugin icon</title>
+  <desc id="desc">A square transparent icon showing a network grid, shield, and route bars.</desc>
+  <rect x="24" y="24" width="464" height="464" rx="112" fill="#0f3d3e"/>
+  <rect x="60" y="60" width="392" height="392" rx="84" fill="#f2efe6"/>
+  <rect x="96" y="96" width="320" height="320" rx="60" fill="#135c62"/>
+  <path d="M256 126c56 38 101 47 132 50v86c0 87-55 142-132 186-77-44-132-99-132-186v-86c31-3 76-12 132-50z" fill="#f2efe6"/>
+  <path d="M256 165c38 24 70 31 95 34v58c0 61-37 101-95 136-58-35-95-75-95-136v-58c25-3 57-10 95-34z" fill="#df6a32"/>
+  <circle cx="180" cy="176" r="20" fill="#f2efe6"/>
+  <circle cx="332" cy="176" r="20" fill="#f2efe6"/>
+  <circle cx="180" cy="336" r="20" fill="#f2efe6"/>
+  <circle cx="332" cy="336" r="20" fill="#f2efe6"/>
+  <path d="M180 176h152M180 336h152M180 176v160M332 176v160" stroke="#78c3b6" stroke-width="16" stroke-linecap="round"/>
+  <path d="M220 230h72M208 268h96M220 306h72" stroke="#f2efe6" stroke-width="20" stroke-linecap="round"/>
+</svg>

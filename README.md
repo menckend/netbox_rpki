@@ -1,11 +1,96 @@
 # NetBox RPKI Plugin
 
-Netbox plugin for adding BGP RPKI elements.
+Bring RPKI inventory, validation, routing intent, and hosted-provider workflows into NetBox 4.5.x.
+
+`netbox_rpki` extends NetBox with a broad RPKI data model plus the operational workflows needed to ingest validator state, model publication intent, reconcile intent against published objects, and manage write-back to supported providers. The detailed reference documentation lives in the Sphinx site; this README is the top-level summary required to evaluate whether the plugin fits a deployment.
+
+![NetBox RPKI plugin icon](images/netbox-rpki-icon.svg)
 
 * Free software: Apache-2.0
+* Icon asset: `images/netbox-rpki-icon.svg` is provided under CC BY 4.0 for certification/catalog use
 * [Documentation](https://menckend.github.io/netbox_rpki)
 * [Repository](https://github.com/menckend/netbox_rpki)
 * [Python Package](https://pypi.org/project/netbox_rpki/)
+
+## Summary
+
+The plugin is aimed at operators who want NetBox to hold both raw RPKI state and higher-level publication intent.
+
+- Track native RPKI inventory such as certificates, ROAs, ASPAs, manifests, signed objects, repositories, and publication points
+- Import external observations from validators and hosted providers
+- Author ROA and ASPA intent, simulate changes, reconcile drift, and retain approval history
+- Expose the same object families through the NetBox UI, REST API, GraphQL, tables, and navigation
+
+## Compatibility
+
+`netbox-plugin.yaml`
+
+The plugin declares NetBox compatibility for the 4.5.x release line. Verification has been completed against real development installs of NetBox 4.5.0 and NetBox 4.5.7, covering plugin bootstrap, `manage.py check`, provider-sync, models, API, GraphQL, view, and navigation suites, browser smoke testing, and the full routing-intent and bulk-authoring workflow.
+
+| NetBox | Python | Status | Notes |
+| --- | --- | --- | --- |
+| 4.5.0 | 3.12 | GA | Release-gated developer install verified end-to-end. |
+| 4.5.7 | 3.12 | GA | Release-gated developer install verified end-to-end. |
+| 4.5.x | 3.12 | Beta | Supported release line, but exact patch combinations other than the GA anchors are not release-gated. |
+| 4.5.x | 3.13 - 3.14 | Best effort | Allowed for operator evaluation and covered by the compatibility contract tests, but not release-gated. |
+| < 4.5 or >= 4.6 | any | Unsupported | Outside the plugin compatibility window. |
+| 4.5.x | < 3.12 or > 3.14 | Unsupported | Outside the documented Python range. |
+
+Non-GA combinations emit a runtime `RuntimeWarning` during plugin startup so unsupported and best-effort deployments are visible before operators proceed.
+
+## Dependencies
+
+| Component | Required for | Supported versions | Notes |
+| --- | --- | --- | --- |
+| NetBox | All plugin functionality | 4.5.0 to 4.5.99 | The certified support window currently targets the NetBox 4.5 release line. |
+| Python | All plugin functionality | 3.12 to 3.14 | 3.12 is the release-gated version today. |
+| PostgreSQL | NetBox runtime and tests | NetBox-supported versions for 4.5.x | Required by NetBox itself; the plugin does not replace this dependency. |
+| Redis | NetBox runtime and tests | NetBox-supported versions for 4.5.x | Required by NetBox task and caching subsystems. |
+| Routinator | Validator import workflows | Current API compatible `jsonext` endpoint or snapshot export | Optional unless validator-ingest features are used. |
+| Krill | Hosted-provider sync and write-back workflows | API-compatible Krill deployments | Optional unless Krill-backed provider workflows are used. |
+| ARIN RPKI API | Hosted-provider sync workflows | Current ARIN API behavior supported by the plugin | Optional unless ARIN-backed provider workflows are used. |
+| IRRd-compatible service | IRR snapshot and coordination workflows | IRRd-compatible HTTP/WHOIS source | Optional unless IRR ingest and coordination workflows are used. |
+| Node.js and Playwright | Browser E2E development workflow | Node 18+ and the Playwright version pinned in `package-lock.json` | Optional for plugin runtime; used only for browser smoke tests. |
+
+## Installation
+
+For adding to a NetBox Docker setup see
+[the general instructions for using netbox-docker with plugins](https://github.com/netbox-community/netbox-docker/wiki/Using-Netbox-Plugins).
+
+Install using pip:
+
+```bash
+pip install netbox_rpki
+```
+
+or by adding to your `local_requirements.txt` or `plugin_requirements.txt` (netbox-docker):
+
+```bash
+netbox_rpki
+```
+
+Enable the plugin in `/opt/netbox/netbox/netbox/configuration.py`,
+ or if you use netbox-docker, your `/configuration/plugins.py` file :
+
+```python
+PLUGINS = [
+   'netbox_rpki'
+]
+
+PLUGINS_CONFIG = {
+   "netbox_rpki": {'top_level_menu': False},
+}
+```
+
+Run `python -m manage.py migrate` from the NetBox project directory in your installation, then run `python manage.py check` to confirm the plugin loads cleanly.
+
+## Maintainer Engagement
+
+Use GitHub issues for bug reports, feature requests, and documentation requests. The repo ships issue templates under `.github/ISSUE_TEMPLATE/` for those entry points.
+
+## User Support
+
+User support currently runs through the same public GitHub issue tracker used for bugs and documentation requests. There is no separate commercial support, discussion forum, or Slack channel maintained specifically for this plugin at this time.
 
 ## Features
 
@@ -421,7 +506,7 @@ Implements NetBox models, API endpoints, GraphQL types, tables, and UI views acr
    - Represents a recorded lifecycle health event produced by a hook evaluation.
 
 
-## Screencaps
+## Screenshots
 
 ### RPKI Organizations/Certificates/Resources
 
@@ -441,56 +526,6 @@ Implements NetBox models, API endpoints, GraphQL types, tables, and UI views acr
 
 
 
-
-## Compatibility
-
-`netbox-plugin.yaml`
-
-The plugin declares NetBox compatibility for the 4.5.x release line. Verification has been completed against real development installs of NetBox 4.5.0 and NetBox 4.5.7, covering plugin bootstrap, `manage.py check`, provider-sync, models, API, GraphQL, view, and navigation suites, browser smoke testing, and the full routing-intent and bulk-authoring workflow.
-
-| NetBox | Python | Status | Notes |
-| --- | --- | --- | --- |
-| 4.5.0 | 3.12 | GA | Release-gated developer install verified end-to-end. |
-| 4.5.7 | 3.12 | GA | Release-gated developer install verified end-to-end. |
-| 4.5.x | 3.12 | Beta | Supported release line, but exact patch combinations other than the GA anchors are not release-gated. |
-| 4.5.x | 3.13 - 3.14 | Best effort | Allowed for operator evaluation and covered by the compatibility contract tests, but not release-gated. |
-| < 4.5 or >= 4.6 | any | Unsupported | Outside the plugin compatibility window. |
-| 4.5.x | < 3.12 or > 3.14 | Unsupported | Outside the documented Python range. |
-
-Non-GA combinations emit a runtime `RuntimeWarning` during plugin startup so unsupported and best-effort deployments are visible before operators proceed.
-
-
-## Installing
-
-For adding to a NetBox Docker setup see
-[the general instructions for using netbox-docker with plugins](https://github.com/netbox-community/netbox-docker/wiki/Using-Netbox-Plugins).
-
-Install using pip:
-
-```bash
-pip install netbox_rpki
-```
-
-or by adding to your `local_requirements.txt` or `plugin_requirements.txt` (netbox-docker):
-
-```bash
-netbox_rpki
-```
-
-Enable the plugin in `/opt/netbox/netbox/netbox/configuration.py`,
- or if you use netbox-docker, your `/configuration/plugins.py` file :
-
-```python
-PLUGINS = [
-    'netbox_rpki'
-]
-
-PLUGINS_CONFIG = {
-    "netbox_rpki": {'top_level_menu': False},
-}
-```
-
-Run  `python -m manage.py migrate` from the .../netbox/netbox/ directory in your netbox installation. (or include the manage.py migrate command in Dockerfile-Plugins if using netbox-docker.)
 
 ## Browser E2E Tests
 

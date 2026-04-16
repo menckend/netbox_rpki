@@ -2,6 +2,8 @@
 
 ## 0.2.0 (2026-04-15)
 
+This major release introduces substantial new feature coverage across RPKI inventory, validation, routing intent, reconciliation, provider synchronization, delegated workflows, and operational reporting, alongside broad NetBox integration enhancements.
+
 * Core inventory: expand the plugin from basic organization, certificate, and ROA tracking into a broader RPKI inventory surface that also covers publication points, repositories, trust-anchor hierarchy, generic signed objects, CRLs, manifests, ASPAs, RSCs, router certificates, and related object-linkage views.
 * External validator import: add retained validator instances, validation runs, object validation results, and validated ROA and ASPA payload models, including Routinator `jsonext` import support from either the live API or exported snapshot files.
 * Routing intent: introduce organization-scoped routing intent authoring with profiles, rules, context groups, policy bundles, overrides, reusable templates, template bindings, typed exceptions, and bulk intent runs.
@@ -17,10 +19,14 @@
 
 ## 0.1.6.2 (2026-04-11)
 
+This patch release focuses on documentation and release metadata updates so the published package description stays aligned with the implemented feature set.
+
 * Documentation: expand the README feature and model coverage summary to describe the implemented standards-aligned object families and Priority 1 intent/reconciliation model layer.
 * Release metadata: align the plugin manifest with the `0.1.6.2` patch release.
 
 ## 0.1.6.1 (2026-04-11)
+
+This patch release improves development and test reliability by expanding seeded fixture coverage and adding regression checks around the shared sample dataset.
 
 * Dev/test fixtures: seed the devrun NetBox database and fixture-backed test helpers with at least a dozen rows across core NetBox dependency tables and plugin tables.
 * Tests: add regression coverage asserting the shared sample dataset populates every targeted table at the expected minimum volume.
@@ -28,11 +34,15 @@
 
 ## 0.1.6 (2026-04-11)
 
+This minor release refactors the plugin’s standard NetBox surfaces around a shared registry model and expands automated compatibility validation across the supported NetBox anchors.
+
 * Refactor: move plugin UI, API, GraphQL, navigation, and standard test surfaces to a metadata-driven object registry.
 * UI: replace repeated Organization, Certificate, and ROA detail templates with a shared metadata-driven detail renderer.
 * Tests: parameterize repeated CRUD, form, filterset, table, URL, navigation, and GraphQL coverage around the shared registry contract.
 * Compatibility: validate plugin load and test-suite execution against NetBox 4.5.0 and 4.5.7.
 
 ## 0.1.0 (2024-10-11)
+
+This initial release established the first PyPI-published version of the plugin with the foundational NetBox RPKI data model and packaging baseline.
 
 * First release on PyPI.
