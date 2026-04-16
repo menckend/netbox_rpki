@@ -14,6 +14,12 @@ on:
         options:
           - testpypi
           - pypi
+          - github-release
+      release_ref:
+        description: Git ref or tag to build for a manual run
+        required: true
+        default: main
+        type: string
 
 permissions:
   contents: read
@@ -26,6 +32,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.inputs.release_ref || github.ref }}
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -86,10 +93,10 @@ jobs:
           repository-url: https://test.pypi.org/legacy/
 
   github-release:
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || github.event.inputs.publish_target == 'github-release'
     name: Sign artifacts and publish GitHub release
     needs:
-      - publish-to-pypi
+      - build
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -107,7 +114,7 @@ jobs:
             ./dist/*.tar.gz
             ./dist/*.whl
       - name: Create GitHub release and upload artifacts
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             dist/*
