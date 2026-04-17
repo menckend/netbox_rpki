@@ -40,6 +40,8 @@ Non-GA combinations emit a runtime `RuntimeWarning` during plugin startup so uns
 
 Operators can also run `manage.py diagnose_netbox_rpki --format text|json` after installation to verify plugin registration, migrations, Redis-backed job prerequisites, and integration wiring before troubleshooting workflow-specific failures.
 
+Contributors who need a real hosted-provider integration path without RIR test credentials can use the documented public Krill testbed workflow in `LOCAL_DEV_SETUP.md`, including the `devrun/public-krill-testbed.sh` helper for the `live-provider` lane.
+
 ## Dependencies
 
 | Component | Required for | Supported versions | Notes |

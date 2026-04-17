@@ -104,6 +104,17 @@ Lane intent:
 
 Live-provider tests must live in `netbox_rpki/tests/test_live_*.py` and must be guarded so they skip unless `NETBOX_RPKI_ENABLE_LIVE_PROVIDER_TESTS=1` is set. This keeps day-to-day development independent from external provider credentials or live backends.
 
+For the blessed no-RIR-credentials path, use the documented public Krill testbed helper:
+
+```bash
+cd ~/src/netbox_rpki/devrun
+./public-krill-testbed.sh env
+./public-krill-testbed.sh check
+./public-krill-testbed.sh run
+```
+
+That path is documented in `LOCAL_DEV_SETUP.md` and is the preferred contributor route for real hosted-provider integration work when normal CI coverage is not enough. Certification CI does not provision public-testbed credentials and does not run that path automatically.
+
 ## Pull Request Guidelines
 
 Before you submit a pull request, check that it meets these guidelines:

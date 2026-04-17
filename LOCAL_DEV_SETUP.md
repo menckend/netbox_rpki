@@ -210,6 +210,54 @@ Running `./dev.sh test` with no argument defaults to `contract`.
 The `provider` lane is optional and is mainly for fixture-backed hosted-provider sync/write behavior; most day-to-day work should stay on `fast`, `contract`, or explicit labels.
 The `live-provider` lane is separate on purpose: it is reserved for real backend integration coverage, defaults to a clean skip unless `NETBOX_RPKI_ENABLE_LIVE_PROVIDER_TESTS=1`, and discovers only modules named `netbox_rpki/tests/test_live_*.py`.
 
+### Public Krill testbed path
+
+If you need a real provider-like path without RIR test credentials, use a Krill CA that is registered under the NLnet Labs public Krill testbed.
+
+Primary upstream references:
+
+- NLnet Labs public testbed page: `https://testbed.krill.cloud/index.html#/testbed`
+- Krill documentation: `https://krill.docs.nlnetlabs.nl/en/stable/testbed.html`
+
+Recommended local flow:
+
+1. Set up the external Krill workspace described in [Optional: Krill](#optional-krill).
+2. Register that Krill CA under the NLnet Labs public testbed and obtain a CA-scoped API token.
+3. Export the live-provider environment or let the helper print it for you:
+
+```bash
+cd ~/src/netbox_rpki/devrun
+./public-krill-testbed.sh env
+```
+
+4. Set the required token and any non-default values:
+
+```bash
+export NETBOX_RPKI_LIVE_KRILL_API_TOKEN='<krill-api-token>'
+export NETBOX_RPKI_LIVE_KRILL_API_BASE_URL='https://localhost:3001'
+export NETBOX_RPKI_LIVE_KRILL_CA_HANDLE='netbox-rpki-dev'
+export NETBOX_RPKI_LIVE_KRILL_ORG_HANDLE='PUBLIC-TESTBED'
+```
+
+5. Run the read-only probe and then the live-provider lane:
+
+```bash
+./public-krill-testbed.sh check
+./public-krill-testbed.sh run
+```
+
+What this path covers:
+
+- real HTTPS/API reachability to Krill
+- live credential validation through `netbox_rpki.tests.test_live_provider_krill`
+- a reproducible provider-like path for sync/test-connection work without RIR portal access
+
+Limitations and cleanup:
+
+- This path is for testing and training only; do not treat the public testbed TAL or repository as production trust material.
+- The helper only performs a read-only API probe and runs the `live-provider` lane. It does not create, rotate, or delete CAs for you.
+- Cleanup of child CAs, tokens, and repository state remains your responsibility in the Krill UI/API.
+
 ### Focused tests
 
 Pass explicit Django test labels after the lane keyword (or in place of it):
@@ -348,6 +396,7 @@ When detected:
 
 - `./dev.sh start` starts Krill automatically.
 - `./dev.sh stop` stops it.
+- `./public-krill-testbed.sh` can reuse it for the documented public-testbed live-provider path.
 
 When absent, `devrun` skips Krill and the rest of the environment works normally.
 
@@ -422,6 +471,7 @@ These let you point tests at a different database or Redis without changing the 
 | `check-netbox.sh` | Compare baseline vs. plugin-enabled `manage.py check` |
 | `status.sh` | Lower-level status report (used by `dev.sh status`) |
 | `stop.sh` | Lower-level stop (used by `dev.sh stop`) |
+| `public-krill-testbed.sh` | Print/check/run the documented public Krill testbed live-provider path |
 
 ---
 
