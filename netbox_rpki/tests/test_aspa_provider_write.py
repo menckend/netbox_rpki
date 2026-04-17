@@ -209,6 +209,11 @@ class AspaProviderWriteServiceTestCase(TestCase):
         self.assertEqual(execution.execution_mode, rpki_models.ProviderWriteExecutionMode.PREVIEW)
         self.assertEqual(execution.status, rpki_models.ValidationRunStatus.COMPLETED)
         self.assertEqual(execution.request_payload_json, delta)
+        self.assertEqual(
+            execution.response_payload_json['provider_request'],
+            {'add': [{'customer': 'AS64730', 'providers': ['AS64731']}], 'remove': []},
+        )
+        self.assertEqual(execution.response_payload_json['preview_report']['dangerous_change_count'], 0)
         self.assertEqual(execution.aspa_change_plan, plan)
         self.assertEqual(plan.status, rpki_models.ASPAChangePlanStatus.DRAFT)
 

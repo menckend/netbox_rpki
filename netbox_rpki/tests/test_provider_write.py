@@ -296,6 +296,13 @@ class ProviderWriteServiceTestCase(TestCase):
         self.assertEqual(execution.status, rpki_models.ValidationRunStatus.COMPLETED)
         self.assertEqual(execution.requested_by, 'preview-user')
         self.assertEqual(execution.request_payload_json, delta)
+        self.assertEqual(execution.response_payload_json['provider_request'], delta)
+        self.assertTrue(execution.response_payload_json['preview_report']['has_dangerous_changes'])
+        self.assertEqual(execution.response_payload_json['preview_report']['dangerous_change_count'], 1)
+        preview_items = execution.response_payload_json['preview_report']['items']
+        self.assertTrue(any(not item['before_state'] for item in preview_items))
+        dangerous_item = next(item for item in preview_items if item['is_dangerous'])
+        self.assertEqual(dangerous_item['before_state']['prefix_cidr_text'], '10.99.0.0/24')
         self.assertEqual(self.plan.status, rpki_models.ROAChangePlanStatus.DRAFT)
 
     def test_approve_transitions_plan_to_approved(self):
@@ -1144,10 +1151,14 @@ class ROAChangePlanActionAPITestCase(PluginAPITestCase):
 
         self.assertHttpStatus(response, 200)
         self.assertIn('delta', response.data)
+        self.assertIn('provider_request', response.data)
+        self.assertIn('preview_report', response.data)
         self.assertIn('execution', response.data)
         self.assertIn('latest_lint_posture', response.data)
         self.assertEqual(response.data['status'], rpki_models.ROAChangePlanStatus.DRAFT)
         self.assertIn('latest_simulation_summary', response.data)
+        self.assertTrue(response.data['preview_report']['has_dangerous_changes'])
+        self.assertEqual(response.data['preview_report']['provider_request'], response.data['provider_request'])
 
     def test_approve_action_transitions_plan(self):
         self.add_permissions(
@@ -1636,7 +1647,26 @@ class ROAChangePlanActionViewTestCase(PluginViewTestCase):
 
         self.assertHttpStatus(response, 200)
         self.assertContains(response, 'Preview Provider Delta')
+        self.assertContains(response, 'Exact Provider Request')
+        self.assertContains(response, 'Export JSON')
+        self.assertContains(response, 'Dangerous changes flagged')
+        self.assertContains(response, 'Before State')
+        self.assertContains(response, 'After State')
         self.assertContains(response, '10.89.0.0/24')
+
+    def test_preview_view_can_export_json(self):
+        self.add_permissions('netbox_rpki.view_roachangeplan', 'netbox_rpki.change_roachangeplan')
+
+        response = self.client.get(
+            reverse('plugins:netbox_rpki:roachangeplan_preview', kwargs={'pk': self.plan.pk}) + '?export=json'
+        )
+
+        self.assertHttpStatus(response, 200)
+        self.assertEqual(response['Content-Type'], 'application/json')
+        payload = response.json()
+        self.assertEqual(payload['change_plan_id'], self.plan.pk)
+        self.assertEqual(payload['preview_report']['change_plan_name'], self.plan.name)
+        self.assertTrue(payload['preview_report']['has_dangerous_changes'])
 
     def test_simulate_view_creates_run_and_redirects(self):
         self.add_permissions(
@@ -1891,8 +1921,11 @@ class ASPAChangePlanActionAPITestCase(PluginAPITestCase):
 
         self.assertHttpStatus(response, 200)
         self.assertIn('delta', response.data)
+        self.assertIn('provider_request', response.data)
+        self.assertIn('preview_report', response.data)
         self.assertIn('execution', response.data)
         self.assertEqual(response.data['status'], rpki_models.ASPAChangePlanStatus.DRAFT)
+        self.assertEqual(response.data['preview_report']['provider_request'], response.data['provider_request'])
 
     def test_approve_action_transitions_plan(self):
         self.add_permissions('netbox_rpki.view_aspachangeplan', 'netbox_rpki.change_aspachangeplan')
@@ -2101,7 +2134,23 @@ class ASPAChangePlanActionViewTestCase(PluginViewTestCase):
         response = self.client.get(reverse('plugins:netbox_rpki:aspachangeplan_preview', kwargs={'pk': self.plan.pk}))
 
         self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'Exact Provider Request')
+        self.assertContains(response, 'Export JSON')
         self.assertContains(response, 'AS65890')
+
+    def test_preview_view_can_export_json(self):
+        self.add_permissions('netbox_rpki.view_aspachangeplan', 'netbox_rpki.change_aspachangeplan')
+
+        response = self.client.get(
+            reverse('plugins:netbox_rpki:aspachangeplan_preview', kwargs={'pk': self.plan.pk}) + '?export=json'
+        )
+
+        self.assertHttpStatus(response, 200)
+        self.assertEqual(response['Content-Type'], 'application/json')
+        payload = response.json()
+        self.assertEqual(payload['change_plan_id'], self.plan.pk)
+        self.assertEqual(payload['preview_report']['change_plan_name'], self.plan.name)
+        self.assertFalse(payload['preview_report']['has_dangerous_changes'])
 
     def test_approve_view_renders_and_persists_governance_fields(self):
         self.add_permissions('netbox_rpki.view_aspachangeplan', 'netbox_rpki.change_aspachangeplan')

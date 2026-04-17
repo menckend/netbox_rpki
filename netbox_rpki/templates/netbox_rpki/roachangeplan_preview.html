@@ -28,9 +28,119 @@
               </div>
             {% endif %}
 
-            {% if delta %}
-              <h5>Outbound Delta</h5>
-              <pre class="mb-0"><code>{{ delta }}</code></pre>
+            {% if preview_report %}
+              {% if preview_report.has_dangerous_changes %}
+                <div class="alert alert-warning" role="alert">
+                  <strong>Dangerous changes flagged.</strong>
+                  {{ preview_report.dangerous_change_count }} item{{ preview_report.dangerous_change_count|pluralize }}
+                  removes or rewrites currently published provider state.
+                </div>
+              {% endif %}
+
+              <div class="row g-3 mb-4">
+                <div class="col-md-3">
+                  <div class="card h-100">
+                    <div class="card-body">
+                      <div class="text-muted small">Items</div>
+                      <div class="display-6">{{ preview_report.item_count }}</div>
+                    </div>
+                  </div>
+                </div>
+                <div class="col-md-3">
+                  <div class="card h-100">
+                    <div class="card-body">
+                      <div class="text-muted small">Adds</div>
+                      <div class="display-6">{{ preview_report.added_count }}</div>
+                    </div>
+                  </div>
+                </div>
+                <div class="col-md-3">
+                  <div class="card h-100">
+                    <div class="card-body">
+                      <div class="text-muted small">Removals</div>
+                      <div class="display-6">{{ preview_report.removed_count }}</div>
+                    </div>
+                  </div>
+                </div>
+                <div class="col-md-3">
+                  <div class="card h-100">
+                    <div class="card-body">
+                      <div class="text-muted small">Dangerous</div>
+                      <div class="display-6">{{ preview_report.dangerous_change_count }}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="mb-0">Exact Provider Request</h5>
+                <a
+                  href="?export=json"
+                  class="btn btn-outline-secondary btn-sm"
+                >Export JSON</a>
+              </div>
+              <pre class="mb-4"><code>{{ preview_report.provider_request }}</code></pre>
+
+              <h5>Object Review</h5>
+              <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                  <thead>
+                    <tr>
+                      <th>Object</th>
+                      <th>Semantic</th>
+                      <th>Before State</th>
+                      <th>After State</th>
+                      <th>Provider Payload</th>
+                      <th>Attention</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for item in preview_report.items %}
+                      <tr>
+                        <td>
+                          <strong>{{ item.name }}</strong>
+                          {% if item.object_key %}
+                            <div class="text-muted small"><code>{{ item.object_key }}</code></div>
+                          {% endif %}
+                        </td>
+                        <td>
+                          <div>{{ item.plan_semantic|default:item.action_type }}</div>
+                          <div class="text-muted small">{{ item.provider_operation }}</div>
+                        </td>
+                        <td>
+                          {% if item.before_state %}
+                            <code>{{ item.before_state }}</code>
+                          {% else %}
+                            <span class="text-muted">None</span>
+                          {% endif %}
+                        </td>
+                        <td>
+                          {% if item.after_state %}
+                            <code>{{ item.after_state }}</code>
+                          {% else %}
+                            <span class="text-muted">None</span>
+                          {% endif %}
+                        </td>
+                        <td><code>{{ item.provider_payload }}</code></td>
+                        <td>
+                          {% if item.attention_level == 'danger' %}
+                            <span class="badge text-bg-danger">Danger</span>
+                          {% elif item.attention_level == 'warning' %}
+                            <span class="badge text-bg-warning">Warning</span>
+                          {% else %}
+                            <span class="badge text-bg-secondary">Info</span>
+                          {% endif %}
+                          {% if item.dangerous_reasons %}
+                            <div class="small text-muted mt-2">
+                              {{ item.dangerous_reasons|join:' ' }}
+                            </div>
+                          {% endif %}
+                        </td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
             {% endif %}
           </div>
           <div class="card-footer text-end">

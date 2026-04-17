@@ -217,6 +217,199 @@ def build_aspa_change_plan_delta(
     }
 
 
+def _normalize_preview_state(value: dict | None) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    return {key: value[key] for key in sorted(value)}
+
+
+def _build_preview_state_diff(before_state: dict, after_state: dict) -> list[dict[str, object]]:
+    state_diff = []
+    for key in sorted(set(before_state) | set(after_state)):
+        before_value = before_state.get(key)
+        after_value = after_state.get(key)
+        if before_value == after_value:
+            continue
+        state_diff.append({
+            'field': key,
+            'before': before_value,
+            'after': after_value,
+        })
+    return state_diff
+
+
+def _serialize_provider_request_payload(
+    provider_account: rpki_models.RpkiProviderAccount,
+    delta: dict[str, list[dict]],
+    *,
+    family: str,
+) -> dict[str, list[dict]]:
+    if provider_account.provider_type == rpki_models.ProviderType.KRILL and family == 'ASPA':
+        return _serialize_krill_aspa_delta(delta)
+    return {
+        'added': [dict(entry) for entry in delta.get('added', [])],
+        'removed': [dict(entry) for entry in delta.get('removed', [])],
+    }
+
+
+def _build_roa_preview_item(item: rpki_models.ROAChangePlanItem) -> dict[str, object]:
+    before_state = _normalize_preview_state(item.before_state_json)
+    after_state = _normalize_preview_state(item.after_state_json)
+    plan_semantic = item.plan_semantic or item.action_type or ''
+    dangerous_reasons = []
+    attention_level = 'info'
+    if before_state:
+        dangerous_reasons.append('Removes or mutates currently published Krill state.')
+        attention_level = 'danger'
+    elif plan_semantic == rpki_models.ROAChangePlanItemSemantic.RESHAPE:
+        dangerous_reasons.append('Adjusts an existing authorization shape before it is re-published.')
+        attention_level = 'warning'
+    return {
+        'id': item.pk,
+        'name': item.name,
+        'object_family': 'ROA',
+        'object_key': '|'.join(
+            str(value or '')
+            for value in (
+                before_state.get('prefix_cidr_text') or after_state.get('prefix_cidr_text'),
+                before_state.get('origin_asn_value') or after_state.get('origin_asn_value'),
+                before_state.get('max_length_value') or after_state.get('max_length_value'),
+            )
+        ),
+        'action_type': item.action_type,
+        'plan_semantic': plan_semantic,
+        'provider_operation': item.provider_operation,
+        'provider_payload': dict(item.provider_payload_json or {}),
+        'before_state': before_state,
+        'after_state': after_state,
+        'state_diff': _build_preview_state_diff(before_state, after_state),
+        'reason': item.reason,
+        'is_dangerous': bool(dangerous_reasons),
+        'attention_level': attention_level,
+        'dangerous_reasons': dangerous_reasons,
+    }
+
+
+def _build_aspa_preview_item(item: rpki_models.ASPAChangePlanItem) -> dict[str, object]:
+    before_state = _normalize_preview_state(item.before_state_json)
+    after_state = _normalize_preview_state(item.after_state_json)
+    plan_semantic = item.plan_semantic or item.action_type or ''
+    dangerous_reasons = []
+    attention_level = 'info'
+    if plan_semantic in {
+        rpki_models.ASPAChangePlanItemSemantic.WITHDRAW,
+        rpki_models.ASPAChangePlanItemSemantic.REMOVE_PROVIDER,
+        rpki_models.ASPAChangePlanItemSemantic.REPLACE,
+        rpki_models.ASPAChangePlanItemSemantic.RESHAPE,
+    } or before_state:
+        dangerous_reasons.append('Withdraws or rewrites currently published ASPA provider authorization state.')
+        attention_level = 'danger'
+    elif plan_semantic == rpki_models.ASPAChangePlanItemSemantic.ADD_PROVIDER:
+        dangerous_reasons.append('Expands the allowed upstream provider set for this customer ASN.')
+        attention_level = 'warning'
+    return {
+        'id': item.pk,
+        'name': item.name,
+        'object_family': 'ASPA',
+        'object_key': str(
+            before_state.get('customer_asn')
+            or after_state.get('customer_asn')
+            or ''
+        ),
+        'action_type': item.action_type,
+        'plan_semantic': plan_semantic,
+        'provider_operation': item.provider_operation,
+        'provider_payload': dict(item.provider_payload_json or {}),
+        'before_state': before_state,
+        'after_state': after_state,
+        'state_diff': _build_preview_state_diff(before_state, after_state),
+        'reason': item.reason,
+        'is_dangerous': bool(dangerous_reasons),
+        'attention_level': attention_level,
+        'dangerous_reasons': dangerous_reasons,
+    }
+
+
+def _build_preview_summary(
+    *,
+    provider_account: rpki_models.RpkiProviderAccount,
+    family: str,
+    delta: dict[str, list[dict]],
+    items: list[dict[str, object]],
+) -> dict[str, object]:
+    dangerous_items = [item for item in items if item['is_dangerous']]
+    attention_counts = {'danger': 0, 'warning': 0, 'info': 0}
+    for item in items:
+        attention_level = str(item.get('attention_level') or 'info')
+        attention_counts[attention_level] = attention_counts.get(attention_level, 0) + 1
+    return {
+        'schema_version': 1,
+        'family': family.lower(),
+        'family_display': family,
+        'provider_account_id': provider_account.pk,
+        'provider_account_name': provider_account.name,
+        'provider_type': provider_account.provider_type,
+        'provider_type_display': provider_account.get_provider_type_display(),
+        'item_count': len(items),
+        'added_count': len(delta.get('added', [])),
+        'removed_count': len(delta.get('removed', [])),
+        'has_dangerous_changes': bool(dangerous_items),
+        'dangerous_change_count': len(dangerous_items),
+        'attention_counts': attention_counts,
+        'provider_request': _serialize_provider_request_payload(
+            provider_account,
+            delta,
+            family=family,
+        ),
+        'items': items,
+    }
+
+
+def build_roa_change_plan_preview_report(
+    plan: rpki_models.ROAChangePlan | int,
+) -> dict[str, object]:
+    plan = _normalize_plan(plan)
+    provider_account = _require_previewable(plan)
+    delta = build_roa_change_plan_delta(plan)
+    items = [
+        _build_roa_preview_item(item)
+        for item in plan.items.exclude(provider_operation='').order_by('pk')
+    ]
+    preview_report = _build_preview_summary(
+        provider_account=provider_account,
+        family='ROA',
+        delta=delta,
+        items=items,
+    )
+    preview_report['change_plan_id'] = plan.pk
+    preview_report['change_plan_name'] = plan.name
+    preview_report['governance'] = _get_plan_governance_metadata(plan)
+    return preview_report
+
+
+def build_aspa_change_plan_preview_report(
+    plan: rpki_models.ASPAChangePlan | int,
+) -> dict[str, object]:
+    plan = _normalize_aspa_plan(plan)
+    provider_account = _require_aspa_previewable(plan)
+    delta = build_aspa_change_plan_delta(plan)
+    items = [
+        _build_aspa_preview_item(item)
+        for item in plan.items.exclude(provider_operation='').order_by('pk')
+    ]
+    preview_report = _build_preview_summary(
+        provider_account=provider_account,
+        family='ASPA',
+        delta=delta,
+        items=items,
+    )
+    preview_report['change_plan_id'] = plan.pk
+    preview_report['change_plan_name'] = plan.name
+    preview_report['governance'] = _get_plan_governance_metadata(plan)
+    preview_report['delegated_scope'] = _get_plan_delegated_scope_metadata(plan)
+    return preview_report
+
+
 def _invert_delta(delta: dict[str, list[dict]]) -> dict[str, list[dict]]:
     return {
         'added': list(delta.get('removed', [])),
@@ -886,6 +1079,7 @@ def preview_roa_change_plan_provider_write(
     plan = _normalize_plan(plan)
     provider_account = _require_previewable(plan)
     delta = build_roa_change_plan_delta(plan)
+    preview_report = build_roa_change_plan_preview_report(plan)
     started_at = timezone.now()
     execution = _create_execution(
         plan=plan,
@@ -901,6 +1095,8 @@ def preview_roa_change_plan_provider_write(
             'preview_only': True,
             'roa_write_mode': provider_account.roa_write_mode,
             'governance': _get_plan_governance_metadata(plan),
+            'provider_request': preview_report['provider_request'],
+            'preview_report': preview_report,
         },
     )
     return execution, delta
@@ -914,6 +1110,7 @@ def preview_aspa_change_plan_provider_write(
     plan = _normalize_aspa_plan(plan)
     provider_account = _require_aspa_previewable(plan)
     delta = build_aspa_change_plan_delta(plan)
+    preview_report = build_aspa_change_plan_preview_report(plan)
     started_at = timezone.now()
     execution = _create_execution(
         plan=plan,
@@ -930,6 +1127,8 @@ def preview_aspa_change_plan_provider_write(
             'aspa_write_mode': provider_account.aspa_write_mode,
             'governance': _get_plan_governance_metadata(plan),
             'delegated_scope': _get_plan_delegated_scope_metadata(plan),
+            'provider_request': preview_report['provider_request'],
+            'preview_report': preview_report,
         },
     )
     return execution, delta

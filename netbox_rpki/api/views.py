@@ -810,6 +810,8 @@ class ROAChangePlanViewSet(VIEWSET_CLASS_MAP['roachangeplan']):
 
         payload = self._serialize_plan_payload(request, plan)
         payload['delta'] = delta
+        payload['provider_request'] = execution.response_payload_json.get('provider_request', {})
+        payload['preview_report'] = execution.response_payload_json.get('preview_report', {})
         payload['execution'] = SERIALIZER_CLASS_MAP['providerwriteexecution'](
             execution,
             context={'request': request},
@@ -912,6 +914,8 @@ class ROAChangePlanViewSet(VIEWSET_CLASS_MAP['roachangeplan']):
         plan.refresh_from_db()
         payload = self._serialize_plan_payload(request, plan)
         payload['delta'] = delta
+        payload['provider_request'] = execution.response_payload_json.get('provider_request', {})
+        payload['preview_report'] = execution.response_payload_json.get('preview_report', {})
         payload['execution'] = SERIALIZER_CLASS_MAP['providerwriteexecution'](
             execution,
             context={'request': request},
@@ -1128,6 +1132,8 @@ class ASPAChangePlanViewSet(VIEWSET_CLASS_MAP['aspachangeplan']):
 
         payload = self._serialize_plan_payload(request, plan)
         payload['delta'] = delta
+        payload['provider_request'] = execution.response_payload_json.get('provider_request', {})
+        payload['preview_report'] = execution.response_payload_json.get('preview_report', {})
         payload['execution'] = SERIALIZER_CLASS_MAP['providerwriteexecution'](
             execution,
             context={'request': request},

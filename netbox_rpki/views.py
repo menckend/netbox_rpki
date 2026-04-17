@@ -4,7 +4,7 @@ from urllib.parse import urlencode
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied
 from django.db.models import Q
-from django.http import HttpResponseBadRequest
+from django.http import HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -38,7 +38,9 @@ from netbox_rpki.services import (
     approve_aspa_change_plan,
     approve_aspa_change_plan_secondary,
     build_aspa_change_plan_delta,
+    build_aspa_change_plan_preview_report,
     build_roa_change_plan_lint_posture,
+    build_roa_change_plan_preview_report,
     build_roa_change_plan_simulation_review,
     build_roa_change_plan_simulation_posture,
     build_external_mismatch_items,
@@ -3068,18 +3070,43 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
 class ROAChangePlanPreviewView(ROAChangePlanActionView):
     template_name = 'netbox_rpki/roachangeplan_preview.html'
 
+    def _build_export_payload(self, plan, preview_report, *, execution=None):
+        payload = {
+            'change_plan_id': plan.pk,
+            'change_plan_name': plan.name,
+            'change_plan_status': plan.status,
+            'preview_report': preview_report,
+        }
+        if execution is not None:
+            payload['execution'] = {
+                'id': execution.pk,
+                'name': execution.name,
+                'status': execution.status,
+                'execution_mode': execution.execution_mode,
+                'requested_by': execution.requested_by,
+                'started_at': execution.started_at.isoformat() if execution.started_at is not None else None,
+                'completed_at': execution.completed_at.isoformat() if execution.completed_at is not None else None,
+            }
+        return payload
+
     def _render(self, request, plan, *, execution=None, error_text=None, status=200):
         try:
-            delta = build_roa_change_plan_delta(plan)
+            preview_report = build_roa_change_plan_preview_report(plan)
         except ProviderWriteError as exc:
-            delta = None
+            preview_report = None
             error_text = error_text or str(exc)
             status = 400
+
+        if request.GET.get('export') == 'json' and preview_report is not None:
+            return JsonResponse(
+                self._build_export_payload(plan, preview_report, execution=execution),
+                json_dumps_params={'indent': 2, 'sort_keys': True},
+            )
 
         return render(request, self.template_name, {
             'object': plan,
             'change_plan': plan,
-            'delta': delta,
+            'preview_report': preview_report,
             'execution': execution,
             'error_text': error_text,
             'form': ConfirmationForm(),
@@ -3345,18 +3372,43 @@ class ROAChangePlanSimulateView(ROAChangePlanActionView):
 class ASPAChangePlanPreviewView(ASPAChangePlanActionView):
     template_name = 'netbox_rpki/roachangeplan_preview.html'
 
+    def _build_export_payload(self, plan, preview_report, *, execution=None):
+        payload = {
+            'change_plan_id': plan.pk,
+            'change_plan_name': plan.name,
+            'change_plan_status': plan.status,
+            'preview_report': preview_report,
+        }
+        if execution is not None:
+            payload['execution'] = {
+                'id': execution.pk,
+                'name': execution.name,
+                'status': execution.status,
+                'execution_mode': execution.execution_mode,
+                'requested_by': execution.requested_by,
+                'started_at': execution.started_at.isoformat() if execution.started_at is not None else None,
+                'completed_at': execution.completed_at.isoformat() if execution.completed_at is not None else None,
+            }
+        return payload
+
     def _render(self, request, plan, *, execution=None, error_text=None, status=200):
         try:
-            delta = build_aspa_change_plan_delta(plan)
+            preview_report = build_aspa_change_plan_preview_report(plan)
         except ProviderWriteError as exc:
-            delta = None
+            preview_report = None
             error_text = error_text or str(exc)
             status = 400
+
+        if request.GET.get('export') == 'json' and preview_report is not None:
+            return JsonResponse(
+                self._build_export_payload(plan, preview_report, execution=execution),
+                json_dumps_params={'indent': 2, 'sort_keys': True},
+            )
 
         return render(request, self.template_name, {
             'object': plan,
             'change_plan': plan,
-            'delta': delta,
+            'preview_report': preview_report,
             'execution': execution,
             'error_text': error_text,
             'form': ConfirmationForm(),
