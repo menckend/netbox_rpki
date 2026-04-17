@@ -137,6 +137,8 @@ class ProviderAdapter(ABC):
         self,
         provider_account: rpki_models.RpkiProviderAccount,
         snapshot: rpki_models.ProviderSnapshot,
+        *,
+        sync_run: rpki_models.ProviderSyncRun | None = None,
     ) -> dict[str, dict[str, object]]:
         raise NotImplementedError
 
@@ -204,10 +206,12 @@ class ArinProviderAdapter(ProviderAdapter):
         self,
         provider_account: rpki_models.RpkiProviderAccount,
         snapshot: rpki_models.ProviderSnapshot,
+        *,
+        sync_run: rpki_models.ProviderSyncRun | None = None,
     ) -> dict[str, dict[str, object]]:
         from netbox_rpki.services import provider_sync as provider_sync_service
 
-        return provider_sync_service._import_arin_records(provider_account, snapshot)
+        return provider_sync_service._import_arin_records(provider_account, snapshot, sync_run=sync_run)
 
     def _validate_credentials(
         self,
@@ -290,10 +294,12 @@ class KrillProviderAdapter(ProviderAdapter):
         self,
         provider_account: rpki_models.RpkiProviderAccount,
         snapshot: rpki_models.ProviderSnapshot,
+        *,
+        sync_run: rpki_models.ProviderSyncRun | None = None,
     ) -> dict[str, dict[str, object]]:
         from netbox_rpki.services import provider_sync as provider_sync_service
 
-        return provider_sync_service._import_krill_records(provider_account, snapshot)
+        return provider_sync_service._import_krill_records(provider_account, snapshot, sync_run=sync_run)
 
     def _validate_credentials(
         self,

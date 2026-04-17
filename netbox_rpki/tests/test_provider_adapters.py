@@ -168,7 +168,7 @@ class ProviderAdapterContractTestCase(TestCase):
         ) as arin_mock:
             result = get_provider_adapter(self.arin_account).sync_inventory(self.arin_account, arin_snapshot)
         self.assertEqual(result, {'arin': {'records_imported': 1}})
-        arin_mock.assert_called_once_with(self.arin_account, arin_snapshot)
+        arin_mock.assert_called_once_with(self.arin_account, arin_snapshot, sync_run=None)
 
         with patch(
             'netbox_rpki.services.provider_sync._import_krill_records',
@@ -176,7 +176,7 @@ class ProviderAdapterContractTestCase(TestCase):
         ) as krill_mock:
             result = get_provider_adapter(self.krill_account).sync_inventory(self.krill_account, krill_snapshot)
         self.assertEqual(result, {'krill': {'records_imported': 2}})
-        krill_mock.assert_called_once_with(self.krill_account, krill_snapshot)
+        krill_mock.assert_called_once_with(self.krill_account, krill_snapshot, sync_run=None)
 
     def test_standardized_unsupported_write_handling(self):
         adapter = get_provider_adapter(self.arin_account)

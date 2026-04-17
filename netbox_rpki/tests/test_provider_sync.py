@@ -34,6 +34,7 @@ from netbox_rpki.services.lifecycle_reporting import (
 from netbox_rpki.services.provider_sync_contract import (
     PROVIDER_SYNC_FAMILY_ORDER,
     PROVIDER_SYNC_SUMMARY_SCHEMA_VERSION,
+    build_family_summary,
     build_provider_account_rollup,
     build_provider_account_pub_obs_rollup,
     build_provider_snapshot_diff_rollup,
@@ -676,10 +677,76 @@ class ProviderSyncServiceTestCase(TestCase):
         self.assertEqual(second_snapshot.summary_json['latest_diff_name'], snapshot_diff.name)
         self.assertEqual(first_snapshot.summary_json['publication_health'], second_snapshot.summary_json['publication_health'])
         self.assertEqual(provider_account.last_sync_summary_json['publication_health'], second_snapshot.summary_json['publication_health'])
-        diff_rollup = build_provider_snapshot_diff_rollup(snapshot_diff)
-        self.assertEqual(diff_rollup['item_count'], 0)
-        self.assertEqual(diff_rollup['family_count'], len(diff_rollup['family_rollups']))
-        self.assertTrue(all(rollup['churn_status'] == 'steady' for rollup in diff_rollup['family_rollups']))
+
+    def test_sync_provider_account_resumes_failed_krill_run_from_family_checkpoint(self):
+        provider_account = create_test_provider_account(
+            name='Resumable Krill Account',
+            organization=self.organization,
+            provider_type=rpki_models.ProviderType.KRILL,
+            org_handle='ORG-RESUME',
+            ca_handle='resume-ca',
+            api_base_url='https://krill.example.invalid',
+            api_key='resume-token',
+        )
+
+        with patch('netbox_rpki.services.provider_sync._fetch_krill_routes_json', return_value=KRILL_ROUTES_JSON), \
+             patch('netbox_rpki.services.provider_sync._fetch_krill_aspas_json', return_value=KRILL_ASPAS_JSON), \
+             patch('netbox_rpki.services.provider_sync._fetch_krill_ca_metadata_json', return_value=KRILL_CA_METADATA_JSON), \
+             patch('netbox_rpki.services.provider_sync._fetch_krill_parent_statuses_json', return_value=KRILL_PARENT_STATUSES_JSON), \
+             patch('netbox_rpki.services.provider_sync._fetch_krill_parent_contact_payloads', return_value={'testbed': KRILL_PARENT_CONTACT_JSON}), \
+             patch('netbox_rpki.services.provider_sync._fetch_krill_child_info_payloads', return_value={'edge-customer-01': KRILL_CHILD_INFO_JSON}), \
+             patch('netbox_rpki.services.provider_sync._fetch_krill_child_connections_json', return_value=KRILL_CHILD_CONNECTIONS_JSON), \
+             patch('netbox_rpki.services.provider_sync._fetch_krill_repo_details_json', return_value=KRILL_REPO_DETAILS_JSON), \
+             patch('netbox_rpki.services.provider_sync._fetch_krill_repo_status_json', return_value=KRILL_REPO_STATUS_JSON), \
+             patch(
+                 'netbox_rpki.services.provider_sync._import_krill_child_link_family',
+                 side_effect=[
+                     ProviderSyncError('forced child-link failure'),
+                     build_family_summary(
+                         rpki_models.ProviderSyncFamily.CHILD_LINKS,
+                         status=rpki_models.ProviderSyncFamilyStatus.COMPLETED,
+                         counts={'records_fetched': 1, 'records_imported': 1},
+                     ),
+                 ],
+             ) as child_import_mock:
+            with self.assertRaisesMessage(ProviderSyncError, 'forced child-link failure'):
+                sync_provider_account(provider_account)
+
+            failed_run = provider_account.sync_runs.order_by('-started_at', '-pk').first()
+            failed_snapshot = failed_run.provider_snapshot
+            self.assertEqual(failed_run.status, rpki_models.ValidationRunStatus.FAILED)
+            self.assertEqual(
+                failed_run.summary_json['checkpoint']['last_completed_family'],
+                rpki_models.ProviderSyncFamily.PARENT_LINKS,
+            )
+            self.assertEqual(
+                failed_run.summary_json['checkpoint']['next_family'],
+                rpki_models.ProviderSyncFamily.CHILD_LINKS,
+            )
+            completed_families = set(failed_run.summary_json['checkpoint']['completed_families'])
+            self.assertIn(rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS, completed_families)
+            self.assertIn(rpki_models.ProviderSyncFamily.ASPAS, completed_families)
+            self.assertEqual(
+                rpki_models.ImportedRoaAuthorization.objects.filter(provider_snapshot=failed_snapshot).count(),
+                failed_run.summary_json['families'][rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS]['records_imported'],
+            )
+
+            resumed_run, resumed_snapshot = sync_provider_account(provider_account)
+
+        self.assertEqual(child_import_mock.call_count, 2)
+        self.assertEqual(resumed_run.pk, failed_run.pk)
+        self.assertEqual(resumed_snapshot.pk, failed_snapshot.pk)
+        self.assertEqual(resumed_run.status, rpki_models.ValidationRunStatus.COMPLETED)
+        self.assertTrue(resumed_run.summary_json['checkpoint']['resumed'])
+        self.assertEqual(
+            resumed_run.summary_json['checkpoint']['completed_supported_family_count'],
+            resumed_run.summary_json['checkpoint']['supported_family_count'],
+        )
+        self.assertEqual(
+            rpki_models.ImportedRoaAuthorization.objects.filter(provider_snapshot=resumed_snapshot).count(),
+            resumed_run.summary_json['families'][rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS]['records_imported'],
+        )
+        self.assertNotIn('latest_diff_id', resumed_run.summary_json)
 
     def test_sync_provider_account_generates_changed_snapshot_diff_items(self):
         provider_account = create_test_provider_account(

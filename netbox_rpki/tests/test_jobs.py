@@ -7,13 +7,15 @@ from core.models import Job
 from django.test import TestCase
 
 from netbox_rpki import models as rpki_models
-from netbox_rpki.jobs import ExecuteIrrChangePlanJob, RunBulkRoutingIntentJob
+from netbox_rpki.jobs import ExecuteIrrChangePlanJob, RunBulkRoutingIntentJob, SyncProviderAccountJob
 from netbox_rpki.tests.utils import (
     create_test_asn,
     create_test_irr_change_plan,
     create_test_irr_write_execution,
     create_test_organization,
     create_test_prefix,
+    create_test_provider_account,
+    create_test_provider_snapshot,
     create_test_routing_intent_profile,
     create_test_routing_intent_template,
     create_test_routing_intent_template_binding,
@@ -176,3 +178,50 @@ class ExecuteIrrChangePlanJobTestCase(TestCase):
         )
         self.assertEqual(replay_record.job_name, ExecuteIrrChangePlanJob.get_job_name(self.plan, execution_mode=rpki_models.IrrWriteExecutionMode.APPLY))
         self.assertEqual(replay_record.resolution_payload_json['irr_write_execution_pk'], execution.pk)
+
+
+class SyncProviderAccountJobTestCase(TestCase):
+    def setUp(self):
+        self.organization = create_test_organization(org_id='provider-sync-job-org', name='Provider Sync Job Org')
+        self.provider_account = create_test_provider_account(
+            name='Provider Sync Job Account',
+            organization=self.organization,
+            provider_type=rpki_models.ProviderType.KRILL,
+            org_handle='ORG-JOB',
+            ca_handle='job-ca',
+            api_base_url='https://krill.example.invalid',
+            api_key='job-token',
+        )
+
+    def _create_job(self, name):
+        return Job.objects.create(name=name, status='pending', job_id=uuid4(), data={})
+
+    def test_enqueue_allows_resume_when_running_sync_has_no_active_job(self):
+        running_snapshot = create_test_provider_snapshot(
+            name='Running Resume Snapshot',
+            organization=self.organization,
+            provider_account=self.provider_account,
+            status=rpki_models.ValidationRunStatus.RUNNING,
+        )
+        rpki_models.ProviderSyncRun.objects.create(
+            name='Running Resume Sync',
+            organization=self.organization,
+            provider_account=self.provider_account,
+            provider_snapshot=running_snapshot,
+            status=rpki_models.ValidationRunStatus.RUNNING,
+            summary_json={
+                'checkpoint': {
+                    'resume_supported': True,
+                    'current_family': rpki_models.ProviderSyncFamily.CHILD_LINKS,
+                },
+            },
+        )
+        queued_job = self._create_job('Provider Sync Resume Job')
+
+        with patch.object(SyncProviderAccountJob, 'enqueue', return_value=queued_job):
+            job, created = SyncProviderAccountJob.enqueue_for_provider_account(self.provider_account)
+
+        self.assertIs(job, queued_job)
+        self.assertTrue(created)
+        execution_record = rpki_models.JobExecutionRecord.objects.get(job=queued_job)
+        self.assertEqual(execution_record.disposition, rpki_models.JobExecutionDisposition.ENQUEUED)

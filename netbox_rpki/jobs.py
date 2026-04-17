@@ -686,7 +686,7 @@ class SyncProviderAccountJob(JobRunner):
             status=rpki_models.ValidationRunStatus.RUNNING,
         ).order_by('-started_at', '-pk').first()
         skip_resolution = None
-        if active_run is not None:
+        if active_run is not None and existing_job is not None:
             skip_resolution = {
                 'reason': 'running_provider_sync',
                 'run_model': 'ProviderSyncRun',
