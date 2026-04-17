@@ -403,6 +403,201 @@ class LifecycleExportViewTestCase(PluginViewTestCase):
         self.assertEqual(payload['data']['accounts'][0]['provider_account_id'], self.provider_account.pk)
 
 
+class ProviderAccountSummaryViewTestCase(PluginViewTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        now = timezone.now()
+        cls.organization = create_test_organization(
+            org_id='provider-summary-view-org',
+            name='Provider Summary View Org',
+        )
+        cls.full_success_account = create_test_provider_account(
+            name='Provider Summary Full Success',
+            organization=cls.organization,
+            provider_type=rpki_models.ProviderType.KRILL,
+            ca_handle='provider-summary-full',
+            org_handle='ORG-SUMMARY-FULL',
+            sync_interval=60,
+            last_successful_sync=now - timedelta(minutes=20),
+            last_sync_status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        cls.full_success_snapshot = create_test_provider_snapshot(
+            name='Provider Summary Full Snapshot',
+            organization=cls.organization,
+            provider_account=cls.full_success_account,
+            fetched_at=now - timedelta(minutes=18),
+            completed_at=now - timedelta(minutes=17),
+        )
+        cls.full_success_summary = build_provider_sync_summary(
+            cls.full_success_account,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+            family_summaries={
+                rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS: {
+                    'status': rpki_models.ProviderSyncFamilyStatus.COMPLETED,
+                    'records_fetched': 6,
+                    'records_imported': 6,
+                },
+            },
+            default_supported_status=rpki_models.ProviderSyncFamilyStatus.COMPLETED,
+        )
+        cls.full_success_summary['latest_snapshot_id'] = cls.full_success_snapshot.pk
+        cls.full_success_summary['latest_snapshot_name'] = cls.full_success_snapshot.name
+        cls.full_success_summary['latest_snapshot_completed_at'] = cls.full_success_snapshot.completed_at.isoformat()
+        cls.full_success_account.last_sync_summary_json = cls.full_success_summary
+        cls.full_success_account.save(update_fields=['last_sync_summary_json'])
+
+        cls.partial_success_account = create_test_provider_account(
+            name='Provider Summary Partial Success',
+            organization=cls.organization,
+            provider_type=rpki_models.ProviderType.KRILL,
+            ca_handle='provider-summary-partial',
+            org_handle='ORG-SUMMARY-PARTIAL',
+            api_key='',
+            sync_interval=60,
+            last_successful_sync=now - timedelta(minutes=10),
+            last_sync_status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        cls.partial_base_snapshot = create_test_provider_snapshot(
+            name='Provider Summary Partial Base Snapshot',
+            organization=cls.organization,
+            provider_account=cls.partial_success_account,
+            fetched_at=now - timedelta(hours=2),
+            completed_at=now - timedelta(hours=2, minutes=1),
+        )
+        cls.partial_snapshot = create_test_provider_snapshot(
+            name='Provider Summary Partial Snapshot',
+            organization=cls.organization,
+            provider_account=cls.partial_success_account,
+            fetched_at=now - timedelta(minutes=9),
+            completed_at=now - timedelta(minutes=8),
+        )
+        cls.partial_diff = create_test_provider_snapshot_diff(
+            name='Provider Summary Partial Diff',
+            organization=cls.organization,
+            provider_account=cls.partial_success_account,
+            base_snapshot=cls.partial_base_snapshot,
+            comparison_snapshot=cls.partial_snapshot,
+        )
+        cls.partial_summary = build_provider_sync_summary(
+            cls.partial_success_account,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+            family_summaries={
+                rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS: {
+                    'status': rpki_models.ProviderSyncFamilyStatus.COMPLETED,
+                    'records_fetched': 10,
+                    'records_imported': 8,
+                    'records_failed': 2,
+                    'warning_count': 1,
+                },
+            },
+            default_supported_status=rpki_models.ProviderSyncFamilyStatus.COMPLETED,
+        )
+        cls.partial_summary['summary_schema_version'] = 999
+        cls.partial_summary['latest_snapshot_id'] = cls.partial_snapshot.pk
+        cls.partial_summary['latest_snapshot_name'] = cls.partial_snapshot.name
+        cls.partial_summary['latest_snapshot_completed_at'] = cls.partial_snapshot.completed_at.isoformat()
+        cls.partial_summary['latest_diff_id'] = cls.partial_diff.pk
+        cls.partial_summary['latest_diff_name'] = cls.partial_diff.name
+        cls.partial_success_account.last_sync_summary_json = cls.partial_summary
+        cls.partial_success_account.save(update_fields=['last_sync_summary_json'])
+
+        cls.failed_account = create_test_provider_account(
+            name='Provider Summary Failed',
+            organization=cls.organization,
+            provider_type=rpki_models.ProviderType.ARIN,
+            org_handle='ORG-SUMMARY-FAILED',
+            sync_interval=60,
+            last_successful_sync=now - timedelta(days=1),
+            last_sync_status=rpki_models.ValidationRunStatus.FAILED,
+        )
+        cls.failed_account.last_sync_summary_json = build_provider_sync_summary(
+            cls.failed_account,
+            status=rpki_models.ValidationRunStatus.FAILED,
+            family_summaries={},
+            error='Provider returned an authentication failure.',
+            default_supported_status=rpki_models.ProviderSyncFamilyStatus.FAILED,
+        )
+        cls.failed_account.save(update_fields=['last_sync_summary_json'])
+
+    def test_provider_account_summary_view_renders_dashboard_tiles_and_drilldowns(self):
+        self.add_permissions(
+            'netbox_rpki.view_rpkiprovideraccount',
+            'netbox_rpki.view_providersnapshot',
+            'netbox_rpki.view_providersnapshotdiff',
+        )
+
+        response = self.client.get(reverse('plugins:netbox_rpki:provideraccount_summary'))
+
+        self.assertHttpStatus(response, 200)
+        self.assertTemplateUsed(response, 'netbox_rpki/provideraccount_summary.html')
+        self.assertContains(response, 'Provider Sync Health Dashboard')
+        self.assertContains(response, 'Visible Accounts')
+        self.assertContains(response, 'Full Success')
+        self.assertContains(response, 'Partial Success')
+        self.assertContains(response, self.partial_success_account.name)
+        self.assertContains(response, self.failed_account.name)
+        self.assertContains(
+            response,
+            reverse(
+                'plugins:netbox_rpki:provideraccount_timeline',
+                kwargs={'pk': self.partial_success_account.pk},
+            ),
+        )
+        self.assertContains(
+            response,
+            reverse(
+                'plugins:netbox_rpki:provideraccount_publication_diff_summary',
+                kwargs={'pk': self.partial_success_account.pk},
+            ),
+        )
+        self.assertContains(
+            response,
+            reverse('plugins:netbox_rpki:providersnapshot', kwargs={'pk': self.partial_snapshot.pk}),
+        )
+        self.assertContains(
+            response,
+            reverse('plugins:netbox_rpki:providersnapshotdiff', kwargs={'pk': self.partial_diff.pk}),
+        )
+
+        self.assertEqual(response.context['summary']['total_accounts'], 3)
+        self.assertEqual(response.context['summary']['full_success_count'], 1)
+        self.assertEqual(response.context['summary']['partial_success_count'], 1)
+        self.assertEqual(response.context['summary']['auth_warning_count'], 1)
+        self.assertEqual(response.context['summary']['schema_warning_count'], 1)
+
+    def test_provider_account_summary_view_distinguishes_partial_success_and_warnings(self):
+        self.add_permissions(
+            'netbox_rpki.view_rpkiprovideraccount',
+            'netbox_rpki.view_providersnapshot',
+            'netbox_rpki.view_providersnapshotdiff',
+        )
+
+        response = self.client.get(reverse('plugins:netbox_rpki:provideraccount_summary'))
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'API key is blank')
+        self.assertContains(response, 'Unexpected summary schema version 999; expected 1.')
+        self.assertContains(response, '2 record(s) failed to import.')
+        self.assertContains(response, '1 sync warning(s) were recorded.')
+
+        partial_row = next(
+            account
+            for account in response.context['accounts']
+            if account['provider_account_id'] == self.partial_success_account.pk
+        )
+        failed_row = next(
+            account
+            for account in response.context['accounts']
+            if account['provider_account_id'] == self.failed_account.pk
+        )
+
+        self.assertEqual(partial_row['sync_outcome'], 'partial_success')
+        self.assertEqual(partial_row['sync_outcome_label'], 'Partial Success')
+        self.assertEqual(partial_row['error_rate_percent'], '20.0%')
+        self.assertEqual(failed_row['sync_outcome'], 'failed')
+        self.assertEqual(failed_row['sync_health'], rpki_models.ProviderSyncHealth.FAILED)
+
+
 class ProviderAccountSyncViewTestCase(PluginViewTestCase):
     @classmethod
     def setUpTestData(cls):

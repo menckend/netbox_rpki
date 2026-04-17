@@ -14,6 +14,14 @@ OPERATIONS_MENU_ITEM = PluginMenuItem(
     ],
 )
 
+PROVIDER_SYNC_HEALTH_MENU_ITEM = PluginMenuItem(
+    link='plugins:netbox_rpki:provideraccount_summary',
+    link_text='Provider Sync Health',
+    permissions=[
+        'netbox_rpki.view_rpkiprovideraccount',
+    ],
+)
+
 IRR_DIVERGENCE_MENU_ITEM = PluginMenuItem(
     link='plugins:netbox_rpki:irr_divergence_dashboard',
     link_text='IRR Divergence Dashboard',
@@ -46,7 +54,10 @@ navigation_groups = {
     for group_name, specs in get_navigation_groups()
 }
 navigation_groups['IRR'] = navigation_groups.get('IRR', ()) + (IRR_DIVERGENCE_MENU_ITEM,)
-navigation_groups['Resources'] = navigation_groups.get('Resources', ()) + (OPERATIONS_MENU_ITEM,)
+navigation_groups['Resources'] = navigation_groups.get('Resources', ()) + (
+    PROVIDER_SYNC_HEALTH_MENU_ITEM,
+    OPERATIONS_MENU_ITEM,
+)
 
 menu_groups = tuple(
     (group_name, navigation_groups.get(group_name, ()))

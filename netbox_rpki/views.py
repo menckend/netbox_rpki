@@ -74,8 +74,12 @@ from netbox_rpki.services.lifecycle_reporting import (
     get_effective_lifecycle_thresholds,
     is_within_lifecycle_expiry_threshold,
 )
-from netbox_rpki.services.provider_sync_contract import build_provider_account_rollup
-from netbox_rpki.services.provider_sync_contract import build_provider_account_summary
+from netbox_rpki.services.provider_adapters import get_provider_adapter
+from netbox_rpki.services.provider_sync_contract import (
+    PROVIDER_SYNC_SUMMARY_SCHEMA_VERSION,
+    build_provider_account_rollup,
+    build_provider_account_summary,
+)
 from netbox_rpki.services.provider_sync_diff import (
     build_latest_provider_snapshot_diff,
     build_provider_snapshot_diff,
@@ -635,9 +639,252 @@ class ProviderAccountPublicationDiffSummaryView(ContentTypePermissionRequiredMix
 
 class ProviderAccountSummaryView(ContentTypePermissionRequiredMixin, View):
     template_name = 'netbox_rpki/provideraccount_summary.html'
+    sync_health_badge_classes = {
+        models.ProviderSyncHealth.HEALTHY: 'bg-success',
+        models.ProviderSyncHealth.STALE: 'bg-warning text-dark',
+        models.ProviderSyncHealth.FAILED: 'bg-danger',
+        models.ProviderSyncHealth.NEVER_SYNCED: 'bg-secondary',
+        models.ProviderSyncHealth.IN_PROGRESS: 'bg-info text-dark',
+        models.ProviderSyncHealth.DISABLED: 'bg-dark',
+    }
+    sync_health_priority = {
+        models.ProviderSyncHealth.FAILED: 0,
+        models.ProviderSyncHealth.STALE: 1,
+        models.ProviderSyncHealth.NEVER_SYNCED: 2,
+        models.ProviderSyncHealth.IN_PROGRESS: 3,
+        models.ProviderSyncHealth.HEALTHY: 4,
+        models.ProviderSyncHealth.DISABLED: 5,
+    }
+    sync_outcome_badge_classes = {
+        'full_success': 'bg-success',
+        'partial_success': 'bg-warning text-dark',
+        'failed': 'bg-danger',
+        'in_progress': 'bg-info text-dark',
+        'never_synced': 'bg-secondary',
+        'disabled': 'bg-dark',
+        'pending': 'bg-secondary',
+    }
+    sync_outcome_labels = {
+        'full_success': 'Full Success',
+        'partial_success': 'Partial Success',
+        'failed': 'Failed',
+        'in_progress': 'In Progress',
+        'never_synced': 'Never Synced',
+        'disabled': 'Disabled',
+        'pending': 'Pending',
+    }
+    sync_outcome_priority = {
+        'failed': 0,
+        'partial_success': 1,
+        'in_progress': 2,
+        'never_synced': 3,
+        'pending': 4,
+        'full_success': 5,
+        'disabled': 6,
+    }
 
     def get_required_permission(self):
         return 'netbox_rpki.view_rpkiprovideraccount'
+
+    def build_sync_outcome(self, rollup):
+        if not rollup['sync_enabled']:
+            return 'disabled', []
+        if rollup['last_sync_status'] == models.ValidationRunStatus.FAILED:
+            return 'failed', [rollup['summary_error'] or 'The latest sync run failed.']
+        if rollup['last_sync_status'] == models.ValidationRunStatus.RUNNING:
+            return 'in_progress', ['A sync run is currently in progress.']
+        if rollup['last_successful_sync'] in (None, ''):
+            return 'never_synced', ['No successful sync has been recorded yet.']
+
+        partial_reasons = []
+        if rollup['records_failed'] > 0:
+            partial_reasons.append(f"{rollup['records_failed']} record(s) failed to import.")
+        if rollup['error_count'] > 0:
+            partial_reasons.append(f"{rollup['error_count']} sync error(s) were recorded.")
+        if rollup['warning_count'] > 0:
+            partial_reasons.append(f"{rollup['warning_count']} sync warning(s) were recorded.")
+        if rollup['summary_error']:
+            partial_reasons.append(str(rollup['summary_error']))
+
+        supported_families = set(rollup.get('supported_families', ()))
+        degraded_families = [
+            family_rollup['label']
+            for family_rollup in rollup.get('family_rollups', ())
+            if family_rollup.get('family') in supported_families
+            and family_rollup.get('status') in {
+                models.ProviderSyncFamilyStatus.FAILED,
+                models.ProviderSyncFamilyStatus.PENDING,
+                models.ProviderSyncFamilyStatus.RUNNING,
+                models.ProviderSyncFamilyStatus.SKIPPED,
+            }
+        ]
+        if degraded_families:
+            partial_reasons.append(
+                f"Supported families needing attention: {', '.join(degraded_families)}."
+            )
+
+        if partial_reasons:
+            return 'partial_success', partial_reasons
+        if rollup['last_sync_status'] == models.ValidationRunStatus.COMPLETED:
+            return 'full_success', []
+        return 'pending', ['The latest sync has not completed yet.']
+
+    def build_schema_warnings(self, provider_account, rollup):
+        schema_version = rollup.get('summary_schema_version')
+        if not provider_account.last_sync_summary_json:
+            return []
+        if schema_version in (None, ''):
+            return ['Sync summary is missing a schema version.']
+        if schema_version != PROVIDER_SYNC_SUMMARY_SCHEMA_VERSION:
+            return [
+                'Unexpected summary schema version '
+                f'{schema_version}; expected {PROVIDER_SYNC_SUMMARY_SCHEMA_VERSION}.'
+            ]
+        return []
+
+    def build_auth_warnings(self, provider_account):
+        return [
+            {
+                'field_name': issue.field_name,
+                'issue_text': issue.issue_text,
+                'remediation': issue.remediation,
+            }
+            for issue in get_provider_adapter(provider_account).credential_issues(provider_account)
+        ]
+
+    def build_provider_account_row(self, provider_account, rollup):
+        sync_outcome, partial_reasons = self.build_sync_outcome(rollup)
+        auth_warnings = self.build_auth_warnings(provider_account)
+        schema_warnings = self.build_schema_warnings(provider_account, rollup)
+        supported_families = set(rollup.get('supported_families', ()))
+        coverage_warnings = [
+            f"{family_rollup['label']}: {family_rollup['capability_reason']}"
+            for family_rollup in rollup.get('family_rollups', ())
+            if family_rollup.get('capability_reason')
+            and family_rollup.get('family') in supported_families
+        ]
+        error_rate_denominator = rollup['records_fetched'] or (rollup['records_imported'] + rollup['records_failed'])
+        error_rate_percent = (
+            f"{(rollup['records_failed'] / error_rate_denominator) * 100:.1f}%"
+            if error_rate_denominator
+            else '0.0%'
+        )
+        record_summary = (
+            f"{rollup['records_imported']} imported / "
+            f"{rollup['records_stale']} stale / "
+            f"{rollup['records_failed']} failed"
+        )
+        if rollup['last_successful_sync']:
+            last_sync_text = str(rollup['last_successful_sync'])
+        elif rollup['last_sync_status'] == models.ValidationRunStatus.FAILED:
+            last_sync_text = 'No successful sync recorded'
+        else:
+            last_sync_text = 'Never synced'
+
+        return {
+            **rollup,
+            'object': provider_account,
+            'provider_type_display': provider_account.get_provider_type_display(),
+            'sync_health_badge_class': self.sync_health_badge_classes.get(rollup['sync_health'], 'bg-secondary'),
+            'sync_outcome': sync_outcome,
+            'sync_outcome_label': self.sync_outcome_labels[sync_outcome],
+            'sync_outcome_badge_class': self.sync_outcome_badge_classes[sync_outcome],
+            'partial_reasons': partial_reasons,
+            'auth_warnings': auth_warnings,
+            'schema_warnings': schema_warnings,
+            'coverage_warnings': coverage_warnings,
+            'warning_total': len(auth_warnings) + len(schema_warnings) + len(coverage_warnings),
+            'last_sync_text': last_sync_text,
+            'record_summary': record_summary,
+            'error_rate_percent': error_rate_percent,
+            'error_rate_text': f"{rollup['records_failed']} failed of {error_rate_denominator or 0} fetched/imported",
+            'latest_snapshot_url': (
+                reverse('plugins:netbox_rpki:providersnapshot', kwargs={'pk': rollup['latest_snapshot_id']})
+                if rollup['latest_snapshot_id'] is not None
+                else ''
+            ),
+            'latest_diff_url': (
+                reverse('plugins:netbox_rpki:providersnapshotdiff', kwargs={'pk': rollup['latest_diff_id']})
+                if rollup['latest_diff_id'] is not None
+                else ''
+            ),
+            'timeline_url': reverse(
+                'plugins:netbox_rpki:provideraccount_timeline',
+                kwargs={'pk': provider_account.pk},
+            ),
+            'publication_diff_summary_url': reverse(
+                'plugins:netbox_rpki:provideraccount_publication_diff_summary',
+                kwargs={'pk': provider_account.pk},
+            ),
+        }
+
+    def build_summary_tiles(self, summary, accounts):
+        full_success_count = sum(1 for account in accounts if account['sync_outcome'] == 'full_success')
+        partial_success_count = sum(1 for account in accounts if account['sync_outcome'] == 'partial_success')
+        attention_count = sum(
+            1
+            for account in accounts
+            if account['sync_health'] in {
+                models.ProviderSyncHealth.FAILED,
+                models.ProviderSyncHealth.STALE,
+                models.ProviderSyncHealth.NEVER_SYNCED,
+            }
+        )
+        auth_warning_count = sum(1 for account in accounts if account['auth_warnings'])
+        schema_warning_count = sum(1 for account in accounts if account['schema_warnings'])
+        summary.update(
+            {
+                'full_success_count': full_success_count,
+                'partial_success_count': partial_success_count,
+                'attention_count': attention_count,
+                'auth_warning_count': auth_warning_count,
+                'schema_warning_count': schema_warning_count,
+            }
+        )
+        return [
+            {
+                'title': 'Visible Accounts',
+                'count': summary['total_accounts'],
+                'description': 'Provider accounts included in this dashboard view.',
+                'border_class': 'border-primary',
+            },
+            {
+                'title': 'Full Success',
+                'count': full_success_count,
+                'description': 'Accounts whose latest sync completed without partial-data signals.',
+                'border_class': 'border-success',
+            },
+            {
+                'title': 'Partial Success',
+                'count': partial_success_count,
+                'description': 'Accounts with completed syncs that still recorded failures, warnings, or degraded families.',
+                'border_class': 'border-warning',
+            },
+            {
+                'title': 'Stale or Failed',
+                'count': attention_count,
+                'description': 'Accounts currently stale, failed, or never synced.',
+                'border_class': 'border-danger',
+            },
+            {
+                'title': 'Auth Warnings',
+                'count': auth_warning_count,
+                'description': 'Accounts missing required provider credentials.',
+                'border_class': 'border-secondary',
+            },
+            {
+                'title': 'Schema Warnings',
+                'count': schema_warning_count,
+                'description': 'Accounts with missing or unexpected sync summary schema versions.',
+                'border_class': 'border-secondary',
+            },
+            {
+                'title': 'Sync Due',
+                'count': summary['sync_due_count'],
+                'description': 'Accounts currently due for another provider sync.',
+                'border_class': 'border-info',
+            },
+        ]
 
     def get(self, request):
         provider_accounts = list(
@@ -658,8 +905,30 @@ class ProviderAccountSummaryView(ContentTypePermissionRequiredMixin, View):
             visible_snapshot_ids=visible_snapshot_ids,
             visible_diff_ids=visible_diff_ids,
         )
+        provider_account_by_id = {
+            provider_account.pk: provider_account
+            for provider_account in provider_accounts
+        }
+        accounts = [
+            self.build_provider_account_row(
+                provider_account_by_id[rollup['provider_account_id']],
+                rollup,
+            )
+            for rollup in summary['accounts']
+        ]
+        accounts.sort(
+            key=lambda account: (
+                self.sync_health_priority.get(account['sync_health'], 99),
+                self.sync_outcome_priority.get(account['sync_outcome'], 99),
+                account['provider_account_name'].lower(),
+            )
+        )
+        summary['accounts'] = accounts
+        summary_tiles = self.build_summary_tiles(summary, accounts)
         return render(request, self.template_name, {
             'summary': summary,
+            'accounts': accounts,
+            'summary_tiles': summary_tiles,
             'provider_account_count': len(provider_accounts),
             'return_url': reverse('plugins:netbox_rpki:provideraccount_list'),
         })

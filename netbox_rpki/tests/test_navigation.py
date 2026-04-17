@@ -23,11 +23,27 @@ class NavigationTestCase(SimpleTestCase):
     def test_resource_menu_items_match_expected_links(self):
         self.assertEqual(
             [item.link_text for item in navigation.resource_menu_items],
-            [label for label, _link in EXPECTED_NAVIGATION_LINKS['Resources']] + ['Operations'],
+            [label for label, _link in EXPECTED_NAVIGATION_LINKS['Resources']] + ['Provider Sync Health', 'Operations'],
         )
         self.assertEqual(
             [item.link for item in navigation.resource_menu_items],
-            [link for _label, link in EXPECTED_NAVIGATION_LINKS['Resources']] + ['plugins:netbox_rpki:operations_dashboard'],
+            [link for _label, link in EXPECTED_NAVIGATION_LINKS['Resources']] + [
+                'plugins:netbox_rpki:provideraccount_summary',
+                'plugins:netbox_rpki:operations_dashboard',
+            ],
+        )
+
+    def test_provider_sync_health_menu_item_has_expected_permissions(self):
+        provider_sync_health_item = navigation.resource_menu_items[-2]
+
+        self.assertEqual(provider_sync_health_item.link_text, 'Provider Sync Health')
+        self.assertEqual(provider_sync_health_item.link, 'plugins:netbox_rpki:provideraccount_summary')
+        self.assertEqual(provider_sync_health_item.url, reverse('plugins:netbox_rpki:provideraccount_summary'))
+        self.assertEqual(
+            provider_sync_health_item.permissions,
+            [
+                'netbox_rpki.view_rpkiprovideraccount',
+            ],
         )
 
     def test_operations_menu_item_has_expected_permissions(self):

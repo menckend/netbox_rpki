@@ -1,50 +1,133 @@
 {% extends 'generic/_base.html' %}
 
-{% block title %}Provider Account Summary{% endblock %}
+{% block title %}Provider Sync Health Dashboard{% endblock %}
 
 {% block content %}
   <div class="row mt-4">
     <div class="col col-md-12">
       <div class="card border-primary mb-4">
-        <h2 class="card-header">Provider Account Summary</h2>
+        <h2 class="card-header">Provider Sync Health Dashboard</h2>
         <div class="card-body">
-          <p class="mb-3">
-            Aggregate lifecycle and sync health summary across all visible provider accounts
-            ({{ provider_account_count }} total).
+          <p class="mb-0">
+            Account-by-account visibility into provider sync freshness, execution outcome, imported object counts,
+            error rates, and schema or authentication warnings.
           </p>
-          <div class="mb-3">
-            <a href="{% url 'plugins:netbox_rpki:operations_export' %}?format=json"
-               class="btn btn-outline-primary btn-sm">Export JSON</a>
-            <a href="{% url 'plugins:netbox_rpki:operations_export' %}?format=csv"
-               class="btn btn-outline-secondary btn-sm">Export CSV</a>
-          </div>
         </div>
       </div>
 
-      {% if summary %}
-        <div class="row g-3 mb-4">
-          {% for account_summary in summary %}
-            <div class="col col-md-4">
-              <div class="card h-100">
-                <div class="card-header fw-semibold">{{ account_summary.name|default:'Unknown' }}</div>
-                <div class="card-body">
-                  <dl class="row mb-0 small">
-                    <dt class="col-sm-6">Org</dt>
-                    <dd class="col-sm-6">{{ account_summary.organization|default:'—' }}</dd>
-                    <dt class="col-sm-6">Provider Type</dt>
-                    <dd class="col-sm-6">{{ account_summary.provider_type|default:'—' }}</dd>
-                    <dt class="col-sm-6">Last Sync Status</dt>
-                    <dd class="col-sm-6">{{ account_summary.last_sync_status|default:'—' }}</dd>
-                    <dt class="col-sm-6">Health</dt>
-                    <dd class="col-sm-6">{{ account_summary.health|default:'—' }}</dd>
-                  </dl>
-                </div>
-              </div>
+      <div class="row g-3 mb-4">
+        {% for tile in summary_tiles %}
+          <div class="col col-md-3">
+            <div class="border {{ tile.border_class }} rounded p-3 h-100">
+              <div class="text-muted small text-uppercase">{{ tile.title }}</div>
+              <div class="fs-2 fw-semibold">{{ tile.count }}</div>
+              <div class="text-muted small">{{ tile.description }}</div>
             </div>
-          {% endfor %}
+          </div>
+        {% endfor %}
+      </div>
+
+      {% if accounts %}
+        <div class="card border-secondary mb-4">
+          <h3 class="card-header">Provider Accounts</h3>
+          <div class="card-body p-0">
+            <div class="table-responsive">
+              <table class="table table-hover align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>Provider Account</th>
+                    <th>Freshness</th>
+                    <th>Latest Outcome</th>
+                    <th>Last Successful Sync</th>
+                    <th>Object Counts</th>
+                    <th>Error Rate</th>
+                    <th>Warnings</th>
+                    <th>Drill-Down</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for account in accounts %}
+                    <tr>
+                      <td>
+                        <div><a href="{{ account.object.get_absolute_url }}">{{ account.provider_account_name }}</a></div>
+                        <div class="text-muted small">{{ account.organization_name }} / {{ account.provider_type_display }}</div>
+                      </td>
+                      <td>
+                        <span class="badge {{ account.sync_health_badge_class }}">{{ account.sync_health_display }}</span>
+                        <div class="text-muted small mt-1">
+                          {% if account.next_sync_due_at %}
+                            Next due {{ account.next_sync_due_at }}
+                          {% elif not account.sync_enabled %}
+                            Sync disabled
+                          {% else %}
+                            No sync interval configured
+                          {% endif %}
+                        </div>
+                      </td>
+                      <td>
+                        <span class="badge {{ account.sync_outcome_badge_class }}">{{ account.sync_outcome_label }}</span>
+                        <div class="text-muted small mt-1">Last status: {{ account.last_sync_status|default:'—' }}</div>
+                        {% if account.partial_reasons %}
+                          {% for reason in account.partial_reasons %}
+                            <div class="small mt-1">{{ reason }}</div>
+                          {% endfor %}
+                        {% endif %}
+                      </td>
+                      <td>
+                        <div>{{ account.last_sync_text }}</div>
+                        {% if account.latest_snapshot_completed_at %}
+                          <div class="text-muted small">Snapshot completed {{ account.latest_snapshot_completed_at }}</div>
+                        {% endif %}
+                      </td>
+                      <td>
+                        <div>{{ account.record_summary }}</div>
+                        <div class="text-muted small">
+                          {{ account.records_fetched }} fetched / {{ account.supported_family_count }} supported family(s)
+                        </div>
+                      </td>
+                      <td>
+                        <div>{{ account.error_rate_percent }}</div>
+                        <div class="text-muted small">{{ account.error_rate_text }}</div>
+                        <div class="text-muted small">{{ account.warning_count }} sync warning(s), {{ account.error_count }} sync error(s)</div>
+                      </td>
+                      <td>
+                        {% if account.auth_warnings or account.schema_warnings or account.coverage_warnings %}
+                          {% for warning in account.auth_warnings %}
+                            <div class="small">{{ warning.issue_text }}</div>
+                          {% endfor %}
+                          {% for warning in account.schema_warnings %}
+                            <div class="small">{{ warning }}</div>
+                          {% endfor %}
+                          {% for warning in account.coverage_warnings %}
+                            <div class="small text-muted">{{ warning }}</div>
+                          {% endfor %}
+                        {% else %}
+                          <span class="text-muted">None</span>
+                        {% endif %}
+                      </td>
+                      <td>
+                        <div><a href="{{ account.object.get_absolute_url }}">Account</a></div>
+                        <div><a href="{{ account.timeline_url }}">Timeline</a></div>
+                        <div><a href="{{ account.publication_diff_summary_url }}">Publication Diff</a></div>
+                        {% if account.latest_snapshot_url %}
+                          <div><a href="{{ account.latest_snapshot_url }}">{{ account.latest_snapshot_name|default:'Latest Snapshot' }}</a></div>
+                        {% endif %}
+                        {% if account.latest_diff_url %}
+                          <div><a href="{{ account.latest_diff_url }}">{{ account.latest_diff_name|default:'Latest Diff' }}</a></div>
+                        {% endif %}
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       {% else %}
-        <div class="alert alert-info" role="alert">No provider account summary data is available.</div>
+        <div class="alert alert-info" role="alert">
+          No visible provider accounts are available yet. Create a provider account and run an initial sync to
+          populate this dashboard.
+        </div>
       {% endif %}
 
       <div class="text-end">
