@@ -47,6 +47,9 @@ from netbox_rpki.tests.utils import (
     create_test_certificate_prefix,
     create_test_certificate_revocation_list,
     create_test_end_entity_certificate,
+    create_test_irr_snapshot,
+    create_test_irr_source,
+    create_test_imported_irr_route_object,
     create_test_imported_certificate_observation,
     create_test_imported_publication_point,
     create_test_imported_signed_object,
@@ -2807,6 +2810,94 @@ class ImportedCertificateObservationAPITestCase(PluginAPITestCase):
         )
 
         self.assertHttpStatus(response, 405)
+
+
+class ImportedIrrRouteObjectProvenanceAPITestCase(PluginAPITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(
+            org_id='imported-irr-provenance-api-org',
+            name='Imported IRR Provenance API Org',
+        )
+        cls.source = create_test_irr_source(
+            name='Imported IRR Provenance Source',
+            slug='imported-irr-provenance-source',
+            organization=cls.organization,
+        )
+        cls.snapshot = create_test_irr_snapshot(
+            name='Imported IRR Provenance Snapshot',
+            source=cls.source,
+            fetch_mode=rpki_models.IrrFetchMode.SNAPSHOT_IMPORT,
+            status=rpki_models.IrrSnapshotStatus.COMPLETED,
+        )
+        cls.route_current = create_test_imported_irr_route_object(
+            name='route:198.51.100.0/24AS64500',
+            snapshot=cls.snapshot,
+            source=cls.source,
+            stable_key='route:198.51.100.0/24AS64500',
+            prefix='198.51.100.0/24',
+            origin_asn='AS64500',
+            provenance_type=rpki_models.IrrObjectProvenanceType.IMPORTED,
+            creation_path=rpki_models.IrrObjectCreationPath.SNAPSHOT_IMPORT,
+            provenance_confidence=rpki_models.IrrObjectProvenanceConfidence.HIGH,
+            first_seen_at=timezone.now() - timedelta(days=2),
+            last_seen_at=timezone.now() - timedelta(hours=1),
+            freshness_status=rpki_models.IrrObjectFreshness.CURRENT,
+            provenance_summary_json={
+                'fetch_mode': rpki_models.IrrFetchMode.SNAPSHOT_IMPORT,
+                'snapshot_status': rpki_models.IrrSnapshotStatus.COMPLETED,
+            },
+        )
+        cls.route_historical = create_test_imported_irr_route_object(
+            name='route:203.0.113.0/24AS64501',
+            snapshot=cls.snapshot,
+            source=cls.source,
+            stable_key='route:203.0.113.0/24AS64501',
+            prefix='203.0.113.0/24',
+            origin_asn='AS64501',
+            provenance_type=rpki_models.IrrObjectProvenanceType.DERIVED,
+            creation_path=rpki_models.IrrObjectCreationPath.ROUTE_REFERENCE,
+            provenance_confidence=rpki_models.IrrObjectProvenanceConfidence.MEDIUM,
+            first_seen_at=timezone.now() - timedelta(days=5),
+            last_seen_at=timezone.now() - timedelta(days=3),
+            freshness_status=rpki_models.IrrObjectFreshness.HISTORICAL,
+            provenance_summary_json={
+                'derived_from': 'route:203.0.113.0/24AS64501',
+            },
+        )
+
+    def test_imported_irr_route_object_detail_exposes_provenance_fields(self):
+        self.add_permissions('netbox_rpki.view_importedirrrouteobject')
+        spec = OBJECT_SPEC_BY_REGISTRY_KEY['imported_irr_route_object']
+        detail_url = reverse(spec.api.detail_view_name, kwargs={'pk': self.route_current.pk})
+
+        response = self.client.get(detail_url, **self.header)
+
+        self.assertHttpStatus(response, 200)
+        self.assertEqual(response.data['id'], self.route_current.pk)
+        self.assertEqual(response.data['provenance_type'], rpki_models.IrrObjectProvenanceType.IMPORTED)
+        self.assertEqual(response.data['creation_path'], rpki_models.IrrObjectCreationPath.SNAPSHOT_IMPORT)
+        self.assertEqual(response.data['provenance_confidence'], rpki_models.IrrObjectProvenanceConfidence.HIGH)
+        self.assertEqual(response.data['freshness_status'], rpki_models.IrrObjectFreshness.CURRENT)
+        self.assertIn('fetch_mode', response.data['provenance_summary_json'])
+
+    def test_imported_irr_route_object_list_filters_by_provenance_and_freshness(self):
+        self.add_permissions('netbox_rpki.view_importedirrrouteobject')
+        spec = OBJECT_SPEC_BY_REGISTRY_KEY['imported_irr_route_object']
+        list_url = reverse(f'plugins-api:netbox_rpki-api:{spec.api.basename}-list')
+
+        response = self.client.get(
+            list_url,
+            {
+                'provenance_type': rpki_models.IrrObjectProvenanceType.DERIVED,
+                'freshness_status': rpki_models.IrrObjectFreshness.HISTORICAL,
+            },
+            **self.header,
+        )
+
+        self.assertHttpStatus(response, 200)
+        self.assertEqual(len(response.data['results']), 1)
+        self.assertEqual(response.data['results'][0]['id'], self.route_historical.pk)
 
 
 class ImportedPublicationLinkAPITestCase(PluginAPITestCase):

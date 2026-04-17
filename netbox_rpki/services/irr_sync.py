@@ -186,6 +186,7 @@ def persist_irr_snapshot(snapshot: rpki_models.IrrSnapshot, batch: dict):
                 'summary_json',
             )
         )
+        _mark_prior_imported_rows_historical(snapshot)
         persisted = _persist_imported_rows(snapshot, batch)
 
         source = snapshot.source
@@ -212,6 +213,105 @@ def persist_irr_snapshot(snapshot: rpki_models.IrrSnapshot, batch: dict):
     snapshot.summary_json = summary_json
     snapshot.save(update_fields=('summary_json',))
     return snapshot
+
+
+IMPORTED_IRR_MODELS = (
+    rpki_models.ImportedIrrRouteObject,
+    rpki_models.ImportedIrrRouteSet,
+    rpki_models.ImportedIrrRouteSetMember,
+    rpki_models.ImportedIrrAsSet,
+    rpki_models.ImportedIrrAsSetMember,
+    rpki_models.ImportedIrrAutNum,
+    rpki_models.ImportedIrrMaintainer,
+)
+
+
+def _mark_prior_imported_rows_historical(snapshot: rpki_models.IrrSnapshot) -> None:
+    for model in IMPORTED_IRR_MODELS:
+        model.objects.filter(
+            source=snapshot.source,
+        ).exclude(
+            snapshot=snapshot,
+        ).update(
+            freshness_status=rpki_models.IrrObjectFreshness.HISTORICAL,
+        )
+
+
+def _resolve_provenance_fields(
+    *,
+    snapshot: rpki_models.IrrSnapshot,
+    model,
+    record: dict,
+) -> dict:
+    completed_at = snapshot.completed_at or snapshot.started_at
+    previous = (
+        model.objects.filter(
+            source=snapshot.source,
+            stable_key=record['stable_key'],
+        )
+        .exclude(snapshot=snapshot)
+        .order_by('-last_seen_at', '-created')
+        .first()
+    )
+    provenance_type = rpki_models.IrrObjectProvenanceType.IMPORTED
+    creation_path = (
+        rpki_models.IrrObjectCreationPath.SNAPSHOT_IMPORT
+        if snapshot.fetch_mode == rpki_models.IrrFetchMode.SNAPSHOT_IMPORT
+        else rpki_models.IrrObjectCreationPath.LIVE_QUERY
+    )
+    provenance_confidence = (
+        rpki_models.IrrObjectProvenanceConfidence.HIGH
+        if snapshot.fetch_mode == rpki_models.IrrFetchMode.SNAPSHOT_IMPORT
+        else rpki_models.IrrObjectProvenanceConfidence.AUTHORITATIVE
+    )
+    derived_from = ''
+    payload_json = dict(record.get('payload_json') or {})
+    if 'derived_from_route' in payload_json:
+        provenance_type = rpki_models.IrrObjectProvenanceType.DERIVED
+        creation_path = rpki_models.IrrObjectCreationPath.ROUTE_REFERENCE
+        provenance_confidence = rpki_models.IrrObjectProvenanceConfidence.MEDIUM
+        derived_from = payload_json.get('derived_from_route', '')
+    elif 'derived_from_route_set' in payload_json:
+        provenance_type = rpki_models.IrrObjectProvenanceType.DERIVED
+        creation_path = rpki_models.IrrObjectCreationPath.ROUTE_SET_REFERENCE
+        provenance_confidence = rpki_models.IrrObjectProvenanceConfidence.MEDIUM
+        derived_from = payload_json.get('derived_from_route_set', '')
+    elif 'derived_from_as_set' in payload_json:
+        provenance_type = rpki_models.IrrObjectProvenanceType.DERIVED
+        creation_path = rpki_models.IrrObjectCreationPath.AS_SET_REFERENCE
+        provenance_confidence = rpki_models.IrrObjectProvenanceConfidence.MEDIUM
+        derived_from = payload_json.get('derived_from_as_set', '')
+
+    first_seen_at = (
+        previous.first_seen_at
+        if previous is not None and previous.first_seen_at is not None
+        else completed_at
+    )
+    return {
+        'provenance_type': provenance_type,
+        'creation_path': creation_path,
+        'provenance_confidence': provenance_confidence,
+        'first_seen_at': first_seen_at,
+        'last_seen_at': completed_at,
+        'freshness_status': (
+            rpki_models.IrrObjectFreshness.CURRENT
+            if snapshot.status in {
+                rpki_models.IrrSnapshotStatus.COMPLETED,
+                rpki_models.IrrSnapshotStatus.PARTIAL,
+            }
+            else rpki_models.IrrObjectFreshness.UNKNOWN
+        ),
+        'provenance_summary_json': {
+            'fetch_mode': snapshot.fetch_mode,
+            'snapshot_status': snapshot.status,
+            'snapshot_completed_at': completed_at.isoformat() if completed_at else '',
+            'source_serial': snapshot.source_serial,
+            'source_last_modified': snapshot.source_last_modified.isoformat() if snapshot.source_last_modified else '',
+            'source_fingerprint': snapshot.source_fingerprint,
+            'derived_from': derived_from,
+            'previous_snapshot_id': getattr(previous, 'snapshot_id', None),
+        },
+    }
 
 
 def _fetch_irrd_compatible_live_batch(irr_source: rpki_models.IrrSource) -> dict:
@@ -399,6 +499,11 @@ def _persist_imported_rows(snapshot: rpki_models.IrrSnapshot, batch: dict) -> di
 
     persisted_counts['route'] = 0
     for record in batch['families']['route']:
+        provenance_fields = _resolve_provenance_fields(
+            snapshot=snapshot,
+            model=rpki_models.ImportedIrrRouteObject,
+            record=record,
+        )
         rpki_models.ImportedIrrRouteObject.objects.create(
             name=record['stable_key'],
             snapshot=snapshot,
@@ -414,11 +519,17 @@ def _persist_imported_rows(snapshot: rpki_models.IrrSnapshot, batch: dict) -> di
             origin_asn=record['summary']['origin_asn'],
             route_set_names_json=record['summary']['route_set_names_json'],
             maintainer_names_json=record['summary']['maintainer_names_json'],
+            **provenance_fields,
         )
         persisted_counts['route'] += 1
 
     persisted_counts['route6'] = 0
     for record in batch['families']['route6']:
+        provenance_fields = _resolve_provenance_fields(
+            snapshot=snapshot,
+            model=rpki_models.ImportedIrrRouteObject,
+            record=record,
+        )
         rpki_models.ImportedIrrRouteObject.objects.create(
             name=record['stable_key'],
             snapshot=snapshot,
@@ -434,11 +545,17 @@ def _persist_imported_rows(snapshot: rpki_models.IrrSnapshot, batch: dict) -> di
             origin_asn=record['summary']['origin_asn'],
             route_set_names_json=record['summary']['route_set_names_json'],
             maintainer_names_json=record['summary']['maintainer_names_json'],
+            **provenance_fields,
         )
         persisted_counts['route6'] += 1
 
     persisted_counts['route_set'] = 0
     for record in batch['families']['route_set']:
+        provenance_fields = _resolve_provenance_fields(
+            snapshot=snapshot,
+            model=rpki_models.ImportedIrrRouteSet,
+            record=record,
+        )
         instance = rpki_models.ImportedIrrRouteSet.objects.create(
             name=record['stable_key'],
             snapshot=snapshot,
@@ -452,12 +569,18 @@ def _persist_imported_rows(snapshot: rpki_models.IrrSnapshot, batch: dict) -> di
             set_name=record['summary']['set_name'],
             maintainer_names_json=record['summary']['maintainer_names_json'],
             member_count=record['summary']['member_count'],
+            **provenance_fields,
         )
         route_sets_by_name[instance.set_name] = instance
         persisted_counts['route_set'] += 1
 
     persisted_counts['route_set_member'] = 0
     for record in batch['families']['route_set_member']:
+        provenance_fields = _resolve_provenance_fields(
+            snapshot=snapshot,
+            model=rpki_models.ImportedIrrRouteSetMember,
+            record=record,
+        )
         rpki_models.ImportedIrrRouteSetMember.objects.create(
             name=record['stable_key'],
             snapshot=snapshot,
@@ -473,11 +596,17 @@ def _persist_imported_rows(snapshot: rpki_models.IrrSnapshot, batch: dict) -> di
             member_type=record['summary']['member_type'],
             normalized_prefix=record['summary'].get('normalized_prefix', ''),
             normalized_set_name=record['summary'].get('normalized_set_name', ''),
+            **provenance_fields,
         )
         persisted_counts['route_set_member'] += 1
 
     persisted_counts['as_set'] = 0
     for record in batch['families']['as_set']:
+        provenance_fields = _resolve_provenance_fields(
+            snapshot=snapshot,
+            model=rpki_models.ImportedIrrAsSet,
+            record=record,
+        )
         instance = rpki_models.ImportedIrrAsSet.objects.create(
             name=record['stable_key'],
             snapshot=snapshot,
@@ -491,12 +620,18 @@ def _persist_imported_rows(snapshot: rpki_models.IrrSnapshot, batch: dict) -> di
             set_name=record['summary']['set_name'],
             maintainer_names_json=record['summary']['maintainer_names_json'],
             member_count=record['summary']['member_count'],
+            **provenance_fields,
         )
         as_sets_by_name[instance.set_name] = instance
         persisted_counts['as_set'] += 1
 
     persisted_counts['as_set_member'] = 0
     for record in batch['families']['as_set_member']:
+        provenance_fields = _resolve_provenance_fields(
+            snapshot=snapshot,
+            model=rpki_models.ImportedIrrAsSetMember,
+            record=record,
+        )
         rpki_models.ImportedIrrAsSetMember.objects.create(
             name=record['stable_key'],
             snapshot=snapshot,
@@ -512,11 +647,17 @@ def _persist_imported_rows(snapshot: rpki_models.IrrSnapshot, batch: dict) -> di
             member_type=record['summary']['member_type'],
             normalized_asn=record['summary'].get('normalized_asn', ''),
             normalized_set_name=record['summary'].get('normalized_set_name', ''),
+            **provenance_fields,
         )
         persisted_counts['as_set_member'] += 1
 
     persisted_counts['aut_num'] = 0
     for record in batch['families']['aut_num']:
+        provenance_fields = _resolve_provenance_fields(
+            snapshot=snapshot,
+            model=rpki_models.ImportedIrrAutNum,
+            record=record,
+        )
         rpki_models.ImportedIrrAutNum.objects.create(
             name=record['stable_key'],
             snapshot=snapshot,
@@ -534,11 +675,17 @@ def _persist_imported_rows(snapshot: rpki_models.IrrSnapshot, batch: dict) -> di
             maintainer_names_json=record['summary']['maintainer_names_json'],
             admin_contact_handles_json=record['summary']['admin_contact_handles_json'],
             tech_contact_handles_json=record['summary']['tech_contact_handles_json'],
+            **provenance_fields,
         )
         persisted_counts['aut_num'] += 1
 
     persisted_counts['mntner'] = 0
     for record in batch['families']['mntner']:
+        provenance_fields = _resolve_provenance_fields(
+            snapshot=snapshot,
+            model=rpki_models.ImportedIrrMaintainer,
+            record=record,
+        )
         rpki_models.ImportedIrrMaintainer.objects.create(
             name=record['stable_key'],
             snapshot=snapshot,
@@ -553,6 +700,7 @@ def _persist_imported_rows(snapshot: rpki_models.IrrSnapshot, batch: dict) -> di
             auth_summary_json=record['summary']['auth_summary_json'],
             admin_contact_handles_json=record['summary']['admin_contact_handles_json'],
             upd_to_addresses_json=record['summary']['upd_to_addresses_json'],
+            **provenance_fields,
         )
         persisted_counts['mntner'] += 1
 

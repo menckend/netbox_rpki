@@ -147,6 +147,54 @@ class IrrSyncServiceTestCase(TestCase):
         self.assertEqual(rpki_models.ImportedIrrRouteSetMember.objects.filter(snapshot=snapshot).count(), 2)
         self.assertEqual(rpki_models.ImportedIrrAsSetMember.objects.filter(snapshot=snapshot).count(), 1)
 
+    def test_sync_irr_source_stamps_provenance_and_rolls_prior_rows_to_historical(self):
+        first_snapshot = sync_irr_source(
+            self.irr_source,
+            fetch_mode=rpki_models.IrrFetchMode.SNAPSHOT_IMPORT,
+            snapshot_file=str(FIXTURE_PATH),
+        )
+        first_route = rpki_models.ImportedIrrRouteObject.objects.get(
+            snapshot=first_snapshot,
+            stable_key='route:203.0.113.0/24AS64500',
+        )
+        first_route_member = (
+            rpki_models.ImportedIrrRouteSetMember.objects.filter(snapshot=first_snapshot)
+            .order_by('stable_key')
+            .first()
+        )
+
+        self.assertEqual(first_route.provenance_type, rpki_models.IrrObjectProvenanceType.IMPORTED)
+        self.assertEqual(first_route.creation_path, rpki_models.IrrObjectCreationPath.SNAPSHOT_IMPORT)
+        self.assertEqual(first_route.provenance_confidence, rpki_models.IrrObjectProvenanceConfidence.HIGH)
+        self.assertEqual(first_route.freshness_status, rpki_models.IrrObjectFreshness.CURRENT)
+        self.assertIsNotNone(first_route.first_seen_at)
+        self.assertEqual(first_route.first_seen_at, first_route.last_seen_at)
+        self.assertIsNotNone(first_route_member)
+        self.assertEqual(first_route_member.provenance_type, rpki_models.IrrObjectProvenanceType.DERIVED)
+        self.assertEqual(first_route_member.provenance_confidence, rpki_models.IrrObjectProvenanceConfidence.MEDIUM)
+
+        second_snapshot = sync_irr_source(
+            self.irr_source,
+            fetch_mode=rpki_models.IrrFetchMode.SNAPSHOT_IMPORT,
+            snapshot_file=str(FIXTURE_PATH),
+        )
+        first_route.refresh_from_db()
+        latest_route = rpki_models.ImportedIrrRouteObject.objects.get(
+            snapshot=second_snapshot,
+            stable_key='route:203.0.113.0/24AS64500',
+        )
+
+        self.assertEqual(first_route.freshness_status, rpki_models.IrrObjectFreshness.HISTORICAL)
+        self.assertEqual(latest_route.provenance_type, rpki_models.IrrObjectProvenanceType.IMPORTED)
+        self.assertEqual(latest_route.creation_path, rpki_models.IrrObjectCreationPath.SNAPSHOT_IMPORT)
+        self.assertEqual(latest_route.freshness_status, rpki_models.IrrObjectFreshness.CURRENT)
+        self.assertEqual(latest_route.first_seen_at, first_route.first_seen_at)
+        self.assertGreaterEqual(latest_route.last_seen_at, first_route.last_seen_at)
+        self.assertEqual(
+            latest_route.provenance_summary_json['previous_snapshot_id'],
+            first_snapshot.pk,
+        )
+
     def test_sync_irr_source_requires_snapshot_file_for_snapshot_mode(self):
         with self.assertRaises(IrrSyncError):
             sync_irr_source(

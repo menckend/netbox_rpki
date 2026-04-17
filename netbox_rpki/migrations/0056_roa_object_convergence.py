@@ -15,10 +15,17 @@ def backfill_roa_objects(apps, schema_editor):
     RoaPrefix = apps.get_model('netbox_rpki', 'RoaPrefix')
     RoaObjectPrefix = apps.get_model('netbox_rpki', 'RoaObjectPrefix')
 
-    roa_content_type = ContentType.objects.get(app_label='netbox_rpki', model='roa')
-    roa_object_content_type = ContentType.objects.get(app_label='netbox_rpki', model='roaobject')
-    roa_prefix_content_type = ContentType.objects.get(app_label='netbox_rpki', model='roaprefix')
-    roa_object_prefix_content_type = ContentType.objects.get(app_label='netbox_rpki', model='roaobjectprefix')
+    def ensure_content_type(model_name):
+        content_type, _ = ContentType.objects.get_or_create(
+            app_label='netbox_rpki',
+            model=model_name,
+        )
+        return content_type
+
+    roa_content_type = ensure_content_type('roa')
+    roa_object_content_type = ensure_content_type('roaobject')
+    roa_prefix_content_type = ensure_content_type('roaprefix')
+    roa_object_prefix_content_type = ensure_content_type('roaobjectprefix')
 
     for roa in Roa.objects.select_related('signed_by__rpki_org', 'signed_object').all():
         organization_id = None

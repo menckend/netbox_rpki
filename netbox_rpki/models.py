@@ -302,6 +302,37 @@ class IrrMemberType(models.TextChoices):
     UNKNOWN = "unknown", "Unknown"
 
 
+class IrrObjectProvenanceType(models.TextChoices):
+    IMPORTED = "imported", "Imported"
+    DERIVED = "derived", "Derived"
+    CHANGE_PLAN_SYNC = "change_plan_sync", "Change Plan Sync"
+    MANUAL = "manual", "Manual"
+
+
+class IrrObjectCreationPath(models.TextChoices):
+    LIVE_QUERY = "live_query", "Live Query"
+    SNAPSHOT_IMPORT = "snapshot_import", "Snapshot Import"
+    ROUTE_REFERENCE = "route_reference", "Route Reference"
+    ROUTE_SET_REFERENCE = "route_set_reference", "Route-Set Reference"
+    AS_SET_REFERENCE = "as_set_reference", "AS-Set Reference"
+    CHANGE_PLAN_APPLY = "change_plan_apply", "Change Plan Apply"
+    MANUAL_ENTRY = "manual_entry", "Manual Entry"
+
+
+class IrrObjectProvenanceConfidence(models.TextChoices):
+    AUTHORITATIVE = "authoritative", "Authoritative"
+    HIGH = "high", "High"
+    MEDIUM = "medium", "Medium"
+    LOW = "low", "Low"
+
+
+class IrrObjectFreshness(models.TextChoices):
+    CURRENT = "current", "Current"
+    STALE = "stale", "Stale"
+    HISTORICAL = "historical", "Historical"
+    UNKNOWN = "unknown", "Unknown"
+
+
 class IrrCoordinationRunStatus(models.TextChoices):
     PENDING = "pending", "Pending"
     RUNNING = "running", "Running"
@@ -3551,6 +3582,29 @@ class ImportedIrrObjectBase(NamedRpkiStandardModel):
     object_text = models.TextField(blank=True)
     payload_json = models.JSONField(default=dict, blank=True)
     source_database_label = models.CharField(max_length=100, blank=True)
+    provenance_type = models.CharField(
+        max_length=32,
+        choices=IrrObjectProvenanceType.choices,
+        default=IrrObjectProvenanceType.IMPORTED,
+    )
+    creation_path = models.CharField(
+        max_length=32,
+        choices=IrrObjectCreationPath.choices,
+        default=IrrObjectCreationPath.LIVE_QUERY,
+    )
+    provenance_confidence = models.CharField(
+        max_length=32,
+        choices=IrrObjectProvenanceConfidence.choices,
+        default=IrrObjectProvenanceConfidence.HIGH,
+    )
+    first_seen_at = models.DateTimeField(blank=True, null=True)
+    last_seen_at = models.DateTimeField(blank=True, null=True)
+    freshness_status = models.CharField(
+        max_length=32,
+        choices=IrrObjectFreshness.choices,
+        default=IrrObjectFreshness.UNKNOWN,
+    )
+    provenance_summary_json = models.JSONField(default=dict, blank=True)
 
     class Meta:
         abstract = True
@@ -3561,6 +3615,22 @@ class ImportedIrrObjectBase(NamedRpkiStandardModel):
 
     def get_absolute_url(self):
         return _plugin_get_action_url(type(self), kwargs={'pk': self.pk})
+
+    @property
+    def provenance_summary(self) -> dict:
+        return {
+            'source_id': self.source_id,
+            'source_name': getattr(self.source, 'name', ''),
+            'snapshot_id': self.snapshot_id,
+            'snapshot_name': getattr(self.snapshot, 'name', ''),
+            'provenance_type': self.provenance_type,
+            'creation_path': self.creation_path,
+            'provenance_confidence': self.provenance_confidence,
+            'first_seen_at': self.first_seen_at.isoformat() if self.first_seen_at else '',
+            'last_seen_at': self.last_seen_at.isoformat() if self.last_seen_at else '',
+            'freshness_status': self.freshness_status,
+            **dict(self.provenance_summary_json or {}),
+        }
 
 
 class ImportedIrrRouteObject(ImportedIrrObjectBase):
