@@ -14,6 +14,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from netbox_rpki import models as rpki_models
+from netbox_rpki.structured_logging import emit_structured_log
 
 
 IRR_FAMILY_ORDER = (
@@ -942,11 +943,37 @@ def _join_url(base_url: str, path: str) -> str:
 def _http_text_request(url: str, *, username: str | None = None, password: str | None = None) -> str:
     request = Request(url, method='GET')
     _add_basic_auth(request, username=username, password=password)
+    emit_structured_log(
+        'irr_sync.http.request',
+        subsystem='irr_sync',
+        debug=True,
+        method='GET',
+        url=url,
+        headers=dict(request.header_items()),
+    )
     try:
         with urlopen(request, timeout=30) as response:
-            return response.read().decode('utf-8')
+            payload = response.read().decode('utf-8')
     except (HTTPError, URLError) as exc:
+        emit_structured_log(
+            'irr_sync.http.error',
+            subsystem='irr_sync',
+            level='warning',
+            method='GET',
+            url=url,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
         raise IrrSyncError(f'HTTP request failed for {url}: {exc}') from exc
+    emit_structured_log(
+        'irr_sync.http.response',
+        subsystem='irr_sync',
+        debug=True,
+        method='GET',
+        url=url,
+        response_body=payload,
+    )
+    return payload
 
 
 def _http_json_request(
@@ -964,11 +991,38 @@ def _http_json_request(
         headers['Content-Type'] = 'application/json'
     request = Request(url, data=data, headers=headers, method=method)
     _add_basic_auth(request, username=username, password=password)
+    emit_structured_log(
+        'irr_sync.http.request',
+        subsystem='irr_sync',
+        debug=True,
+        method=method,
+        url=url,
+        headers=dict(request.header_items()),
+        request_body=payload or {},
+    )
     try:
         with urlopen(request, timeout=30) as response:
-            return json.loads(response.read().decode('utf-8'))
+            response_payload = json.loads(response.read().decode('utf-8'))
     except (HTTPError, URLError, json.JSONDecodeError) as exc:
+        emit_structured_log(
+            'irr_sync.http.error',
+            subsystem='irr_sync',
+            level='warning',
+            method=method,
+            url=url,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
         raise IrrSyncError(f'JSON request failed for {url}: {exc}') from exc
+    emit_structured_log(
+        'irr_sync.http.response',
+        subsystem='irr_sync',
+        debug=True,
+        method=method,
+        url=url,
+        response_body=response_payload,
+    )
+    return response_payload
 
 
 def _add_basic_auth(request: Request, *, username: str | None = None, password: str | None = None) -> None:

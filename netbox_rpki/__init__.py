@@ -23,7 +23,10 @@ class RpkiConfig(PluginConfig):
     max_version = '4.5.99'
     required_settings = []
     default_settings = {
-        'top_level_menu': True
+        'top_level_menu': True,
+        'structured_logging': {
+            'debug_subsystems': [],
+        },
         }
 
     def ready(self):

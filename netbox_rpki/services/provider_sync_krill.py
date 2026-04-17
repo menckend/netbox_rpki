@@ -17,6 +17,7 @@ from pyasn1.codec.der import decoder, encoder
 from pyasn1_modules import rfc5652, rfc6486
 
 from netbox_rpki import models as rpki_models
+from netbox_rpki.structured_logging import emit_structured_log
 
 
 class KrillSyncError(ValueError):
@@ -811,8 +812,44 @@ def _load_json(request: Request, provider_account: rpki_models.RpkiProviderAccou
     ssl_context = krill_ssl_context(provider_account)
     if ssl_context is not None:
         urlopen_kwargs['context'] = ssl_context
-    with urlopen(request, **urlopen_kwargs) as response:
-        return json.loads(response.read().decode('utf-8'))
+    emit_structured_log(
+        'provider_sync.krill.request',
+        subsystem='provider_sync',
+        debug=True,
+        provider_account_id=provider_account.pk,
+        provider_type=provider_account.provider_type,
+        method=request.get_method(),
+        url=request.full_url,
+        headers=dict(request.header_items()),
+        tls_verification='disabled' if ssl_context is not None else 'enabled',
+    )
+    try:
+        with urlopen(request, **urlopen_kwargs) as response:
+            payload = json.loads(response.read().decode('utf-8'))
+    except Exception as exc:
+        emit_structured_log(
+            'provider_sync.krill.error',
+            subsystem='provider_sync',
+            level='warning',
+            provider_account_id=provider_account.pk,
+            provider_type=provider_account.provider_type,
+            method=request.get_method(),
+            url=request.full_url,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        raise
+    emit_structured_log(
+        'provider_sync.krill.response',
+        subsystem='provider_sync',
+        debug=True,
+        provider_account_id=provider_account.pk,
+        provider_type=provider_account.provider_type,
+        method=request.get_method(),
+        url=request.full_url,
+        response_body=payload,
+    )
+    return payload
 
 
 def _load_json_list(request: Request, provider_account: rpki_models.RpkiProviderAccount) -> list[dict]:

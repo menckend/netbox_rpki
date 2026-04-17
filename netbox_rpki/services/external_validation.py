@@ -18,6 +18,7 @@ from ipam.models.asns import ASN
 from ipam.models.ip import Prefix
 
 from netbox_rpki import models as rpki_models
+from netbox_rpki.structured_logging import emit_structured_log
 
 
 VALIDATOR_FETCH_MODE_LIVE_API = 'live_api'
@@ -643,12 +644,57 @@ def _join_url(base_url: str, path: str) -> str:
 
 def _http_json_request(url: str):
     request = Request(url, headers={'Accept': 'application/json'})
+    emit_structured_log(
+        'external_validation.http.request',
+        subsystem='external_validation',
+        debug=True,
+        method='GET',
+        url=url,
+        headers=dict(request.header_items()),
+    )
     try:
         with urlopen(request, timeout=30) as response:
-            return json.loads(response.read().decode('utf-8'))
+            payload = json.loads(response.read().decode('utf-8'))
     except HTTPError as exc:
+        emit_structured_log(
+            'external_validation.http.error',
+            subsystem='external_validation',
+            level='warning',
+            method='GET',
+            url=url,
+            error=str(exc),
+            error_type=type(exc).__name__,
+            http_status=exc.code,
+        )
         raise ExternalValidationError(f'HTTP error {exc.code} while fetching validator data from {url}.') from exc
     except URLError as exc:
+        emit_structured_log(
+            'external_validation.http.error',
+            subsystem='external_validation',
+            level='warning',
+            method='GET',
+            url=url,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
         raise ExternalValidationError(f'Could not connect to validator endpoint {url}.') from exc
     except json.JSONDecodeError as exc:
+        emit_structured_log(
+            'external_validation.http.error',
+            subsystem='external_validation',
+            level='warning',
+            method='GET',
+            url=url,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
         raise ExternalValidationError(f'Validator endpoint {url} did not return valid JSON.') from exc
+    emit_structured_log(
+        'external_validation.http.response',
+        subsystem='external_validation',
+        debug=True,
+        method='GET',
+        url=url,
+        response_body=payload,
+    )
+    return payload

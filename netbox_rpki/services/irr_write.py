@@ -10,6 +10,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from netbox_rpki import models as rpki_models
+from netbox_rpki.structured_logging import emit_structured_log
 
 
 class IrrChangePlanError(ValueError):
@@ -1147,24 +1148,88 @@ def _submit_irrd_operation(source: rpki_models.IrrSource, operation: dict) -> di
         username=source.http_username or None,
         password=source.http_password or None,
     )
+    emit_structured_log(
+        'irr_write.submit.start',
+        subsystem='irr_write',
+        debug=True,
+        irr_source_id=source.pk,
+        irr_source_name=source.name,
+        method=operation['method'],
+        url=operation['url'],
+        headers=dict(request.header_items()),
+        request_body=operation['body'],
+    )
     try:
         with urlopen(request, timeout=30) as response:
             raw_body = response.read().decode('utf-8').strip()
     except HTTPError as exc:
         error_body = exc.read().decode('utf-8', errors='replace')
+        emit_structured_log(
+            'irr_write.submit.error',
+            subsystem='irr_write',
+            level='warning',
+            irr_source_id=source.pk,
+            irr_source_name=source.name,
+            method=operation['method'],
+            url=operation['url'],
+            error=error_body or str(exc),
+            error_type=type(exc).__name__,
+            http_status=exc.code,
+        )
         return {
             'http_status': exc.code,
             'error': error_body or str(exc),
         }
     except URLError as exc:
+        emit_structured_log(
+            'irr_write.submit.error',
+            subsystem='irr_write',
+            level='warning',
+            irr_source_id=source.pk,
+            irr_source_name=source.name,
+            method=operation['method'],
+            url=operation['url'],
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
         raise IrrWriteExecutionError(f'IRRd submit request failed: {exc}') from exc
 
     if not raw_body:
+        emit_structured_log(
+            'irr_write.submit.success',
+            subsystem='irr_write',
+            debug=True,
+            irr_source_id=source.pk,
+            irr_source_name=source.name,
+            method=operation['method'],
+            url=operation['url'],
+            response_body={},
+        )
         return {}
     try:
         payload = json.loads(raw_body)
     except json.JSONDecodeError:
+        emit_structured_log(
+            'irr_write.submit.success',
+            subsystem='irr_write',
+            debug=True,
+            irr_source_id=source.pk,
+            irr_source_name=source.name,
+            method=operation['method'],
+            url=operation['url'],
+            response_body=raw_body,
+        )
         return {'raw': raw_body}
+    emit_structured_log(
+        'irr_write.submit.success',
+        subsystem='irr_write',
+        debug=True,
+        irr_source_id=source.pk,
+        irr_source_name=source.name,
+        method=operation['method'],
+        url=operation['url'],
+        response_body=payload,
+    )
     if isinstance(payload, dict):
         return payload
     return {'raw': payload}

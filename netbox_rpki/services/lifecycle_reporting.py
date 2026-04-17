@@ -15,6 +15,7 @@ from django.utils import timezone
 from urllib.request import Request, urlopen
 
 from netbox_rpki import models as rpki_models
+from netbox_rpki.structured_logging import emit_structured_log
 from netbox_rpki.services.provider_sync_evidence import (
     build_certificate_observation_attention_summary,
     build_publication_point_attention_summary,
@@ -1472,19 +1473,60 @@ def deliver_lifecycle_health_event(event: rpki_models.LifecycleHealthEvent) -> d
     request = Request(hook.target_url, data=body, headers=headers, method='POST')
 
     if event.status == rpki_models.LifecycleHealthEventStatus.RESOLVED and not hook.send_resolved:
+        emit_structured_log(
+            'lifecycle_hooks.delivery.skipped',
+            subsystem='lifecycle_hooks',
+            debug=True,
+            event_id=event.pk,
+            event_kind=event.event_kind,
+            hook_id=hook.pk,
+            target_url=hook.target_url,
+            reason='resolved delivery disabled',
+        )
         return {'delivered': False, 'skipped': True, 'error': ''}
 
+    emit_structured_log(
+        'lifecycle_hooks.delivery.start',
+        subsystem='lifecycle_hooks',
+        debug=True,
+        event_id=event.pk,
+        event_kind=event.event_kind,
+        hook_id=hook.pk,
+        target_url=hook.target_url,
+        headers=dict(request.header_items()),
+        request_body=payload,
+    )
     try:
         with urlopen(request, timeout=30):
             pass
     except Exception as exc:  # pragma: no cover - exercised via focused tests
         event.delivery_error = str(exc)
         event.save(update_fields=('delivery_error', 'last_updated'))
+        emit_structured_log(
+            'lifecycle_hooks.delivery.error',
+            subsystem='lifecycle_hooks',
+            level='warning',
+            event_id=event.pk,
+            event_kind=event.event_kind,
+            hook_id=hook.pk,
+            target_url=hook.target_url,
+            error=event.delivery_error,
+            error_type=type(exc).__name__,
+        )
         return {'delivered': False, 'skipped': False, 'error': event.delivery_error}
 
     if event.delivery_error:
         event.delivery_error = ''
         event.save(update_fields=('delivery_error', 'last_updated'))
+    emit_structured_log(
+        'lifecycle_hooks.delivery.success',
+        subsystem='lifecycle_hooks',
+        debug=True,
+        event_id=event.pk,
+        event_kind=event.event_kind,
+        hook_id=hook.pk,
+        target_url=hook.target_url,
+    )
     return {'delivered': True, 'skipped': False, 'error': ''}
 
 

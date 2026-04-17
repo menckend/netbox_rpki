@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -93,3 +94,12 @@ class RunBulkRoutingIntentJobTestCase(TestCase):
         self.assertEqual(runner.job.data['binding_pks'], [self.binding.pk])
         self.assertTrue(runner.job.data['create_change_plans'])
         save_mock.assert_called_once_with(update_fields=('data',))
+        self.assertEqual(runner.logger.info.call_count, 2)
+        start_event = json.loads(runner.logger.info.call_args_list[0].args[0])
+        complete_event = json.loads(runner.logger.info.call_args_list[1].args[0])
+        self.assertEqual(start_event['event'], 'job.run.start')
+        self.assertEqual(start_event['subsystem'], 'jobs')
+        self.assertEqual(start_event['job_class'], 'RunBulkRoutingIntentJob')
+        self.assertEqual(start_event['organization_id'], self.organization.pk)
+        self.assertEqual(complete_event['event'], 'job.run.complete')
+        self.assertEqual(complete_event['bulk_intent_run_pk'], bulk_run.pk)

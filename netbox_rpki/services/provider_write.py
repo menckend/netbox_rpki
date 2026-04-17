@@ -7,6 +7,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from netbox_rpki import models as rpki_models
+from netbox_rpki.structured_logging import emit_structured_log
 from netbox_rpki.services.provider_adapters import (
     ProviderAdapterLookupError,
     get_provider_adapter,
@@ -955,17 +956,73 @@ def _submit_krill_json_delta(
     if ssl_context is not None:
         urlopen_kwargs['context'] = ssl_context
 
-    with urlopen(request, **urlopen_kwargs) as response:
-        raw_body = response.read().decode('utf-8').strip()
+    emit_structured_log(
+        'provider_write.krill.submit.start',
+        subsystem='provider_write',
+        debug=True,
+        provider_account_id=provider_account.pk,
+        provider_type=provider_account.provider_type,
+        method=request.get_method(),
+        url=url,
+        headers=dict(request.header_items()),
+        delta=delta,
+        tls_verification='disabled' if ssl_context is not None else 'enabled',
+    )
+    try:
+        with urlopen(request, **urlopen_kwargs) as response:
+            raw_body = response.read().decode('utf-8').strip()
+    except Exception as exc:
+        emit_structured_log(
+            'provider_write.krill.submit.error',
+            subsystem='provider_write',
+            level='warning',
+            provider_account_id=provider_account.pk,
+            provider_type=provider_account.provider_type,
+            method=request.get_method(),
+            url=url,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        raise
 
     if not raw_body:
+        emit_structured_log(
+            'provider_write.krill.submit.success',
+            subsystem='provider_write',
+            debug=True,
+            provider_account_id=provider_account.pk,
+            provider_type=provider_account.provider_type,
+            method=request.get_method(),
+            url=url,
+            response_body={},
+        )
         return {}
 
     try:
         payload = json.loads(raw_body)
     except json.JSONDecodeError:
+        emit_structured_log(
+            'provider_write.krill.submit.success',
+            subsystem='provider_write',
+            debug=True,
+            provider_account_id=provider_account.pk,
+            provider_type=provider_account.provider_type,
+            method=request.get_method(),
+            url=url,
+            response_body=raw_body,
+        )
         return {'raw': raw_body}
 
+    emit_structured_log(
+        'provider_write.krill.submit.success',
+        subsystem='provider_write',
+        debug=True,
+        provider_account_id=provider_account.pk,
+        provider_type=provider_account.provider_type,
+        method=request.get_method(),
+        url=url,
+        response_body=payload,
+    )
     if isinstance(payload, dict):
         return payload
     return {'raw': payload}

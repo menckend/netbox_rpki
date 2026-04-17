@@ -3,6 +3,7 @@ from core.choices import JobStatusChoices
 from core.models import Job
 
 from netbox_rpki import models as rpki_models
+from netbox_rpki.structured_logging import emit_structured_log
 from netbox_rpki.services import (
     TELEMETRY_FETCH_MODE_SNAPSHOT_IMPORT,
     VALIDATOR_FETCH_MODE_LIVE_API,
@@ -29,7 +30,16 @@ class RunRoutingIntentProfileJob(JobRunner):
 
     def run(self, profile_pk, comparison_scope=rpki_models.ReconciliationComparisonScope.LOCAL_ROA_RECORDS, provider_snapshot_pk=None, *args, **kwargs):
         profile = rpki_models.RoutingIntentProfile.objects.get(pk=profile_pk)
-        self.logger.info(f'Running routing-intent pipeline for profile {profile.name} ({profile.pk})')
+        emit_structured_log(
+            'job.run.start',
+            subsystem='jobs',
+            logger=self.logger,
+            job_class=type(self).__name__,
+            profile_id=profile.pk,
+            profile_name=profile.name,
+            comparison_scope=comparison_scope,
+            provider_snapshot_pk=provider_snapshot_pk,
+        )
         derivation_run, reconciliation_run = run_routing_intent_pipeline(
             profile,
             trigger_mode=rpki_models.IntentRunTriggerMode.MANUAL,
@@ -44,9 +54,14 @@ class RunRoutingIntentProfileJob(JobRunner):
             'provider_snapshot_pk': provider_snapshot_pk,
         }
         self.job.save(update_fields=('data',))
-        self.logger.info(
-            f'Completed routing-intent pipeline with derivation run {derivation_run.pk} '
-            f'and reconciliation run {reconciliation_run.pk}'
+        emit_structured_log(
+            'job.run.complete',
+            subsystem='jobs',
+            logger=self.logger,
+            job_class=type(self).__name__,
+            profile_id=profile.pk,
+            derivation_run_pk=derivation_run.pk,
+            reconciliation_run_pk=reconciliation_run.pk,
         )
 
 
@@ -120,7 +135,16 @@ class RunAspaReconciliationJob(JobRunner):
         **kwargs,
     ):
         organization = rpki_models.Organization.objects.get(pk=organization_pk)
-        self.logger.info(f'Running ASPA reconciliation for organization {organization.name} ({organization.pk})')
+        emit_structured_log(
+            'job.run.start',
+            subsystem='jobs',
+            logger=self.logger,
+            job_class=type(self).__name__,
+            organization_id=organization.pk,
+            organization_name=organization.name,
+            comparison_scope=comparison_scope,
+            provider_snapshot_pk=provider_snapshot_pk,
+        )
         reconciliation_run = run_aspa_reconciliation_pipeline(
             organization,
             comparison_scope=comparison_scope,
@@ -133,7 +157,14 @@ class RunAspaReconciliationJob(JobRunner):
             'provider_snapshot_pk': provider_snapshot_pk,
         }
         self.job.save(update_fields=('data',))
-        self.logger.info(f'Completed ASPA reconciliation run {reconciliation_run.pk}')
+        emit_structured_log(
+            'job.run.complete',
+            subsystem='jobs',
+            logger=self.logger,
+            job_class=type(self).__name__,
+            organization_id=organization.pk,
+            reconciliation_run_pk=reconciliation_run.pk,
+        )
 
 
 class RunBulkRoutingIntentJob(JobRunner):
@@ -271,8 +302,18 @@ class RunBulkRoutingIntentJob(JobRunner):
         bindings = tuple(
             rpki_models.RoutingIntentTemplateBinding.objects.filter(pk__in=tuple(binding_pks)).order_by('pk')
         )
-        self.logger.info(
-            f'Running bulk routing-intent pipeline for organization {organization.name} ({organization.pk})'
+        emit_structured_log(
+            'job.run.start',
+            subsystem='jobs',
+            logger=self.logger,
+            job_class=type(self).__name__,
+            organization_id=organization.pk,
+            organization_name=organization.name,
+            profile_pks=list(profile_pks),
+            binding_pks=list(binding_pks),
+            comparison_scope=comparison_scope,
+            provider_snapshot_pk=provider_snapshot_pk,
+            create_change_plans=create_change_plans,
         )
         bulk_run = run_bulk_routing_intent_pipeline(
             organization=organization,
@@ -293,7 +334,14 @@ class RunBulkRoutingIntentJob(JobRunner):
             'create_change_plans': create_change_plans,
         }
         self.job.save(update_fields=('data',))
-        self.logger.info(f'Completed bulk routing-intent run {bulk_run.pk}')
+        emit_structured_log(
+            'job.run.complete',
+            subsystem='jobs',
+            logger=self.logger,
+            job_class=type(self).__name__,
+            organization_id=organization.pk,
+            bulk_intent_run_pk=bulk_run.pk,
+        )
 
 
 class SyncProviderAccountJob(JobRunner):
@@ -346,7 +394,15 @@ class SyncProviderAccountJob(JobRunner):
 
     def run(self, provider_account_pk, *args, **kwargs):
         provider_account = rpki_models.RpkiProviderAccount.objects.get(pk=provider_account_pk)
-        self.logger.info(f'Running provider sync for account {provider_account.name} ({provider_account.pk})')
+        emit_structured_log(
+            'job.run.start',
+            subsystem='jobs',
+            logger=self.logger,
+            job_class=type(self).__name__,
+            provider_account_id=provider_account.pk,
+            provider_account_name=provider_account.name,
+            provider_type=provider_account.provider_type,
+        )
         sync_run, snapshot = sync_provider_account(provider_account)
         self.job.data = {
             'provider_account_pk': provider_account.pk,
@@ -354,8 +410,14 @@ class SyncProviderAccountJob(JobRunner):
             'provider_snapshot_pk': snapshot.pk,
         }
         self.job.save(update_fields=('data',))
-        self.logger.info(
-            f'Completed provider sync with sync run {sync_run.pk} and provider snapshot {snapshot.pk}'
+        emit_structured_log(
+            'job.run.complete',
+            subsystem='jobs',
+            logger=self.logger,
+            job_class=type(self).__name__,
+            provider_account_id=provider_account.pk,
+            provider_sync_run_pk=sync_run.pk,
+            provider_snapshot_pk=snapshot.pk,
         )
 
 
@@ -438,7 +500,16 @@ class SyncIrrSourceJob(JobRunner):
         **kwargs,
     ):
         irr_source = rpki_models.IrrSource.objects.get(pk=irr_source_pk)
-        self.logger.info(f'Running IRR import for source {irr_source.name} ({irr_source.pk})')
+        emit_structured_log(
+            'job.run.start',
+            subsystem='jobs',
+            logger=self.logger,
+            job_class=type(self).__name__,
+            irr_source_id=irr_source.pk,
+            irr_source_name=irr_source.name,
+            fetch_mode=fetch_mode,
+            snapshot_file=snapshot_file,
+        )
         snapshot = sync_irr_source(
             irr_source,
             fetch_mode=fetch_mode,
@@ -451,7 +522,14 @@ class SyncIrrSourceJob(JobRunner):
             'snapshot_file': snapshot_file,
         }
         self.job.save(update_fields=('data',))
-        self.logger.info(f'Completed IRR import with snapshot {snapshot.pk}')
+        emit_structured_log(
+            'job.run.complete',
+            subsystem='jobs',
+            logger=self.logger,
+            job_class=type(self).__name__,
+            irr_source_id=irr_source.pk,
+            irr_snapshot_pk=snapshot.pk,
+        )
 
 
 class SyncValidatorInstanceJob(JobRunner):
@@ -529,7 +607,16 @@ class SyncValidatorInstanceJob(JobRunner):
         **kwargs,
     ):
         validator = rpki_models.ValidatorInstance.objects.get(pk=validator_pk)
-        self.logger.info(f'Running validator import for {validator.name} ({validator.pk})')
+        emit_structured_log(
+            'job.run.start',
+            subsystem='jobs',
+            logger=self.logger,
+            job_class=type(self).__name__,
+            validator_id=validator.pk,
+            validator_name=validator.name,
+            fetch_mode=fetch_mode,
+            snapshot_file=snapshot_file,
+        )
         run = sync_validator_instance(
             validator,
             fetch_mode=fetch_mode,
@@ -542,7 +629,14 @@ class SyncValidatorInstanceJob(JobRunner):
             'snapshot_file': snapshot_file,
         }
         self.job.save(update_fields=('data',))
-        self.logger.info(f'Completed validator import with validation run {run.pk}')
+        emit_structured_log(
+            'job.run.complete',
+            subsystem='jobs',
+            logger=self.logger,
+            job_class=type(self).__name__,
+            validator_id=validator.pk,
+            validation_run_pk=run.pk,
+        )
 
 
 class SyncTelemetrySourceJob(JobRunner):
@@ -615,7 +709,16 @@ class SyncTelemetrySourceJob(JobRunner):
         **kwargs,
     ):
         source = rpki_models.TelemetrySource.objects.get(pk=telemetry_source_pk)
-        self.logger.info(f'Running telemetry import for source {source.name} ({source.pk})')
+        emit_structured_log(
+            'job.run.start',
+            subsystem='jobs',
+            logger=self.logger,
+            job_class=type(self).__name__,
+            telemetry_source_id=source.pk,
+            telemetry_source_name=source.name,
+            fetch_mode=fetch_mode,
+            snapshot_file=snapshot_file,
+        )
         run = sync_telemetry_source(source, snapshot_file=snapshot_file)
         self.job.data = {
             'telemetry_source_pk': source.pk,
@@ -624,7 +727,14 @@ class SyncTelemetrySourceJob(JobRunner):
             'snapshot_file': snapshot_file,
         }
         self.job.save(update_fields=('data',))
-        self.logger.info(f'Completed telemetry import with run {run.pk}')
+        emit_structured_log(
+            'job.run.complete',
+            subsystem='jobs',
+            logger=self.logger,
+            job_class=type(self).__name__,
+            telemetry_source_id=source.pk,
+            telemetry_run_pk=run.pk,
+        )
 
 
 class RunIrrCoordinationJob(JobRunner):
@@ -674,14 +784,28 @@ class RunIrrCoordinationJob(JobRunner):
 
     def run(self, organization_pk, *args, **kwargs):
         organization = rpki_models.Organization.objects.get(pk=organization_pk)
-        self.logger.info(f'Running IRR coordination for organization {organization.name} ({organization.pk})')
+        emit_structured_log(
+            'job.run.start',
+            subsystem='jobs',
+            logger=self.logger,
+            job_class=type(self).__name__,
+            organization_id=organization.pk,
+            organization_name=organization.name,
+        )
         coordination_run = run_irr_coordination(organization)
         self.job.data = {
             'organization_pk': organization.pk,
             'irr_coordination_run_pk': coordination_run.pk,
         }
         self.job.save(update_fields=('data',))
-        self.logger.info(f'Completed IRR coordination run {coordination_run.pk}')
+        emit_structured_log(
+            'job.run.complete',
+            subsystem='jobs',
+            logger=self.logger,
+            job_class=type(self).__name__,
+            organization_id=organization.pk,
+            irr_coordination_run_pk=coordination_run.pk,
+        )
 
 
 class CreateROAChangePlanJob(JobRunner):
@@ -730,8 +854,14 @@ class CreateROAChangePlanJob(JobRunner):
 
     def run(self, reconciliation_run_pk, plan_name=None, *args, **kwargs):
         reconciliation_run = rpki_models.ROAReconciliationRun.objects.get(pk=reconciliation_run_pk)
-        self.logger.info(
-            f'Creating ROA change plan from reconciliation run {reconciliation_run.name} ({reconciliation_run.pk})'
+        emit_structured_log(
+            'job.run.start',
+            subsystem='jobs',
+            logger=self.logger,
+            job_class=type(self).__name__,
+            roa_reconciliation_run_id=reconciliation_run.pk,
+            roa_reconciliation_run_name=reconciliation_run.name,
+            plan_name=plan_name,
         )
         plan = create_roa_change_plan(reconciliation_run, name=plan_name)
         self.job.data = {
@@ -739,9 +869,14 @@ class CreateROAChangePlanJob(JobRunner):
             'roa_change_plan_pk': plan.pk,
         }
         self.job.save(update_fields=('data',))
-        self.logger.info(
-            f'Created ROA change plan {plan.pk} with {plan.items.count()} items '
-            f'from reconciliation run {reconciliation_run.pk}'
+        emit_structured_log(
+            'job.run.complete',
+            subsystem='jobs',
+            logger=self.logger,
+            job_class=type(self).__name__,
+            roa_reconciliation_run_id=reconciliation_run.pk,
+            roa_change_plan_pk=plan.pk,
+            item_count=plan.items.count(),
         )
 
 
@@ -792,14 +927,28 @@ class CreateIrrChangePlansJob(JobRunner):
 
     def run(self, coordination_run_pk, *args, **kwargs):
         coordination_run = rpki_models.IrrCoordinationRun.objects.get(pk=coordination_run_pk)
-        self.logger.info(f'Creating IRR change plans for coordination run {coordination_run.name} ({coordination_run.pk})')
+        emit_structured_log(
+            'job.run.start',
+            subsystem='jobs',
+            logger=self.logger,
+            job_class=type(self).__name__,
+            irr_coordination_run_id=coordination_run.pk,
+            irr_coordination_run_name=coordination_run.name,
+        )
         plans = create_irr_change_plans(coordination_run)
         self.job.data = {
             'irr_coordination_run_pk': coordination_run.pk,
             'irr_change_plan_pks': [plan.pk for plan in plans],
         }
         self.job.save(update_fields=('data',))
-        self.logger.info(f'Created {len(plans)} IRR change plans for coordination run {coordination_run.pk}')
+        emit_structured_log(
+            'job.run.complete',
+            subsystem='jobs',
+            logger=self.logger,
+            job_class=type(self).__name__,
+            irr_coordination_run_id=coordination_run.pk,
+            irr_change_plan_count=len(plans),
+        )
 
 
 class ExecuteIrrChangePlanJob(JobRunner):
@@ -868,8 +1017,14 @@ class ExecuteIrrChangePlanJob(JobRunner):
         **kwargs,
     ):
         change_plan = rpki_models.IrrChangePlan.objects.get(pk=change_plan_pk)
-        self.logger.info(
-            f'Running IRR change plan {execution_mode} for {change_plan.name} ({change_plan.pk})'
+        emit_structured_log(
+            'job.run.start',
+            subsystem='jobs',
+            logger=self.logger,
+            job_class=type(self).__name__,
+            irr_change_plan_id=change_plan.pk,
+            irr_change_plan_name=change_plan.name,
+            execution_mode=execution_mode,
         )
         if execution_mode == rpki_models.IrrWriteExecutionMode.APPLY:
             execution, _ = apply_irr_change_plan(change_plan)
@@ -881,7 +1036,15 @@ class ExecuteIrrChangePlanJob(JobRunner):
             'execution_mode': execution_mode,
         }
         self.job.save(update_fields=('data',))
-        self.logger.info(f'Completed IRR change plan {execution_mode} as execution {execution.pk}')
+        emit_structured_log(
+            'job.run.complete',
+            subsystem='jobs',
+            logger=self.logger,
+            job_class=type(self).__name__,
+            irr_change_plan_id=change_plan.pk,
+            irr_write_execution_pk=execution.pk,
+            execution_mode=execution_mode,
+        )
 
 
 class EvaluateLifecycleHealthJob(JobRunner):
@@ -931,8 +1094,13 @@ class EvaluateLifecycleHealthJob(JobRunner):
 
     def run(self, provider_account_pk, *args, **kwargs):
         provider_account = rpki_models.RpkiProviderAccount.objects.get(pk=provider_account_pk)
-        self.logger.info(
-            f'Evaluating lifecycle-health events for provider account {provider_account.name} ({provider_account.pk})'
+        emit_structured_log(
+            'job.run.start',
+            subsystem='jobs',
+            logger=self.logger,
+            job_class=type(self).__name__,
+            provider_account_id=provider_account.pk,
+            provider_account_name=provider_account.name,
         )
         result = evaluate_lifecycle_health_events(provider_account)
         self.job.data = {
@@ -944,6 +1112,14 @@ class EvaluateLifecycleHealthJob(JobRunner):
             'resolved_count': result['resolved_count'],
         }
         self.job.save(update_fields=('data',))
-        self.logger.info(
-            f'Completed lifecycle-health evaluation with {result["event_count"]} event(s)'
+        emit_structured_log(
+            'job.run.complete',
+            subsystem='jobs',
+            logger=self.logger,
+            job_class=type(self).__name__,
+            provider_account_id=provider_account.pk,
+            event_count=result['event_count'],
+            opened_count=result['opened_count'],
+            repeated_count=result['repeated_count'],
+            resolved_count=result['resolved_count'],
         )

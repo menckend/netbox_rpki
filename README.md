@@ -80,11 +80,18 @@ PLUGINS = [
 ]
 
 PLUGINS_CONFIG = {
-   "netbox_rpki": {'top_level_menu': False},
+   "netbox_rpki": {
+      'top_level_menu': False,
+      'structured_logging': {
+         'debug_subsystems': ['provider_sync', 'provider_write'],
+      },
+   },
 }
 ```
 
 Run `python -m manage.py migrate` from the NetBox project directory in your installation, then run `python manage.py check` to confirm the plugin loads cleanly.
+
+`structured_logging.debug_subsystems` accepts subsystem names such as `provider_sync`, `provider_write`, `irr_sync`, `irr_write`, `external_validation`, `lifecycle_hooks`, and `jobs`. When enabled, those subsystems emit additional structured debug events with consistent redaction of credentials, bearer/basic auth headers, webhook signatures, and write payload bodies.
 
 ## Maintainer Engagement
 

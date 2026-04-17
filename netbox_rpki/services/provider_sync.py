@@ -15,6 +15,7 @@ from ipam.models.asns import ASN
 from ipam.models.ip import Prefix
 
 from netbox_rpki import models as rpki_models
+from netbox_rpki.structured_logging import emit_structured_log
 from netbox_rpki.services.provider_adapters import (
     ProviderAdapterLookupError,
     get_provider_adapter,
@@ -148,13 +149,49 @@ def _arin_roa_list_url(provider_account: rpki_models.RpkiProviderAccount) -> str
 
 
 def _fetch_arin_roa_xml(provider_account: rpki_models.RpkiProviderAccount) -> str:
+    url = _arin_roa_list_url(provider_account)
     request = Request(
-        _arin_roa_list_url(provider_account),
+        url,
         headers={'Accept': 'application/xml'},
         method='GET',
     )
-    with urlopen(request, timeout=30) as response:
-        return response.read().decode('utf-8')
+    emit_structured_log(
+        'provider_sync.arin.fetch.start',
+        subsystem='provider_sync',
+        debug=True,
+        provider_account_id=provider_account.pk,
+        provider_type=provider_account.provider_type,
+        method='GET',
+        url=url,
+        headers=dict(request.header_items()),
+    )
+    try:
+        with urlopen(request, timeout=30) as response:
+            payload = response.read().decode('utf-8')
+    except Exception as exc:
+        emit_structured_log(
+            'provider_sync.arin.fetch.error',
+            subsystem='provider_sync',
+            level='warning',
+            provider_account_id=provider_account.pk,
+            provider_type=provider_account.provider_type,
+            method='GET',
+            url=url,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        raise
+    emit_structured_log(
+        'provider_sync.arin.fetch.success',
+        subsystem='provider_sync',
+        debug=True,
+        provider_account_id=provider_account.pk,
+        provider_type=provider_account.provider_type,
+        method='GET',
+        url=url,
+        response_text=payload,
+    )
+    return payload
 
 
 def _build_unique_uri_lookup(rows: IterableCollection[object], *field_names: str) -> dict[str, object]:
