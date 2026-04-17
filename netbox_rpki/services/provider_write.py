@@ -148,7 +148,10 @@ def _require_applicable(plan: rpki_models.ROAChangePlan) -> rpki_models.RpkiProv
         raise ProviderWriteError('This ROA change plan has already been applied.')
     if plan.status == rpki_models.ROAChangePlanStatus.APPLYING:
         raise ProviderWriteError('This ROA change plan is already being applied.')
-    if plan.status != rpki_models.ROAChangePlanStatus.APPROVED:
+    if plan.status not in {
+        rpki_models.ROAChangePlanStatus.APPROVED,
+        rpki_models.ROAChangePlanStatus.FAILED,
+    }:
         raise ProviderWriteError('ROA change plans must be approved before they can be applied.')
     return provider_account
 
@@ -159,7 +162,10 @@ def _require_aspa_applicable(plan: rpki_models.ASPAChangePlan) -> rpki_models.Rp
         raise ProviderWriteError('This ASPA change plan has already been applied.')
     if plan.status == rpki_models.ASPAChangePlanStatus.APPLYING:
         raise ProviderWriteError('This ASPA change plan is already being applied.')
-    if plan.status != rpki_models.ASPAChangePlanStatus.APPROVED:
+    if plan.status not in {
+        rpki_models.ASPAChangePlanStatus.APPROVED,
+        rpki_models.ASPAChangePlanStatus.FAILED,
+    }:
         raise ProviderWriteError('ASPA change plans must be approved before they can be applied.')
     return provider_account
 
@@ -410,6 +416,341 @@ def build_aspa_change_plan_preview_report(
     return preview_report
 
 
+def _empty_delta() -> dict[str, list[dict]]:
+    return {
+        'added': [],
+        'removed': [],
+    }
+
+
+def _payload_identity(payload: dict) -> str:
+    return json.dumps(payload, sort_keys=True, separators=(',', ':'))
+
+
+def _merge_delta(target: dict[str, list[dict]], delta: dict[str, list[dict]]) -> dict[str, list[dict]]:
+    merged = {
+        'added': [dict(entry) for entry in target.get('added', [])],
+        'removed': [dict(entry) for entry in target.get('removed', [])],
+    }
+    for key in ('added', 'removed'):
+        seen = {_payload_identity(entry) for entry in merged[key]}
+        for entry in delta.get(key, []):
+            candidate = dict(entry)
+            candidate_key = _payload_identity(candidate)
+            if candidate_key in seen:
+                continue
+            merged[key].append(candidate)
+            seen.add(candidate_key)
+    return merged
+
+
+def _delta_item_count(delta: dict[str, list[dict]]) -> int:
+    return sum(len(values) for values in delta.values())
+
+
+def _build_roa_item_batch(item: rpki_models.ROAChangePlanItem) -> dict[str, object] | None:
+    payload = dict(item.provider_payload_json or {})
+    if item.provider_operation == rpki_models.ProviderWriteOperation.ADD_ROUTE:
+        request_delta = {'added': [payload], 'removed': []}
+    elif item.provider_operation == rpki_models.ProviderWriteOperation.REMOVE_ROUTE:
+        request_delta = {'added': [], 'removed': [payload]}
+    else:
+        return None
+
+    before_state = _normalize_preview_state(item.before_state_json)
+    after_state = _normalize_preview_state(item.after_state_json)
+    return {
+        'item_id': item.pk,
+        'item_name': item.name,
+        'plan_semantic': item.plan_semantic or item.action_type or '',
+        'provider_operation': item.provider_operation,
+        'provider_payload': payload,
+        'request_delta': request_delta,
+        'before_state': before_state,
+        'after_state': after_state,
+        'state_diff': _build_preview_state_diff(before_state, after_state),
+        'reason': item.reason,
+    }
+
+
+def _build_aspa_item_batch(item: rpki_models.ASPAChangePlanItem) -> dict[str, object] | None:
+    payload = dict(item.provider_payload_json or {})
+    if item.provider_operation == rpki_models.ProviderWriteOperation.ADD_PROVIDER_SET:
+        request_delta = {'added': [payload], 'removed': []}
+    elif item.provider_operation == rpki_models.ProviderWriteOperation.REMOVE_PROVIDER_SET:
+        request_delta = {'added': [], 'removed': [payload]}
+    else:
+        return None
+
+    before_state = _normalize_preview_state(item.before_state_json)
+    after_state = _normalize_preview_state(item.after_state_json)
+    return {
+        'item_id': item.pk,
+        'item_name': item.name,
+        'plan_semantic': item.plan_semantic or item.action_type or '',
+        'provider_operation': item.provider_operation,
+        'provider_payload': payload,
+        'request_delta': request_delta,
+        'before_state': before_state,
+        'after_state': after_state,
+        'state_diff': _build_preview_state_diff(before_state, after_state),
+        'reason': item.reason,
+    }
+
+
+def _build_plan_item_batches(plan) -> list[dict[str, object]]:
+    item_batches: list[dict[str, object]] = []
+    items = plan.items.exclude(provider_operation='').order_by('pk')
+    for item in items:
+        if isinstance(plan, rpki_models.ASPAChangePlan):
+            batch = _build_aspa_item_batch(item)
+        else:
+            batch = _build_roa_item_batch(item)
+        if batch is not None:
+            item_batches.append(batch)
+    return item_batches
+
+
+def _request_item_signatures(item_batches: list[dict[str, object]]) -> list[dict[str, object]]:
+    return [
+        {
+            'item_id': batch.get('item_id'),
+            'provider_operation': batch.get('provider_operation'),
+            'provider_payload': dict(batch.get('provider_payload') or {}),
+        }
+        for batch in item_batches
+    ]
+
+
+def _latest_apply_execution(plan) -> rpki_models.ProviderWriteExecution | None:
+    return (
+        plan.provider_write_executions
+        .filter(execution_mode=rpki_models.ProviderWriteExecutionMode.APPLY)
+        .order_by('-started_at', '-created')
+        .first()
+    )
+
+
+def _resolve_apply_item_batches(
+    plan,
+    item_batches: list[dict[str, object]],
+) -> tuple[list[dict[str, object]], dict[str, object]]:
+    context = {
+        'retry_mode': 'full',
+        'retry_source_execution_id': None,
+        'safe_retry': False,
+        'automatic_failed_only': False,
+        'failed_item_ids': [],
+        'successful_item_count_previous': 0,
+    }
+    if plan.status != rpki_models.ROAChangePlanStatus.FAILED and plan.status != rpki_models.ASPAChangePlanStatus.FAILED:
+        return item_batches, context
+
+    latest_execution = _latest_apply_execution(plan)
+    if latest_execution is None:
+        raise ProviderWriteError(
+            f'{_plan_family(plan)} change plan retries require an earlier apply execution record.'
+        )
+
+    previous_request = dict(latest_execution.request_payload_json or {})
+    previous_item_batches = list(previous_request.get('item_batches') or [])
+    if not previous_item_batches:
+        raise ProviderWriteError(
+            f'{_plan_family(plan)} change plan retries are only supported for executions with per-item batch audit.'
+        )
+
+    current_signatures = _request_item_signatures(item_batches)
+    previous_signatures = _request_item_signatures(previous_item_batches)
+    if current_signatures != previous_signatures:
+        raise ProviderWriteError(
+            f'{_plan_family(plan)} change plan payload changed since the failed execution; review or regenerate before retrying.'
+        )
+
+    previous_results = list((latest_execution.response_payload_json or {}).get('item_results') or [])
+    failed_item_ids = [
+        item_result.get('item_id')
+        for item_result in previous_results
+        if item_result.get('status') != 'completed'
+    ]
+    failed_item_ids = [
+        item_id
+        for item_id in failed_item_ids
+        if isinstance(item_id, int)
+    ]
+    if not failed_item_ids:
+        raise ProviderWriteError(
+            f'No failed {_plan_family(plan)} provider-write items remain to retry for this plan.'
+        )
+
+    selected_batches = [
+        batch
+        for batch in item_batches
+        if batch['item_id'] in failed_item_ids
+    ]
+    if not selected_batches:
+        raise ProviderWriteError(
+            f'No failed {_plan_family(plan)} provider-write items remain to retry for this plan.'
+        )
+
+    context.update({
+        'retry_mode': 'failed_only',
+        'retry_source_execution_id': latest_execution.pk,
+        'safe_retry': True,
+        'automatic_failed_only': len(selected_batches) != len(item_batches),
+        'failed_item_ids': failed_item_ids,
+        'successful_item_count_previous': sum(
+            1 for item_result in previous_results
+            if item_result.get('status') == 'completed'
+        ),
+    })
+    return selected_batches, context
+
+
+def _build_apply_request_payload(
+    *,
+    family: str,
+    delta: dict[str, list[dict]],
+    item_batches: list[dict[str, object]],
+    retry_context: dict[str, object],
+) -> dict[str, object]:
+    return {
+        'schema_version': 1,
+        'family': family.lower(),
+        'family_display': family,
+        'delta': delta,
+        'item_batches': [
+            {
+                key: value
+                for key, value in batch.items()
+                if key != 'request_delta'
+            } | {'request_delta': batch['request_delta']}
+            for batch in item_batches
+        ],
+        'retry_mode': retry_context['retry_mode'],
+        'retry_source_execution_id': retry_context['retry_source_execution_id'],
+        'failed_item_ids': list(retry_context.get('failed_item_ids') or []),
+        'automatic_failed_only': bool(retry_context.get('automatic_failed_only')),
+    }
+
+
+def _build_item_rollback_advice(
+    *,
+    provider_account: rpki_models.RpkiProviderAccount,
+    family: str,
+    request_delta: dict[str, list[dict]],
+    successful: bool,
+) -> dict[str, object]:
+    inverse_delta = _invert_delta(request_delta)
+    if not successful:
+        return {
+            'rollback_required': False,
+            'summary': 'No rollback is recorded for this item because the provider did not confirm it as applied.',
+            'inverse_delta': _empty_delta(),
+            'inverse_provider_request': _serialize_provider_request_payload(
+                provider_account,
+                _empty_delta(),
+                family=family,
+            ),
+        }
+    return {
+        'rollback_required': True,
+        'summary': 'Rollback this item with the inverse provider delta, or apply the accumulated rollback bundle for the plan.',
+        'inverse_delta': inverse_delta,
+        'inverse_provider_request': _serialize_provider_request_payload(
+            provider_account,
+            inverse_delta,
+            family=family,
+        ),
+    }
+
+
+def _build_apply_item_result(
+    *,
+    provider_account: rpki_models.RpkiProviderAccount,
+    family: str,
+    batch: dict[str, object],
+    provider_response: dict | None,
+    error_text: str = '',
+) -> dict[str, object]:
+    successful = not error_text
+    request_delta = batch['request_delta']
+    return {
+        'item_id': batch['item_id'],
+        'item_name': batch['item_name'],
+        'plan_semantic': batch['plan_semantic'],
+        'provider_operation': batch['provider_operation'],
+        'provider_payload': dict(batch.get('provider_payload') or {}),
+        'before_state': dict(batch.get('before_state') or {}),
+        'after_state': dict(batch.get('after_state') or {}),
+        'state_diff': list(batch.get('state_diff') or []),
+        'reason': batch.get('reason') or '',
+        'status': 'failed' if error_text else 'completed',
+        'request_delta': request_delta,
+        'provider_request': _serialize_provider_request_payload(
+            provider_account,
+            request_delta,
+            family=family,
+        ),
+        'provider_response': provider_response or {},
+        'error': error_text,
+        'rollback_advice': _build_item_rollback_advice(
+            provider_account=provider_account,
+            family=family,
+            request_delta=request_delta,
+            successful=successful,
+        ),
+    }
+
+
+def _build_batch_summary(
+    *,
+    item_results: list[dict[str, object]],
+    retry_context: dict[str, object],
+) -> dict[str, object]:
+    successful_item_ids = [
+        item_result['item_id']
+        for item_result in item_results
+        if item_result['status'] == 'completed'
+    ]
+    failed_item_ids = [
+        item_result['item_id']
+        for item_result in item_results
+        if item_result['status'] != 'completed'
+    ]
+    return {
+        'requested_item_count': len(item_results),
+        'successful_item_count': len(successful_item_ids),
+        'failed_item_count': len(failed_item_ids),
+        'successful_item_ids': successful_item_ids,
+        'failed_item_ids': failed_item_ids,
+        'partial_success': bool(successful_item_ids and failed_item_ids),
+        'retry_mode': retry_context['retry_mode'],
+        'retry_source_execution_id': retry_context['retry_source_execution_id'],
+        'safe_retry': bool(failed_item_ids),
+    }
+
+
+def _build_rerun_advice(
+    *,
+    batch_summary: dict[str, object],
+    retry_context: dict[str, object],
+) -> dict[str, object]:
+    failed_item_ids = list(batch_summary.get('failed_item_ids') or [])
+    if failed_item_ids:
+        if retry_context['retry_mode'] == 'failed_only':
+            reason = 'Retry this plan again to rerun only the remaining failed provider-write items.'
+        else:
+            reason = 'Retry this plan again to rerun only the failed provider-write items while the plan payload is unchanged.'
+    else:
+        reason = 'No failed provider-write items remain to retry.'
+    return {
+        'can_retry_failed_items': bool(failed_item_ids),
+        'failed_item_ids': failed_item_ids,
+        'retry_mode': 'failed_only' if failed_item_ids else 'none',
+        'reason': reason,
+    }
+
+
 def _invert_delta(delta: dict[str, list[dict]]) -> dict[str, list[dict]]:
     return {
         'added': list(delta.get('removed', [])),
@@ -422,14 +763,19 @@ def _create_roa_rollback_bundle(
     delta: dict[str, list[dict]],
 ) -> rpki_models.ROAChangePlanRollbackBundle:
     rollback_delta = _invert_delta(delta)
-    bundle = rpki_models.ROAChangePlanRollbackBundle(
-        name=f'{plan.name} Rollback',
-        organization=plan.organization,
-        source_plan=plan,
-        tenant=plan.tenant,
-        rollback_delta_json=rollback_delta,
-        item_count=sum(len(values) for values in rollback_delta.values()),
-    )
+    try:
+        bundle = plan.rollback_bundle
+    except rpki_models.ROAChangePlanRollbackBundle.DoesNotExist:
+        bundle = rpki_models.ROAChangePlanRollbackBundle(
+            name=f'{plan.name} Rollback',
+            organization=plan.organization,
+            source_plan=plan,
+            tenant=plan.tenant,
+            rollback_delta_json=_empty_delta(),
+            item_count=0,
+        )
+    bundle.rollback_delta_json = _merge_delta(bundle.rollback_delta_json or _empty_delta(), rollback_delta)
+    bundle.item_count = _delta_item_count(bundle.rollback_delta_json)
     bundle.full_clean(validate_unique=False)
     bundle.save()
     return bundle
@@ -440,14 +786,19 @@ def _create_aspa_rollback_bundle(
     delta: dict[str, list[dict]],
 ) -> rpki_models.ASPAChangePlanRollbackBundle:
     rollback_delta = _invert_delta(delta)
-    bundle = rpki_models.ASPAChangePlanRollbackBundle(
-        name=f'{plan.name} Rollback',
-        organization=plan.organization,
-        source_plan=plan,
-        tenant=plan.tenant,
-        rollback_delta_json=rollback_delta,
-        item_count=sum(len(values) for values in rollback_delta.values()),
-    )
+    try:
+        bundle = plan.rollback_bundle
+    except rpki_models.ASPAChangePlanRollbackBundle.DoesNotExist:
+        bundle = rpki_models.ASPAChangePlanRollbackBundle(
+            name=f'{plan.name} Rollback',
+            organization=plan.organization,
+            source_plan=plan,
+            tenant=plan.tenant,
+            rollback_delta_json=_empty_delta(),
+            item_count=0,
+        )
+    bundle.rollback_delta_json = _merge_delta(bundle.rollback_delta_json or _empty_delta(), rollback_delta)
+    bundle.item_count = _delta_item_count(bundle.rollback_delta_json)
     bundle.full_clean(validate_unique=False)
     bundle.save()
     return bundle
@@ -1086,7 +1437,7 @@ def preview_roa_change_plan_provider_write(
         provider_account=provider_account,
         execution_mode=rpki_models.ProviderWriteExecutionMode.PREVIEW,
         requested_by=requested_by,
-        status=rpki_models.ValidationRunStatus.COMPLETED,
+        status=rpki_models.ProviderWriteExecutionStatus.COMPLETED,
         started_at=started_at,
         completed_at=started_at,
         item_count=sum(len(values) for values in delta.values()),
@@ -1117,7 +1468,7 @@ def preview_aspa_change_plan_provider_write(
         provider_account=provider_account,
         execution_mode=rpki_models.ProviderWriteExecutionMode.PREVIEW,
         requested_by=requested_by,
-        status=rpki_models.ValidationRunStatus.COMPLETED,
+        status=rpki_models.ProviderWriteExecutionStatus.COMPLETED,
         started_at=started_at,
         completed_at=started_at,
         item_count=sum(len(values) for values in delta.values()),
@@ -1277,59 +1628,158 @@ def apply_roa_change_plan_provider_write(
     plan = _normalize_plan(plan)
     provider_account = _require_applicable(plan)
     adapter = get_provider_adapter(provider_account)
-    delta = build_roa_change_plan_delta(plan)
+    all_item_batches = _build_plan_item_batches(plan)
+    item_batches, retry_context = _resolve_apply_item_batches(plan, all_item_batches)
+    delta = _empty_delta()
+    for batch in item_batches:
+        delta = _merge_delta(delta, batch['request_delta'])
     started_at = timezone.now()
     plan.status = rpki_models.ROAChangePlanStatus.APPLYING
     plan.apply_started_at = started_at
     plan.apply_requested_by = requested_by
     plan.failed_at = None
     plan.save(update_fields=('status', 'apply_started_at', 'apply_requested_by', 'failed_at'))
+    request_payload_json = _build_apply_request_payload(
+        family='ROA',
+        delta=delta,
+        item_batches=item_batches,
+        retry_context=retry_context,
+    )
     execution = _create_execution(
         plan=plan,
         provider_account=provider_account,
         execution_mode=rpki_models.ProviderWriteExecutionMode.APPLY,
         requested_by=requested_by,
-        status=rpki_models.ValidationRunStatus.RUNNING,
+        status=rpki_models.ProviderWriteExecutionStatus.RUNNING,
         started_at=started_at,
-        item_count=sum(len(values) for values in delta.values()),
-        request_payload_json=delta,
+        item_count=len(item_batches),
+        request_payload_json=request_payload_json,
     )
 
     try:
-        provider_response = adapter.apply_roa_delta(provider_account, delta)
-        applied_at = timezone.now()
-        plan.status = rpki_models.ROAChangePlanStatus.APPLIED
-        plan.applied_at = applied_at
-        plan.save(update_fields=('status', 'applied_at'))
-        _create_roa_rollback_bundle(plan, delta)
-
         response_payload_json = {
-            'provider_response': provider_response,
+            'schema_version': 1,
+            'family': 'roa',
             'roa_write_mode': provider_account.roa_write_mode,
             'governance': _get_plan_governance_metadata(plan),
+            'delta': delta,
+            'item_results': [],
+            'provider_response': {},
+            'provider_responses': [],
         }
+        successful_delta = _empty_delta()
+        encountered_errors: list[str] = []
+        for batch in item_batches:
+            try:
+                provider_response = adapter.apply_roa_delta(provider_account, batch['request_delta'])
+                successful_delta = _merge_delta(successful_delta, batch['request_delta'])
+                response_payload_json['item_results'].append(
+                    _build_apply_item_result(
+                        provider_account=provider_account,
+                        family='ROA',
+                        batch=batch,
+                        provider_response=provider_response,
+                    )
+                )
+                response_payload_json['provider_responses'].append(provider_response)
+                response_payload_json['provider_response'] = provider_response
+            except Exception as exc:
+                encountered_errors.append(str(exc))
+                response_payload_json['item_results'].append(
+                    _build_apply_item_result(
+                        provider_account=provider_account,
+                        family='ROA',
+                        batch=batch,
+                        provider_response=None,
+                        error_text=str(exc),
+                    )
+                )
+
+        batch_summary = _build_batch_summary(
+            item_results=response_payload_json['item_results'],
+            retry_context=retry_context,
+        )
+        response_payload_json['batch_summary'] = batch_summary
+        response_payload_json['rerun_advice'] = _build_rerun_advice(
+            batch_summary=batch_summary,
+            retry_context=retry_context,
+        )
+
+        successful_item_count = batch_summary['successful_item_count']
+        failed_item_count = batch_summary['failed_item_count']
+        if successful_item_count:
+            rollback_bundle = _create_roa_rollback_bundle(plan, successful_delta)
+            response_payload_json['rollback_guidance'] = {
+                'rollback_bundle_id': rollback_bundle.pk,
+                'rollback_bundle_name': rollback_bundle.name,
+                'rollback_bundle_url': rollback_bundle.get_absolute_url(),
+                'successful_delta': successful_delta,
+                'inverse_delta': _invert_delta(successful_delta),
+                'successful_item_ids': batch_summary['successful_item_ids'],
+            }
+        else:
+            rollback_bundle = None
+            response_payload_json['rollback_guidance'] = {
+                'rollback_bundle_id': None,
+                'rollback_bundle_name': '',
+                'rollback_bundle_url': '',
+                'successful_delta': _empty_delta(),
+                'inverse_delta': _empty_delta(),
+                'successful_item_ids': [],
+            }
+
         followup_sync_run = None
         followup_snapshot = None
-        try:
-            followup_sync_run, followup_snapshot = sync_provider_account(
-                provider_account,
-                snapshot_name=(
-                    f'{provider_account.name} Post-Apply Snapshot {applied_at:%Y-%m-%d %H:%M:%S}'
-                ),
+        followup_error = ''
+        if successful_item_count:
+            applied_at = timezone.now()
+            try:
+                followup_sync_run, followup_snapshot = sync_provider_account(
+                    provider_account,
+                    snapshot_name=(
+                        f'{provider_account.name} Post-Apply Snapshot {applied_at:%Y-%m-%d %H:%M:%S}'
+                    ),
+                )
+                response_payload_json['followup_sync'] = {
+                    'provider_sync_run_id': followup_sync_run.pk,
+                    'provider_snapshot_id': followup_snapshot.pk,
+                    'status': followup_sync_run.status,
+                }
+            except Exception as exc:
+                followup_error = str(exc)
+                response_payload_json['followup_sync'] = {
+                    'status': rpki_models.ValidationRunStatus.FAILED,
+                    'error': followup_error,
+                }
+        else:
+            applied_at = None
+            response_payload_json['followup_sync'] = {
+                'status': 'not_run',
+                'reason': 'No provider changes were confirmed as applied.',
+            }
+
+        if failed_item_count:
+            completed_at = timezone.now()
+            plan.status = rpki_models.ROAChangePlanStatus.FAILED
+            plan.failed_at = completed_at
+            plan.save(update_fields=('status', 'failed_at'))
+            execution.status = (
+                rpki_models.ProviderWriteExecutionStatus.PARTIAL
+                if successful_item_count
+                else rpki_models.ProviderWriteExecutionStatus.FAILED
             )
-            response_payload_json['followup_sync'] = {
-                'provider_sync_run_id': followup_sync_run.pk,
-                'provider_snapshot_id': followup_snapshot.pk,
-                'status': followup_sync_run.status,
-            }
-            execution.status = rpki_models.ValidationRunStatus.COMPLETED
-        except Exception as exc:
-            response_payload_json['followup_sync'] = {
-                'status': rpki_models.ValidationRunStatus.FAILED,
-                'error': str(exc),
-            }
-            execution.status = rpki_models.ValidationRunStatus.FAILED
-            execution.error = str(exc)
+            execution.error = '; '.join(encountered_errors)[:4000]
+        else:
+            plan.status = rpki_models.ROAChangePlanStatus.APPLIED
+            plan.applied_at = applied_at
+            plan.failed_at = None
+            plan.save(update_fields=('status', 'applied_at', 'failed_at'))
+            if followup_error:
+                execution.status = rpki_models.ProviderWriteExecutionStatus.FAILED
+                execution.error = followup_error
+            else:
+                execution.status = rpki_models.ProviderWriteExecutionStatus.COMPLETED
+                execution.error = ''
 
         execution.completed_at = timezone.now()
         execution.response_payload_json = response_payload_json
@@ -1349,7 +1799,7 @@ def apply_roa_change_plan_provider_write(
         plan.status = rpki_models.ROAChangePlanStatus.FAILED
         plan.failed_at = completed_at
         plan.save(update_fields=('status', 'failed_at'))
-        execution.status = rpki_models.ValidationRunStatus.FAILED
+        execution.status = rpki_models.ProviderWriteExecutionStatus.FAILED
         execution.completed_at = completed_at
         execution.error = str(exc)
         execution.response_payload_json = {
@@ -1368,37 +1818,45 @@ def apply_aspa_change_plan_provider_write(
     plan = _normalize_aspa_plan(plan)
     provider_account = _require_aspa_applicable(plan)
     adapter = get_provider_adapter(provider_account)
-    delta = build_aspa_change_plan_delta(plan)
+    all_item_batches = _build_plan_item_batches(plan)
+    item_batches, retry_context = _resolve_apply_item_batches(plan, all_item_batches)
+    delta = _empty_delta()
+    for batch in item_batches:
+        delta = _merge_delta(delta, batch['request_delta'])
     started_at = timezone.now()
     plan.status = rpki_models.ASPAChangePlanStatus.APPLYING
     plan.apply_started_at = started_at
     plan.apply_requested_by = requested_by
     plan.failed_at = None
     plan.save(update_fields=('status', 'apply_started_at', 'apply_requested_by', 'failed_at'))
+    request_payload_json = _build_apply_request_payload(
+        family='ASPA',
+        delta=delta,
+        item_batches=item_batches,
+        retry_context=retry_context,
+    )
     execution = _create_execution(
         plan=plan,
         provider_account=provider_account,
         execution_mode=rpki_models.ProviderWriteExecutionMode.APPLY,
         requested_by=requested_by,
-        status=rpki_models.ValidationRunStatus.RUNNING,
+        status=rpki_models.ProviderWriteExecutionStatus.RUNNING,
         started_at=started_at,
-        item_count=sum(len(values) for values in delta.values()),
-        request_payload_json=delta,
+        item_count=len(item_batches),
+        request_payload_json=request_payload_json,
     )
 
     try:
-        provider_response = adapter.apply_aspa_delta(provider_account, delta)
-        applied_at = timezone.now()
-        plan.status = rpki_models.ASPAChangePlanStatus.APPLIED
-        plan.applied_at = applied_at
-        plan.save(update_fields=('status', 'applied_at'))
-        _create_aspa_rollback_bundle(plan, delta)
-
         response_payload_json = {
-            'provider_response': provider_response,
+            'schema_version': 1,
+            'family': 'aspa',
             'aspa_write_mode': provider_account.aspa_write_mode,
             'governance': _get_plan_governance_metadata(plan),
             'delegated_scope': _get_plan_delegated_scope_metadata(plan),
+            'delta': delta,
+            'item_results': [],
+            'provider_response': {},
+            'provider_responses': [],
             'delta_summary': {
                 'customer_count': len(delta.get('added', [])) + len(delta.get('removed', [])),
                 'create_count': len(delta.get('added', [])),
@@ -1407,28 +1865,119 @@ def apply_aspa_change_plan_provider_write(
                 'provider_remove_count': sum(len(entry.get('provider_asns') or []) for entry in delta.get('removed', [])),
             },
         }
+        successful_delta = _empty_delta()
+        encountered_errors: list[str] = []
+        for batch in item_batches:
+            try:
+                provider_response = adapter.apply_aspa_delta(provider_account, batch['request_delta'])
+                successful_delta = _merge_delta(successful_delta, batch['request_delta'])
+                response_payload_json['item_results'].append(
+                    _build_apply_item_result(
+                        provider_account=provider_account,
+                        family='ASPA',
+                        batch=batch,
+                        provider_response=provider_response,
+                    )
+                )
+                response_payload_json['provider_responses'].append(provider_response)
+                response_payload_json['provider_response'] = provider_response
+            except Exception as exc:
+                encountered_errors.append(str(exc))
+                response_payload_json['item_results'].append(
+                    _build_apply_item_result(
+                        provider_account=provider_account,
+                        family='ASPA',
+                        batch=batch,
+                        provider_response=None,
+                        error_text=str(exc),
+                    )
+                )
+
+        batch_summary = _build_batch_summary(
+            item_results=response_payload_json['item_results'],
+            retry_context=retry_context,
+        )
+        response_payload_json['batch_summary'] = batch_summary
+        response_payload_json['rerun_advice'] = _build_rerun_advice(
+            batch_summary=batch_summary,
+            retry_context=retry_context,
+        )
+
+        successful_item_count = batch_summary['successful_item_count']
+        failed_item_count = batch_summary['failed_item_count']
+        if successful_item_count:
+            rollback_bundle = _create_aspa_rollback_bundle(plan, successful_delta)
+            response_payload_json['rollback_guidance'] = {
+                'rollback_bundle_id': rollback_bundle.pk,
+                'rollback_bundle_name': rollback_bundle.name,
+                'rollback_bundle_url': rollback_bundle.get_absolute_url(),
+                'successful_delta': successful_delta,
+                'inverse_delta': _invert_delta(successful_delta),
+                'successful_item_ids': batch_summary['successful_item_ids'],
+            }
+        else:
+            rollback_bundle = None
+            response_payload_json['rollback_guidance'] = {
+                'rollback_bundle_id': None,
+                'rollback_bundle_name': '',
+                'rollback_bundle_url': '',
+                'successful_delta': _empty_delta(),
+                'inverse_delta': _empty_delta(),
+                'successful_item_ids': [],
+            }
+
         followup_sync_run = None
         followup_snapshot = None
-        try:
-            followup_sync_run, followup_snapshot = sync_provider_account(
-                provider_account,
-                snapshot_name=(
-                    f'{provider_account.name} Post-ASPA-Apply Snapshot {applied_at:%Y-%m-%d %H:%M:%S}'
-                ),
+        followup_error = ''
+        if successful_item_count:
+            applied_at = timezone.now()
+            try:
+                followup_sync_run, followup_snapshot = sync_provider_account(
+                    provider_account,
+                    snapshot_name=(
+                        f'{provider_account.name} Post-ASPA-Apply Snapshot {applied_at:%Y-%m-%d %H:%M:%S}'
+                    ),
+                )
+                response_payload_json['followup_sync'] = {
+                    'provider_sync_run_id': followup_sync_run.pk,
+                    'provider_snapshot_id': followup_snapshot.pk,
+                    'status': followup_sync_run.status,
+                }
+            except Exception as exc:
+                followup_error = str(exc)
+                response_payload_json['followup_sync'] = {
+                    'status': rpki_models.ValidationRunStatus.FAILED,
+                    'error': followup_error,
+                }
+        else:
+            applied_at = None
+            response_payload_json['followup_sync'] = {
+                'status': 'not_run',
+                'reason': 'No provider changes were confirmed as applied.',
+            }
+
+        if failed_item_count:
+            completed_at = timezone.now()
+            plan.status = rpki_models.ASPAChangePlanStatus.FAILED
+            plan.failed_at = completed_at
+            plan.save(update_fields=('status', 'failed_at'))
+            execution.status = (
+                rpki_models.ProviderWriteExecutionStatus.PARTIAL
+                if successful_item_count
+                else rpki_models.ProviderWriteExecutionStatus.FAILED
             )
-            response_payload_json['followup_sync'] = {
-                'provider_sync_run_id': followup_sync_run.pk,
-                'provider_snapshot_id': followup_snapshot.pk,
-                'status': followup_sync_run.status,
-            }
-            execution.status = rpki_models.ValidationRunStatus.COMPLETED
-        except Exception as exc:
-            response_payload_json['followup_sync'] = {
-                'status': rpki_models.ValidationRunStatus.FAILED,
-                'error': str(exc),
-            }
-            execution.status = rpki_models.ValidationRunStatus.FAILED
-            execution.error = str(exc)
+            execution.error = '; '.join(encountered_errors)[:4000]
+        else:
+            plan.status = rpki_models.ASPAChangePlanStatus.APPLIED
+            plan.applied_at = applied_at
+            plan.failed_at = None
+            plan.save(update_fields=('status', 'applied_at', 'failed_at'))
+            if followup_error:
+                execution.status = rpki_models.ProviderWriteExecutionStatus.FAILED
+                execution.error = followup_error
+            else:
+                execution.status = rpki_models.ProviderWriteExecutionStatus.COMPLETED
+                execution.error = ''
 
         execution.completed_at = timezone.now()
         execution.response_payload_json = response_payload_json
@@ -1448,7 +1997,7 @@ def apply_aspa_change_plan_provider_write(
         plan.status = rpki_models.ASPAChangePlanStatus.FAILED
         plan.failed_at = completed_at
         plan.save(update_fields=('status', 'failed_at'))
-        execution.status = rpki_models.ValidationRunStatus.FAILED
+        execution.status = rpki_models.ProviderWriteExecutionStatus.FAILED
         execution.completed_at = completed_at
         execution.error = str(exc)
         execution.response_payload_json = {

@@ -587,6 +587,62 @@
               </div>
             </div>
 
+            <div class="row mb-4">
+              <div class="col col-md-12">
+                <div class="card" id="provider-write-failures-attention">
+                  <h5 class="card-header">Recent Provider Write Failures</h5>
+                  {% if provider_write_failures %}
+                    <div class="card-body table-responsive">
+                      <table class="table table-hover align-middle mb-0">
+                        <thead>
+                          <tr>
+                            <th>Name</th>
+                            <th>Organization</th>
+                            <th>Provider Account</th>
+                            <th>Family</th>
+                            <th>Change Plan</th>
+                            <th>Status</th>
+                            <th>Successful Items</th>
+                            <th>Failed Items</th>
+                            <th>Retry Guidance</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {% for item in provider_write_failures %}
+                            <tr>
+                              <td><a href="{{ item.execution.get_absolute_url }}">{{ item.execution.name }}</a></td>
+                              <td><a href="{{ item.execution.organization.get_absolute_url }}">{{ item.execution.organization }}</a></td>
+                              <td><a href="{{ item.execution.provider_account.get_absolute_url }}">{{ item.execution.provider_account.name }}</a></td>
+                              <td>{{ item.object_family_display }}</td>
+                              <td>
+                                {% if item.target_change_plan %}
+                                  <a href="{{ item.target_change_plan.get_absolute_url }}">{{ item.target_change_plan.name }}</a>
+                                {% else %}
+                                  <span class="text-muted">None</span>
+                                {% endif %}
+                              </td>
+                              <td><span class="badge bg-{{ item.status_badge_class }}">{{ item.execution.status }}</span></td>
+                              <td>{{ item.successful_item_count }}</td>
+                              <td>{{ item.failed_item_count }}</td>
+                              <td>
+                                {% if item.rerun_advice.can_retry_failed_items %}
+                                  {{ item.rerun_advice.reason }}
+                                {% else %}
+                                  <span class="text-muted">{{ item.execution.error|default:'No retry guidance recorded.' }}</span>
+                                {% endif %}
+                              </td>
+                            </tr>
+                          {% endfor %}
+                        </tbody>
+                      </table>
+                    </div>
+                  {% else %}
+                    <div class="card-body text-muted">No recent provider write failures recorded.</div>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+
             <div class="row">
               <div class="col col-md-12">
                 <div class="card" id="irr-write-failures-attention">

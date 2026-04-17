@@ -604,6 +604,14 @@ class ProviderWriteExecutionMode(models.TextChoices):
     APPLY = "apply", "Apply"
 
 
+class ProviderWriteExecutionStatus(models.TextChoices):
+    PENDING = "pending", "Pending"
+    RUNNING = "running", "Running"
+    COMPLETED = "completed", "Completed"
+    FAILED = "failed", "Failed"
+    PARTIAL = "partial", "Partial"
+
+
 class RollbackBundleStatus(models.TextChoices):
     AVAILABLE = "available", "Available"
     APPROVED = "approved", "Approved"
@@ -1728,8 +1736,8 @@ class ValidationRun(NamedRpkiStandardModel):
     )
     status = models.CharField(
         max_length=32,
-        choices=ValidationRunStatus.choices,
-        default=ValidationRunStatus.PENDING,
+        choices=ProviderWriteExecutionStatus.choices,
+        default=ProviderWriteExecutionStatus.PENDING,
     )
     started_at = models.DateTimeField(blank=True, null=True)
     completed_at = models.DateTimeField(blank=True, null=True)

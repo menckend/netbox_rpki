@@ -88,6 +88,7 @@ from netbox_rpki.tests.utils import (
     create_test_routing_intent_template_rule,
     create_test_provider_account,
     create_test_provider_snapshot,
+    create_test_provider_write_execution,
     create_test_router_certificate,
     create_test_telemetry_run,
     create_test_telemetry_source,
@@ -2443,6 +2444,30 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
                 'provider_remove_count': 1,
             },
         )
+        cls.provider_write_execution = create_test_provider_write_execution(
+            name='Operations Provider Write Failure',
+            organization=cls.organization,
+            provider_account=cls.aspa_provider_account,
+            provider_snapshot=cls.aspa_snapshot,
+            change_plan=None,
+            aspa_change_plan=cls.aspa_change_plan,
+            execution_mode=rpki_models.ProviderWriteExecutionMode.APPLY,
+            status=rpki_models.ProviderWriteExecutionStatus.PARTIAL,
+            error='Second provider write item failed during dashboard test',
+            response_payload_json={
+                'batch_summary': {
+                    'successful_item_count': 1,
+                    'failed_item_count': 1,
+                    'failed_item_ids': [2],
+                },
+                'rerun_advice': {
+                    'can_retry_failed_items': True,
+                    'failed_item_ids': [2],
+                    'retry_mode': 'failed_only',
+                    'reason': 'Retry this plan again to rerun only the remaining failed provider-write items.',
+                },
+            },
+        )
         cls.validator_attention = create_test_validator_instance(
             name='Operations Validator',
             organization=cls.organization,
@@ -2548,6 +2573,7 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
             'netbox_rpki.view_roachangeplan',
             'netbox_rpki.view_aspareconciliationrun',
             'netbox_rpki.view_aspachangeplan',
+            'netbox_rpki.view_providerwriteexecution',
             'netbox_rpki.view_validatorinstance',
             'netbox_rpki.view_validationrun',
             'netbox_rpki.view_telemetrysource',
@@ -2631,6 +2657,9 @@ class OperationsDashboardViewTestCase(PluginViewTestCase):
         self.assertContains(response, self.irr_coordination_run.name)
         self.assertContains(response, 'IRR Change Plans Requiring Attention')
         self.assertContains(response, self.irr_change_plan.name)
+        self.assertContains(response, 'Recent Provider Write Failures')
+        self.assertContains(response, self.provider_write_execution.name)
+        self.assertContains(response, 'Retry this plan again to rerun only the remaining failed provider-write items.')
         self.assertContains(response, 'Recent IRR Write Failures')
         self.assertContains(response, self.irr_write_execution.name)
         self.assertContains(response, 'IRR delete rejected during dashboard test')
@@ -2814,6 +2843,7 @@ class OperationsDashboardEmptyStateViewTestCase(PluginViewTestCase):
             'netbox_rpki.view_roachangeplan',
             'netbox_rpki.view_aspareconciliationrun',
             'netbox_rpki.view_aspachangeplan',
+            'netbox_rpki.view_providerwriteexecution',
             'netbox_rpki.view_validatorinstance',
             'netbox_rpki.view_validationrun',
             'netbox_rpki.view_telemetrysource',

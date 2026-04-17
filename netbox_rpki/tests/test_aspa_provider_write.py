@@ -295,8 +295,10 @@ class AspaProviderWriteServiceTestCase(TestCase):
         self.assertEqual(plan.apply_requested_by, 'apply-user')
         self.assertEqual(execution.status, rpki_models.ValidationRunStatus.COMPLETED)
         self.assertEqual(execution.aspa_change_plan, plan)
-        self.assertEqual(execution.request_payload_json, delta)
+        self.assertEqual(execution.request_payload_json['delta'], delta)
         self.assertEqual(execution.response_payload_json['provider_response'], {'message': 'accepted'})
+        self.assertEqual(execution.response_payload_json['batch_summary']['successful_item_count'], 1)
+        self.assertEqual(execution.response_payload_json['batch_summary']['failed_item_count'], 0)
         self.assertEqual(execution.followup_sync_run, followup_sync_run)
         self.assertEqual(execution.followup_provider_snapshot, followup_snapshot)
         rollback_bundle = plan.rollback_bundle
@@ -309,7 +311,7 @@ class AspaProviderWriteServiceTestCase(TestCase):
             },
         )
         self.assertEqual(rollback_bundle.item_count, len(delta['added']) + len(delta['removed']))
-        submit_mock.assert_called_once_with(self.provider_account, delta)
+        submit_mock.assert_called_once_with(self.provider_account, {'added': delta['added'], 'removed': []})
         sync_mock.assert_called_once()
 
     def test_apply_failure_marks_plan_failed_and_records_error(self):
@@ -333,15 +335,105 @@ class AspaProviderWriteServiceTestCase(TestCase):
             'netbox_rpki.services.provider_write._submit_krill_aspa_delta',
             side_effect=RuntimeError('krill rejected aspa delta'),
         ):
-            with self.assertRaisesMessage(ProviderWriteError, 'krill rejected aspa delta'):
-                apply_aspa_change_plan_provider_write(plan, requested_by='failed-user')
+            execution, delta = apply_aspa_change_plan_provider_write(plan, requested_by='failed-user')
 
         plan.refresh_from_db()
         self.assertEqual(plan.status, rpki_models.ASPAChangePlanStatus.FAILED)
-        execution = plan.provider_write_executions.get(execution_mode=rpki_models.ProviderWriteExecutionMode.APPLY)
         self.assertEqual(execution.status, rpki_models.ValidationRunStatus.FAILED)
-        self.assertEqual(execution.error, 'krill rejected aspa delta')
+        self.assertIn('krill rejected aspa delta', execution.error)
+        self.assertEqual(execution.request_payload_json['delta'], delta)
+        self.assertTrue(execution.response_payload_json['rerun_advice']['can_retry_failed_items'])
         self.assertFalse(rpki_models.ASPAChangePlanRollbackBundle.objects.filter(source_plan=plan).exists())
+
+    def test_apply_partial_failure_can_retry_only_failed_items(self):
+        customer_a = create_test_asn(64762)
+        provider_a = create_test_asn(64763)
+        customer_b = create_test_asn(64764)
+        provider_b = create_test_asn(64765)
+        create_test_aspa_intent(
+            name='ASPA Retry Intent A',
+            organization=self.organization,
+            customer_as=customer_a,
+            provider_as=provider_a,
+        )
+        create_test_aspa_intent(
+            name='ASPA Retry Intent B',
+            organization=self.organization,
+            customer_as=customer_b,
+            provider_as=provider_b,
+        )
+        run = reconcile_aspa_intents(
+            self.organization,
+            comparison_scope=rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
+            provider_snapshot=self.provider_snapshot,
+        )
+        plan = create_aspa_change_plan(run, name='ASPA Partial Retry Plan')
+        approve_aspa_change_plan(plan, approved_by='retry-approver')
+
+        partial_followup_snapshot = create_test_provider_snapshot(
+            name='ASPA Partial Retry Snapshot',
+            organization=self.organization,
+            provider_account=self.provider_account,
+            provider_name='Krill',
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        partial_followup_sync_run = create_test_provider_sync_run(
+            name='ASPA Partial Retry Sync Run',
+            organization=self.organization,
+            provider_account=self.provider_account,
+            provider_snapshot=partial_followup_snapshot,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+
+        with patch(
+            'netbox_rpki.services.provider_write._submit_krill_aspa_delta',
+            side_effect=[{'message': 'accepted'}, RuntimeError('second aspa item failed')],
+        ) as submit_mock:
+            with patch(
+                'netbox_rpki.services.provider_write.sync_provider_account',
+                return_value=(partial_followup_sync_run, partial_followup_snapshot),
+            ):
+                execution, delta = apply_aspa_change_plan_provider_write(plan, requested_by='partial-user')
+
+        plan.refresh_from_db()
+        self.assertEqual(plan.status, rpki_models.ASPAChangePlanStatus.FAILED)
+        self.assertEqual(execution.status, rpki_models.ProviderWriteExecutionStatus.PARTIAL)
+        self.assertEqual(execution.response_payload_json['batch_summary']['successful_item_count'], 1)
+        self.assertEqual(execution.response_payload_json['batch_summary']['failed_item_count'], 1)
+        self.assertEqual(submit_mock.call_count, 2)
+        self.assertEqual(plan.rollback_bundle.item_count, 1)
+
+        retry_followup_snapshot = create_test_provider_snapshot(
+            name='ASPA Retry Snapshot',
+            organization=self.organization,
+            provider_account=self.provider_account,
+            provider_name='Krill',
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        retry_followup_sync_run = create_test_provider_sync_run(
+            name='ASPA Retry Sync Run',
+            organization=self.organization,
+            provider_account=self.provider_account,
+            provider_snapshot=retry_followup_snapshot,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        with patch(
+            'netbox_rpki.services.provider_write._submit_krill_aspa_delta',
+            return_value={'message': 'retry accepted'},
+        ) as retry_submit_mock:
+            with patch(
+                'netbox_rpki.services.provider_write.sync_provider_account',
+                return_value=(retry_followup_sync_run, retry_followup_snapshot),
+            ):
+                retry_execution, retry_delta = apply_aspa_change_plan_provider_write(plan, requested_by='retry-user')
+
+        plan.refresh_from_db()
+        self.assertEqual(plan.status, rpki_models.ASPAChangePlanStatus.APPLIED)
+        self.assertEqual(retry_execution.status, rpki_models.ProviderWriteExecutionStatus.COMPLETED)
+        self.assertEqual(retry_execution.request_payload_json['retry_mode'], 'failed_only')
+        self.assertEqual(retry_execution.request_payload_json['delta'], retry_delta)
+        retry_submit_mock.assert_called_once()
+        self.assertEqual(plan.rollback_bundle.item_count, len(delta['added']) + len(delta['removed']))
 
     def test_apply_records_partial_failure_on_followup_sync_failure(self):
         customer = create_test_asn(64770)

@@ -1995,6 +1995,7 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
         'netbox_rpki.view_roachangeplan',
         'netbox_rpki.view_aspareconciliationrun',
         'netbox_rpki.view_aspachangeplan',
+        'netbox_rpki.view_providerwriteexecution',
         'netbox_rpki.view_irrsource',
         'netbox_rpki.view_irrcoordinationrun',
         'netbox_rpki.view_irrchangeplan',
@@ -2030,6 +2031,7 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
         irr_sources_requiring_attention = self.get_irr_sources_requiring_attention(request)
         irr_coordination_attention_runs = self.get_irr_coordination_attention_runs(request)
         irr_change_plans_requiring_attention = self.get_irr_change_plans_requiring_attention(request)
+        provider_write_failures = self.get_recent_provider_write_failures(request)
         irr_write_failures = self.get_recent_irr_write_failures(request)
         attention_tiles = self.build_attention_tiles(
             provider_accounts=provider_accounts,
@@ -2048,6 +2050,7 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
             irr_sources_requiring_attention=irr_sources_requiring_attention,
             irr_coordination_attention_runs=irr_coordination_attention_runs,
             irr_change_plans_requiring_attention=irr_change_plans_requiring_attention,
+            provider_write_failures=provider_write_failures,
             irr_write_failures=irr_write_failures,
             expiring_roas=expiring_roas,
             expiring_certificates=expiring_certificates,
@@ -2076,6 +2079,7 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
             'irr_sources_requiring_attention': irr_sources_requiring_attention,
             'irr_coordination_attention_runs': irr_coordination_attention_runs,
             'irr_change_plans_requiring_attention': irr_change_plans_requiring_attention,
+            'provider_write_failures': provider_write_failures,
             'irr_write_failures': irr_write_failures,
         })
 
@@ -2107,6 +2111,7 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
         irr_sources_requiring_attention,
         irr_coordination_attention_runs,
         irr_change_plans_requiring_attention,
+        provider_write_failures,
         irr_write_failures,
         expiring_roas,
         expiring_certificates,
@@ -2321,6 +2326,19 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
                 'workflow_url': self.build_dashboard_focus_url(
                     tab='workflow-attention',
                     section_id='irr-change-plans-attention',
+                ),
+            },
+            {
+                'title': 'Provider Write Failures',
+                'count': len(provider_write_failures),
+                'description': 'Recent failed or partial ROA or ASPA provider write executions.',
+                'empty_message': (
+                    'Apply provider-backed ROA or ASPA change plans to surface partial writes and failed retries here.'
+                ),
+                'action_label': 'Review provider write failures',
+                'workflow_url': self.build_dashboard_focus_url(
+                    tab='workflow-attention',
+                    section_id='provider-write-failures-attention',
                 ),
             },
             {
@@ -2585,6 +2603,42 @@ class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):
             }
         ).order_by('-started_at', '-created')
         return list(queryset[:20])
+
+    def get_recent_provider_write_failures(self, request):
+        queryset = models.ProviderWriteExecution.objects.restrict(request.user, 'view').select_related(
+            'organization',
+            'provider_account',
+            'change_plan',
+            'aspa_change_plan',
+        ).filter(
+            status__in={
+                models.ProviderWriteExecutionStatus.FAILED,
+                models.ProviderWriteExecutionStatus.PARTIAL,
+            }
+        ).order_by('-started_at', '-created')
+        items = []
+        for execution in queryset[:20]:
+            batch_summary = dict((execution.response_payload_json or {}).get('batch_summary') or {})
+            target_change_plan = execution.target_change_plan
+            items.append({
+                'execution': execution,
+                'target_change_plan': target_change_plan,
+                'object_family_display': execution.object_family.upper(),
+                'successful_item_count': batch_summary.get('successful_item_count', 0),
+                'failed_item_count': batch_summary.get('failed_item_count', 0),
+                'rerun_advice': dict((execution.response_payload_json or {}).get('rerun_advice') or {}),
+                'status_badge_class': self.get_provider_write_status_badge_class(execution.status),
+            })
+        return items
+
+    def get_provider_write_status_badge_class(self, status):
+        if status == models.ProviderWriteExecutionStatus.FAILED:
+            return 'danger'
+        if status == models.ProviderWriteExecutionStatus.PARTIAL:
+            return 'warning text-dark'
+        if status == models.ProviderWriteExecutionStatus.RUNNING:
+            return 'info'
+        return 'secondary'
 
     def get_expiring_roas(self, request):
         now = timezone.now()
@@ -3333,13 +3387,30 @@ class ROAChangePlanApplyView(ROAChangePlanActionView):
             messages.error(request, str(exc))
             return redirect(plan.get_absolute_url())
 
-        if execution.status == models.ValidationRunStatus.COMPLETED:
+        if execution.status == models.ProviderWriteExecutionStatus.COMPLETED:
             messages.success(request, f'Applied ROA change plan {plan.name}.')
-        else:
+        elif execution.status == models.ProviderWriteExecutionStatus.PARTIAL:
+            failed_item_count = (
+                (execution.response_payload_json or {}).get('batch_summary') or {}
+            ).get('failed_item_count', 0)
             messages.warning(
                 request,
-                f'Applied ROA change plan {plan.name}, but the follow-up provider sync did not complete successfully.',
+                f'Applied ROA change plan {plan.name} partially; {failed_item_count} item(s) failed and can be retried safely.',
             )
+        else:
+            failed_item_count = (
+                (execution.response_payload_json or {}).get('batch_summary') or {}
+            ).get('failed_item_count', 0)
+            if failed_item_count:
+                messages.error(
+                    request,
+                    f'ROA change plan {plan.name} failed to apply; {failed_item_count} item(s) were rejected.',
+                )
+            else:
+                messages.warning(
+                    request,
+                    f'Applied ROA change plan {plan.name}, but the follow-up provider sync did not complete successfully.',
+                )
         return redirect(plan.get_absolute_url())
 
 
@@ -3672,13 +3743,30 @@ class ASPAChangePlanApplyView(ASPAChangePlanActionView):
             messages.error(request, str(exc))
             return redirect(plan.get_absolute_url())
 
-        if execution.status == models.ValidationRunStatus.COMPLETED:
+        if execution.status == models.ProviderWriteExecutionStatus.COMPLETED:
             messages.success(request, f'Applied ASPA change plan {plan.name}.')
-        else:
+        elif execution.status == models.ProviderWriteExecutionStatus.PARTIAL:
+            failed_item_count = (
+                (execution.response_payload_json or {}).get('batch_summary') or {}
+            ).get('failed_item_count', 0)
             messages.warning(
                 request,
-                f'Applied ASPA change plan {plan.name}, but the follow-up provider sync did not complete successfully.',
+                f'Applied ASPA change plan {plan.name} partially; {failed_item_count} item(s) failed and can be retried safely.',
             )
+        else:
+            failed_item_count = (
+                (execution.response_payload_json or {}).get('batch_summary') or {}
+            ).get('failed_item_count', 0)
+            if failed_item_count:
+                messages.error(
+                    request,
+                    f'ASPA change plan {plan.name} failed to apply; {failed_item_count} item(s) were rejected.',
+                )
+            else:
+                messages.warning(
+                    request,
+                    f'Applied ASPA change plan {plan.name}, but the follow-up provider sync did not complete successfully.',
+                )
         return redirect(plan.get_absolute_url())
 
 

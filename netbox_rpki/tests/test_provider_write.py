@@ -586,8 +586,10 @@ class ProviderWriteServiceTestCase(TestCase):
         self.assertEqual(execution.status, rpki_models.ValidationRunStatus.COMPLETED)
         self.assertEqual(execution.followup_sync_run, followup_sync_run)
         self.assertEqual(execution.followup_provider_snapshot, followup_snapshot)
-        self.assertEqual(execution.request_payload_json, delta)
+        self.assertEqual(execution.request_payload_json['delta'], delta)
         self.assertEqual(execution.response_payload_json['provider_response'], {'message': 'accepted'})
+        self.assertEqual(execution.response_payload_json['batch_summary']['successful_item_count'], 2)
+        self.assertEqual(execution.response_payload_json['batch_summary']['failed_item_count'], 0)
         self.assertEqual(
             execution.response_payload_json['governance'],
             {
@@ -607,7 +609,14 @@ class ProviderWriteServiceTestCase(TestCase):
             },
         )
         self.assertEqual(rollback_bundle.item_count, len(delta['added']) + len(delta['removed']))
-        submit_mock.assert_called_once_with(self.provider_account, delta)
+        self.assertEqual(submit_mock.call_count, 2)
+        self.assertEqual(
+            [call.args[1] for call in submit_mock.call_args_list],
+            [
+                {'added': delta['added'], 'removed': []},
+                {'added': [], 'removed': delta['removed']},
+            ],
+        )
         sync_mock.assert_called_once_with(
             self.provider_account,
             snapshot_name=sync_mock.call_args.kwargs['snapshot_name'],
@@ -663,18 +672,99 @@ class ProviderWriteServiceTestCase(TestCase):
             'netbox_rpki.services.provider_write._submit_krill_route_delta',
             side_effect=RuntimeError('krill rejected delta'),
         ):
-            with self.assertRaisesMessage(ProviderWriteError, 'krill rejected delta'):
-                apply_roa_change_plan_provider_write(plan, requested_by='failed-apply-user')
+            execution, delta = apply_roa_change_plan_provider_write(plan, requested_by='failed-apply-user')
 
         plan.refresh_from_db()
         self.assertEqual(plan.status, rpki_models.ROAChangePlanStatus.FAILED)
         self.assertIsNotNone(plan.apply_started_at)
         self.assertEqual(plan.apply_requested_by, 'failed-apply-user')
         self.assertIsNotNone(plan.failed_at)
-        execution = plan.provider_write_executions.get(execution_mode=rpki_models.ProviderWriteExecutionMode.APPLY)
         self.assertEqual(execution.status, rpki_models.ValidationRunStatus.FAILED)
-        self.assertEqual(execution.error, 'krill rejected delta')
+        self.assertIn('krill rejected delta', execution.error)
+        self.assertEqual(execution.request_payload_json['delta'], delta)
+        self.assertEqual(execution.response_payload_json['batch_summary']['successful_item_count'], 0)
+        self.assertEqual(execution.response_payload_json['batch_summary']['failed_item_count'], 2)
+        self.assertTrue(execution.response_payload_json['rerun_advice']['can_retry_failed_items'])
         self.assertFalse(rpki_models.ROAChangePlanRollbackBundle.objects.filter(source_plan=plan).exists())
+
+    def test_apply_partial_failure_records_item_results_and_retry_applies_only_failed_items(self):
+        plan = create_roa_change_plan(self.reconciliation_run, name='Partial Apply Plan')
+        approve_roa_change_plan(
+            plan,
+            approved_by='partial-approver',
+            acknowledged_finding_ids=current_ack_required_finding_ids(plan),
+        )
+        partial_followup_snapshot = create_test_provider_snapshot(
+            name='Partial Apply Snapshot',
+            organization=self.organization,
+            provider_account=self.provider_account,
+            provider_name='Krill',
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        partial_followup_sync_run = create_test_provider_sync_run(
+            name='Partial Apply Sync Run',
+            organization=self.organization,
+            provider_account=self.provider_account,
+            provider_snapshot=partial_followup_snapshot,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+
+        with patch(
+            'netbox_rpki.services.provider_write._submit_krill_route_delta',
+            side_effect=[{'message': 'accepted'}, RuntimeError('second item failed')],
+        ) as submit_mock:
+            with patch(
+                'netbox_rpki.services.provider_write.sync_provider_account',
+                return_value=(partial_followup_sync_run, partial_followup_snapshot),
+            ):
+                execution, delta = apply_roa_change_plan_provider_write(plan, requested_by='partial-user')
+
+        plan.refresh_from_db()
+        self.assertEqual(plan.status, rpki_models.ROAChangePlanStatus.FAILED)
+        self.assertEqual(execution.status, rpki_models.ProviderWriteExecutionStatus.PARTIAL)
+        self.assertEqual(execution.response_payload_json['batch_summary']['successful_item_count'], 1)
+        self.assertEqual(execution.response_payload_json['batch_summary']['failed_item_count'], 1)
+        self.assertTrue(execution.response_payload_json['rerun_advice']['can_retry_failed_items'])
+        self.assertEqual(submit_mock.call_count, 2)
+        rollback_bundle = plan.rollback_bundle
+        self.assertEqual(rollback_bundle.item_count, 1)
+
+        retry_followup_snapshot = create_test_provider_snapshot(
+            name='Retry Apply Snapshot',
+            organization=self.organization,
+            provider_account=self.provider_account,
+            provider_name='Krill',
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        retry_followup_sync_run = create_test_provider_sync_run(
+            name='Retry Apply Sync Run',
+            organization=self.organization,
+            provider_account=self.provider_account,
+            provider_snapshot=retry_followup_snapshot,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+        )
+        with patch(
+            'netbox_rpki.services.provider_write._submit_krill_route_delta',
+            return_value={'message': 'retry accepted'},
+        ) as retry_submit_mock:
+            with patch(
+                'netbox_rpki.services.provider_write.sync_provider_account',
+                return_value=(retry_followup_sync_run, retry_followup_snapshot),
+            ):
+                retry_execution, retry_delta = apply_roa_change_plan_provider_write(
+                    plan,
+                    requested_by='retry-user',
+                )
+
+        plan.refresh_from_db()
+        self.assertEqual(plan.status, rpki_models.ROAChangePlanStatus.APPLIED)
+        self.assertEqual(retry_execution.status, rpki_models.ProviderWriteExecutionStatus.COMPLETED)
+        self.assertEqual(retry_execution.request_payload_json['retry_mode'], 'failed_only')
+        self.assertEqual(retry_execution.request_payload_json['delta'], retry_delta)
+        self.assertEqual(retry_execution.response_payload_json['batch_summary']['successful_item_count'], 1)
+        self.assertEqual(retry_execution.response_payload_json['batch_summary']['failed_item_count'], 0)
+        retry_submit_mock.assert_called_once()
+        self.assertEqual(plan.rollback_bundle.item_count, len(delta['added']) + len(delta['removed']))
 
     def test_capability_gating_rejects_unsupported_provider(self):
         unsupported_account = create_test_provider_account(
@@ -951,7 +1041,7 @@ class ASPAProviderWriteServiceTestCase(TestCase):
         self.assertEqual(execution.status, rpki_models.ValidationRunStatus.COMPLETED)
         self.assertEqual(execution.followup_sync_run, followup_sync_run)
         self.assertEqual(execution.followup_provider_snapshot, followup_snapshot)
-        self.assertEqual(execution.request_payload_json, delta)
+        self.assertEqual(execution.request_payload_json['delta'], delta)
         self.assertEqual(execution.response_payload_json['provider_response'], {'message': 'accepted'})
         self.assertEqual(
             execution.response_payload_json['delta_summary'],
@@ -976,7 +1066,14 @@ class ASPAProviderWriteServiceTestCase(TestCase):
                 'ownership_scope_conflict_customer_asns': [],
             },
         )
-        submit_mock.assert_called_once_with(self.provider_account, delta)
+        self.assertEqual(submit_mock.call_count, 2)
+        self.assertEqual(
+            [call.args[1] for call in submit_mock.call_args_list],
+            [
+                {'added': delta['added'], 'removed': []},
+                {'added': [], 'removed': delta['removed']},
+            ],
+        )
         sync_mock.assert_called_once_with(
             self.provider_account,
             snapshot_name=sync_mock.call_args.kwargs['snapshot_name'],
@@ -1026,17 +1123,17 @@ class ASPAProviderWriteServiceTestCase(TestCase):
             'netbox_rpki.services.provider_write._submit_krill_aspa_delta',
             side_effect=RuntimeError('krill rejected aspa delta'),
         ):
-            with self.assertRaisesMessage(ProviderWriteError, 'krill rejected aspa delta'):
-                apply_aspa_change_plan_provider_write(plan, requested_by='failed-apply-user')
+            execution, delta = apply_aspa_change_plan_provider_write(plan, requested_by='failed-apply-user')
 
         plan.refresh_from_db()
         self.assertEqual(plan.status, rpki_models.ASPAChangePlanStatus.FAILED)
         self.assertIsNotNone(plan.apply_started_at)
         self.assertEqual(plan.apply_requested_by, 'failed-apply-user')
         self.assertIsNotNone(plan.failed_at)
-        execution = plan.provider_write_executions.get(execution_mode=rpki_models.ProviderWriteExecutionMode.APPLY)
         self.assertEqual(execution.status, rpki_models.ValidationRunStatus.FAILED)
-        self.assertEqual(execution.error, 'krill rejected aspa delta')
+        self.assertIn('krill rejected aspa delta', execution.error)
+        self.assertEqual(execution.request_payload_json['delta'], delta)
+        self.assertTrue(execution.response_payload_json['rerun_advice']['can_retry_failed_items'])
         self.assertFalse(rpki_models.ASPAChangePlanRollbackBundle.objects.filter(source_plan=plan).exists())
 
     def test_apply_failure_during_followup_sync_records_partial_success(self):
