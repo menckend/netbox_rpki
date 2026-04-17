@@ -964,6 +964,7 @@ EXTRA_ACTION_NAME_CONTRACTS = {
         'summary',
         'summary_export',
         'sync',
+        'test_connection',
         'timeline',
     ),
     'roareconciliationrun': ('create_plan', 'summary'),
@@ -1048,8 +1049,11 @@ CUSTOM_ACTION_CONTRACTS = {
         'instance_attr': 'routing_intent_template_binding',
     },
     'rpkiprovideraccount': {
-        'actions': ('sync',),
-        'route_name': 'plugins-api:netbox_rpki-api:provideraccount-sync',
+        'actions': ('sync', 'test_connection'),
+        'route_names': (
+            'plugins-api:netbox_rpki-api:provideraccount-sync',
+            'plugins-api:netbox_rpki-api:provideraccount-test-connection',
+        ),
         'denied_status': 404,
         'view_permissions': ('netbox_rpki.view_rpkiprovideraccount',),
         'allowed_permissions': ('netbox_rpki.view_rpkiprovideraccount', 'netbox_rpki.change_rpkiprovideraccount'),

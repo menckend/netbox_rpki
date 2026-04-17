@@ -2382,3 +2382,78 @@ class ProviderAccountSyncActionAPITestCase(PluginAPITestCase):
         self.assertHttpStatus(response, 200)
         self.assertTrue(response.data['sync_in_progress'])
         self.assertTrue(response.data['job']['existing'])
+
+
+class ProviderAccountCredentialValidationActionAPITestCase(PluginAPITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='provider-validation-api-org', name='Provider Validation API Org')
+        cls.provider_account = create_test_provider_account(
+            name='API Validation Account',
+            organization=cls.organization,
+            provider_type=rpki_models.ProviderType.KRILL,
+            org_handle='ORG-VALIDATION-API',
+            ca_handle='validation-api-ca',
+        )
+
+    def test_test_connection_action_returns_validation_payload(self):
+        self.add_permissions(
+            'netbox_rpki.view_rpkiprovideraccount',
+            'netbox_rpki.change_rpkiprovideraccount',
+        )
+        url = reverse('plugins-api:netbox_rpki-api:provideraccount-test-connection', kwargs={'pk': self.provider_account.pk})
+        validation_result = {
+            'schema_version': 1,
+            'provider_account_id': self.provider_account.pk,
+            'provider_type': self.provider_account.provider_type,
+            'status': 'failed',
+            'result_kind': 'permission_failure',
+            'summary': 'Krill CA metadata endpoint rejected the request with HTTP 403.',
+            'remediation': 'Verify the account or token has permission to read provider inventory.',
+            'checked_at': timezone.now().isoformat(),
+            'mutates_provider_state': False,
+            'capability_summary': {
+                'supports_roa_read': True,
+                'supports_aspa_read': True,
+                'supports_certificate_inventory': True,
+                'supports_repository_metadata': True,
+                'supports_bulk_operations': True,
+                'supported_sync_families': [rpki_models.ProviderSyncFamily.ROA_AUTHORIZATIONS],
+                'roa_write_mode': rpki_models.ProviderRoaWriteMode.KRILL_ROUTE_DELTA,
+                'aspa_write_mode': rpki_models.ProviderAspaWriteMode.KRILL_ASPA_DELTA,
+            },
+            'checks': [
+                {
+                    'code': 'credential_fields',
+                    'status': 'passed',
+                    'result_kind': 'ok',
+                    'summary': 'Required provider credential fields are present.',
+                    'remediation': '',
+                    'missing_fields': [],
+                },
+                {
+                    'code': 'live_probe',
+                    'status': 'failed',
+                    'result_kind': 'permission_failure',
+                    'summary': 'Krill CA metadata endpoint rejected the request with HTTP 403.',
+                    'remediation': 'Verify the account or token has permission to read provider inventory.',
+                    'endpoint_label': 'Krill CA metadata endpoint',
+                    'method': 'GET',
+                    'url': 'https://krill.example.invalid/api/v1/cas/validation-api-ca',
+                    'http_status': 403,
+                    'error_type': 'HTTPError',
+                },
+            ],
+        }
+
+        with patch(
+            'netbox_rpki.api.views.validate_provider_account_credentials',
+            return_value=validation_result,
+        ) as validate_mock:
+            response = self.client.post(url, {}, format='json', **self.header)
+
+        self.assertHttpStatus(response, 200)
+        self.assertEqual(response.data['result_kind'], 'permission_failure')
+        self.assertFalse(response.data['mutates_provider_state'])
+        self.assertEqual(response.data['checks'][1]['result_kind'], 'permission_failure')
+        validate_mock.assert_called_once_with(self.provider_account)

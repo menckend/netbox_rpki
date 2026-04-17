@@ -26,6 +26,13 @@ def build_object_urlpatterns(spec):
         )
         urlpatterns.append(
             path(
+                f'{path_prefix}/<int:pk>/test-connection/',
+                views.ProviderAccountCredentialValidationView.as_view(),
+                name='provideraccount_test_connection',
+            )
+        )
+        urlpatterns.append(
+            path(
                 f'{path_prefix}/<int:pk>/export/lifecycle/',
                 views.ProviderAccountLifecycleExportView.as_view(),
                 name='provideraccount_export_lifecycle',

@@ -2865,6 +2865,11 @@ PROVIDER_ACCOUNT_DETAIL_SPEC = DetailSpec(
     actions=(
         DetailActionSpec(
             permission='netbox_rpki.change_rpkiprovideraccount',
+            label='Test Connection',
+            direct_url=lambda obj: reverse('plugins:netbox_rpki:provideraccount_test_connection', kwargs={'pk': obj.pk}),
+        ),
+        DetailActionSpec(
+            permission='netbox_rpki.change_rpkiprovideraccount',
             label='Sync',
             direct_url=lambda obj: reverse('plugins:netbox_rpki:provideraccount_sync', kwargs={'pk': obj.pk}),
             visible=lambda obj: obj.sync_enabled,

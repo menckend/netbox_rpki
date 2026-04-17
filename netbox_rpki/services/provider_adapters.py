@@ -98,6 +98,12 @@ class ProviderAdapter(ABC):
             )
         return issues
 
+    def validate_credentials(
+        self,
+        provider_account: rpki_models.RpkiProviderAccount,
+    ) -> dict[str, object]:
+        return self._validate_credentials(provider_account)
+
     def validate_sync_account(self, provider_account: rpki_models.RpkiProviderAccount) -> None:
         if self.profile.sync_requires_target and not self.sync_target_handle(provider_account):
             raise ValueError(
@@ -132,6 +138,13 @@ class ProviderAdapter(ABC):
         provider_account: rpki_models.RpkiProviderAccount,
         snapshot: rpki_models.ProviderSnapshot,
     ) -> dict[str, dict[str, object]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def _validate_credentials(
+        self,
+        provider_account: rpki_models.RpkiProviderAccount,
+    ) -> dict[str, object]:
         raise NotImplementedError
 
     def apply_roa_delta(
@@ -195,6 +208,14 @@ class ArinProviderAdapter(ProviderAdapter):
         from netbox_rpki.services import provider_sync as provider_sync_service
 
         return provider_sync_service._import_arin_records(provider_account, snapshot)
+
+    def _validate_credentials(
+        self,
+        provider_account: rpki_models.RpkiProviderAccount,
+    ) -> dict[str, object]:
+        from netbox_rpki.services.provider_credential_validation import validate_arin_provider_credentials
+
+        return validate_arin_provider_credentials(provider_account)
 
 
 class KrillProviderAdapter(ProviderAdapter):
@@ -273,6 +294,14 @@ class KrillProviderAdapter(ProviderAdapter):
         from netbox_rpki.services import provider_sync as provider_sync_service
 
         return provider_sync_service._import_krill_records(provider_account, snapshot)
+
+    def _validate_credentials(
+        self,
+        provider_account: rpki_models.RpkiProviderAccount,
+    ) -> dict[str, object]:
+        from netbox_rpki.services.provider_credential_validation import validate_krill_provider_credentials
+
+        return validate_krill_provider_credentials(provider_account)
 
     def apply_roa_delta(
         self,

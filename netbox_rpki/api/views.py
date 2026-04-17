@@ -47,6 +47,7 @@ from netbox_rpki.services.lifecycle_reporting import (
     build_provider_publication_diff_timeline,
 )
 from netbox_rpki.services.provider_sync_contract import build_provider_account_summary
+from netbox_rpki.services.provider_credential_validation import validate_provider_account_credentials
 from netbox_rpki.services.provider_sync_diff import (
     build_latest_provider_snapshot_diff,
     build_provider_snapshot_diff,
@@ -421,7 +422,7 @@ class RpkiProviderAccountViewSet(VIEWSET_CLASS_MAP['rpkiprovideraccount']):
     def get_queryset(self):
         queryset = super().get_queryset()
 
-        if getattr(self, 'action', None) == 'sync' and self.request.user.is_authenticated:
+        if getattr(self, 'action', None) in {'sync', 'test_connection'} and self.request.user.is_authenticated:
             return self.queryset.model.objects.restrict(self.request.user, 'change')
 
         return queryset
@@ -452,6 +453,15 @@ class RpkiProviderAccountViewSet(VIEWSET_CLASS_MAP['rpkiprovideraccount']):
             }
         payload['sync_in_progress'] = not created
         return Response(payload)
+
+    @action(detail=True, methods=['post'], permission_classes=[TokenWritePermission], url_path='test-connection')
+    def test_connection(self, request, pk=None):
+        provider_account = self.get_object()
+
+        if not request.user.has_perm('netbox_rpki.change_rpkiprovideraccount', provider_account):
+            raise PermissionDenied('This user does not have permission to test this provider account.')
+
+        return Response(validate_provider_account_credentials(provider_account))
 
     def _get_export_format(self, request):
         export_format = request.query_params.get('export_format', 'json').lower()

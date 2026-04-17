@@ -80,6 +80,7 @@ from netbox_rpki.services.provider_sync_contract import (
     build_provider_account_rollup,
     build_provider_account_summary,
 )
+from netbox_rpki.services.provider_credential_validation import validate_provider_account_credentials
 from netbox_rpki.services.provider_sync_diff import (
     build_latest_provider_snapshot_diff,
     build_provider_snapshot_diff,
@@ -431,6 +432,46 @@ class ProviderAccountSyncView(generic.ObjectEditView):
                 f'Provider account {provider_account.name} already has a sync in progress.',
             )
         return redirect(provider_account.get_absolute_url())
+
+
+class ProviderAccountCredentialValidationView(generic.ObjectEditView):
+    queryset = models.RpkiProviderAccount.objects.all()
+    template_name = 'netbox_rpki/provideraccount_test_connection.html'
+
+    def get_required_permission(self):
+        return 'netbox_rpki.change_rpkiprovideraccount'
+
+    def get_provider_account(self, pk):
+        return get_object_or_404(self.queryset, pk=pk)
+
+    def _render(self, request, provider_account, *, form=None, validation_result=None, status=200):
+        return render(request, self.template_name, {
+            'object': provider_account,
+            'provider_account': provider_account,
+            'form': form or ConfirmationForm(),
+            'validation_result': validation_result,
+            'return_url': self.get_return_url(request, provider_account),
+        }, status=status)
+
+    def get(self, request, pk):
+        provider_account = self.get_provider_account(pk)
+        return self._render(request, provider_account)
+
+    def post(self, request, pk):
+        provider_account = self.get_provider_account(pk)
+        form = ConfirmationForm(request.POST)
+        if not form.is_valid():
+            return self._render(request, provider_account, form=form, status=400)
+
+        validation_result = validate_provider_account_credentials(provider_account)
+        if validation_result['status'] == 'passed':
+            messages.success(request, f'Provider connection test succeeded for {provider_account.name}.')
+        else:
+            messages.warning(
+                request,
+                f'Provider connection test reported {validation_result["result_kind"]} for {provider_account.name}.',
+            )
+        return self._render(request, provider_account, validation_result=validation_result)
 
 
 class LifecycleExportViewMixin:

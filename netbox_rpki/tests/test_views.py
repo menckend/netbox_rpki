@@ -742,6 +742,88 @@ class ProviderAccountSyncViewTestCase(PluginViewTestCase):
         self.assertContains(response, 'Publication Diff Timeline')
 
 
+class ProviderAccountCredentialValidationViewTestCase(PluginViewTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(
+            org_id='provider-validation-ui-org',
+            name='Provider Validation UI Org',
+        )
+        cls.provider_account = create_test_provider_account(
+            name='Provider Validation UI Account',
+            organization=cls.organization,
+            provider_type=rpki_models.ProviderType.KRILL,
+            org_handle='ORG-VALIDATION-UI',
+            ca_handle='validation-ui-ca',
+        )
+
+    def test_provider_account_detail_shows_test_connection_button(self):
+        self.add_permissions('netbox_rpki.view_rpkiprovideraccount', 'netbox_rpki.change_rpkiprovideraccount')
+
+        response = self.client.get(self.provider_account.get_absolute_url())
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(
+            response,
+            reverse('plugins:netbox_rpki:provideraccount_test_connection', kwargs={'pk': self.provider_account.pk}),
+        )
+
+    def test_provider_account_test_connection_view_renders_confirmation(self):
+        self.add_permissions('netbox_rpki.view_rpkiprovideraccount', 'netbox_rpki.change_rpkiprovideraccount')
+
+        response = self.client.get(
+            reverse('plugins:netbox_rpki:provideraccount_test_connection', kwargs={'pk': self.provider_account.pk}),
+        )
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'Test Provider Connection')
+        self.assertContains(response, 'safe read-only credential test')
+        self.assertContains(response, self.provider_account.name)
+
+    def test_provider_account_test_connection_view_displays_validation_results(self):
+        self.add_permissions('netbox_rpki.view_rpkiprovideraccount', 'netbox_rpki.change_rpkiprovideraccount')
+
+        validation_result = {
+            'status': 'failed',
+            'result_kind': 'auth_failure',
+            'summary': 'Krill CA metadata endpoint rejected the supplied credentials with HTTP 401.',
+            'remediation': 'Verify the provider API key or bearer token.',
+            'checks': [
+                {
+                    'code': 'credential_fields',
+                    'status': 'passed',
+                    'summary': 'Required provider credential fields are present.',
+                    'remediation': '',
+                },
+                {
+                    'code': 'live_probe',
+                    'status': 'failed',
+                    'result_kind': 'auth_failure',
+                    'summary': 'Krill CA metadata endpoint rejected the supplied credentials with HTTP 401.',
+                    'remediation': 'Verify the provider API key or bearer token.',
+                    'endpoint_label': 'Krill CA metadata endpoint',
+                    'method': 'GET',
+                    'url': 'https://krill.example.invalid/api/v1/cas/validation-ui-ca',
+                },
+            ],
+        }
+
+        with patch(
+            'netbox_rpki.views.validate_provider_account_credentials',
+            return_value=validation_result,
+        ) as validate_mock:
+            response = self.client.post(
+                reverse('plugins:netbox_rpki:provideraccount_test_connection', kwargs={'pk': self.provider_account.pk}),
+                {'confirm': True},
+            )
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'auth_failure')
+        self.assertContains(response, 'Krill CA metadata endpoint rejected the supplied credentials with HTTP 401.')
+        self.assertContains(response, 'Verify the provider API key or bearer token.')
+        validate_mock.assert_called_once_with(self.provider_account)
+
+
 class ProviderSnapshotDetailViewTestCase(PluginViewTestCase):
     @classmethod
     def setUpTestData(cls):

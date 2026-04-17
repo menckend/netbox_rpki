@@ -1,0 +1,93 @@
+{% extends 'generic/_base.html' %}
+
+{% block title %}Test {{ provider_account }} Connection{% endblock %}
+
+{% block content %}
+  <div class="row mt-5">
+    <div class="col col-md-8 offset-md-2">
+      <form action="" method="post" class="form">
+        {% csrf_token %}
+        {% for field in form.hidden_fields %}
+          {{ field }}
+        {% endfor %}
+        <div class="card border-primary">
+          <h2 class="card-header">Test Provider Connection</h2>
+          <div class="card-body">
+            <p>
+              Run a safe read-only credential test for <strong>{{ provider_account }}</strong>.
+              This probe verifies credential wiring, provider reachability, and permission posture without mutating
+              provider state.
+            </p>
+            <dl class="row mb-0">
+              <dt class="col-sm-4">Provider Type</dt>
+              <dd class="col-sm-8">{{ provider_account.get_provider_type_display }}</dd>
+              <dt class="col-sm-4">Transport</dt>
+              <dd class="col-sm-8">{{ provider_account.transport }}</dd>
+              <dt class="col-sm-4">Sync Enabled</dt>
+              <dd class="col-sm-8">{{ provider_account.sync_enabled }}</dd>
+              <dt class="col-sm-4">ROA Write Mode</dt>
+              <dd class="col-sm-8">{{ provider_account.roa_write_mode }}</dd>
+              <dt class="col-sm-4">ASPA Write Mode</dt>
+              <dd class="col-sm-8">{{ provider_account.aspa_write_mode }}</dd>
+            </dl>
+
+            {% if validation_result %}
+              <hr>
+              <div class="alert {% if validation_result.status == 'passed' %}alert-success{% else %}alert-warning{% endif %}" role="alert">
+                <div class="fw-semibold">{{ validation_result.summary }}</div>
+                {% if validation_result.remediation %}
+                  <div class="small mt-1">{{ validation_result.remediation }}</div>
+                {% endif %}
+              </div>
+              <div class="mb-3">
+                <div class="small text-muted text-uppercase">Result Kind</div>
+                <div>{{ validation_result.result_kind }}</div>
+              </div>
+              <div class="card border-secondary">
+                <h3 class="card-header h5 mb-0">Validation Checks</h3>
+                <div class="card-body p-0">
+                  <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                      <thead>
+                        <tr>
+                          <th>Check</th>
+                          <th>Status</th>
+                          <th>Summary</th>
+                          <th>Remediation</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {% for check in validation_result.checks %}
+                          <tr>
+                            <td>{{ check.code }}</td>
+                            <td>{{ check.status }}</td>
+                            <td>
+                              <div>{{ check.summary }}</div>
+                              {% if check.endpoint_label %}
+                                <div class="text-muted small">{{ check.endpoint_label }} via {{ check.method }} {{ check.url }}</div>
+                              {% endif %}
+                              {% if check.missing_fields %}
+                                {% for issue in check.missing_fields %}
+                                  <div class="small">{{ issue.issue_text }}</div>
+                                {% endfor %}
+                              {% endif %}
+                            </td>
+                            <td>{{ check.remediation|default:'—' }}</td>
+                          </tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            {% endif %}
+          </div>
+          <div class="card-footer text-end">
+            <a href="{{ return_url }}" class="btn btn-outline-secondary">Back</a>
+            <button type="submit" name="_confirm" class="btn btn-primary">Run Safe Test</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endblock %}
