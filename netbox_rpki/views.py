@@ -1079,14 +1079,18 @@ class RoutingIntentProfileRunView(generic.ObjectEditView):
             return self._render(request, profile, form=form, status=400)
 
         provider_snapshot = form.cleaned_data.get('provider_snapshot')
-        job = RunRoutingIntentProfileJob.enqueue(
-            instance=profile,
+        job, created = RunRoutingIntentProfileJob.enqueue_for_profile(
+            profile,
             user=request.user,
-            profile_pk=profile.pk,
             comparison_scope=form.cleaned_data['comparison_scope'],
-            provider_snapshot_pk=getattr(provider_snapshot, 'pk', provider_snapshot),
+            provider_snapshot=provider_snapshot,
         )
-        messages.success(request, f'Enqueued routing-intent profile job {job.pk} for {profile.name}.')
+        if job is not None and created:
+            messages.success(request, f'Enqueued routing-intent profile job {job.pk} for {profile.name}.')
+        elif job is not None:
+            messages.warning(request, f'Routing-intent profile job {job.pk} is already active for {profile.name}.')
+        else:
+            messages.warning(request, f'Routing-intent reconciliation is already running for {profile.name}.')
         return redirect(profile.get_absolute_url())
 
 

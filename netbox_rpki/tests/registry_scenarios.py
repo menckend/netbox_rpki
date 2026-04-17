@@ -89,6 +89,7 @@ from netbox_rpki.tests.utils import (
     create_test_lifecycle_health_policy,
     create_test_imported_publication_point,
     create_test_imported_signed_object,
+    create_test_job_execution_record,
     create_test_repository,
     create_test_rir,
     create_test_revoked_certificate,
@@ -691,6 +692,9 @@ def _register_scenario_builders() -> None:
             ),
             "bgppathobservation": lambda: create_test_bgp_path_observation(
                 name=f"BGP Path Observation {unique_token('bgp-path-observation')}",
+            ),
+            "jobexecutionrecord": lambda: create_test_job_execution_record(
+                name=f"Job Execution Record {unique_token('job-execution-record')}",
             ),
             "bulkintentrun": lambda: create_test_bulk_intent_run(name=f"Bulk Intent Run {unique_token('bulk-intent-run')}"),
             "bulkintentrunscoperesult": lambda: create_test_bulk_intent_run_scope_result(

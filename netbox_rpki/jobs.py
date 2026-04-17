@@ -1,6 +1,7 @@
 from netbox.jobs import JobRunner
 from core.choices import JobStatusChoices
 from core.models import Job
+from django.utils import timezone
 
 from netbox_rpki import models as rpki_models
 from netbox_rpki.structured_logging import emit_structured_log
@@ -24,9 +25,265 @@ from netbox_rpki.services import (
 )
 
 
+def _requested_by_value(user) -> str:
+    if user is None:
+        return ''
+    if isinstance(user, str):
+        return user
+    return getattr(user, 'username', '') or ''
+
+
+def _serialize_job_reference(job: Job | None) -> dict:
+    if job is None:
+        return {}
+    return {
+        'id': job.pk,
+        'name': job.name,
+        'status': job.status,
+    }
+
+
+def _record_job_execution(
+    *,
+    organization=None,
+    job: Job | None = None,
+    job_class: str,
+    job_name: str,
+    dedupe_key: str,
+    disposition: str,
+    requested_by: str = '',
+    schedule_at=None,
+    request_payload=None,
+    resolution_payload=None,
+):
+    recorded_at = timezone.now()
+    create_kwargs = {
+        'name': f'{job_name} {rpki_models.JobExecutionDisposition(disposition).label} {recorded_at:%Y-%m-%d %H:%M:%S}',
+        'job': job,
+        'job_class': job_class,
+        'job_name': job_name,
+        'dedupe_key': dedupe_key,
+        'disposition': disposition,
+        'requested_by': requested_by,
+        'scheduled_at': schedule_at,
+        'request_payload_json': request_payload or {},
+        'resolution_payload_json': resolution_payload or {},
+    }
+    if isinstance(organization, rpki_models.Organization):
+        create_kwargs['organization'] = organization
+    elif organization is not None:
+        create_kwargs['organization_id'] = organization
+    return rpki_models.JobExecutionRecord.objects.create(
+        **create_kwargs,
+    )
+
+
+def _enqueue_with_lineage(
+    *,
+    job_runner_class,
+    organization=None,
+    job_name: str,
+    dedupe_key: str,
+    request_payload: dict,
+    user=None,
+    schedule_at=None,
+    existing_job: Job | None = None,
+    skip_resolution: dict | None = None,
+    enqueue_kwargs: dict | None = None,
+):
+    requested_by = _requested_by_value(user)
+    job_class = job_runner_class.__name__
+
+    if existing_job is not None:
+        _record_job_execution(
+            organization=organization,
+            job=existing_job,
+            job_class=job_class,
+            job_name=job_name,
+            dedupe_key=dedupe_key,
+            disposition=rpki_models.JobExecutionDisposition.MERGED,
+            requested_by=requested_by,
+            schedule_at=schedule_at,
+            request_payload=request_payload,
+            resolution_payload={
+                'reason': 'active_job',
+                'job': _serialize_job_reference(existing_job),
+            },
+        )
+        emit_structured_log(
+            'job.enqueue.decision',
+            subsystem='jobs',
+            job_class=job_class,
+            job_name=job_name,
+            dedupe_key=dedupe_key,
+            disposition=rpki_models.JobExecutionDisposition.MERGED,
+            requested_by=requested_by,
+            existing_job_id=existing_job.pk,
+        )
+        return existing_job, False
+
+    if skip_resolution is not None:
+        _record_job_execution(
+            organization=organization,
+            job_class=job_class,
+            job_name=job_name,
+            dedupe_key=dedupe_key,
+            disposition=rpki_models.JobExecutionDisposition.SKIPPED,
+            requested_by=requested_by,
+            schedule_at=schedule_at,
+            request_payload=request_payload,
+            resolution_payload=skip_resolution,
+        )
+        emit_structured_log(
+            'job.enqueue.decision',
+            subsystem='jobs',
+            job_class=job_class,
+            job_name=job_name,
+            dedupe_key=dedupe_key,
+            disposition=rpki_models.JobExecutionDisposition.SKIPPED,
+            requested_by=requested_by,
+            skip_reason=skip_resolution.get('reason'),
+        )
+        return None, False
+
+    job = job_runner_class.enqueue(
+        name=job_name,
+        user=user,
+        schedule_at=schedule_at,
+        **(enqueue_kwargs or {}),
+    )
+    _record_job_execution(
+        organization=organization,
+        job=job,
+        job_class=job_class,
+        job_name=job_name,
+        dedupe_key=dedupe_key,
+        disposition=rpki_models.JobExecutionDisposition.ENQUEUED,
+        requested_by=requested_by,
+        schedule_at=schedule_at,
+        request_payload=request_payload,
+        resolution_payload={
+            'reason': 'job_enqueued',
+            'job': _serialize_job_reference(job),
+        },
+    )
+    emit_structured_log(
+        'job.enqueue.decision',
+        subsystem='jobs',
+        job_class=job_class,
+        job_name=job_name,
+        dedupe_key=dedupe_key,
+        disposition=rpki_models.JobExecutionDisposition.ENQUEUED,
+        requested_by=requested_by,
+        job_id=job.pk,
+    )
+    return job, True
+
+
 class RunRoutingIntentProfileJob(JobRunner):
     class Meta:
         name = 'RPKI Intent Reconciliation'
+
+    @classmethod
+    def get_job_name(
+        cls,
+        profile: rpki_models.RoutingIntentProfile | int,
+        *,
+        comparison_scope: str = rpki_models.ReconciliationComparisonScope.LOCAL_ROA_RECORDS,
+        provider_snapshot=None,
+    ) -> str:
+        profile_pk = profile.pk if hasattr(profile, 'pk') else profile
+        provider_snapshot_pk = getattr(provider_snapshot, 'pk', provider_snapshot) or 'none'
+        return f'{cls.name} [{profile_pk}:{comparison_scope}:{provider_snapshot_pk}]'
+
+    @classmethod
+    def get_active_job_for_profile(
+        cls,
+        profile: rpki_models.RoutingIntentProfile | int,
+        *,
+        comparison_scope: str = rpki_models.ReconciliationComparisonScope.LOCAL_ROA_RECORDS,
+        provider_snapshot=None,
+    ):
+        return Job.objects.filter(
+            name=cls.get_job_name(
+                profile,
+                comparison_scope=comparison_scope,
+                provider_snapshot=provider_snapshot,
+            ),
+            status__in=JobStatusChoices.ENQUEUED_STATE_CHOICES,
+        ).order_by('created').first()
+
+    @classmethod
+    def enqueue_for_profile(
+        cls,
+        profile: rpki_models.RoutingIntentProfile | int,
+        *,
+        comparison_scope: str = rpki_models.ReconciliationComparisonScope.LOCAL_ROA_RECORDS,
+        provider_snapshot=None,
+        user=None,
+        schedule_at=None,
+    ):
+        if not isinstance(profile, rpki_models.RoutingIntentProfile):
+            profile = rpki_models.RoutingIntentProfile.objects.get(pk=profile)
+
+        provider_snapshot_pk = getattr(provider_snapshot, 'pk', provider_snapshot)
+        job_name = cls.get_job_name(
+            profile,
+            comparison_scope=comparison_scope,
+            provider_snapshot=provider_snapshot_pk,
+        )
+        dedupe_key = job_name
+        request_payload = {
+            'profile_pk': profile.pk,
+            'organization_pk': profile.organization_id,
+            'comparison_scope': comparison_scope,
+            'provider_snapshot_pk': provider_snapshot_pk,
+        }
+        existing_job = cls.get_active_job_for_profile(
+            profile,
+            comparison_scope=comparison_scope,
+            provider_snapshot=provider_snapshot_pk,
+        )
+        if comparison_scope == rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED:
+            running_filter = {
+                'intent_profile': profile,
+                'status': rpki_models.ValidationRunStatus.RUNNING,
+                'comparison_scope': comparison_scope,
+                'provider_snapshot': provider_snapshot,
+            }
+        else:
+            running_filter = {
+                'intent_profile': profile,
+                'status': rpki_models.ValidationRunStatus.RUNNING,
+                'comparison_scope': comparison_scope,
+            }
+        skip_resolution = None
+        active_run = rpki_models.ROAReconciliationRun.objects.filter(**running_filter).order_by('-started_at', '-pk').first()
+        if active_run is not None:
+            skip_resolution = {
+                'reason': 'running_reconciliation',
+                'run_model': 'ROAReconciliationRun',
+                'run_id': active_run.pk,
+                'comparison_scope': comparison_scope,
+                'provider_snapshot_pk': provider_snapshot_pk,
+            }
+
+        return _enqueue_with_lineage(
+            job_runner_class=cls,
+            organization=profile.organization,
+            job_name=job_name,
+            dedupe_key=dedupe_key,
+            request_payload=request_payload,
+            user=user,
+            schedule_at=schedule_at,
+            existing_job=existing_job,
+            skip_resolution=skip_resolution,
+            enqueue_kwargs={
+                'profile_pk': profile.pk,
+                'comparison_scope': comparison_scope,
+                'provider_snapshot_pk': provider_snapshot_pk,
+            },
+        )
 
     def run(self, profile_pk, comparison_scope=rpki_models.ReconciliationComparisonScope.LOCAL_ROA_RECORDS, provider_snapshot_pk=None, *args, **kwargs):
         profile = rpki_models.RoutingIntentProfile.objects.get(pk=profile_pk)
@@ -102,10 +359,15 @@ class RunAspaReconciliationJob(JobRunner):
         if not isinstance(organization, rpki_models.Organization):
             organization = rpki_models.Organization.objects.get(pk=organization)
 
+        provider_snapshot_pk = getattr(provider_snapshot, 'pk', provider_snapshot)
+        job_name = cls.get_job_name(organization, comparison_scope)
+        dedupe_key = job_name
+        request_payload = {
+            'organization_pk': organization.pk,
+            'comparison_scope': comparison_scope,
+            'provider_snapshot_pk': provider_snapshot_pk,
+        }
         existing_job = cls.get_active_job_for_organization(organization, comparison_scope)
-        if existing_job is not None:
-            return existing_job, False
-
         running_filter = {
             'organization': organization,
             'status': rpki_models.ValidationRunStatus.RUNNING,
@@ -113,18 +375,33 @@ class RunAspaReconciliationJob(JobRunner):
         }
         if comparison_scope == rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED:
             running_filter['provider_snapshot'] = provider_snapshot
-        if rpki_models.ASPAReconciliationRun.objects.filter(**running_filter).exists():
-            return None, False
+        active_run = rpki_models.ASPAReconciliationRun.objects.filter(**running_filter).order_by('-started_at', '-pk').first()
+        skip_resolution = None
+        if active_run is not None:
+            skip_resolution = {
+                'reason': 'running_reconciliation',
+                'run_model': 'ASPAReconciliationRun',
+                'run_id': active_run.pk,
+                'comparison_scope': comparison_scope,
+                'provider_snapshot_pk': provider_snapshot_pk,
+            }
 
-        job = cls.enqueue(
-            name=cls.get_job_name(organization, comparison_scope),
+        return _enqueue_with_lineage(
+            job_runner_class=cls,
+            organization=organization,
+            job_name=job_name,
+            dedupe_key=dedupe_key,
+            request_payload=request_payload,
             user=user,
             schedule_at=schedule_at,
-            organization_pk=organization.pk,
-            comparison_scope=comparison_scope,
-            provider_snapshot_pk=getattr(provider_snapshot, 'pk', provider_snapshot),
+            existing_job=existing_job,
+            skip_resolution=skip_resolution,
+            enqueue_kwargs={
+                'organization_pk': organization.pk,
+                'comparison_scope': comparison_scope,
+                'provider_snapshot_pk': provider_snapshot_pk,
+            },
         )
-        return job, True
 
     def run(
         self,
@@ -245,6 +522,25 @@ class RunBulkRoutingIntentJob(JobRunner):
             provider_snapshot=provider_snapshot,
             create_change_plans=create_change_plans,
         )
+        job_name = cls.get_job_name(
+            organization,
+            profiles=profile_pks,
+            bindings=binding_pks,
+            comparison_scope=comparison_scope,
+            provider_snapshot=provider_snapshot,
+            create_change_plans=create_change_plans,
+        )
+        dedupe_key = f'{organization.pk}:{baseline_fingerprint}'
+        request_payload = {
+            'organization_pk': organization.pk,
+            'profile_pks': list(profile_pks),
+            'binding_pks': list(binding_pks),
+            'comparison_scope': comparison_scope,
+            'provider_snapshot_pk': getattr(provider_snapshot, 'pk', provider_snapshot),
+            'create_change_plans': create_change_plans,
+            'run_name': run_name,
+            'baseline_fingerprint': baseline_fingerprint,
+        }
 
         existing_job = cls.get_active_job_for_request(
             organization,
@@ -254,36 +550,40 @@ class RunBulkRoutingIntentJob(JobRunner):
             provider_snapshot=provider_snapshot,
             create_change_plans=create_change_plans,
         )
-        if existing_job is not None:
-            return existing_job, False
-
-        if rpki_models.BulkIntentRun.objects.filter(
+        active_run = rpki_models.BulkIntentRun.objects.filter(
             organization=organization,
             status=rpki_models.ValidationRunStatus.RUNNING,
             baseline_fingerprint=baseline_fingerprint,
-        ).exists():
-            return None, False
+        ).order_by('-started_at', '-pk').first()
+        skip_resolution = None
+        if active_run is not None:
+            skip_resolution = {
+                'reason': 'running_bulk_run',
+                'run_model': 'BulkIntentRun',
+                'run_id': active_run.pk,
+                'baseline_fingerprint': baseline_fingerprint,
+            }
 
-        job = cls.enqueue(
-            name=cls.get_job_name(
-                organization,
-                profiles=profile_pks,
-                bindings=binding_pks,
-                comparison_scope=comparison_scope,
-                provider_snapshot=provider_snapshot,
-                create_change_plans=create_change_plans,
-            ),
+        return _enqueue_with_lineage(
+            job_runner_class=cls,
+            organization=organization,
+            job_name=job_name,
+            dedupe_key=dedupe_key,
+            request_payload=request_payload,
             user=user,
             schedule_at=schedule_at,
-            organization_pk=organization.pk,
-            profile_pks=profile_pks,
-            binding_pks=binding_pks,
-            comparison_scope=comparison_scope,
-            provider_snapshot_pk=getattr(provider_snapshot, 'pk', provider_snapshot),
-            create_change_plans=create_change_plans,
-            run_name=run_name,
+            existing_job=existing_job,
+            skip_resolution=skip_resolution,
+            enqueue_kwargs={
+                'organization_pk': organization.pk,
+                'profile_pks': profile_pks,
+                'binding_pks': binding_pks,
+                'comparison_scope': comparison_scope,
+                'provider_snapshot_pk': getattr(provider_snapshot, 'pk', provider_snapshot),
+                'create_change_plans': create_change_plans,
+                'run_name': run_name,
+            },
         )
-        return job, True
 
     def run(
         self,
@@ -374,23 +674,39 @@ class SyncProviderAccountJob(JobRunner):
         if not provider_account.sync_enabled:
             raise ValueError(f'Provider account {provider_account.name} is disabled for sync.')
 
+        job_name = cls.get_job_name(provider_account)
+        dedupe_key = job_name
+        request_payload = {
+            'organization_pk': provider_account.organization_id,
+            'provider_account_pk': provider_account.pk,
+        }
         existing_job = cls.get_active_job_for_provider_account(provider_account)
-        if existing_job is not None:
-            return existing_job, False
-
-        if rpki_models.ProviderSyncRun.objects.filter(
+        active_run = rpki_models.ProviderSyncRun.objects.filter(
             provider_account=provider_account,
             status=rpki_models.ValidationRunStatus.RUNNING,
-        ).exists():
-            return None, False
+        ).order_by('-started_at', '-pk').first()
+        skip_resolution = None
+        if active_run is not None:
+            skip_resolution = {
+                'reason': 'running_provider_sync',
+                'run_model': 'ProviderSyncRun',
+                'run_id': active_run.pk,
+            }
 
-        job = cls.enqueue(
-            name=cls.get_job_name(provider_account),
+        return _enqueue_with_lineage(
+            job_runner_class=cls,
+            organization=provider_account.organization,
+            job_name=job_name,
+            dedupe_key=dedupe_key,
+            request_payload=request_payload,
             user=user,
             schedule_at=schedule_at,
-            provider_account_pk=provider_account.pk,
+            existing_job=existing_job,
+            skip_resolution=skip_resolution,
+            enqueue_kwargs={
+                'provider_account_pk': provider_account.pk,
+            },
         )
-        return job, True
 
     def run(self, provider_account_pk, *args, **kwargs):
         provider_account = rpki_models.RpkiProviderAccount.objects.get(pk=provider_account_pk)
@@ -466,30 +782,49 @@ class SyncIrrSourceJob(JobRunner):
         if not irr_source.enabled:
             raise ValueError(f'IRR source {irr_source.name} is disabled.')
 
+        job_name = cls.get_job_name(irr_source, fetch_mode=fetch_mode, snapshot_file=snapshot_file)
+        dedupe_key = job_name
+        request_payload = {
+            'organization_pk': irr_source.organization_id,
+            'irr_source_pk': irr_source.pk,
+            'fetch_mode': fetch_mode,
+            'snapshot_file': snapshot_file,
+        }
         existing_job = cls.get_active_job_for_source(
             irr_source,
             fetch_mode=fetch_mode,
             snapshot_file=snapshot_file,
         )
-        if existing_job is not None:
-            return existing_job, False
-
-        if rpki_models.IrrSnapshot.objects.filter(
+        active_run = rpki_models.IrrSnapshot.objects.filter(
             source=irr_source,
             status=rpki_models.IrrSnapshotStatus.RUNNING,
             fetch_mode=fetch_mode,
-        ).exists():
-            return None, False
+        ).order_by('-started_at', '-pk').first()
+        skip_resolution = None
+        if active_run is not None:
+            skip_resolution = {
+                'reason': 'running_irr_snapshot',
+                'run_model': 'IrrSnapshot',
+                'run_id': active_run.pk,
+                'fetch_mode': fetch_mode,
+            }
 
-        job = cls.enqueue(
-            name=cls.get_job_name(irr_source, fetch_mode=fetch_mode, snapshot_file=snapshot_file),
+        return _enqueue_with_lineage(
+            job_runner_class=cls,
+            organization=irr_source.organization,
+            job_name=job_name,
+            dedupe_key=dedupe_key,
+            request_payload=request_payload,
             user=user,
             schedule_at=schedule_at,
-            irr_source_pk=irr_source.pk,
-            fetch_mode=fetch_mode,
-            snapshot_file=snapshot_file,
+            existing_job=existing_job,
+            skip_resolution=skip_resolution,
+            enqueue_kwargs={
+                'irr_source_pk': irr_source.pk,
+                'fetch_mode': fetch_mode,
+                'snapshot_file': snapshot_file,
+            },
         )
-        return job, True
 
     def run(
         self,
@@ -574,29 +909,48 @@ class SyncValidatorInstanceJob(JobRunner):
         if not isinstance(validator, rpki_models.ValidatorInstance):
             validator = rpki_models.ValidatorInstance.objects.get(pk=validator)
 
+        job_name = cls.get_job_name(validator, fetch_mode=fetch_mode, snapshot_file=snapshot_file)
+        dedupe_key = job_name
+        request_payload = {
+            'organization_pk': validator.organization_id,
+            'validator_pk': validator.pk,
+            'fetch_mode': fetch_mode,
+            'snapshot_file': snapshot_file,
+        }
         existing_job = cls.get_active_job_for_validator(
             validator,
             fetch_mode=fetch_mode,
             snapshot_file=snapshot_file,
         )
-        if existing_job is not None:
-            return existing_job, False
-
-        if rpki_models.ValidationRun.objects.filter(
+        active_run = rpki_models.ValidationRun.objects.filter(
             validator=validator,
             status=rpki_models.ValidationRunStatus.RUNNING,
-        ).exists():
-            return None, False
+        ).order_by('-started_at', '-pk').first()
+        skip_resolution = None
+        if active_run is not None:
+            skip_resolution = {
+                'reason': 'running_validation',
+                'run_model': 'ValidationRun',
+                'run_id': active_run.pk,
+                'fetch_mode': fetch_mode,
+            }
 
-        job = cls.enqueue(
-            name=cls.get_job_name(validator, fetch_mode=fetch_mode, snapshot_file=snapshot_file),
+        return _enqueue_with_lineage(
+            job_runner_class=cls,
+            organization=validator.organization,
+            job_name=job_name,
+            dedupe_key=dedupe_key,
+            request_payload=request_payload,
             user=user,
             schedule_at=schedule_at,
-            validator_pk=validator.pk,
-            fetch_mode=fetch_mode,
-            snapshot_file=snapshot_file,
+            existing_job=existing_job,
+            skip_resolution=skip_resolution,
+            enqueue_kwargs={
+                'validator_pk': validator.pk,
+                'fetch_mode': fetch_mode,
+                'snapshot_file': snapshot_file,
+            },
         )
-        return job, True
 
     def run(
         self,
@@ -680,25 +1034,44 @@ class SyncTelemetrySourceJob(JobRunner):
         if not source.enabled:
             raise ValueError(f'Telemetry source {source.name} is disabled.')
 
+        job_name = cls.get_job_name(source, snapshot_file=snapshot_file)
+        dedupe_key = job_name
+        request_payload = {
+            'organization_pk': source.organization_id,
+            'telemetry_source_pk': source.pk,
+            'fetch_mode': TELEMETRY_FETCH_MODE_SNAPSHOT_IMPORT,
+            'snapshot_file': snapshot_file,
+        }
         existing_job = cls.get_active_job_for_source(source, snapshot_file=snapshot_file)
-        if existing_job is not None:
-            return existing_job, False
-
-        if rpki_models.TelemetryRun.objects.filter(
+        active_run = rpki_models.TelemetryRun.objects.filter(
             source=source,
             status=rpki_models.ValidationRunStatus.RUNNING,
-        ).exists():
-            return None, False
+        ).order_by('-started_at', '-pk').first()
+        skip_resolution = None
+        if active_run is not None:
+            skip_resolution = {
+                'reason': 'running_telemetry_import',
+                'run_model': 'TelemetryRun',
+                'run_id': active_run.pk,
+                'snapshot_file': snapshot_file,
+            }
 
-        job = cls.enqueue(
-            name=cls.get_job_name(source, snapshot_file=snapshot_file),
+        return _enqueue_with_lineage(
+            job_runner_class=cls,
+            organization=source.organization,
+            job_name=job_name,
+            dedupe_key=dedupe_key,
+            request_payload=request_payload,
             user=user,
             schedule_at=schedule_at,
-            telemetry_source_pk=source.pk,
-            fetch_mode=TELEMETRY_FETCH_MODE_SNAPSHOT_IMPORT,
-            snapshot_file=snapshot_file,
+            existing_job=existing_job,
+            skip_resolution=skip_resolution,
+            enqueue_kwargs={
+                'telemetry_source_pk': source.pk,
+                'fetch_mode': TELEMETRY_FETCH_MODE_SNAPSHOT_IMPORT,
+                'snapshot_file': snapshot_file,
+            },
         )
-        return job, True
 
     def run(
         self,
@@ -764,23 +1137,38 @@ class RunIrrCoordinationJob(JobRunner):
         if not isinstance(organization, rpki_models.Organization):
             organization = rpki_models.Organization.objects.get(pk=organization)
 
+        job_name = cls.get_job_name(organization)
+        dedupe_key = job_name
+        request_payload = {
+            'organization_pk': organization.pk,
+        }
         existing_job = cls.get_active_job_for_organization(organization)
-        if existing_job is not None:
-            return existing_job, False
-
-        if rpki_models.IrrCoordinationRun.objects.filter(
+        active_run = rpki_models.IrrCoordinationRun.objects.filter(
             organization=organization,
             status=rpki_models.IrrCoordinationRunStatus.RUNNING,
-        ).exists():
-            return None, False
+        ).order_by('-started_at', '-pk').first()
+        skip_resolution = None
+        if active_run is not None:
+            skip_resolution = {
+                'reason': 'running_irr_coordination',
+                'run_model': 'IrrCoordinationRun',
+                'run_id': active_run.pk,
+            }
 
-        job = cls.enqueue(
-            name=cls.get_job_name(organization),
+        return _enqueue_with_lineage(
+            job_runner_class=cls,
+            organization=organization,
+            job_name=job_name,
+            dedupe_key=dedupe_key,
+            request_payload=request_payload,
             user=user,
             schedule_at=schedule_at,
-            organization_pk=organization.pk,
+            existing_job=existing_job,
+            skip_resolution=skip_resolution,
+            enqueue_kwargs={
+                'organization_pk': organization.pk,
+            },
         )
-        return job, True
 
     def run(self, organization_pk, *args, **kwargs):
         organization = rpki_models.Organization.objects.get(pk=organization_pk)
@@ -839,18 +1227,28 @@ class CreateROAChangePlanJob(JobRunner):
         if not isinstance(reconciliation_run, rpki_models.ROAReconciliationRun):
             reconciliation_run = rpki_models.ROAReconciliationRun.objects.get(pk=reconciliation_run)
 
+        job_name = cls.get_job_name(reconciliation_run)
+        dedupe_key = job_name
+        request_payload = {
+            'organization_pk': reconciliation_run.organization_id,
+            'reconciliation_run_pk': reconciliation_run.pk,
+            'plan_name': plan_name,
+        }
         existing_job = cls.get_active_job_for_reconciliation_run(reconciliation_run)
-        if existing_job is not None:
-            return existing_job, False
-
-        job = cls.enqueue(
-            name=cls.get_job_name(reconciliation_run),
+        return _enqueue_with_lineage(
+            job_runner_class=cls,
+            organization=reconciliation_run.organization,
+            job_name=job_name,
+            dedupe_key=dedupe_key,
+            request_payload=request_payload,
             user=user,
             schedule_at=schedule_at,
-            reconciliation_run_pk=reconciliation_run.pk,
-            plan_name=plan_name,
+            existing_job=existing_job,
+            enqueue_kwargs={
+                'reconciliation_run_pk': reconciliation_run.pk,
+                'plan_name': plan_name,
+            },
         )
-        return job, True
 
     def run(self, reconciliation_run_pk, plan_name=None, *args, **kwargs):
         reconciliation_run = rpki_models.ROAReconciliationRun.objects.get(pk=reconciliation_run_pk)
@@ -907,23 +1305,39 @@ class CreateIrrChangePlansJob(JobRunner):
         if not isinstance(coordination_run, rpki_models.IrrCoordinationRun):
             coordination_run = rpki_models.IrrCoordinationRun.objects.get(pk=coordination_run)
 
+        job_name = cls.get_job_name(coordination_run)
+        dedupe_key = job_name
+        request_payload = {
+            'organization_pk': coordination_run.organization_id,
+            'coordination_run_pk': coordination_run.pk,
+        }
         existing_job = cls.get_active_job_for_coordination_run(coordination_run)
-        if existing_job is not None:
-            return existing_job, False
-
-        if rpki_models.IrrChangePlan.objects.filter(
+        active_plan = rpki_models.IrrChangePlan.objects.filter(
             coordination_run=coordination_run,
             status=rpki_models.IrrChangePlanStatus.EXECUTING,
-        ).exists():
-            return None, False
+        ).order_by('-execution_started_at', '-pk').first()
+        skip_resolution = None
+        if active_plan is not None:
+            skip_resolution = {
+                'reason': 'executing_change_plan',
+                'run_model': 'IrrChangePlan',
+                'run_id': active_plan.pk,
+            }
 
-        job = cls.enqueue(
-            name=cls.get_job_name(coordination_run),
+        return _enqueue_with_lineage(
+            job_runner_class=cls,
+            organization=coordination_run.organization,
+            job_name=job_name,
+            dedupe_key=dedupe_key,
+            request_payload=request_payload,
             user=user,
             schedule_at=schedule_at,
-            coordination_run_pk=coordination_run.pk,
+            existing_job=existing_job,
+            skip_resolution=skip_resolution,
+            enqueue_kwargs={
+                'coordination_run_pk': coordination_run.pk,
+            },
         )
-        return job, True
 
     def run(self, coordination_run_pk, *args, **kwargs):
         coordination_run = rpki_models.IrrCoordinationRun.objects.get(pk=coordination_run_pk)
@@ -989,25 +1403,43 @@ class ExecuteIrrChangePlanJob(JobRunner):
         if not isinstance(change_plan, rpki_models.IrrChangePlan):
             change_plan = rpki_models.IrrChangePlan.objects.get(pk=change_plan)
 
+        job_name = cls.get_job_name(change_plan, execution_mode=execution_mode)
+        dedupe_key = job_name
+        request_payload = {
+            'organization_pk': change_plan.organization_id,
+            'change_plan_pk': change_plan.pk,
+            'execution_mode': execution_mode,
+        }
         existing_job = cls.get_active_job_for_change_plan(change_plan, execution_mode=execution_mode)
-        if existing_job is not None:
-            return existing_job, False
-
-        if rpki_models.IrrWriteExecution.objects.filter(
+        active_execution = rpki_models.IrrWriteExecution.objects.filter(
             change_plan=change_plan,
             execution_mode=execution_mode,
             status=rpki_models.IrrWriteExecutionStatus.RUNNING,
-        ).exists():
-            return None, False
+        ).order_by('-started_at', '-pk').first()
+        skip_resolution = None
+        if active_execution is not None:
+            skip_resolution = {
+                'reason': 'running_irr_write_execution',
+                'run_model': 'IrrWriteExecution',
+                'run_id': active_execution.pk,
+                'execution_mode': execution_mode,
+            }
 
-        job = cls.enqueue(
-            name=cls.get_job_name(change_plan, execution_mode=execution_mode),
+        return _enqueue_with_lineage(
+            job_runner_class=cls,
+            organization=change_plan.organization,
+            job_name=job_name,
+            dedupe_key=dedupe_key,
+            request_payload=request_payload,
             user=user,
             schedule_at=schedule_at,
-            change_plan_pk=change_plan.pk,
-            execution_mode=execution_mode,
+            existing_job=existing_job,
+            skip_resolution=skip_resolution,
+            enqueue_kwargs={
+                'change_plan_pk': change_plan.pk,
+                'execution_mode': execution_mode,
+            },
         )
-        return job, True
 
     def run(
         self,
@@ -1027,15 +1459,43 @@ class ExecuteIrrChangePlanJob(JobRunner):
             execution_mode=execution_mode,
         )
         if execution_mode == rpki_models.IrrWriteExecutionMode.APPLY:
-            execution, _ = apply_irr_change_plan(change_plan)
+            execution, payload = apply_irr_change_plan(
+                change_plan,
+                requested_by=_requested_by_value(getattr(self.job, 'user', None)),
+                replay_safe=True,
+            )
         else:
-            execution, _ = preview_irr_change_plan(change_plan)
+            execution, payload = preview_irr_change_plan(
+                change_plan,
+                requested_by=_requested_by_value(getattr(self.job, 'user', None)),
+                replay_safe=True,
+            )
         self.job.data = {
             'irr_change_plan_pk': change_plan.pk,
             'irr_write_execution_pk': execution.pk,
             'execution_mode': execution_mode,
         }
         self.job.save(update_fields=('data',))
+        if payload.get('replayed'):
+            _record_job_execution(
+                organization=change_plan.organization,
+                job=self.job,
+                job_class=type(self).__name__,
+                job_name=type(self).get_job_name(change_plan, execution_mode=execution_mode),
+                dedupe_key=type(self).get_job_name(change_plan, execution_mode=execution_mode),
+                disposition=rpki_models.JobExecutionDisposition.REPLAYED,
+                requested_by=_requested_by_value(getattr(self.job, 'user', None)),
+                request_payload={
+                    'change_plan_pk': change_plan.pk,
+                    'execution_mode': execution_mode,
+                    'request_fingerprint': payload.get('request_fingerprint'),
+                },
+                resolution_payload={
+                    'reason': 'replay_safe_execution',
+                    'irr_write_execution_pk': execution.pk,
+                    'request_fingerprint': payload.get('request_fingerprint'),
+                },
+            )
         emit_structured_log(
             'job.run.complete',
             subsystem='jobs',
@@ -1074,23 +1534,39 @@ class EvaluateLifecycleHealthJob(JobRunner):
         if not isinstance(provider_account, rpki_models.RpkiProviderAccount):
             provider_account = rpki_models.RpkiProviderAccount.objects.get(pk=provider_account)
 
+        job_name = cls.get_job_name(provider_account)
+        dedupe_key = job_name
+        request_payload = {
+            'organization_pk': provider_account.organization_id,
+            'provider_account_pk': provider_account.pk,
+        }
         existing_job = cls.get_active_job_for_provider_account(provider_account)
-        if existing_job is not None:
-            return existing_job, False
-
-        if rpki_models.LifecycleHealthEvent.objects.filter(
+        active_event = rpki_models.LifecycleHealthEvent.objects.filter(
             provider_account=provider_account,
             status=rpki_models.LifecycleHealthEventStatus.OPEN,
-        ).exists():
-            return None, False
+        ).order_by('-last_seen_at', '-pk').first()
+        skip_resolution = None
+        if active_event is not None:
+            skip_resolution = {
+                'reason': 'open_lifecycle_event',
+                'run_model': 'LifecycleHealthEvent',
+                'run_id': active_event.pk,
+            }
 
-        job = cls.enqueue(
-            name=cls.get_job_name(provider_account),
+        return _enqueue_with_lineage(
+            job_runner_class=cls,
+            organization=provider_account.organization,
+            job_name=job_name,
+            dedupe_key=dedupe_key,
+            request_payload=request_payload,
             user=user,
             schedule_at=schedule_at,
-            provider_account_pk=provider_account.pk,
+            existing_job=existing_job,
+            skip_resolution=skip_resolution,
+            enqueue_kwargs={
+                'provider_account_pk': provider_account.pk,
+            },
         )
-        return job, True
 
     def run(self, provider_account_pk, *args, **kwargs):
         provider_account = rpki_models.RpkiProviderAccount.objects.get(pk=provider_account_pk)

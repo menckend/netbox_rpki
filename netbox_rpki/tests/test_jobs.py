@@ -1,13 +1,17 @@
 import json
 from types import SimpleNamespace
+from uuid import uuid4
 from unittest.mock import Mock, patch
 
+from core.models import Job
 from django.test import TestCase
 
 from netbox_rpki import models as rpki_models
-from netbox_rpki.jobs import RunBulkRoutingIntentJob
+from netbox_rpki.jobs import ExecuteIrrChangePlanJob, RunBulkRoutingIntentJob
 from netbox_rpki.tests.utils import (
     create_test_asn,
+    create_test_irr_change_plan,
+    create_test_irr_write_execution,
     create_test_organization,
     create_test_prefix,
     create_test_routing_intent_profile,
@@ -49,8 +53,11 @@ class RunBulkRoutingIntentJobTestCase(TestCase):
             prefix_selector_query=f'id={cls.prefix.pk}',
         )
 
+    def _create_job(self, name):
+        return Job.objects.create(name=name, status='pending', job_id=uuid4(), data={})
+
     def test_enqueue_for_organization_deduplicates_existing_active_job(self):
-        existing_job = Mock(pk=901)
+        existing_job = self._create_job('Bulk Routing Intent Run [existing]')
 
         with patch.object(
             RunBulkRoutingIntentJob,
@@ -65,6 +72,28 @@ class RunBulkRoutingIntentJobTestCase(TestCase):
 
         self.assertIs(job, existing_job)
         self.assertFalse(created)
+        execution_record = rpki_models.JobExecutionRecord.objects.get(job=existing_job)
+        self.assertEqual(execution_record.disposition, rpki_models.JobExecutionDisposition.MERGED)
+        self.assertEqual(execution_record.job_class, 'RunBulkRoutingIntentJob')
+        self.assertEqual(execution_record.request_payload_json['organization_pk'], self.organization.pk)
+
+    def test_enqueue_for_organization_records_enqueued_execution_lineage(self):
+        queued_job = self._create_job('Bulk Routing Intent Run [queued]')
+
+        with patch.object(RunBulkRoutingIntentJob, 'enqueue', return_value=queued_job):
+            job, created = RunBulkRoutingIntentJob.enqueue_for_organization(
+                self.organization,
+                profiles=(self.profile,),
+                bindings=(self.binding,),
+            )
+
+        self.assertIs(job, queued_job)
+        self.assertTrue(created)
+        execution_record = rpki_models.JobExecutionRecord.objects.get(job=queued_job)
+        self.assertEqual(execution_record.disposition, rpki_models.JobExecutionDisposition.ENQUEUED)
+        self.assertEqual(execution_record.job_class, 'RunBulkRoutingIntentJob')
+        self.assertEqual(execution_record.request_payload_json['organization_pk'], self.organization.pk)
+        self.assertIn('baseline_fingerprint', execution_record.request_payload_json)
 
     def test_run_records_bulk_run_in_job_data(self):
         bulk_run = rpki_models.BulkIntentRun.objects.create(
@@ -103,3 +132,47 @@ class RunBulkRoutingIntentJobTestCase(TestCase):
         self.assertEqual(start_event['organization_id'], self.organization.pk)
         self.assertEqual(complete_event['event'], 'job.run.complete')
         self.assertEqual(complete_event['bulk_intent_run_pk'], bulk_run.pk)
+
+
+class ExecuteIrrChangePlanJobTestCase(TestCase):
+    def setUp(self):
+        self.plan = create_test_irr_change_plan(name='Replay-safe IRR Plan')
+
+    def _create_job(self, name):
+        return Job.objects.create(name=name, status='pending', job_id=uuid4(), data={})
+
+    def test_run_records_replayed_execution_lineage(self):
+        execution = create_test_irr_write_execution(
+            change_plan=self.plan,
+            execution_mode=rpki_models.IrrWriteExecutionMode.APPLY,
+            request_fingerprint='replay-fingerprint',
+        )
+        job = self._create_job(ExecuteIrrChangePlanJob.get_job_name(self.plan, execution_mode=rpki_models.IrrWriteExecutionMode.APPLY))
+        save_mock = Mock()
+        job.save = save_mock
+        runner = ExecuteIrrChangePlanJob(job)
+        runner.logger = Mock()
+
+        with patch(
+            'netbox_rpki.jobs.apply_irr_change_plan',
+            return_value=(
+                execution,
+                {
+                    'replayed': True,
+                    'replayed_execution_pk': execution.pk,
+                    'request_fingerprint': execution.request_fingerprint,
+                },
+            ),
+        ) as apply_mock:
+            runner.run(
+                change_plan_pk=self.plan.pk,
+                execution_mode=rpki_models.IrrWriteExecutionMode.APPLY,
+            )
+
+        apply_mock.assert_called_once()
+        replay_record = rpki_models.JobExecutionRecord.objects.get(
+            job_class='ExecuteIrrChangePlanJob',
+            disposition=rpki_models.JobExecutionDisposition.REPLAYED,
+        )
+        self.assertEqual(replay_record.job_name, ExecuteIrrChangePlanJob.get_job_name(self.plan, execution_mode=rpki_models.IrrWriteExecutionMode.APPLY))
+        self.assertEqual(replay_record.resolution_payload_json['irr_write_execution_pk'], execution.pk)

@@ -1140,7 +1140,7 @@ class RoutingIntentProfileActionViewTestCase(PluginViewTestCase):
             def get_absolute_url():
                 return '/core/jobs/885/'
 
-        with patch('netbox_rpki.views.RunRoutingIntentProfileJob.enqueue', return_value=StubJob()) as enqueue_mock:
+        with patch('netbox_rpki.views.RunRoutingIntentProfileJob.enqueue_for_profile', return_value=(StubJob(), True)) as enqueue_mock:
             response = self.client.post(
                 reverse('plugins:netbox_rpki:routingintentprofile_run', kwargs={'pk': self.profile.pk}),
                 {
@@ -1152,11 +1152,10 @@ class RoutingIntentProfileActionViewTestCase(PluginViewTestCase):
 
         self.assertRedirects(response, self.profile.get_absolute_url())
         enqueue_mock.assert_called_once_with(
-            instance=self.profile,
+            self.profile,
             user=self.user,
-            profile_pk=self.profile.pk,
             comparison_scope=rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
-            provider_snapshot_pk=self.provider_snapshot.pk,
+            provider_snapshot=self.provider_snapshot,
         )
 
     def test_profile_detail_hides_run_button_without_change_permission(self):

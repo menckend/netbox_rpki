@@ -38,13 +38,24 @@ class Command(BaseCommand):
         provider_snapshot_pk = options.get('provider_snapshot')
 
         if options['enqueue']:
-            job = RunRoutingIntentProfileJob.enqueue(
-                instance=profile,
-                profile_pk=profile.pk,
+            provider_snapshot = None
+            if provider_snapshot_pk is not None:
+                try:
+                    provider_snapshot = rpki_models.ProviderSnapshot.objects.get(pk=provider_snapshot_pk)
+                except rpki_models.ProviderSnapshot.DoesNotExist as exc:
+                    raise CommandError(f'ProviderSnapshot {provider_snapshot_pk} does not exist.') from exc
+
+            job, created = RunRoutingIntentProfileJob.enqueue_for_profile(
+                profile,
                 comparison_scope=comparison_scope,
-                provider_snapshot_pk=provider_snapshot_pk,
+                provider_snapshot=provider_snapshot,
             )
-            self.stdout.write(self.style.SUCCESS(f'Enqueued job {job.pk} for profile {profile.pk}.'))
+            if job is not None and created:
+                self.stdout.write(self.style.SUCCESS(f'Enqueued job {job.pk} for profile {profile.pk}.'))
+            elif job is not None:
+                self.stdout.write(self.style.WARNING(f'Existing job {job.pk} is already active for profile {profile.pk}.'))
+            else:
+                self.stdout.write(self.style.WARNING(f'Routing-intent reconciliation is already running for profile {profile.pk}.'))
             return
 
         derivation_run, reconciliation_run = run_routing_intent_pipeline(

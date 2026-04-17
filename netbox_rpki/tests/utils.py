@@ -2,6 +2,7 @@ import hashlib
 from dataclasses import dataclass
 from uuid import uuid4
 
+from core.models import Job
 from django.utils import timezone
 from django.utils.text import slugify
 from netaddr import IPNetwork
@@ -156,6 +157,45 @@ def create_test_lifecycle_health_event(
         resolved_at=resolved_at,
         payload_json=payload_json or {},
         delivery_error=delivery_error,
+        **kwargs,
+    )
+
+
+def create_test_job_execution_record(
+    name='Job Execution Record 1',
+    organization=None,
+    job=None,
+    job_class='RunBulkRoutingIntentJob',
+    job_name='Bulk Routing Intent Run [1:test]',
+    dedupe_key='bulk-routing-intent-run:[1:test]',
+    disposition=rpki_models.JobExecutionDisposition.ENQUEUED,
+    requested_by='',
+    scheduled_at=None,
+    request_payload_json=None,
+    resolution_payload_json=None,
+    **kwargs,
+):
+    if organization is None:
+        organization = create_test_organization()
+    if job is None:
+        job = Job.objects.create(
+            name=job_name,
+            status='pending',
+            job_id=uuid4(),
+            data={},
+        )
+    return rpki_models.JobExecutionRecord.objects.create(
+        name=name,
+        organization=organization,
+        job=job,
+        job_class=job_class,
+        job_name=job_name,
+        dedupe_key=dedupe_key,
+        disposition=disposition,
+        requested_by=requested_by,
+        scheduled_at=scheduled_at,
+        request_payload_json=request_payload_json or {},
+        resolution_payload_json=resolution_payload_json or {},
         **kwargs,
     )
 
@@ -2300,6 +2340,7 @@ def create_test_irr_write_execution(
     started_at=None,
     completed_at=None,
     item_count=0,
+    request_fingerprint='',
     request_payload_json=None,
     response_payload_json=None,
     error='',
@@ -2322,6 +2363,7 @@ def create_test_irr_write_execution(
         started_at=started_at,
         completed_at=completed_at,
         item_count=item_count,
+        request_fingerprint=request_fingerprint,
         request_payload_json=request_payload_json or {},
         response_payload_json=response_payload_json or {},
         error=error,

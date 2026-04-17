@@ -153,6 +153,31 @@ class IrrWriteExecutionServiceTestCase(TestCase):
         self.assertEqual(posted_body['override'], 'override-pass')
 
     @patch('netbox_rpki.services.irr_write.urlopen')
+    def test_apply_irr_change_plan_reuses_matching_execution_when_replay_safe(self, urlopen_mock):
+        urlopen_mock.return_value = _MockHttpResponse({'summary': {'objects_found': 1, 'successful': 1, 'failed': 0}})
+        create_test_irr_change_plan_item(
+            name='Create Route',
+            change_plan=self.plan,
+            action=rpki_models.IrrChangePlanAction.CREATE,
+            after_state_json={
+                'object_class': 'route',
+                'prefix': '203.0.113.0/24',
+                'origin_asn': 'AS64500',
+                'stable_key': 'route:203.0.113.0/24AS64500',
+            },
+        )
+
+        first_execution, first_payload = apply_irr_change_plan(self.plan, requested_by='apply-user', replay_safe=True)
+        second_execution, second_payload = apply_irr_change_plan(self.plan, requested_by='apply-user', replay_safe=True)
+
+        self.assertEqual(first_execution.pk, second_execution.pk)
+        self.assertEqual(urlopen_mock.call_count, 1)
+        self.assertFalse(first_payload.get('replayed', False))
+        self.assertTrue(second_payload['replayed'])
+        self.assertEqual(second_payload['replayed_execution_pk'], first_execution.pk)
+        self.assertEqual(second_payload['request_fingerprint'], first_execution.request_fingerprint)
+
+    @patch('netbox_rpki.services.irr_write.urlopen')
     def test_apply_irr_change_plan_records_partial_execution(self, urlopen_mock):
         urlopen_mock.side_effect = [
             _MockHttpResponse({'summary': {'objects_found': 1, 'successful': 1, 'failed': 0}}),

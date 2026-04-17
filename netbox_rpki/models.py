@@ -90,6 +90,13 @@ class ValidationRunStatus(models.TextChoices):
     FAILED = "failed", "Failed"
 
 
+class JobExecutionDisposition(models.TextChoices):
+    ENQUEUED = "enqueued", "Enqueued"
+    MERGED = "merged", "Merged"
+    SKIPPED = "skipped", "Skipped"
+    REPLAYED = "replayed", "Replayed"
+
+
 class ValidationDisposition(models.TextChoices):
     ACCEPTED = "accepted", "Accepted"
     REJECTED = "rejected", "Rejected"
@@ -4105,6 +4112,7 @@ class IrrWriteExecution(NamedRpkiStandardModel):
     started_at = models.DateTimeField(blank=True, null=True)
     completed_at = models.DateTimeField(blank=True, null=True)
     item_count = models.PositiveIntegerField(default=0)
+    request_fingerprint = models.CharField(max_length=128, blank=True)
     request_payload_json = models.JSONField(default=dict, blank=True)
     response_payload_json = models.JSONField(default=dict, blank=True)
     error = models.TextField(blank=True)
@@ -4130,6 +4138,47 @@ class IrrWriteExecution(NamedRpkiStandardModel):
                 errors['source'] = 'IRR write execution source must match the IRR change plan source.'
         if errors:
             raise ValidationError(errors)
+
+
+class JobExecutionRecord(NamedRpkiStandardModel):
+    organization = models.ForeignKey(
+        to=Organization,
+        on_delete=models.PROTECT,
+        related_name='job_execution_records',
+        blank=True,
+        null=True,
+    )
+    job = models.ForeignKey(
+        to='core.Job',
+        on_delete=models.SET_NULL,
+        related_name='netbox_rpki_execution_records',
+        blank=True,
+        null=True,
+    )
+    job_class = models.CharField(max_length=128)
+    job_name = models.CharField(max_length=200)
+    dedupe_key = models.CharField(max_length=255)
+    disposition = models.CharField(
+        max_length=16,
+        choices=JobExecutionDisposition.choices,
+    )
+    requested_by = models.CharField(max_length=150, blank=True)
+    scheduled_at = models.DateTimeField(blank=True, null=True)
+    request_payload_json = models.JSONField(default=dict, blank=True)
+    resolution_payload_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ('-created', '-pk')
+        indexes = (
+            models.Index(fields=('job_class', 'dedupe_key'), name='nb_rpki_jobexec_key_idx'),
+            models.Index(fields=('organization', 'disposition'), name='nb_rpki_jobexec_orgdisp_idx'),
+        )
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse('plugins:netbox_rpki:jobexecutionrecord', args=[self.pk])
 
 
 class TelemetrySource(NamedRpkiStandardModel):

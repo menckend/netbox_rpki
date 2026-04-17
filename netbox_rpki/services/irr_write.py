@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 from collections import Counter
 from urllib.error import HTTPError, URLError
@@ -460,12 +461,32 @@ def preview_irr_change_plan(
     plan: rpki_models.IrrChangePlan | int,
     *,
     requested_by: str = '',
+    replay_safe: bool = False,
 ) -> tuple[rpki_models.IrrWriteExecution, dict]:
     plan = _normalize_change_plan(plan)
+    payload = _build_execution_payload(plan)
+    request_fingerprint = _build_execution_request_fingerprint(
+        plan=plan,
+        execution_mode=rpki_models.IrrWriteExecutionMode.PREVIEW,
+        payload=payload,
+    )
+    payload['request_fingerprint'] = request_fingerprint
+    if replay_safe:
+        replayed_execution = _find_replay_safe_execution(
+            plan=plan,
+            execution_mode=rpki_models.IrrWriteExecutionMode.PREVIEW,
+            request_fingerprint=request_fingerprint,
+        )
+        if replayed_execution is not None:
+            replay_payload = dict(replayed_execution.response_payload_json or replayed_execution.request_payload_json or payload)
+            replay_payload['replayed'] = True
+            replay_payload['replayed_execution_pk'] = replayed_execution.pk
+            replay_payload['request_fingerprint'] = request_fingerprint
+            return replayed_execution, replay_payload
+
     if not plan.can_preview:
         raise IrrWriteExecutionError('IRR change plan is not previewable in its current state.')
 
-    payload = _build_execution_payload(plan)
     started_at = timezone.now()
     execution = rpki_models.IrrWriteExecution.objects.create(
         name=f'{plan.name} Preview {started_at:%Y-%m-%d %H:%M:%S}',
@@ -479,10 +500,12 @@ def preview_irr_change_plan(
         started_at=started_at,
         completed_at=started_at,
         item_count=payload['actionable_item_count'],
+        request_fingerprint=request_fingerprint,
         request_payload_json=payload,
         response_payload_json={
             'preview_only': True,
             'write_support_mode': plan.write_support_mode,
+            'request_fingerprint': request_fingerprint,
             'item_results': payload['item_results'],
         },
     )
@@ -494,8 +517,29 @@ def apply_irr_change_plan(
     plan: rpki_models.IrrChangePlan | int,
     *,
     requested_by: str = '',
+    replay_safe: bool = False,
 ) -> tuple[rpki_models.IrrWriteExecution, dict]:
     plan = _normalize_change_plan(plan)
+    payload = _build_execution_payload(plan)
+    request_fingerprint = _build_execution_request_fingerprint(
+        plan=plan,
+        execution_mode=rpki_models.IrrWriteExecutionMode.APPLY,
+        payload=payload,
+    )
+    payload['request_fingerprint'] = request_fingerprint
+    if replay_safe:
+        replayed_execution = _find_replay_safe_execution(
+            plan=plan,
+            execution_mode=rpki_models.IrrWriteExecutionMode.APPLY,
+            request_fingerprint=request_fingerprint,
+        )
+        if replayed_execution is not None:
+            replay_payload = dict(replayed_execution.response_payload_json or payload)
+            replay_payload['replayed'] = True
+            replay_payload['replayed_execution_pk'] = replayed_execution.pk
+            replay_payload['request_fingerprint'] = request_fingerprint
+            return replayed_execution, replay_payload
+
     if not plan.can_apply:
         raise IrrWriteExecutionError('IRR change plan is not applyable in its current state.')
     if plan.source.source_family != rpki_models.IrrSourceFamily.IRRD_COMPATIBLE:
@@ -503,7 +547,6 @@ def apply_irr_change_plan(
     if not plan.source.api_key:
         raise IrrWriteExecutionError('IRR source api_key is required for IRRd override-based write execution.')
 
-    payload = _build_execution_payload(plan)
     started_at = timezone.now()
     plan.status = rpki_models.IrrChangePlanStatus.EXECUTING
     plan.execution_started_at = started_at
@@ -523,6 +566,7 @@ def apply_irr_change_plan(
         requested_by=requested_by,
         started_at=started_at,
         item_count=payload['actionable_item_count'],
+        request_fingerprint=request_fingerprint,
         request_payload_json=payload,
     )
 
@@ -530,6 +574,7 @@ def apply_irr_change_plan(
         'write_support_mode': plan.write_support_mode,
         'item_results': [],
         'request_summary': payload['request_summary'],
+        'request_fingerprint': request_fingerprint,
     }
     successful_operations = 0
     failed_operations = 0
@@ -605,6 +650,46 @@ def _normalize_change_plan(plan: rpki_models.IrrChangePlan | int) -> rpki_models
     if isinstance(plan, rpki_models.IrrChangePlan):
         return plan
     return rpki_models.IrrChangePlan.objects.get(pk=plan)
+
+
+def _build_execution_request_fingerprint(
+    *,
+    plan: rpki_models.IrrChangePlan,
+    execution_mode: str,
+    payload: dict,
+) -> str:
+    serialized = json.dumps(
+        {
+            'change_plan_pk': plan.pk,
+            'execution_mode': execution_mode,
+            'payload': payload,
+        },
+        sort_keys=True,
+        separators=(',', ':'),
+    )
+    return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
+
+
+def _find_replay_safe_execution(
+    *,
+    plan: rpki_models.IrrChangePlan,
+    execution_mode: str,
+    request_fingerprint: str,
+) -> rpki_models.IrrWriteExecution | None:
+    replayable_statuses = (
+        (rpki_models.IrrWriteExecutionStatus.COMPLETED,)
+        if execution_mode == rpki_models.IrrWriteExecutionMode.PREVIEW
+        else (
+            rpki_models.IrrWriteExecutionStatus.RUNNING,
+            rpki_models.IrrWriteExecutionStatus.COMPLETED,
+            rpki_models.IrrWriteExecutionStatus.PARTIAL,
+        )
+    )
+    return plan.write_executions.filter(
+        execution_mode=execution_mode,
+        request_fingerprint=request_fingerprint,
+        status__in=replayable_statuses,
+    ).order_by('-started_at', '-pk').first()
 
 
 def _build_execution_payload(plan: rpki_models.IrrChangePlan) -> dict:

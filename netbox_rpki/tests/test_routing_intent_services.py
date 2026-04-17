@@ -2001,17 +2001,17 @@ class RoutingIntentProfileRunActionAPITestCase(PluginAPITestCase):
             def get_absolute_url():
                 return '/core/jobs/321/'
 
-        with patch('netbox_rpki.api.views.RunRoutingIntentProfileJob.enqueue', return_value=StubJob()) as enqueue_mock:
+        with patch('netbox_rpki.api.views.RunRoutingIntentProfileJob.enqueue_for_profile', return_value=(StubJob(), True)) as enqueue_mock:
             response = self.client.post(url, {}, format='json', **self.header)
 
         self.assertHttpStatus(response, 200)
         self.assertEqual(response.data['job']['id'], 321)
+        self.assertFalse(response.data['reconciliation_in_progress'])
         enqueue_mock.assert_called_once_with(
-            instance=self.profile,
+            self.profile,
             user=self.user,
-            profile_pk=self.profile.pk,
             comparison_scope='local_roa_records',
-            provider_snapshot_pk=None,
+            provider_snapshot=None,
         )
 
     def test_run_action_passes_provider_snapshot_parameters(self):
@@ -2033,7 +2033,7 @@ class RoutingIntentProfileRunActionAPITestCase(PluginAPITestCase):
             def get_absolute_url():
                 return '/core/jobs/654/'
 
-        with patch('netbox_rpki.api.views.RunRoutingIntentProfileJob.enqueue', return_value=StubJob()) as enqueue_mock:
+        with patch('netbox_rpki.api.views.RunRoutingIntentProfileJob.enqueue_for_profile', return_value=(StubJob(), True)) as enqueue_mock:
             response = self.client.post(
                 url,
                 {
@@ -2046,11 +2046,10 @@ class RoutingIntentProfileRunActionAPITestCase(PluginAPITestCase):
 
         self.assertHttpStatus(response, 200)
         enqueue_mock.assert_called_once_with(
-            instance=self.profile,
+            self.profile,
             user=self.user,
-            profile_pk=self.profile.pk,
             comparison_scope=rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
-            provider_snapshot_pk=provider_snapshot.pk,
+            provider_snapshot=provider_snapshot,
         )
 
 

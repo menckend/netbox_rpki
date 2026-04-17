@@ -176,22 +176,25 @@ class RoutingIntentProfileViewSet(VIEWSET_CLASS_MAP['routingintentprofile']):
         provider_snapshot_pk = getattr(provider_snapshot, 'pk', provider_snapshot)
         if provider_snapshot is not None and provider_snapshot.organization_id != profile.organization_id:
             raise ValidationError({'provider_snapshot': 'Provider snapshot must belong to the selected organization.'})
-        job = RunRoutingIntentProfileJob.enqueue(
-            instance=profile,
+        job, created = RunRoutingIntentProfileJob.enqueue_for_profile(
+            profile,
             user=request.user,
-            profile_pk=profile.pk,
             comparison_scope=comparison_scope,
-            provider_snapshot_pk=provider_snapshot_pk,
+            provider_snapshot=provider_snapshot,
         )
         serializer = SERIALIZER_CLASS_MAP['routingintentprofile'](profile, context={'request': request})
         payload = dict(serializer.data)
-        payload['job'] = {
-            'id': job.pk,
-            'status': job.status,
-            'url': job.get_absolute_url(),
-        }
-        payload['job']['comparison_scope'] = comparison_scope
-        payload['job']['provider_snapshot'] = provider_snapshot_pk
+        payload['job'] = None
+        if job is not None:
+            payload['job'] = {
+                'id': job.pk,
+                'status': job.status,
+                'url': job.get_absolute_url(),
+                'existing': not created,
+                'comparison_scope': comparison_scope,
+                'provider_snapshot': provider_snapshot_pk,
+            }
+        payload['reconciliation_in_progress'] = not created
         return Response(payload)
 
 
