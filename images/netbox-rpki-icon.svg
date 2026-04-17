@@ -1,15 +1,63 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 640" role="img" aria-labelledby="title desc">
   <title id="title">NetBox RPKI plugin icon</title>
-  <desc id="desc">A square transparent icon showing a network grid, shield, and route bars.</desc>
-  <rect x="24" y="24" width="464" height="464" rx="112" fill="#0f3d3e"/>
-  <rect x="60" y="60" width="392" height="392" rx="84" fill="#f2efe6"/>
-  <rect x="96" y="96" width="320" height="320" rx="60" fill="#135c62"/>
-  <path d="M256 126c56 38 101 47 132 50v86c0 87-55 142-132 186-77-44-132-99-132-186v-86c31-3 76-12 132-50z" fill="#f2efe6"/>
-  <path d="M256 165c38 24 70 31 95 34v58c0 61-37 101-95 136-58-35-95-75-95-136v-58c25-3 57-10 95-34z" fill="#df6a32"/>
-  <circle cx="180" cy="176" r="20" fill="#f2efe6"/>
-  <circle cx="332" cy="176" r="20" fill="#f2efe6"/>
-  <circle cx="180" cy="336" r="20" fill="#f2efe6"/>
-  <circle cx="332" cy="336" r="20" fill="#f2efe6"/>
-  <path d="M180 176h152M180 336h152M180 176v160M332 176v160" stroke="#78c3b6" stroke-width="16" stroke-linecap="round"/>
-  <path d="M220 230h72M208 268h96M220 306h72" stroke="#f2efe6" stroke-width="20" stroke-linecap="round"/>
+  <desc id="desc">A transparent two-tone icon showing a sparse antique key wireframe built from NetBox-style graph nodes and links, with RPKI cut out of the handle.</desc>
+
+  <defs>
+    <g id="key-lines" fill="none" stroke-linecap="square" stroke-linejoin="miter" stroke-width="16">
+      <line x1="180" y1="156" x2="116" y2="220"/>
+      <line x1="180" y1="156" x2="244" y2="220"/>
+      <line x1="116" y1="220" x2="180" y2="284"/>
+      <line x1="244" y1="220" x2="180" y2="284"/>
+
+      <line x1="244" y1="220" x2="360" y2="220"/>
+      <line x1="360" y1="220" x2="540" y2="220"/>
+      <line x1="540" y1="220" x2="720" y2="220"/>
+
+      <line x1="720" y1="220" x2="812" y2="220"/>
+      <line x1="812" y1="220" x2="812" y2="332"/>
+      <line x1="812" y1="332" x2="732" y2="404"/>
+    </g>
+
+    <g id="key-nodes" fill="none" stroke-width="16">
+      <circle cx="180" cy="156" r="23"/>
+      <circle cx="116" cy="220" r="23"/>
+      <circle cx="180" cy="284" r="23"/>
+      <circle cx="244" cy="220" r="23"/>
+      <circle cx="360" cy="220" r="23"/>
+      <circle cx="540" cy="220" r="23"/>
+      <circle cx="720" cy="220" r="23"/>
+      <circle cx="812" cy="220" r="23"/>
+      <circle cx="812" cy="332" r="23"/>
+      <circle cx="732" cy="404" r="23"/>
+    </g>
+
+    <g id="letter-cutouts" fill="#000" font-family="DejaVu Sans, Arial, sans-serif" font-size="28" font-weight="700" text-anchor="middle" dominant-baseline="middle">
+      <text x="180" y="156">R</text>
+      <text x="116" y="220">P</text>
+      <text x="180" y="284">K</text>
+      <text x="244" y="220">I</text>
+    </g>
+
+    <mask id="front-mask">
+      <rect width="960" height="640" fill="#fff"/>
+      <use href="#letter-cutouts"/>
+    </mask>
+
+    <mask id="back-mask">
+      <rect width="960" height="640" fill="#fff"/>
+      <use href="#letter-cutouts" transform="translate(-18 -18)"/>
+    </mask>
+  </defs>
+
+  <g transform="translate(10 12)">
+    <g stroke="#8fe7ff" fill="none" mask="url(#back-mask)" transform="translate(-18 -18)">
+      <use href="#key-lines"/>
+      <use href="#key-nodes"/>
+    </g>
+
+    <g stroke="#23427a" fill="none" mask="url(#front-mask)">
+      <use href="#key-lines"/>
+      <use href="#key-nodes"/>
+    </g>
+  </g>
 </svg>

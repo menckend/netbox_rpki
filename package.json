@@ -11,5 +11,27 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.49.0"
-  }
+  },
+  "description": "Bring RPKI inventory, validation, routing intent, and hosted-provider workflows into NetBox 4.5.x.",
+  "version": "1.0.0",
+  "main": "playwright.config.js",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "dependencies": {
+    "playwright": "^1.59.1",
+    "playwright-core": "^1.59.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/menckend/netbox_rpki.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/menckend/netbox_rpki/issues"
+  },
+  "homepage": "https://github.com/menckend/netbox_rpki#readme"
 }
