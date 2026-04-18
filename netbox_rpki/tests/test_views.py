@@ -4321,3 +4321,115 @@ class ROAValidationSimulationDetailViewTestCase(PluginViewTestCase):
         self.assertContains(response, 'Why It Matters')
         self.assertContains(response, 'Operator Action')
         self.assertContains(response, 'Acknowledge the broader authorization risk before approval.')
+
+
+class IntentAuthorityMapViewTestCase(PluginViewTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='intent-authority-view-org', name='Intent Authority View Org')
+        cls.profile = create_test_routing_intent_profile(
+            name='Intent Authority Profile',
+            organization=cls.organization,
+            status=rpki_models.RoutingIntentProfileStatus.ACTIVE,
+            enabled=True,
+        )
+        cls.derivation_run = create_test_intent_derivation_run(
+            organization=cls.organization,
+            intent_profile=cls.profile,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+            completed_at=timezone.now(),
+        )
+        cls.intent = create_test_roa_intent(
+            organization=cls.organization,
+            intent_profile=cls.profile,
+            derivation_run=cls.derivation_run,
+            prefix_cidr_text='192.0.2.0/24',
+            origin_asn_value=64496,
+            max_length=24,
+        )
+        cls.reconciliation_run = create_test_roa_reconciliation_run(
+            organization=cls.organization,
+            intent_profile=cls.profile,
+            basis_derivation_run=cls.derivation_run,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+            completed_at=timezone.now(),
+        )
+        create_test_roa_intent_result(
+            reconciliation_run=cls.reconciliation_run,
+            roa_intent=cls.intent,
+            result_type=rpki_models.ROAIntentResultType.MISSING,
+        )
+        template = create_test_routing_intent_template(organization=cls.organization)
+        binding = create_test_routing_intent_template_binding(
+            name='Authority Binding',
+            template=template,
+            intent_profile=cls.profile,
+            state=rpki_models.RoutingIntentTemplateBindingState.STALE,
+        )
+        cls.intent.summary_json = {
+            'profile_context_group_names': ['Edge Services'],
+            'binding_context_groups': {str(binding.pk): ['Binding Edge Group']},
+        }
+        cls.intent.save(update_fields=('summary_json',))
+        other_profile = create_test_routing_intent_profile(
+            name='Intent Authority Backup',
+            organization=cls.organization,
+            status=rpki_models.RoutingIntentProfileStatus.ACTIVE,
+            enabled=True,
+        )
+        other_run = create_test_intent_derivation_run(
+            organization=cls.organization,
+            intent_profile=other_profile,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+            completed_at=timezone.now(),
+        )
+        create_test_roa_intent(
+            organization=cls.organization,
+            intent_profile=other_profile,
+            derivation_run=other_run,
+            prefix_cidr_text='192.0.2.0/24',
+            origin_asn_value=64497,
+            max_length=24,
+        )
+
+    def test_intent_authority_map_renders_and_shows_summary_cards(self):
+        self.add_permissions('netbox_rpki.view_roaintent')
+
+        response = self.client.get(reverse('plugins:netbox_rpki:intent_authority_map'))
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'Intent Authority Map')
+        self.assertContains(response, 'Authoritative Subjects')
+        self.assertContains(response, 'With Drift')
+        self.assertContains(response, 'Missing Runtime ROA')
+
+    def test_intent_authority_map_filters_narrow_results(self):
+        self.add_permissions('netbox_rpki.view_roaintent')
+
+        response = self.client.get(reverse('plugins:netbox_rpki:intent_authority_map'), {'q': '64496'})
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, '192.0.2.0/24 -&gt; AS64496 /24')
+        self.assertNotContains(response, '192.0.2.0/24 -&gt; AS64497 /24')
+
+    def test_intent_authority_map_empty_state_with_filters(self):
+        self.add_permissions('netbox_rpki.view_roaintent')
+
+        response = self.client.get(reverse('plugins:netbox_rpki:intent_authority_map'), {'q': 'no-match-token'})
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'No authoritative intent rows match the current filters.')
+
+    def test_intent_authority_map_surfaces_overlap_and_binding_warnings(self):
+        self.add_permissions('netbox_rpki.view_roaintent')
+
+        response = self.client.get(reverse('plugins:netbox_rpki:intent_authority_map'))
+
+        self.assertHttpStatus(response, 200)
+        self.assertContains(response, 'Also covered by profile: Intent Authority Backup')
+        self.assertContains(response, 'profiles have stale or invalid template bindings')
+
+    def test_intent_authority_map_requires_permission(self):
+        response = self.client.get(reverse('plugins:netbox_rpki:intent_authority_map'))
+
+        self.assertHttpStatus(response, 403)

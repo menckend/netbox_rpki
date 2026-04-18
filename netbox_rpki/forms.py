@@ -126,6 +126,81 @@ class IrrDivergenceDashboardFilterForm(forms.Form):
     )
 
 
+class IntentAuthorityMapFilterForm(forms.Form):
+    organization = DynamicModelChoiceField(
+        queryset=netbox_rpki.models.Organization.objects.all(),
+        required=False,
+        label='Organization',
+    )
+    intent_profile = DynamicModelChoiceField(
+        queryset=netbox_rpki.models.RoutingIntentProfile.objects.all(),
+        required=False,
+        label='Intent Profile',
+        query_params={'organization_id': '$organization'},
+    )
+    address_family = forms.ChoiceField(
+        choices=[('', 'All')] + list(netbox_rpki.models.AddressFamily.choices),
+        required=False,
+        label='Address Family',
+    )
+    derived_state = forms.ChoiceField(
+        choices=[('', 'All')] + list(netbox_rpki.models.ROAIntentDerivedState.choices),
+        required=False,
+        label='Derived State',
+    )
+    exposure_state = forms.ChoiceField(
+        choices=[('', 'All')] + list(netbox_rpki.models.ROAIntentExposureState.choices),
+        required=False,
+        label='Exposure',
+    )
+    delegated_entity = DynamicModelChoiceField(
+        queryset=netbox_rpki.models.DelegatedAuthorizationEntity.objects.all(),
+        required=False,
+        label='Delegated Entity',
+        query_params={'organization_id': '$organization'},
+    )
+    managed_relationship = DynamicModelChoiceField(
+        queryset=netbox_rpki.models.ManagedAuthorizationRelationship.objects.all(),
+        required=False,
+        label='Managed Relationship',
+        query_params={'organization_id': '$organization'},
+    )
+    run_state = forms.ChoiceField(
+        choices=(
+            ('', 'All'),
+            ('unreconciled', 'Unreconciled'),
+            ('reconciled_current', 'Reconciled - Current'),
+            ('reconciled_with_drift', 'Reconciled - With Drift'),
+            ('reconciliation_failed', 'Reconciliation Failed'),
+        ),
+        required=False,
+        label='Run State',
+    )
+    drift_state = forms.ChoiceField(
+        choices=(
+            ('', 'All'),
+            ('match', 'Match'),
+            ('missing', 'Missing'),
+            ('origin_mismatch', 'Origin Mismatch'),
+            ('origin_and_length_mismatch', 'Origin + Length Mismatch'),
+            ('prefix_mismatch', 'Prefix Mismatch'),
+            ('max_length_overbroad', 'maxLength Overbroad'),
+            ('max_length_too_narrow', 'maxLength Too Narrow'),
+            ('stale', 'Stale'),
+            ('inactive_intent', 'Inactive Intent'),
+            ('suppressed_by_policy', 'Suppressed by Policy'),
+            ('unknown', 'Unknown'),
+        ),
+        required=False,
+        label='Drift',
+    )
+    q = forms.CharField(
+        required=False,
+        label='Search',
+        widget=forms.TextInput(attrs={'placeholder': 'Prefix, ASN, profile, or explanation'}),
+    )
+
+
 _BaseRoutingIntentProfileForm = RoutingIntentProfileForm
 
 

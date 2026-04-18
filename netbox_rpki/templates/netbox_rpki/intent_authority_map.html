@@ -1,0 +1,142 @@
+{% extends 'generic/_base.html' %}
+{% load render_table from django_tables2 %}
+
+{% block title %}Intent Authority Map{% endblock %}
+
+{% block content %}
+  <div class="row mb-4">
+    <div class="col col-md-12">
+      <div class="card border-primary">
+        <h2 class="card-header">Intent Authority Map</h2>
+        <div class="card-body">
+          <p class="mb-3">
+            Review the currently authoritative ROA intent for each active profile, together with policy lineage,
+            reconciliation posture, and downstream execution state.
+          </p>
+          <form method="get" class="row g-3 align-items-end mb-3">
+            <div class="col col-md-3">
+              <label class="form-label" for="{{ filter_form.organization.id_for_label }}">{{ filter_form.organization.label }}</label>
+              {{ filter_form.organization }}
+            </div>
+            <div class="col col-md-3">
+              <label class="form-label" for="{{ filter_form.intent_profile.id_for_label }}">{{ filter_form.intent_profile.label }}</label>
+              {{ filter_form.intent_profile }}
+            </div>
+            <div class="col col-md-2">
+              <label class="form-label" for="{{ filter_form.address_family.id_for_label }}">{{ filter_form.address_family.label }}</label>
+              {{ filter_form.address_family }}
+            </div>
+            <div class="col col-md-2">
+              <label class="form-label" for="{{ filter_form.derived_state.id_for_label }}">{{ filter_form.derived_state.label }}</label>
+              {{ filter_form.derived_state }}
+            </div>
+            <div class="col col-md-2">
+              <label class="form-label" for="{{ filter_form.exposure_state.id_for_label }}">{{ filter_form.exposure_state.label }}</label>
+              {{ filter_form.exposure_state }}
+            </div>
+            <div class="col col-md-3">
+              <label class="form-label" for="{{ filter_form.delegated_entity.id_for_label }}">{{ filter_form.delegated_entity.label }}</label>
+              {{ filter_form.delegated_entity }}
+            </div>
+            <div class="col col-md-3">
+              <label class="form-label" for="{{ filter_form.managed_relationship.id_for_label }}">{{ filter_form.managed_relationship.label }}</label>
+              {{ filter_form.managed_relationship }}
+            </div>
+            <div class="col col-md-2">
+              <label class="form-label" for="{{ filter_form.run_state.id_for_label }}">{{ filter_form.run_state.label }}</label>
+              {{ filter_form.run_state }}
+            </div>
+            <div class="col col-md-2">
+              <label class="form-label" for="{{ filter_form.drift_state.id_for_label }}">{{ filter_form.drift_state.label }}</label>
+              {{ filter_form.drift_state }}
+            </div>
+            <div class="col col-md-2">
+              <label class="form-label" for="{{ filter_form.q.id_for_label }}">{{ filter_form.q.label }}</label>
+              {{ filter_form.q }}
+            </div>
+            <div class="col col-md-12 d-flex gap-2">
+              <button type="submit" class="btn btn-primary">Apply</button>
+              <a href="{% url 'plugins:netbox_rpki:intent_authority_map' %}" class="btn btn-outline-secondary">Reset</a>
+            </div>
+          </form>
+          <div class="row g-3">
+            <div class="col col-md-2">
+              <div class="border rounded p-3 h-100">
+                <div class="text-muted small text-uppercase">Authoritative Subjects</div>
+                <div class="fs-2 fw-semibold">{{ result.total_row_count }}</div>
+                <div class="text-muted">Rows visible after filters</div>
+              </div>
+            </div>
+            <div class="col col-md-2">
+              <div class="border rounded p-3 h-100">
+                <div class="text-muted small text-uppercase">Unreconciled</div>
+                <div class="fs-2 fw-semibold">{{ result.run_state_counts.unreconciled|default:0 }}</div>
+                <div class="text-muted">Authoritative intents with no current evidence</div>
+              </div>
+            </div>
+            <div class="col col-md-2">
+              <div class="border rounded p-3 h-100">
+                <div class="text-muted small text-uppercase">With Drift</div>
+                <div class="fs-2 fw-semibold">{{ result.run_state_counts.reconciled_with_drift|default:0 }}</div>
+                <div class="text-muted">Reconciled rows that disagree with runtime state</div>
+              </div>
+            </div>
+            <div class="col col-md-2">
+              <div class="border rounded p-3 h-100">
+                <div class="text-muted small text-uppercase">Missing Runtime ROA</div>
+                <div class="fs-2 fw-semibold">{{ result.drift_counts.missing|default:0 }}</div>
+                <div class="text-muted">Authoritative rows missing from runtime evidence</div>
+              </div>
+            </div>
+            <div class="col col-md-2">
+              <div class="border rounded p-3 h-100">
+                <div class="text-muted small text-uppercase">Overlapping Profiles</div>
+                <div class="fs-2 fw-semibold">{{ result.overlap_count }}</div>
+                <div class="text-muted">Rows covered by multiple active profiles</div>
+              </div>
+            </div>
+            <div class="col col-md-2">
+              <div class="border rounded p-3 h-100">
+                <div class="text-muted small text-uppercase">Excluded Profiles</div>
+                <div class="fs-2 fw-semibold">{{ result.excluded_profile_count|add:result.no_derivation_profile_count }}</div>
+                <div class="text-muted">{{ result.excluded_profile_count }} disabled or draft, {{ result.no_derivation_profile_count }} without derivation</div>
+              </div>
+            </div>
+          </div>
+          {% if result.profiles_with_stale_bindings %}
+            <div class="alert alert-warning mt-3 mb-0">
+              {{ result.profiles_with_stale_bindings|length }} profiles have stale or invalid template bindings.
+              Authority may not reflect the latest template policy.
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% if result.rows %}
+    <div class="row">
+      <div class="col col-md-12">
+        <div class="card">
+          <div class="card-body">
+            {% render_table table %}
+          </div>
+        </div>
+      </div>
+    </div>
+  {% else %}
+    <div class="row">
+      <div class="col col-md-12">
+        <div class="card">
+          <div class="card-body text-muted">
+            {% if filters_applied %}
+              No authoritative intent rows match the current filters.
+            {% else %}
+              No active routing intent profiles have completed derivation runs. Create a profile and run derivation to populate this page.
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+{% endblock %}

@@ -9,6 +9,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.generic import View
+from django_tables2 import RequestConfig
 from netbox.object_actions import AddObject, BulkExport, CloneObject, DeleteObject, EditObject
 from netbox.views import generic
 from utilities.forms import ConfirmationForm
@@ -53,10 +54,12 @@ from netbox_rpki.services import (
     build_roa_change_plan_delta,
     create_aspa_change_plan,
     create_roa_change_plan,
+    build_roa_authority_map,
     lift_roa_lint_suppression,
     preview_routing_intent_template_binding,
     preview_aspa_change_plan_provider_write,
     preview_roa_change_plan_provider_write,
+    RoaAuthorityMapFilters,
     build_telemetry_run_history_summary,
     build_validator_run_history_summary,
     run_routing_intent_template_binding_pipeline,
@@ -1975,6 +1978,41 @@ class IrrDivergenceDashboardView(ContentTypePermissionRequiredMixin, View):
                 'url': obj.get_absolute_url(),
             })
         return tuple(objects)
+
+
+class IntentAuthorityMapView(ContentTypePermissionRequiredMixin, View):
+    template_name = 'netbox_rpki/intent_authority_map.html'
+
+    def get_required_permission(self):
+        return 'netbox_rpki.view_roaintent'
+
+    def get(self, request):
+        filter_form = forms.IntentAuthorityMapFilterForm(request.GET or None)
+        filters = RoaAuthorityMapFilters()
+        if filter_form.is_valid():
+            filters = RoaAuthorityMapFilters(
+                organization=filter_form.cleaned_data.get('organization'),
+                intent_profile=filter_form.cleaned_data.get('intent_profile'),
+                address_family=filter_form.cleaned_data.get('address_family', ''),
+                derived_state=filter_form.cleaned_data.get('derived_state', ''),
+                exposure_state=filter_form.cleaned_data.get('exposure_state', ''),
+                delegated_entity=filter_form.cleaned_data.get('delegated_entity'),
+                managed_relationship=filter_form.cleaned_data.get('managed_relationship'),
+                run_state=filter_form.cleaned_data.get('run_state', ''),
+                drift_state=filter_form.cleaned_data.get('drift_state', ''),
+                q=filter_form.cleaned_data.get('q', ''),
+            )
+
+        result = build_roa_authority_map(filters=filters)
+        table = tables.RoaAuthorityMapTable(result.rows)
+        RequestConfig(request, paginate={'per_page': 50}).configure(table)
+
+        return render(request, self.template_name, {
+            'filter_form': filter_form,
+            'table': table,
+            'result': result,
+            'filters_applied': bool(request.GET),
+        })
 
 
 class OperationsDashboardView(ContentTypePermissionRequiredMixin, View):

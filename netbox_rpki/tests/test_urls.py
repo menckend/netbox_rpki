@@ -130,3 +130,10 @@ class UrlRegistrationTestCase(SimpleTestCase):
 
         self.assertEqual(reverse(view_name), path)
         self.assertEqual(resolve(path).view_name, view_name)
+
+    def test_intent_authority_map_route_reverses_and_resolves(self):
+        view_name = 'plugins:netbox_rpki:intent_authority_map'
+        path = '/plugins/netbox_rpki/intent/authority/'
+
+        self.assertEqual(reverse(view_name), path)
+        self.assertEqual(resolve(path).view_name, view_name)

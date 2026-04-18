@@ -30,6 +30,16 @@ IRR_DIVERGENCE_MENU_ITEM = PluginMenuItem(
     ],
 )
 
+INTENT_AUTHORITY_MAP_MENU_ITEM = PluginMenuItem(
+    link='plugins:netbox_rpki:intent_authority_map',
+    link_text='Intent Authority Map',
+    permissions=[
+        'netbox_rpki.view_roaintent',
+        'netbox_rpki.view_roaintentresult',
+        'netbox_rpki.view_roareconciliationrun',
+    ],
+)
+
 
 def build_menu_item(spec):
     buttons = ()
@@ -53,6 +63,7 @@ navigation_groups = {
     group_name: tuple(build_menu_item(spec) for spec in specs)
     for group_name, specs in get_navigation_groups()
 }
+navigation_groups['Intent'] = (INTENT_AUTHORITY_MAP_MENU_ITEM,) + navigation_groups.get('Intent', ())
 navigation_groups['IRR'] = navigation_groups.get('IRR', ()) + (IRR_DIVERGENCE_MENU_ITEM,)
 navigation_groups['Resources'] = navigation_groups.get('Resources', ()) + (
     PROVIDER_SYNC_HEALTH_MENU_ITEM,

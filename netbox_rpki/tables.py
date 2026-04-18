@@ -1,5 +1,6 @@
 
 import django_tables2 as tables
+from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 
 from netbox.tables import NetBoxTable
@@ -252,6 +253,128 @@ class ASPAProviderAuthorizationTable(NetBoxTable):
         model = models.ASPAProvider
         fields = ('provider_as', 'is_current', 'comments', 'tenant', 'tags', 'actions')
         default_columns = ('provider_as', 'is_current', 'comments', 'tenant', 'tags')
+
+
+class RoaAuthorityMapTable(NetBoxTable):
+    subject = tables.Column(
+        accessor='subject_label',
+        verbose_name='Subject',
+        linkify=lambda record: record.roa_intent.get_absolute_url(),
+        order_by=('prefix_cidr_text', 'origin_asn_value', 'max_length'),
+    )
+    organization = tables.Column(accessor='organization', linkify=True)
+    intent_profile = tables.Column(accessor='intent_profile', linkify=True, verbose_name='Profile')
+    address_family = tables.Column(accessor='address_family', verbose_name='AF')
+    derived_state = tables.Column(verbose_name='Authority')
+    exposure_state = tables.Column(verbose_name='Exposure')
+    run_state = tables.Column(verbose_name='Run State')
+    drift_state = tables.Column(verbose_name='Drift')
+    severity = tables.Column(verbose_name='Severity')
+    authority_reason_summary = tables.Column(verbose_name='Why Authoritative')
+    reconciliation_summary = tables.Column(verbose_name='Reconciliation')
+    publication_summary = tables.Column(verbose_name='Execution')
+    binding_freshness = tables.Column(verbose_name='Binding')
+    overlap_warning = tables.Column(verbose_name='Overlap')
+
+    class Meta(NetBoxTable.Meta):
+        model = models.ROAIntent
+        fields = (
+            'subject',
+            'organization',
+            'intent_profile',
+            'address_family',
+            'derived_state',
+            'exposure_state',
+            'run_state',
+            'drift_state',
+            'severity',
+            'authority_reason_summary',
+            'reconciliation_summary',
+            'publication_summary',
+            'binding_freshness',
+            'overlap_warning',
+        )
+        default_columns = (
+            'subject',
+            'organization',
+            'intent_profile',
+            'derived_state',
+            'run_state',
+            'drift_state',
+            'severity',
+            'authority_reason_summary',
+            'publication_summary',
+        )
+
+    def render_derived_state(self, value):
+        return self._render_badge(value, {
+            models.ROAIntentDerivedState.ACTIVE: 'success',
+            models.ROAIntentDerivedState.SUPPRESSED: 'warning text-dark',
+            models.ROAIntentDerivedState.SHADOWED: 'secondary',
+        })
+
+    def render_exposure_state(self, value):
+        return self._render_badge(value, {
+            models.ROAIntentExposureState.ADVERTISED: 'primary',
+            models.ROAIntentExposureState.ELIGIBLE_NOT_ADVERTISED: 'secondary',
+            models.ROAIntentExposureState.BLOCKED: 'danger',
+        })
+
+    def render_run_state(self, value):
+        return self._render_badge(value, {
+            'unreconciled': 'secondary',
+            'reconciled_current': 'success',
+            'reconciled_with_drift': 'warning text-dark',
+            'reconciliation_failed': 'danger',
+        })
+
+    def render_drift_state(self, value):
+        return self._render_badge(value, {
+            'match': 'success',
+            'missing': 'danger',
+            'origin_mismatch': 'danger',
+            'origin_and_length_mismatch': 'danger',
+            'prefix_mismatch': 'warning text-dark',
+            'max_length_overbroad': 'warning text-dark',
+            'max_length_too_narrow': 'warning text-dark',
+            'stale': 'warning text-dark',
+            'inactive_intent': 'secondary',
+            'suppressed_by_policy': 'secondary',
+            'unknown': 'secondary',
+        })
+
+    def render_severity(self, value):
+        return self._render_badge(value.upper() if value else '', {
+            'INFO': 'info',
+            'WARNING': 'warning text-dark',
+            'ERROR': 'danger',
+            'CRITICAL': 'danger',
+        })
+
+    def render_binding_freshness(self, value):
+        return self._render_badge(value or 'None', {
+            models.RoutingIntentTemplateBindingState.CURRENT: 'success',
+            models.RoutingIntentTemplateBindingState.STALE: 'warning text-dark',
+            models.RoutingIntentTemplateBindingState.PENDING: 'info',
+            models.RoutingIntentTemplateBindingState.INVALID: 'danger',
+            'None': 'secondary',
+        })
+
+    def render_overlap_warning(self, value):
+        if not value:
+            return ''
+        return self._render_badge(value, {'default': 'warning text-dark'})
+
+    def render_authority_reason_summary(self, value):
+        if not value:
+            return ''
+        return format_html('<span title="{}">{}</span>', value, value)
+
+    def _render_badge(self, value, class_map):
+        css_class = class_map.get(value, class_map.get('default', 'secondary'))
+        if not value:
+            value = ''
+        return format_html('<span class="badge text-bg-{}">{}</span>', css_class, value)
 
 
 class ImportedAspaProviderTable(NetBoxTable):

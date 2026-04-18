@@ -130,6 +130,12 @@ from .overlay_history import (
     build_validation_run_comparison,
     build_validator_run_history_summary,
 )
+from .intent_authority_map import (
+    RoaAuthorityMapFilters,
+    RoaAuthorityMapResult,
+    RoaAuthorityMapRow,
+    build_roa_authority_map,
+)
 
 __all__ = (
     'ProviderSyncError',
@@ -232,4 +238,8 @@ __all__ = (
     'build_telemetry_run_history_summary',
     'build_validation_run_comparison',
     'build_validator_run_history_summary',
+    'RoaAuthorityMapFilters',
+    'RoaAuthorityMapResult',
+    'RoaAuthorityMapRow',
+    'build_roa_authority_map',
 )

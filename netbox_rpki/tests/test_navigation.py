@@ -79,3 +79,18 @@ class NavigationTestCase(SimpleTestCase):
         for m in navigation.menus:
             with self.subTest(label=m.label):
                 self.assertEqual(m.icon_class, 'mdi mdi-bootstrap')
+
+    def test_intent_authority_map_menu_item_is_first_in_intent_group(self):
+        items = navigation.navigation_groups.get('Intent', ())
+
+        self.assertTrue(items)
+        self.assertEqual(items[0].link_text, 'Intent Authority Map')
+        self.assertEqual(items[0].link, 'plugins:netbox_rpki:intent_authority_map')
+        self.assertEqual(
+            items[0].permissions,
+            [
+                'netbox_rpki.view_roaintent',
+                'netbox_rpki.view_roaintentresult',
+                'netbox_rpki.view_roareconciliationrun',
+            ],
+        )
