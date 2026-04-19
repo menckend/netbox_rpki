@@ -2,6 +2,7 @@ from netbox_rpki import models
 
 from .object_specs import (
     ApiSpec,
+    FieldSetSpec,
     FilterSetSpec,
     FilterFormSpec,
     FormSpec,
@@ -41,6 +42,7 @@ def build_standard_object_spec(
     api_read_only=False,
     ui_read_only=False,
     show_add_button=True,
+    form_fieldsets=None,
 ):
     form_spec = None
     view_edit_class_name = None
@@ -50,6 +52,7 @@ def build_standard_object_spec(
         form_spec = FormSpec(
             class_name=f"{class_prefix}Form",
             fields=api_fields + ("tenant", "comments", "tags"),
+            fieldsets=form_fieldsets,
         )
         view_edit_class_name = f"{class_prefix}EditView"
         view_delete_class_name = f"{class_prefix}DeleteView"
@@ -215,6 +218,13 @@ OBJECT_SPECS = (
                 "tenant",
                 "comments",
                 "tags",
+            ),
+            fieldsets=(
+                FieldSetSpec(fields=("name", "rpki_org", "trust_anchor", "valid_from", "valid_to", "auto_renews"), name="Certificate"),
+                FieldSetSpec(fields=("issuer", "subject", "serial"), name="Identity"),
+                FieldSetSpec(fields=("public_key", "private_key"), name="Cryptographic"),
+                FieldSetSpec(fields=("publication_url", "ca_repository", "publication_point", "self_hosted"), name="Publication"),
+                FieldSetSpec(fields=("tenant", "comments", "tags"), name="Administrative"),
             ),
         ),
         filter_form=FilterFormSpec(class_name="CertificateFilterForm"),
@@ -745,6 +755,15 @@ OBJECT_SPECS = (
         navigation_group="Objects",
         navigation_label="Signed Objects",
         navigation_order=10,
+        form_fieldsets=(
+            FieldSetSpec(fields=("name", "organization", "object_type", "display_label", "publication_status", "validation_state"), name="Signed Object"),
+            FieldSetSpec(fields=("resource_certificate", "ee_certificate"), name="Certificates"),
+            FieldSetSpec(fields=("publication_point", "current_manifest", "filename", "object_uri", "repository_uri"), name="Publication"),
+            FieldSetSpec(fields=("content_hash", "serial_or_version", "cms_digest_algorithm", "cms_signature_algorithm"), name="Cryptographic"),
+            FieldSetSpec(fields=("valid_from", "valid_to"), name="Validity"),
+            FieldSetSpec(fields=("raw_payload_reference",), name="Advanced"),
+            FieldSetSpec(fields=("tenant", "comments", "tags"), name="Administrative"),
+        ),
     ),
     build_standard_object_spec(
         registry_key="certificaterevocationlist",
@@ -1266,6 +1285,12 @@ OBJECT_SPECS = (
         navigation_group="Intent",
         navigation_label="Routing Intent Profiles",
         navigation_order=10,
+        form_fieldsets=(
+            FieldSetSpec(fields=("name", "organization", "is_default", "status", "description", "enabled"), name="Profile"),
+            FieldSetSpec(fields=("selector_mode", "prefix_selector_query", "asn_selector_query", "default_max_length_policy", "allow_as0"), name="Policy"),
+            FieldSetSpec(fields=("context_groups",), name="Context"),
+            FieldSetSpec(fields=("tenant", "comments", "tags"), name="Administrative"),
+        ),
     ),
     build_standard_object_spec(
         registry_key="routingintentcontextgroup",
@@ -1342,6 +1367,11 @@ OBJECT_SPECS = (
         navigation_group="Intent",
         navigation_label="Routing Intent Context Criteria",
         navigation_order=16,
+        form_fieldsets=(
+            FieldSetSpec(fields=("name", "context_group", "criterion_type", "enabled", "weight"), name="Criterion"),
+            FieldSetSpec(fields=("match_tenant", "match_vrf", "match_site", "match_region", "match_provider_account", "match_circuit", "match_provider", "match_value"), name="Match Criteria"),
+            FieldSetSpec(fields=("tenant", "comments", "tags"), name="Administrative"),
+        ),
     ),
     build_standard_object_spec(
         registry_key="routingintentpolicybundle",
@@ -1418,6 +1448,12 @@ OBJECT_SPECS = (
         navigation_group="Intent",
         navigation_label="Routing Intent Rules",
         navigation_order=20,
+        form_fieldsets=(
+            FieldSetSpec(fields=("name", "intent_profile", "weight", "action", "address_family", "enabled"), name="Rule"),
+            FieldSetSpec(fields=("match_tenant", "match_vrf", "match_site", "match_region", "match_role", "match_tag", "match_custom_field"), name="Match Criteria"),
+            FieldSetSpec(fields=("origin_asn", "max_length_mode", "max_length_value"), name="ROA Policy"),
+            FieldSetSpec(fields=("tenant", "comments", "tags"), name="Administrative"),
+        ),
     ),
     build_standard_object_spec(
         registry_key="routingintenttemplate",
@@ -1498,6 +1534,12 @@ OBJECT_SPECS = (
         navigation_group="Intent",
         navigation_label="Routing Intent Template Rules",
         navigation_order=26,
+        form_fieldsets=(
+            FieldSetSpec(fields=("name", "template", "weight", "action", "address_family", "enabled"), name="Rule"),
+            FieldSetSpec(fields=("match_tenant", "match_vrf", "match_site", "match_region", "match_role", "match_tag", "match_custom_field"), name="Match Criteria"),
+            FieldSetSpec(fields=("origin_asn", "max_length_mode", "max_length_value"), name="ROA Policy"),
+            FieldSetSpec(fields=("tenant", "comments", "tags"), name="Administrative"),
+        ),
     ),
     build_standard_object_spec(
         registry_key="routingintenttemplatebinding",
@@ -1545,6 +1587,13 @@ OBJECT_SPECS = (
         navigation_group="Intent",
         navigation_label="Routing Intent Template Bindings",
         navigation_order=27,
+        form_fieldsets=(
+            FieldSetSpec(fields=("name", "template", "intent_profile", "enabled", "binding_priority", "binding_label", "state"), name="Binding"),
+            FieldSetSpec(fields=("origin_asn_override", "max_length_mode", "max_length_value"), name="ROA Policy"),
+            FieldSetSpec(fields=("prefix_selector_query", "asn_selector_query", "context_groups"), name="Selectors"),
+            FieldSetSpec(fields=("last_compiled_fingerprint", "summary_json"), name="Advanced"),
+            FieldSetSpec(fields=("tenant", "comments", "tags"), name="Administrative"),
+        ),
     ),
     build_standard_object_spec(
         registry_key="routingintentexception",
@@ -1608,6 +1657,15 @@ OBJECT_SPECS = (
         navigation_group="Intent",
         navigation_label="Routing Intent Exceptions",
         navigation_order=28,
+        form_fieldsets=(
+            FieldSetSpec(fields=("name", "organization", "intent_profile", "template_binding", "exception_type", "effect_mode", "enabled"), name="Exception"),
+            FieldSetSpec(fields=("prefix", "prefix_cidr_text", "origin_asn", "origin_asn_value", "max_length"), name="Target"),
+            FieldSetSpec(fields=("tenant_scope", "vrf_scope", "site_scope", "region_scope"), name="Scope Filters"),
+            FieldSetSpec(fields=("starts_at", "ends_at", "reason"), name="Lifecycle"),
+            FieldSetSpec(fields=("approved_by", "approved_at"), name="Approval"),
+            FieldSetSpec(fields=("summary_json",), name="Advanced"),
+            FieldSetSpec(fields=("tenant", "comments", "tags"), name="Administrative"),
+        ),
     ),
     build_standard_object_spec(
         registry_key="roaintentoverride",
@@ -1662,6 +1720,13 @@ OBJECT_SPECS = (
         navigation_group="Intent",
         navigation_label="ROA Intent Overrides",
         navigation_order=30,
+        form_fieldsets=(
+            FieldSetSpec(fields=("name", "organization", "intent_profile", "action", "enabled"), name="Override"),
+            FieldSetSpec(fields=("prefix", "prefix_cidr_text", "origin_asn", "origin_asn_value", "max_length"), name="Target"),
+            FieldSetSpec(fields=("tenant_scope", "vrf_scope", "site_scope", "region_scope"), name="Scope Filters"),
+            FieldSetSpec(fields=("reason", "starts_at", "ends_at"), name="Lifecycle"),
+            FieldSetSpec(fields=("tenant", "comments", "tags"), name="Administrative"),
+        ),
     ),
     build_standard_object_spec(
         registry_key="externalmanagementexception",
@@ -1732,6 +1797,15 @@ OBJECT_SPECS = (
         navigation_group="Reconciliation",
         navigation_label="External Management Exceptions",
         navigation_order=31,
+        form_fieldsets=(
+            FieldSetSpec(fields=("name", "organization", "scope_type", "enabled"), name="Exception"),
+            FieldSetSpec(fields=("prefix", "prefix_cidr_text", "origin_asn", "origin_asn_value", "max_length", "roa_object", "imported_authorization"), name="ROA Scope"),
+            FieldSetSpec(fields=("customer_asn", "customer_asn_value", "provider_asn", "provider_asn_value", "aspa", "imported_aspa"), name="ASPA Scope"),
+            FieldSetSpec(fields=("owner", "reason", "starts_at", "review_at", "ends_at"), name="Lifecycle"),
+            FieldSetSpec(fields=("approved_by", "approved_at"), name="Approval"),
+            FieldSetSpec(fields=("summary_json",), name="Advanced"),
+            FieldSetSpec(fields=("tenant", "comments", "tags"), name="Administrative"),
+        ),
     ),
     build_standard_object_spec(
         registry_key="bulkintentrun",
@@ -2755,6 +2829,14 @@ OBJECT_SPECS = (
         navigation_group="Imported",
         navigation_label="Authored CA Relationships",
         navigation_order=117,
+        form_fieldsets=(
+            FieldSetSpec(fields=("name", "organization", "provider_account", "delegated_entity", "managed_relationship"), name="Relationship"),
+            FieldSetSpec(fields=("child_ca_handle", "parent_ca_handle"), name="CA Handles"),
+            FieldSetSpec(fields=("relationship_type", "status", "service_uri"), name="Configuration"),
+            FieldSetSpec(fields=("imported_parent_link", "imported_child_link"), name="Imported Links"),
+            FieldSetSpec(fields=("notes",), name="Notes"),
+            FieldSetSpec(fields=("tenant", "comments", "tags"), name="Administrative"),
+        ),
     ),
     # --- N: Downstream/Delegated Authorization ---
     build_standard_object_spec(
@@ -3364,6 +3446,13 @@ OBJECT_SPECS = (
             ("provider_account_id", "id"),
             ("enabled", "bool"),
         ),
+        form_fieldsets=(
+            FieldSetSpec(fields=("name", "organization", "provider_account", "enabled"), name="Policy"),
+            FieldSetSpec(fields=("sync_stale_after_minutes", "roa_expiry_warning_days", "certificate_expiry_warning_days", "exception_expiry_warning_days"), name="Expiry Thresholds"),
+            FieldSetSpec(fields=("publication_exchange_failure_threshold", "publication_stale_after_minutes", "certificate_expired_grace_minutes", "alert_repeat_after_minutes"), name="Advanced Thresholds"),
+            FieldSetSpec(fields=("notes",), name="Notes"),
+            FieldSetSpec(fields=("tenant", "comments", "tags"), name="Administrative"),
+        ),
     ),
     build_standard_object_spec(
         registry_key="lifecyclehealthhook",
@@ -3399,6 +3488,13 @@ OBJECT_SPECS = (
             ("enabled", "bool"),
             ("target_url", "str"),
             ("send_resolved", "bool"),
+        ),
+        form_fieldsets=(
+            FieldSetSpec(fields=("name", "organization", "provider_account", "policy", "enabled"), name="Hook"),
+            FieldSetSpec(fields=("target_url", "secret", "headers_json"), name="Delivery"),
+            FieldSetSpec(fields=("event_kinds_json", "send_resolved"), name="Events"),
+            FieldSetSpec(fields=("notes",), name="Notes"),
+            FieldSetSpec(fields=("tenant", "comments", "tags"), name="Administrative"),
         ),
     ),
     build_standard_object_spec(
@@ -3502,6 +3598,12 @@ OBJECT_SPECS = (
         navigation_group="Provider",
         navigation_label="Provider Accounts",
         navigation_order=95,
+        form_fieldsets=(
+            FieldSetSpec(fields=("name", "organization", "provider_type", "transport", "sync_enabled"), name="Account"),
+            FieldSetSpec(fields=("org_handle", "ca_handle", "api_key", "api_base_url"), name="Connection"),
+            FieldSetSpec(fields=("sync_interval", "last_successful_sync", "last_sync_status", "last_sync_summary_json"), name="Sync Status"),
+            FieldSetSpec(fields=("tenant", "comments", "tags"), name="Administrative"),
+        ),
     ),
     build_standard_object_spec(
         registry_key="providersnapshot",
@@ -3907,6 +4009,15 @@ OBJECT_SPECS = (
                 "tenant",
                 "comments",
                 "tags",
+            ),
+            fieldsets=(
+                FieldSetSpec(fields=("name", "organization", "slug", "enabled", "source_family"), name="Source"),
+                FieldSetSpec(fields=("query_base_url", "whois_host", "whois_port"), name="Connection"),
+                FieldSetSpec(fields=("write_support_mode", "default_database_label", "maintainer_name"), name="Write Support"),
+                FieldSetSpec(fields=("http_username", "http_password", "api_key"), name="Credentials"),
+                FieldSetSpec(fields=("sync_interval",), name="Sync"),
+                FieldSetSpec(fields=("summary_json",), name="Advanced"),
+                FieldSetSpec(fields=("tenant", "comments", "tags"), name="Administrative"),
             ),
         ),
         filter_form=FilterFormSpec(class_name="IrrSourceFilterForm"),
@@ -4358,7 +4469,7 @@ TABLE_OBJECT_SPECS = tuple(spec for spec in OBJECT_SPECS if spec.table is not No
 VIEW_OBJECT_SPECS = tuple(spec for spec in OBJECT_SPECS if spec.view is not None)
 SIMPLE_DETAIL_VIEW_OBJECT_SPECS = tuple(spec for spec in VIEW_OBJECT_SPECS if spec.view.simple_detail)
 OBJECT_SPEC_BY_REGISTRY_KEY = {spec.registry_key: spec for spec in OBJECT_SPECS}
-MENU_GROUP_ORDER = ("Resources", "ROAs", "Objects", "Trust", "Intent", "Derivation", "Reconciliation", "Provider", "Imported", "IRR", "Validation")
+MENU_GROUP_ORDER = ("Resources", "ROAs", "Objects", "Trust", "Intent", "Derivation", "Reconciliation", "Linting", "Provider", "Imported", "IRR", "Delegated", "Governance", "Validation")
 
 
 def get_object_spec(registry_key: str) -> ObjectSpec:

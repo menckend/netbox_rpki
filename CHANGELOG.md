@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+* Subsystem maturity: every navigation group is now tagged with a maturity level (GA, Beta, or Experimental). Beta and Experimental badges appear in navigation menu labels.
+* Navigation: Linting, Delegated, and Governance subsystems are now visible in the plugin navigation menu (previously suppressed from the menu group order).
+* Plugin setting `hide_experimental`: when set to `True`, Experimental subsystems are removed from the navigation menu. REST API, GraphQL, and URL endpoints remain functional.
+* Documentation: new Subsystem Maturity page in the Sphinx site with level definitions, the current subsystem map, and configuration guidance.
+* README: subsystem maturity table and `hide_experimental` configuration example.
+* Progressive disclosure: forms with 14+ fields are now organized into named fieldsets that group related fields under collapsible headings. Applies to Certificate, IRR Source, and all dynamically-built forms with many fields (Closes #15).
+* Test coverage: structural test verifying fieldset field lists stay in sync with form field lists.
+
 ## 0.2.3 (2026-04-19)
 
 This patch release refreshes the plugin icon artwork and adjusts README rendering for certification readiness.

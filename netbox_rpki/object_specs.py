@@ -48,9 +48,16 @@ class NavigationSpec:
 
 
 @dataclass(frozen=True)
+class FieldSetSpec:
+    fields: tuple[str, ...]
+    name: str | None = None
+
+
+@dataclass(frozen=True)
 class FormSpec:
     class_name: str
     fields: tuple[str, ...]
+    fieldsets: tuple[FieldSetSpec, ...] | None = None
 
 
 @dataclass(frozen=True)

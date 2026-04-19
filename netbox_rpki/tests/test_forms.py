@@ -32,6 +32,20 @@ class FormStructureSmokeTestCase(SimpleTestCase):
             EXPECTED_FILTER_FORM_CLASS_NAMES,
         )
 
+    def test_fieldsets_cover_all_form_fields(self):
+        for spec in FORM_OBJECT_SPECS:
+            if spec.form.fieldsets is None:
+                continue
+            fieldset_fields = []
+            for fs in spec.form.fieldsets:
+                fieldset_fields.extend(fs.fields)
+            with self.subTest(form=spec.form.class_name):
+                self.assertEqual(
+                    sorted(fieldset_fields),
+                    sorted(spec.form.fields),
+                    f"Fieldset fields do not match form fields for {spec.form.class_name}",
+                )
+
 
 class FormRegistryBehaviorTestCase(TestCase):
     def test_generated_filter_forms_define_search_tenant_and_tag_fields(self):

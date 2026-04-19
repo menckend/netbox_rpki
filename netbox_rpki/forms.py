@@ -70,15 +70,22 @@ def build_model_form_class(spec: ObjectSpec) -> type[NetBoxModelForm]:
         },
     )
 
+    attrs = {
+        '__module__': __name__,
+        'tenant': DynamicModelChoiceField(queryset=Tenant.objects.all(), required=False),
+        'comments': CommentField(),
+        'Meta': meta_class,
+    }
+
+    if spec.form.fieldsets:
+        attrs['fieldsets'] = tuple(
+            FieldSet(*fs.fields, name=fs.name) for fs in spec.form.fieldsets
+        )
+
     return type(
         spec.form.class_name,
         (NetBoxModelForm,),
-        {
-            '__module__': __name__,
-            'tenant': DynamicModelChoiceField(queryset=Tenant.objects.all(), required=False),
-            'comments': CommentField(),
-            'Meta': meta_class,
-        },
+        attrs,
     )
 
 
