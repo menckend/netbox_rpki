@@ -2,17 +2,18 @@
 
 ## Unreleased
 
+## 0.2.4 (2026-04-19)
+
+This release adds UX improvements, first-class tenant scoping, and a new cross-validator comparison API.
+
 ### Added
 
-* Subsystem maturity: every navigation group is now tagged with a maturity level (GA, Beta, or Experimental). Beta and Experimental badges appear in navigation menu labels.
-* Navigation: Linting, Delegated, and Governance subsystems are now visible in the plugin navigation menu (previously suppressed from the menu group order).
-* Plugin setting `hide_experimental`: when set to `True`, Experimental subsystems are removed from the navigation menu. REST API, GraphQL, and URL endpoints remain functional.
-* Documentation: new Subsystem Maturity page in the Sphinx site with level definitions, the current subsystem map, and configuration guidance.
-* README: subsystem maturity table and `hide_experimental` configuration example.
-* Progressive disclosure: forms with 14+ fields are now organized into named fieldsets that group related fields under collapsible headings. Applies to Certificate, IRR Source, and all dynamically-built forms with many fields (Closes #15).
-* Test coverage: structural test verifying fieldset field lists stay in sync with form field lists.
-* Tenant scoping: all model forms now include a `tenant_group` selector that dynamically scopes the `tenant` dropdown, matching the standard NetBox tenancy pattern. All filter forms now expose `tenant_group_id` alongside `tenant_id` (Closes #69).
-* Cross-validator comparison: new `GET /api/plugins/netbox-rpki/validator-instances/{id}/compare/?other={id2}` endpoint compares the most recent completed run of two validator instances, returning per-prefix/origin-ASN agreement and disagreement counts with detailed disagreement records (Closes #49).
+* Subsystem maturity badges (closes #7): every navigation group is now tagged with a maturity level (GA, Beta, or Experimental). Beta and Experimental badges appear inline in navigation menu labels. The new `hide_experimental` plugin setting removes Experimental groups from navigation when set to `True`.
+* Navigation: Linting, Delegated, and Governance subsystems unhidden from `MENU_GROUP_ORDER` and now appear in the plugin navigation menu.
+* Documentation: new Subsystem Maturity page in the Sphinx site with level definitions, the current subsystem map, and configuration guidance. README updated with a maturity table and `hide_experimental` example.
+* Progressive disclosure fieldsets (closes #15): forms with 14+ fields are now organized into named, collapsible fieldsets (General, Routing, Validation, Administrative, etc.). Applies to Certificate, IRR Source, and 13 additional dynamically-built forms. A structural test verifies fieldset field lists stay in sync with form field declarations.
+* Tenant scoping (closes #69): all model forms now include a `tenant_group` selector that dynamically scopes the `tenant` dropdown, matching the standard NetBox tenancy UI pattern. All filter forms expose `tenant_group_id` alongside `tenant_id`.
+* Cross-validator ROA payload comparison (closes #49): new `GET /api/plugins/netbox-rpki/validator-instances/{id}/compare/?other={id2}` endpoint compares the most recent completed runs of two validator instances by `(observed_prefix, origin_ASN)` key and returns agreement count, disagreement count, per-entry disagreement records, and freshness status for each run. The `limit_disagreements` query parameter (default 100, max 1000) caps the returned detail rows.
 
 ## 0.2.3 (2026-04-19)
 
