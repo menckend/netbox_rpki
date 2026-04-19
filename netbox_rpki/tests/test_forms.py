@@ -32,6 +32,10 @@ class FormStructureSmokeTestCase(SimpleTestCase):
             EXPECTED_FILTER_FORM_CLASS_NAMES,
         )
 
+    # tenant_group is always injected by build_model_form_class as a UI-only grouping helper;
+    # it is not a model field and is intentionally absent from spec.form.fields.
+    _VIRTUAL_FORM_FIELDS = frozenset({'tenant_group'})
+
     def test_fieldsets_cover_all_form_fields(self):
         for spec in FORM_OBJECT_SPECS:
             if spec.form.fieldsets is None:
@@ -39,9 +43,13 @@ class FormStructureSmokeTestCase(SimpleTestCase):
             fieldset_fields = []
             for fs in spec.form.fieldsets:
                 fieldset_fields.extend(fs.fields)
+            # Exclude virtual UI-only fields that are injected by the form builder
+            declared_fieldset_fields = [
+                f for f in fieldset_fields if f not in self._VIRTUAL_FORM_FIELDS
+            ]
             with self.subTest(form=spec.form.class_name):
                 self.assertEqual(
-                    sorted(fieldset_fields),
+                    sorted(declared_fieldset_fields),
                     sorted(spec.form.fields),
                     f"Fieldset fields do not match form fields for {spec.form.class_name}",
                 )
@@ -54,7 +62,8 @@ class FormRegistryBehaviorTestCase(TestCase):
             form = form_class()
             with self.subTest(form_class=form_class.__name__):
                 self.assertIn('q', form.fields)
-                self.assertIn('tenant', form.fields)
+                self.assertIn('tenant_id', form.fields)
+                self.assertIn('tenant_group_id', form.fields)
                 self.assertIn('tag', form.fields)
 
     def test_generated_forms_accept_minimal_required_fields(self):

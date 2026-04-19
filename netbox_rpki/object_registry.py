@@ -224,7 +224,7 @@ OBJECT_SPECS = (
                 FieldSetSpec(fields=("issuer", "subject", "serial"), name="Identity"),
                 FieldSetSpec(fields=("public_key", "private_key"), name="Cryptographic"),
                 FieldSetSpec(fields=("publication_url", "ca_repository", "publication_point", "self_hosted"), name="Publication"),
-                FieldSetSpec(fields=("tenant", "comments", "tags"), name="Administrative"),
+                FieldSetSpec(fields=("tenant_group", "tenant", "comments", "tags"), name="Administrative"),
             ),
         ),
         filter_form=FilterFormSpec(class_name="CertificateFilterForm"),
@@ -762,7 +762,7 @@ OBJECT_SPECS = (
             FieldSetSpec(fields=("content_hash", "serial_or_version", "cms_digest_algorithm", "cms_signature_algorithm"), name="Cryptographic"),
             FieldSetSpec(fields=("valid_from", "valid_to"), name="Validity"),
             FieldSetSpec(fields=("raw_payload_reference",), name="Advanced"),
-            FieldSetSpec(fields=("tenant", "comments", "tags"), name="Administrative"),
+            FieldSetSpec(fields=("tenant_group", "tenant", "comments", "tags"), name="Administrative"),
         ),
     ),
     build_standard_object_spec(
@@ -1289,7 +1289,7 @@ OBJECT_SPECS = (
             FieldSetSpec(fields=("name", "organization", "is_default", "status", "description", "enabled"), name="Profile"),
             FieldSetSpec(fields=("selector_mode", "prefix_selector_query", "asn_selector_query", "default_max_length_policy", "allow_as0"), name="Policy"),
             FieldSetSpec(fields=("context_groups",), name="Context"),
-            FieldSetSpec(fields=("tenant", "comments", "tags"), name="Administrative"),
+            FieldSetSpec(fields=("tenant_group", "tenant", "comments", "tags"), name="Administrative"),
         ),
     ),
     build_standard_object_spec(
@@ -1370,7 +1370,7 @@ OBJECT_SPECS = (
         form_fieldsets=(
             FieldSetSpec(fields=("name", "context_group", "criterion_type", "enabled", "weight"), name="Criterion"),
             FieldSetSpec(fields=("match_tenant", "match_vrf", "match_site", "match_region", "match_provider_account", "match_circuit", "match_provider", "match_value"), name="Match Criteria"),
-            FieldSetSpec(fields=("tenant", "comments", "tags"), name="Administrative"),
+            FieldSetSpec(fields=("tenant_group", "tenant", "comments", "tags"), name="Administrative"),
         ),
     ),
     build_standard_object_spec(
@@ -1452,7 +1452,7 @@ OBJECT_SPECS = (
             FieldSetSpec(fields=("name", "intent_profile", "weight", "action", "address_family", "enabled"), name="Rule"),
             FieldSetSpec(fields=("match_tenant", "match_vrf", "match_site", "match_region", "match_role", "match_tag", "match_custom_field"), name="Match Criteria"),
             FieldSetSpec(fields=("origin_asn", "max_length_mode", "max_length_value"), name="ROA Policy"),
-            FieldSetSpec(fields=("tenant", "comments", "tags"), name="Administrative"),
+            FieldSetSpec(fields=("tenant_group", "tenant", "comments", "tags"), name="Administrative"),
         ),
     ),
     build_standard_object_spec(
@@ -1538,7 +1538,7 @@ OBJECT_SPECS = (
             FieldSetSpec(fields=("name", "template", "weight", "action", "address_family", "enabled"), name="Rule"),
             FieldSetSpec(fields=("match_tenant", "match_vrf", "match_site", "match_region", "match_role", "match_tag", "match_custom_field"), name="Match Criteria"),
             FieldSetSpec(fields=("origin_asn", "max_length_mode", "max_length_value"), name="ROA Policy"),
-            FieldSetSpec(fields=("tenant", "comments", "tags"), name="Administrative"),
+            FieldSetSpec(fields=("tenant_group", "tenant", "comments", "tags"), name="Administrative"),
         ),
     ),
     build_standard_object_spec(
@@ -1592,7 +1592,7 @@ OBJECT_SPECS = (
             FieldSetSpec(fields=("origin_asn_override", "max_length_mode", "max_length_value"), name="ROA Policy"),
             FieldSetSpec(fields=("prefix_selector_query", "asn_selector_query", "context_groups"), name="Selectors"),
             FieldSetSpec(fields=("last_compiled_fingerprint", "summary_json"), name="Advanced"),
-            FieldSetSpec(fields=("tenant", "comments", "tags"), name="Administrative"),
+            FieldSetSpec(fields=("tenant_group", "tenant", "comments", "tags"), name="Administrative"),
         ),
     ),
     build_standard_object_spec(
@@ -1664,7 +1664,7 @@ OBJECT_SPECS = (
             FieldSetSpec(fields=("starts_at", "ends_at", "reason"), name="Lifecycle"),
             FieldSetSpec(fields=("approved_by", "approved_at"), name="Approval"),
             FieldSetSpec(fields=("summary_json",), name="Advanced"),
-            FieldSetSpec(fields=("tenant", "comments", "tags"), name="Administrative"),
+            FieldSetSpec(fields=("tenant_group", "tenant", "comments", "tags"), name="Administrative"),
         ),
     ),
     build_standard_object_spec(
@@ -1725,7 +1725,7 @@ OBJECT_SPECS = (
             FieldSetSpec(fields=("prefix", "prefix_cidr_text", "origin_asn", "origin_asn_value", "max_length"), name="Target"),
             FieldSetSpec(fields=("tenant_scope", "vrf_scope", "site_scope", "region_scope"), name="Scope Filters"),
             FieldSetSpec(fields=("reason", "starts_at", "ends_at"), name="Lifecycle"),
-            FieldSetSpec(fields=("tenant", "comments", "tags"), name="Administrative"),
+            FieldSetSpec(fields=("tenant_group", "tenant", "comments", "tags"), name="Administrative"),
         ),
     ),
     build_standard_object_spec(
@@ -1804,7 +1804,7 @@ OBJECT_SPECS = (
             FieldSetSpec(fields=("owner", "reason", "starts_at", "review_at", "ends_at"), name="Lifecycle"),
             FieldSetSpec(fields=("approved_by", "approved_at"), name="Approval"),
             FieldSetSpec(fields=("summary_json",), name="Advanced"),
-            FieldSetSpec(fields=("tenant", "comments", "tags"), name="Administrative"),
+            FieldSetSpec(fields=("tenant_group", "tenant", "comments", "tags"), name="Administrative"),
         ),
     ),
     build_standard_object_spec(
@@ -2835,7 +2835,7 @@ OBJECT_SPECS = (
             FieldSetSpec(fields=("relationship_type", "status", "service_uri"), name="Configuration"),
             FieldSetSpec(fields=("imported_parent_link", "imported_child_link"), name="Imported Links"),
             FieldSetSpec(fields=("notes",), name="Notes"),
-            FieldSetSpec(fields=("tenant", "comments", "tags"), name="Administrative"),
+            FieldSetSpec(fields=("tenant_group", "tenant", "comments", "tags"), name="Administrative"),
         ),
     ),
     # --- N: Downstream/Delegated Authorization ---
@@ -3451,7 +3451,7 @@ OBJECT_SPECS = (
             FieldSetSpec(fields=("sync_stale_after_minutes", "roa_expiry_warning_days", "certificate_expiry_warning_days", "exception_expiry_warning_days"), name="Expiry Thresholds"),
             FieldSetSpec(fields=("publication_exchange_failure_threshold", "publication_stale_after_minutes", "certificate_expired_grace_minutes", "alert_repeat_after_minutes"), name="Advanced Thresholds"),
             FieldSetSpec(fields=("notes",), name="Notes"),
-            FieldSetSpec(fields=("tenant", "comments", "tags"), name="Administrative"),
+            FieldSetSpec(fields=("tenant_group", "tenant", "comments", "tags"), name="Administrative"),
         ),
     ),
     build_standard_object_spec(
@@ -3494,7 +3494,7 @@ OBJECT_SPECS = (
             FieldSetSpec(fields=("target_url", "secret", "headers_json"), name="Delivery"),
             FieldSetSpec(fields=("event_kinds_json", "send_resolved"), name="Events"),
             FieldSetSpec(fields=("notes",), name="Notes"),
-            FieldSetSpec(fields=("tenant", "comments", "tags"), name="Administrative"),
+            FieldSetSpec(fields=("tenant_group", "tenant", "comments", "tags"), name="Administrative"),
         ),
     ),
     build_standard_object_spec(
@@ -3602,7 +3602,7 @@ OBJECT_SPECS = (
             FieldSetSpec(fields=("name", "organization", "provider_type", "transport", "sync_enabled"), name="Account"),
             FieldSetSpec(fields=("org_handle", "ca_handle", "api_key", "api_base_url"), name="Connection"),
             FieldSetSpec(fields=("sync_interval", "last_successful_sync", "last_sync_status", "last_sync_summary_json"), name="Sync Status"),
-            FieldSetSpec(fields=("tenant", "comments", "tags"), name="Administrative"),
+            FieldSetSpec(fields=("tenant_group", "tenant", "comments", "tags"), name="Administrative"),
         ),
     ),
     build_standard_object_spec(
@@ -4017,7 +4017,7 @@ OBJECT_SPECS = (
                 FieldSetSpec(fields=("http_username", "http_password", "api_key"), name="Credentials"),
                 FieldSetSpec(fields=("sync_interval",), name="Sync"),
                 FieldSetSpec(fields=("summary_json",), name="Advanced"),
-                FieldSetSpec(fields=("tenant", "comments", "tags"), name="Administrative"),
+                FieldSetSpec(fields=("tenant_group", "tenant", "comments", "tags"), name="Administrative"),
             ),
         ),
         filter_form=FilterFormSpec(class_name="IrrSourceFilterForm"),
