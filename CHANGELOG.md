@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.2 (2026-04-19)
+
+This patch release updates the plugin icon and continues alignment with NetBox Plugin Certification requirements.
+
+* Certification: replace the original plugin icon with the updated `nb_rpki-icon-new` artwork in both SVG and PNG formats.
+* Documentation: update README to reference the new icon asset at 128 px width.
+* Release metadata: bump plugin manifest to `0.2.2`.
+
 ## 0.2.1 (2026-04-19)
 
 This patch release adopts NetBox Plugin Certification requirements across repository metadata, documentation, and packaging.
