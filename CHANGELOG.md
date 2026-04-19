@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.3 (2026-04-19)
+
+This patch release refreshes the plugin icon artwork and adjusts README rendering for certification readiness.
+
+* Certification: update plugin icon SVG and PNG with revised artwork.
+* Documentation: render the plugin icon at 512 px width in README for improved visibility.
+* Release metadata: bump plugin manifest to `0.2.3`.
+
 ## 0.2.2 (2026-04-19)
 
 This patch release updates the plugin icon and continues alignment with NetBox Plugin Certification requirements.
