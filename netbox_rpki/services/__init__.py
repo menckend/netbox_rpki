@@ -125,6 +125,7 @@ from .overlay_reporting import (
     build_validator_instance_attention_items,
 )
 from .overlay_history import (
+    build_cross_validator_comparison,
     build_telemetry_run_comparison,
     build_telemetry_run_history_summary,
     build_validation_run_comparison,
@@ -238,6 +239,7 @@ __all__ = (
     'build_telemetry_run_history_summary',
     'build_validation_run_comparison',
     'build_validator_run_history_summary',
+    'build_cross_validator_comparison',
     'RoaAuthorityMapFilters',
     'RoaAuthorityMapResult',
     'RoaAuthorityMapRow',

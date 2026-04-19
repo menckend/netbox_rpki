@@ -11,6 +11,8 @@
 * README: subsystem maturity table and `hide_experimental` configuration example.
 * Progressive disclosure: forms with 14+ fields are now organized into named fieldsets that group related fields under collapsible headings. Applies to Certificate, IRR Source, and all dynamically-built forms with many fields (Closes #15).
 * Test coverage: structural test verifying fieldset field lists stay in sync with form field lists.
+* Tenant scoping: all model forms now include a `tenant_group` selector that dynamically scopes the `tenant` dropdown, matching the standard NetBox tenancy pattern. All filter forms now expose `tenant_group_id` alongside `tenant_id` (Closes #69).
+* Cross-validator comparison: new `GET /api/plugins/netbox-rpki/validator-instances/{id}/compare/?other={id2}` endpoint compares the most recent completed run of two validator instances, returning per-prefix/origin-ASN agreement and disagreement counts with detailed disagreement records (Closes #49).
 
 ## 0.2.3 (2026-04-19)
 

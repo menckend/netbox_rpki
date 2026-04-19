@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+from django.db.models import F
 from django.utils import timezone
 
 from netbox_rpki import models as rpki_models
@@ -10,7 +11,9 @@ from netbox_rpki import models as rpki_models
 VALIDATOR_RUN_STALE_AFTER = timedelta(hours=24)
 RUN_HISTORY_SUMMARY_SCHEMA_VERSION = 1
 RUN_COMPARISON_SCHEMA_VERSION = 1
+CROSS_VALIDATOR_COMPARISON_SCHEMA_VERSION = 1
 MAX_TIMELINE_ITEMS = 5
+MAX_CROSS_COMPARISON_DISAGREEMENTS = 1000
 
 
 def build_validator_run_history_summary(validator: rpki_models.ValidatorInstance, *, limit: int = MAX_TIMELINE_ITEMS) -> dict[str, object]:
@@ -189,3 +192,104 @@ def _freshness_status(run_time, stale_after: timedelta) -> str:
     if run_time + stale_after <= timezone.now():
         return 'stale'
     return 'current'
+
+
+# ---------------------------------------------------------------------------
+# Cross-validator comparison
+# ---------------------------------------------------------------------------
+
+_STATE_RANK: dict[str, int] = {'invalid': 2, 'valid': 1, 'unknown': 0, '': -1}
+
+
+def _state_rank(state: str) -> int:
+    return _STATE_RANK.get(state, 0)
+
+
+def _build_payload_state_map(run: rpki_models.ValidationRun | None) -> dict[tuple, str]:
+    """Return {(observed_prefix, origin_asn_value) -> validation_state} for a run."""
+    if run is None:
+        return {}
+    rows = (
+        rpki_models.ValidatedRoaPayload.objects
+        .filter(validation_run=run)
+        .annotate(origin_asn_value=F('origin_as__asn'))
+        .values('observed_prefix', 'origin_asn_value', 'object_validation_result__validation_state')
+    )
+    result: dict[tuple, str] = {}
+    for row in rows:
+        key = (row['observed_prefix'] or '', row['origin_asn_value'])
+        state = row['object_validation_result__validation_state'] or ''
+        existing = result.get(key)
+        if existing is None or _state_rank(state) > _state_rank(existing):
+            result[key] = state
+    return result
+
+
+def build_cross_validator_comparison(
+    primary: rpki_models.ValidatorInstance,
+    secondary: rpki_models.ValidatorInstance,
+    *,
+    limit_disagreements: int = 100,
+) -> dict[str, object]:
+    """Compare the latest completed validation runs of two validators.
+
+    Returns a dict with agreement/disagreement counts and per-prefix details.
+    """
+    limit_disagreements = min(limit_disagreements, MAX_CROSS_COMPARISON_DISAGREEMENTS)
+
+    primary_run = (
+        primary.validation_runs.filter(status='completed')
+        .order_by('-completed_at', '-pk')
+        .first()
+    )
+    secondary_run = (
+        secondary.validation_runs.filter(status='completed')
+        .order_by('-completed_at', '-pk')
+        .first()
+    )
+
+    primary_map = _build_payload_state_map(primary_run)
+    secondary_map = _build_payload_state_map(secondary_run)
+
+    all_keys = sorted(set(primary_map) | set(secondary_map))
+    agreements = 0
+    disagreements: list[dict] = []
+    only_primary_count = 0
+    only_secondary_count = 0
+
+    for key in all_keys:
+        p_state = primary_map.get(key)
+        s_state = secondary_map.get(key)
+        if p_state is None:
+            only_secondary_count += 1
+        elif s_state is None:
+            only_primary_count += 1
+        elif p_state == s_state:
+            agreements += 1
+        else:
+            disagreements.append({
+                'prefix': key[0],
+                'origin_asn': key[1],
+                'primary_state': p_state,
+                'secondary_state': s_state,
+            })
+
+    return {
+        'schema_version': CROSS_VALIDATOR_COMPARISON_SCHEMA_VERSION,
+        'primary_validator_id': primary.pk,
+        'primary_validator_name': primary.name,
+        'secondary_validator_id': secondary.pk,
+        'secondary_validator_name': secondary.name,
+        'primary_run_id': getattr(primary_run, 'pk', None),
+        'secondary_run_id': getattr(secondary_run, 'pk', None),
+        'primary_freshness': _freshness_status(_run_time(primary_run), VALIDATOR_RUN_STALE_AFTER),
+        'secondary_freshness': _freshness_status(_run_time(secondary_run), VALIDATOR_RUN_STALE_AFTER),
+        'total_entries': len(all_keys),
+        'common_entries': agreements + len(disagreements),
+        'only_primary_count': only_primary_count,
+        'only_secondary_count': only_secondary_count,
+        'agreement_count': agreements,
+        'disagreement_count': len(disagreements),
+        'disagreements': disagreements[:limit_disagreements],
+        'disagreements_truncated': len(disagreements) > limit_disagreements,
+    }

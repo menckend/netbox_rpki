@@ -74,6 +74,7 @@ from netbox_rpki.services import (
     preview_routing_intent_template_binding,
     preview_aspa_change_plan_provider_write,
     preview_roa_change_plan_provider_write,
+    build_cross_validator_comparison,
     build_telemetry_run_history_summary,
     build_validator_run_history_summary,
     lift_roa_lint_suppression,
@@ -204,6 +205,22 @@ class ValidatorInstanceViewSet(VIEWSET_CLASS_MAP['validatorinstance']):
     def history_summary(self, request, pk=None):
         validator = self.get_object()
         return Response(build_validator_run_history_summary(validator))
+
+    @action(detail=True, methods=['get'])
+    def compare(self, request, pk=None):
+        primary = self.get_object()
+        other_id = request.query_params.get('other')
+        if not other_id:
+            raise ValidationError({'other': 'The "other" query parameter (validator instance ID) is required.'})
+        try:
+            secondary = rpki_models.ValidatorInstance.objects.restrict(request.user, 'view').get(pk=int(other_id))
+        except (rpki_models.ValidatorInstance.DoesNotExist, ValueError, TypeError):
+            raise ValidationError({'other': 'No accessible validator instance found with that ID.'})
+        try:
+            limit = min(int(request.query_params.get('limit_disagreements', 100)), 1000)
+        except (ValueError, TypeError):
+            limit = 100
+        return Response(build_cross_validator_comparison(primary, secondary, limit_disagreements=limit))
 
 
 class TelemetrySourceViewSet(VIEWSET_CLASS_MAP['telemetrysource']):
