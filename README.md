@@ -4,7 +4,7 @@ Bring RPKI inventory, validation, routing intent, and hosted-provider workflows 
 
 `netbox_rpki` extends NetBox with a broad RPKI data model plus the operational workflows needed to ingest validator state, model publication intent, reconcile intent against published objects, and manage write-back to supported providers. The detailed reference documentation lives in the Sphinx site; this README is the top-level summary required to evaluate whether the plugin fits a deployment.
 
-![NetBox RPKI plugin icon](images/netbox-rpki-icon.svg)
+<img src="images/netbox-rpki-icon.svg" alt="NetBox RPKI plugin icon" width="256">
 
 * Free software: Apache-2.0
 * Icon asset: `images/netbox-rpki-icon.svg` is provided under CC BY 4.0 for certification/catalog use

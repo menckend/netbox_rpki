@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1 (2026-04-19)
+
+This patch release adopts NetBox Plugin Certification requirements across repository metadata, documentation, and packaging.
+
+* Certification: align README with Plugin Certification Program criteria including icon rendering, compatibility matrix, dependency summary, screenshots, maintainer contact, and user support guidance.
+* Certification: retire standalone `PLUGIN_CERTIFICATION.md` checklist now that all repository-side criteria are met and tracked in the release gate workflow.
+* Documentation: render the plugin icon at a fixed 256 px width in README for consistent presentation across renderers.
+* Release metadata: bump plugin manifest to `0.2.1`.
+
 ## 0.2.0 (2026-04-15)
 
 This major release introduces substantial new feature coverage across RPKI inventory, validation, routing intent, reconciliation, provider synchronization, delegated workflows, and operational reporting, alongside broad NetBox integration enhancements.
