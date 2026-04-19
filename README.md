@@ -94,6 +94,45 @@ Run `python -m manage.py migrate` from the NetBox project directory in your inst
 
 `structured_logging.debug_subsystems` accepts subsystem names such as `provider_sync`, `provider_write`, `irr_sync`, `irr_write`, `external_validation`, `lifecycle_hooks`, and `jobs`. When enabled, those subsystems emit additional structured debug events with consistent redaction of credentials, bearer/basic auth headers, webhook signatures, and write payload bodies.
 
+## Subsystem Maturity
+
+The plugin spans subsystems at different stages of maturity. Each navigation group carries a maturity tag so operators can evaluate stability expectations before relying on a feature in production.
+
+| Maturity | Badge | Meaning |
+| --- | --- | --- |
+| **GA** | *(none)* | Stable, contract-tested, and not expected to break within the release line. |
+| **Beta** | β | Feature-complete and tested but may evolve across minor releases. |
+| **Experimental** | ⚠ | Early-stage; may change significantly or be restructured. |
+
+| Subsystem | Maturity |
+| --- | --- |
+| Resources | GA |
+| ROAs | GA |
+| Objects | GA |
+| Trust | GA |
+| Validation | GA |
+| Intent | Beta |
+| Derivation | Beta |
+| Reconciliation | Beta |
+| Provider | Beta |
+| Imported | Beta |
+| IRR | Experimental |
+| Linting | Experimental |
+| Delegated | Experimental |
+| Governance | Experimental |
+
+Beta and Experimental badges are shown in the navigation menu labels. To hide Experimental subsystems from the navigation entirely, set `hide_experimental` in the plugin configuration:
+
+```python
+PLUGINS_CONFIG = {
+    "netbox_rpki": {
+        "hide_experimental": True,
+    },
+}
+```
+
+The single source of truth for maturity assignments is `netbox_rpki/maturity.py`. Maturity promotions and demotions are recorded in the changelog. The full reference lives in the [Subsystem Maturity](https://menckend.github.io/netbox_rpki/subsystem_maturity.html) documentation page.
+
 ## Maintainer Engagement
 
 Use GitHub issues for bug reports, feature requests, and documentation requests. The repo ships issue templates under `.github/ISSUE_TEMPLATE/` for those entry points.

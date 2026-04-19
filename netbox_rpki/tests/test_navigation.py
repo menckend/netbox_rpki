@@ -2,6 +2,7 @@ from django.test import SimpleTestCase
 from django.urls import reverse
 
 from netbox_rpki import navigation
+from netbox_rpki.maturity import get_badge
 from netbox_rpki.object_registry import get_navigation_groups
 from netbox_rpki.tests.registry_scenarios import EXPECTED_NAVIGATION_GROUPS, EXPECTED_NAVIGATION_LINKS
 
@@ -74,7 +75,7 @@ class NavigationTestCase(SimpleTestCase):
     def test_default_navigation_exports_top_level_menus(self):
         self.assertEqual(
             [m.label for m in navigation.menus],
-            [f'RPKI {group_name}' for group_name, _ in EXPECTED_NAVIGATION_GROUPS],
+            [f'RPKI {group_name}{get_badge(group_name)}' for group_name, _ in EXPECTED_NAVIGATION_GROUPS],
         )
         for m in navigation.menus:
             with self.subTest(label=m.label):

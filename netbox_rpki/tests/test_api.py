@@ -955,7 +955,7 @@ EXTRA_ACTION_NAME_CONTRACTS = {
     'routingintentprofile': ('run',),
     'routingintentexception': ('approve',),
     'routingintenttemplatebinding': ('preview', 'regenerate'),
-    'validatorinstance': ('history_summary',),
+    'validatorinstance': ('compare', 'history_summary',),
     'telemetrysource': ('history_summary',),
     'rpkiprovideraccount': (
         'export_summary',
@@ -1794,7 +1794,7 @@ class RoutingIntentProfileActionAPITestCase(PluginAPITestCase):
             def get_absolute_url():
                 return '/core/jobs/884/'
 
-        with patch('netbox_rpki.api.views.RunRoutingIntentProfileJob.enqueue', return_value=StubJob()) as enqueue_mock:
+        with patch('netbox_rpki.api.views.RunRoutingIntentProfileJob.enqueue_for_profile', return_value=(StubJob(), True)) as enqueue_mock:
             response = self.client.post(
                 url,
                 {
@@ -1808,11 +1808,10 @@ class RoutingIntentProfileActionAPITestCase(PluginAPITestCase):
         self.assertHttpStatus(response, 200)
         self.assertEqual(response.data['job']['id'], 884)
         enqueue_mock.assert_called_once_with(
-            instance=self.profile,
+            self.profile,
             user=self.user,
-            profile_pk=self.profile.pk,
             comparison_scope=rpki_models.ReconciliationComparisonScope.PROVIDER_IMPORTED,
-            provider_snapshot_pk=self.provider_snapshot.pk,
+            provider_snapshot=self.provider_snapshot,
         )
 
 
@@ -3941,4 +3940,138 @@ class ROAChangePlanSimulationSummaryAPITestCase(PluginAPITestCase):
             ],
             1,
         )
+
+
+class CrossValidatorComparisonAPITestCase(PluginAPITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.organization = create_test_organization(org_id='xval-cmp-org', name='Cross Validator Comparison Org')
+        cls.validator_a = create_test_validator_instance(
+            name='Cross Validator A',
+            organization=cls.organization,
+        )
+        cls.validator_b = create_test_validator_instance(
+            name='Cross Validator B',
+            organization=cls.organization,
+        )
+        cls.asn1 = create_test_asn(asn=64496)
+        cls.asn2 = create_test_asn(asn=64497)
+        cls.prefix1 = create_test_prefix(prefix='192.0.2.0/24')
+        cls.prefix2 = create_test_prefix(prefix='198.51.100.0/24')
+
+        # Validator A run: prefix1/asn1=valid, prefix2/asn2=invalid
+        run_a = create_test_validation_run(
+            name='Cross Validator A Run',
+            validator=cls.validator_a,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+            completed_at=timezone.now() - timedelta(hours=1),
+        )
+        result_a1 = create_test_object_validation_result(
+            name='A Result 1',
+            validation_run=run_a,
+            validation_state=rpki_models.ValidationState.VALID,
+        )
+        create_test_validated_roa_payload(
+            name='A Payload 1',
+            validation_run=run_a,
+            object_validation_result=result_a1,
+            prefix=cls.prefix1,
+            origin_as=cls.asn1,
+            observed_prefix='192.0.2.0/24',
+        )
+        result_a2 = create_test_object_validation_result(
+            name='A Result 2',
+            validation_run=run_a,
+            validation_state=rpki_models.ValidationState.INVALID,
+        )
+        create_test_validated_roa_payload(
+            name='A Payload 2',
+            validation_run=run_a,
+            object_validation_result=result_a2,
+            prefix=cls.prefix2,
+            origin_as=cls.asn2,
+            observed_prefix='198.51.100.0/24',
+        )
+
+        # Validator B run: prefix1/asn1=valid (agrees), prefix2/asn2=valid (disagrees)
+        run_b = create_test_validation_run(
+            name='Cross Validator B Run',
+            validator=cls.validator_b,
+            status=rpki_models.ValidationRunStatus.COMPLETED,
+            completed_at=timezone.now() - timedelta(hours=1),
+        )
+        result_b1 = create_test_object_validation_result(
+            name='B Result 1',
+            validation_run=run_b,
+            validation_state=rpki_models.ValidationState.VALID,
+        )
+        create_test_validated_roa_payload(
+            name='B Payload 1',
+            validation_run=run_b,
+            object_validation_result=result_b1,
+            prefix=cls.prefix1,
+            origin_as=cls.asn1,
+            observed_prefix='192.0.2.0/24',
+        )
+        result_b2 = create_test_object_validation_result(
+            name='B Result 2',
+            validation_run=run_b,
+            validation_state=rpki_models.ValidationState.VALID,
+        )
+        create_test_validated_roa_payload(
+            name='B Payload 2',
+            validation_run=run_b,
+            object_validation_result=result_b2,
+            prefix=cls.prefix2,
+            origin_as=cls.asn2,
+            observed_prefix='198.51.100.0/24',
+        )
+
+    def test_compare_returns_agreement_and_disagreement_counts(self):
+        self.add_permissions('netbox_rpki.view_validatorinstance')
+
+        response = self.client.get(
+            reverse('plugins-api:netbox_rpki-api:validatorinstance-compare', kwargs={'pk': self.validator_a.pk}),
+            data={'other': self.validator_b.pk},
+            **self.header,
+        )
+
+        self.assertHttpStatus(response, 200)
+        self.assertEqual(response.data['primary_validator_id'], self.validator_a.pk)
+        self.assertEqual(response.data['secondary_validator_id'], self.validator_b.pk)
+        self.assertEqual(response.data['agreement_count'], 1)
+        self.assertEqual(response.data['disagreement_count'], 1)
+        self.assertEqual(response.data['total_entries'], 2)
+        self.assertEqual(response.data['only_primary_count'], 0)
+        self.assertEqual(response.data['only_secondary_count'], 0)
+        self.assertFalse(response.data['disagreements_truncated'])
+        self.assertEqual(len(response.data['disagreements']), 1)
+        disagreement = response.data['disagreements'][0]
+        self.assertEqual(disagreement['prefix'], '198.51.100.0/24')
+        self.assertEqual(disagreement['origin_asn'], 64497)
+        self.assertEqual(disagreement['primary_state'], rpki_models.ValidationState.INVALID)
+        self.assertEqual(disagreement['secondary_state'], rpki_models.ValidationState.VALID)
+
+    def test_compare_requires_other_param(self):
+        self.add_permissions('netbox_rpki.view_validatorinstance')
+
+        response = self.client.get(
+            reverse('plugins-api:netbox_rpki-api:validatorinstance-compare', kwargs={'pk': self.validator_a.pk}),
+            **self.header,
+        )
+
+        self.assertHttpStatus(response, 400)
+        self.assertIn('other', response.data)
+
+    def test_compare_rejects_invalid_other_param(self):
+        self.add_permissions('netbox_rpki.view_validatorinstance')
+
+        response = self.client.get(
+            reverse('plugins-api:netbox_rpki-api:validatorinstance-compare', kwargs={'pk': self.validator_a.pk}),
+            data={'other': 99999},
+            **self.header,
+        )
+
+        self.assertHttpStatus(response, 400)
+        self.assertIn('other', response.data)
 

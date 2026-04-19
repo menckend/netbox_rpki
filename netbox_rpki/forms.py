@@ -5,7 +5,7 @@ from django.core.exceptions import (
 )
 from django.utils.translation import gettext as _
 
-from tenancy.models import Tenant
+from tenancy.models import Tenant, TenantGroup
 from utilities.forms.fields import (
     DynamicModelChoiceField,
     DynamicModelMultipleChoiceField,
@@ -70,15 +70,33 @@ def build_model_form_class(spec: ObjectSpec) -> type[NetBoxModelForm]:
         },
     )
 
+    attrs = {
+        '__module__': __name__,
+        'tenant_group': DynamicModelChoiceField(
+            queryset=TenantGroup.objects.all(),
+            required=False,
+            null_option='None',
+            initial_params={'tenants': '$tenant'},
+            label='Tenant Group',
+        ),
+        'tenant': DynamicModelChoiceField(
+            queryset=Tenant.objects.all(),
+            required=False,
+            query_params={'group_id': '$tenant_group'},
+        ),
+        'comments': CommentField(),
+        'Meta': meta_class,
+    }
+
+    if spec.form.fieldsets:
+        attrs['fieldsets'] = tuple(
+            FieldSet(*fs.fields, name=fs.name) for fs in spec.form.fieldsets
+        )
+
     return type(
         spec.form.class_name,
         (NetBoxModelForm,),
-        {
-            '__module__': __name__,
-            'tenant': DynamicModelChoiceField(queryset=Tenant.objects.all(), required=False),
-            'comments': CommentField(),
-            'Meta': meta_class,
-        },
+        attrs,
     )
 
 
@@ -93,7 +111,18 @@ def build_filter_form_class(spec: ObjectSpec) -> type[NetBoxModelFilterSetForm]:
         {
             '__module__': __name__,
             'q': forms.CharField(required=False, label='Search'),
-            'tenant': DynamicModelChoiceField(queryset=Tenant.objects.all(), required=False),
+            'tenant_group_id': DynamicModelMultipleChoiceField(
+                queryset=TenantGroup.objects.all(),
+                required=False,
+                null_option='None',
+                label='Tenant Group',
+            ),
+            'tenant_id': DynamicModelMultipleChoiceField(
+                queryset=Tenant.objects.all(),
+                required=False,
+                query_params={'group_id': '$tenant_group_id'},
+                label='Tenant',
+            ),
             'tag': TagFilterField(spec.model),
             'model': spec.model,
         },
