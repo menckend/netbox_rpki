@@ -1,8 +1,12 @@
 from django.conf import settings
 from netbox.plugins import PluginMenuButton, PluginMenuItem, PluginMenu
 
+from netbox_rpki.maturity import get_badge, is_hidden
 from netbox_rpki.object_registry import get_navigation_groups
 
+
+plugin_settings = settings.PLUGINS_CONFIG.get('netbox_rpki', {})
+_hide_experimental = plugin_settings.get('hide_experimental', False)
 
 OPERATIONS_MENU_ITEM = PluginMenuItem(
     link='plugins:netbox_rpki:operations_dashboard',
@@ -62,9 +66,11 @@ def build_menu_item(spec):
 navigation_groups = {
     group_name: tuple(build_menu_item(spec) for spec in specs)
     for group_name, specs in get_navigation_groups()
+    if not is_hidden(group_name, hide_experimental=_hide_experimental)
 }
 navigation_groups['Intent'] = (INTENT_AUTHORITY_MAP_MENU_ITEM,) + navigation_groups.get('Intent', ())
-navigation_groups['IRR'] = navigation_groups.get('IRR', ()) + (IRR_DIVERGENCE_MENU_ITEM,)
+if not is_hidden('IRR', hide_experimental=_hide_experimental):
+    navigation_groups['IRR'] = navigation_groups.get('IRR', ()) + (IRR_DIVERGENCE_MENU_ITEM,)
 navigation_groups['Resources'] = navigation_groups.get('Resources', ()) + (
     PROVIDER_SYNC_HEALTH_MENU_ITEM,
     OPERATIONS_MENU_ITEM,
@@ -73,17 +79,16 @@ navigation_groups['Resources'] = navigation_groups.get('Resources', ()) + (
 menu_groups = tuple(
     (group_name, navigation_groups.get(group_name, ()))
     for group_name, _specs in get_navigation_groups()
+    if not is_hidden(group_name, hide_experimental=_hide_experimental)
 )
 
 resource_menu_items = navigation_groups.get('Resources', ())
 roa_menu_items = navigation_groups.get('ROAs', ())
 
-plugin_settings = settings.PLUGINS_CONFIG.get('netbox_rpki', {})
-
 if plugin_settings.get('top_level_menu'):
     menus = tuple(
         PluginMenu(
-            label=f'RPKI {group_name}',
+            label=f'RPKI {group_name}{get_badge(group_name)}',
             groups=[(group_name, items)],
             icon_class='mdi mdi-bootstrap',
         )

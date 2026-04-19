@@ -24,6 +24,7 @@ class RpkiConfig(PluginConfig):
     required_settings = []
     default_settings = {
         'top_level_menu': True,
+        'hide_experimental': False,
         'structured_logging': {
             'debug_subsystems': [],
         },
