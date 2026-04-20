@@ -263,6 +263,10 @@ def _normalized_text(value) -> str:
         return value.strip()
     if isinstance(value, (int, float)):
         return str(value).strip()
+    # pyasn1 simple types (IA5String, GeneralizedTime, OID, …) support str()
+    # conversion when they hold a value.
+    if hasattr(value, 'isValue') and value.isValue:
+        return str(value).strip()
     return ''
 
 

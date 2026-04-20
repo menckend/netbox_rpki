@@ -28,6 +28,7 @@ CONTRACT_TEST_LABELS=(
     netbox_rpki.tests.test_urls
     netbox_rpki.tests.test_navigation
     netbox_rpki.tests.test_graphql
+    netbox_rpki.tests.test_signed_object_corpus
 )
 
 PROVIDER_TEST_LABELS=(

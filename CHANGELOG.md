@@ -5,6 +5,7 @@
 ### Added
 
 * Snapshot retention policies (closes #70): new `SnapshotRetentionPolicy` model configures automated purge behaviour for `ValidatorRun` snapshots — max age (days), minimum runs to retain, and dry-run mode. `SnapshotPurgeRun` records each purge execution with a count of deleted snapshots and elapsed time. The `PurgeSnapshotRunJob` background job (queued via `POST /api/plugins/netbox-rpki/snapshot-retention-policies/{id}/run-purge/`) enqueues the purge service and defaults to dry-run. The `GET …/storage-impact/` action returns the current snapshot count, estimated age distribution, and projected deletion counts for a policy. Both models are registered in the RPKI subsystem maturity map under the Governance group.
+* Golden signed-object fixture corpus and parser tests (closes #62): new `signed_object_corpus.py` module provides 16 pre-built DER/CMS/CRL/cert constants covering VALID, STALE, EDGE_CASE, and MALFORMED categories. `test_signed_object_corpus.py` adds 62 `SimpleTestCase` assertions that drive `_load_der_certificate`, `_parse_cms_crl_metadata`, `_parse_cms_manifest_metadata`, `_load_cms_signed_data`, `_load_cms_certificates`, `_infer_signed_object_type`, and `parse_krill_signed_object_records` against the corpus. During test implementation a bug was found and fixed in `_normalized_text` — it now correctly converts pyasn1 simple types (IA5String, GeneralizedTime, OID) to strings, enabling manifest filename and timestamp extraction from DER payloads.
 
 ## 0.2.4 (2026-04-19)
 
