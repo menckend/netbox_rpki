@@ -1,6 +1,6 @@
 sources = NetBox RPKI Plugin
 
-.PHONY: test test-fast test-contract test-full unittest format lint pre-commit clean
+.PHONY: test test-fast test-contract test-full test-load unittest format lint pre-commit clean
 
 test: test-contract
 
@@ -12,6 +12,9 @@ test-contract:
 
 test-full:
 	./devrun/test.sh full
+
+test-load:
+	./devrun/test.sh load
 
 unittest: test-full
 

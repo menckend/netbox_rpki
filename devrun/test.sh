@@ -31,6 +31,10 @@ CONTRACT_TEST_LABELS=(
     netbox_rpki.tests.test_signed_object_corpus
 )
 
+LOAD_TEST_LABELS=(
+    netbox_rpki.tests.test_load_scenarios
+)
+
 PROVIDER_TEST_LABELS=(
     netbox_rpki.tests.test_provider_sync
     netbox_rpki.tests.test_provider_write
@@ -49,6 +53,7 @@ Usage: ./test.sh [fast|contract|provider|live-provider|full|<test labels...>] [e
   provider    Run the fixture-backed provider sync/write lane used for hosted-provider features
   live-provider
               Run opt-in real-backend integration tests discovered from netbox_rpki/tests/test_live_*.py
+  load        Run provider-scale load tests (SMALL tier always; set NETBOX_RPKI_ENABLE_LOAD_TESTS=medium|provider|all for more)
   full        Run the full plugin suite
   <labels>    Run explicit Django test labels under the same dedicated test settings
 
@@ -206,6 +211,10 @@ main() {
         live-provider)
             shift || true
             run_live_provider_tests "$@"
+            ;;
+        load)
+            shift || true
+            run_django_tests "${LOAD_TEST_LABELS[@]}" "$@"
             ;;
         full)
             shift || true
