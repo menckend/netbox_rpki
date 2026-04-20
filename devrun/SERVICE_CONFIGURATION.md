@@ -63,7 +63,7 @@ Explicit configuration:
 - Image: `postgres:16`
 - Container name: `netbox-rpki-postgres`
 - Restart policy: `unless-stopped`
-- Host bind: `127.0.0.1:5432:5432`
+- Host bind: `127.0.0.1:5433:5432`
 - Persistent volume: `postgres_data:/var/lib/postgresql/data`
 - Database name: `netbox`
 - Database user: `netbox`
@@ -84,7 +84,7 @@ Live validation:
 
 - Running container name: `netbox-rpki-postgres`
 - Effective Docker volume name: `devrun_postgres_data`
-- PostgreSQL was accepting connections on `127.0.0.1:5432`
+- PostgreSQL was accepting connections on `127.0.0.1:5433`
 
 ## Redis
 
@@ -95,7 +95,7 @@ Explicit configuration:
 - Image: `redis:7-alpine`
 - Container name: `netbox-rpki-redis`
 - Restart policy: `unless-stopped`
-- Host bind: `127.0.0.1:6379:6379`
+- Host bind: `127.0.0.1:6380:6379`
 - Command: `redis-server --save "" --appendonly no`
 - Health check: `redis-cli ping`
 

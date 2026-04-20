@@ -137,6 +137,10 @@ from .intent_authority_map import (
     RoaAuthorityMapRow,
     build_roa_authority_map,
 )
+from .data_lifecycle import (
+    build_snapshot_storage_impact,
+    run_snapshot_purge,
+)
 
 __all__ = (
     'ProviderSyncError',
@@ -244,4 +248,6 @@ __all__ = (
     'RoaAuthorityMapResult',
     'RoaAuthorityMapRow',
     'build_roa_authority_map',
+    'build_snapshot_storage_impact',
+    'run_snapshot_purge',
 )

@@ -4458,6 +4458,85 @@ OBJECT_SPECS = (
         ui_read_only=True,
         show_add_button=False,
     ),
+    build_standard_object_spec(
+        registry_key="snapshotretentionpolicy",
+        model=models.SnapshotRetentionPolicy,
+        class_prefix="SnapshotRetentionPolicy",
+        label_singular="Snapshot Retention Policy",
+        label_plural="Snapshot Retention Policies",
+        api_fields=(
+            "name",
+            "enabled",
+            "validator_run_keep_count",
+            "validator_run_keep_days",
+            "provider_snapshot_keep_count",
+            "provider_snapshot_keep_days",
+            "telemetry_run_keep_count",
+            "telemetry_run_keep_days",
+            "irr_snapshot_keep_count",
+            "irr_snapshot_keep_days",
+        ),
+        brief_fields=("name", "enabled"),
+        filter_fields=(
+            "name",
+            "enabled",
+            "tenant",
+        ),
+        search_fields=("name__icontains", "comments__icontains"),
+        graphql_fields=(
+            ("name", "str"),
+            ("enabled", "str"),
+        ),
+        navigation_group="Lifecycle",
+        navigation_label="Retention Policies",
+        navigation_order=10,
+        form_fieldsets=(
+            FieldSetSpec(fields=("name", "enabled"), name="Policy"),
+            FieldSetSpec(fields=("validator_run_keep_count", "validator_run_keep_days"), name="Validator Runs"),
+            FieldSetSpec(fields=("provider_snapshot_keep_count", "provider_snapshot_keep_days"), name="Provider Snapshots"),
+            FieldSetSpec(fields=("telemetry_run_keep_count", "telemetry_run_keep_days"), name="Telemetry Runs"),
+            FieldSetSpec(fields=("irr_snapshot_keep_count", "irr_snapshot_keep_days"), name="IRR Snapshots"),
+            FieldSetSpec(fields=("tenant_group", "tenant", "comments", "tags"), name="Administrative"),
+        ),
+    ),
+    build_standard_object_spec(
+        registry_key="snapshotpurgerun",
+        model=models.SnapshotPurgeRun,
+        class_prefix="SnapshotPurgeRun",
+        label_singular="Snapshot Purge Run",
+        label_plural="Snapshot Purge Runs",
+        api_fields=(
+            "name",
+            "policy",
+            "status",
+            "dry_run",
+            "started_at",
+            "completed_at",
+            "summary_json",
+            "error_text",
+        ),
+        brief_fields=("name", "policy", "status", "dry_run"),
+        filter_fields=(
+            "name",
+            "policy",
+            "status",
+            "dry_run",
+            "tenant",
+        ),
+        search_fields=("name__icontains", "error_text__icontains"),
+        graphql_fields=(
+            ("name", "str"),
+            ("policy_id", "id"),
+            ("status", "str"),
+            ("dry_run", "str"),
+        ),
+        navigation_group="Lifecycle",
+        navigation_label="Purge Runs",
+        navigation_order=20,
+        api_read_only=True,
+        ui_read_only=True,
+        show_add_button=False,
+    ),
 )
 
 API_OBJECT_SPECS = OBJECT_SPECS
@@ -4469,7 +4548,7 @@ TABLE_OBJECT_SPECS = tuple(spec for spec in OBJECT_SPECS if spec.table is not No
 VIEW_OBJECT_SPECS = tuple(spec for spec in OBJECT_SPECS if spec.view is not None)
 SIMPLE_DETAIL_VIEW_OBJECT_SPECS = tuple(spec for spec in VIEW_OBJECT_SPECS if spec.view.simple_detail)
 OBJECT_SPEC_BY_REGISTRY_KEY = {spec.registry_key: spec for spec in OBJECT_SPECS}
-MENU_GROUP_ORDER = ("Resources", "ROAs", "Objects", "Trust", "Intent", "Derivation", "Reconciliation", "Linting", "Provider", "Imported", "IRR", "Delegated", "Governance", "Validation")
+MENU_GROUP_ORDER = ("Resources", "ROAs", "Objects", "Trust", "Intent", "Derivation", "Reconciliation", "Linting", "Provider", "Imported", "IRR", "Delegated", "Governance", "Lifecycle", "Validation")
 
 
 def get_object_spec(registry_key: str) -> ObjectSpec:

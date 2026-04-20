@@ -4242,3 +4242,57 @@ def create_test_sample_dataset(item_count=12, label_prefix='Test Fixture Seed', 
 
 def count_test_sample_dataset(marker='Managed by netbox_rpki.tests.utils'):
     return count_seed_sample_data(marker)
+
+
+def create_test_snapshot_retention_policy(
+    name='Snapshot Retention Policy 1',
+    enabled=True,
+    validator_run_keep_count=None,
+    validator_run_keep_days=None,
+    provider_snapshot_keep_count=None,
+    provider_snapshot_keep_days=None,
+    telemetry_run_keep_count=None,
+    telemetry_run_keep_days=None,
+    irr_snapshot_keep_count=None,
+    irr_snapshot_keep_days=None,
+    **kwargs,
+):
+    return rpki_models.SnapshotRetentionPolicy.objects.create(
+        name=name,
+        enabled=enabled,
+        validator_run_keep_count=validator_run_keep_count,
+        validator_run_keep_days=validator_run_keep_days,
+        provider_snapshot_keep_count=provider_snapshot_keep_count,
+        provider_snapshot_keep_days=provider_snapshot_keep_days,
+        telemetry_run_keep_count=telemetry_run_keep_count,
+        telemetry_run_keep_days=telemetry_run_keep_days,
+        irr_snapshot_keep_count=irr_snapshot_keep_count,
+        irr_snapshot_keep_days=irr_snapshot_keep_days,
+        **kwargs,
+    )
+
+
+def create_test_snapshot_purge_run(
+    name='Snapshot Purge Run 1',
+    policy=None,
+    status=None,
+    dry_run=True,
+    started_at=None,
+    completed_at=None,
+    summary_json=None,
+    error_text='',
+    **kwargs,
+):
+    if policy is None:
+        policy = create_test_snapshot_retention_policy()
+    return rpki_models.SnapshotPurgeRun.objects.create(
+        name=name,
+        policy=policy,
+        status=status or rpki_models.ValidationRunStatus.COMPLETED,
+        dry_run=dry_run,
+        started_at=started_at,
+        completed_at=completed_at,
+        summary_json=summary_json or {},
+        error_text=error_text,
+        **kwargs,
+    )

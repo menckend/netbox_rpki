@@ -7755,4 +7755,102 @@ class AuthoredAsSetMember(NamedRpkiStandardModel):
             raise ValidationError(errors)
 
 
+# ---------------------------------------------------------------------------
+# Data Lifecycle: snapshot retention and purge audit trail
+# ---------------------------------------------------------------------------
+
+class SnapshotRetentionPolicy(NamedRpkiStandardModel):
+    """Defines retention limits for each snapshot family."""
+
+    enabled = models.BooleanField(
+        default=True,
+        help_text='When enabled, purge jobs will apply this policy.',
+    )
+
+    # --- Validator runs ---
+    validator_run_keep_count = models.PositiveIntegerField(
+        blank=True, null=True,
+        help_text='Keep at least this many recent validation runs per validator instance.',
+    )
+    validator_run_keep_days = models.PositiveIntegerField(
+        blank=True, null=True,
+        help_text='Keep validation runs completed within the last N days.',
+    )
+
+    # --- Provider snapshots ---
+    provider_snapshot_keep_count = models.PositiveIntegerField(
+        blank=True, null=True,
+        help_text='Keep at least this many recent snapshots per provider account.',
+    )
+    provider_snapshot_keep_days = models.PositiveIntegerField(
+        blank=True, null=True,
+        help_text='Keep provider snapshots completed within the last N days.',
+    )
+
+    # --- Telemetry runs ---
+    telemetry_run_keep_count = models.PositiveIntegerField(
+        blank=True, null=True,
+        help_text='Keep at least this many recent telemetry runs per telemetry source.',
+    )
+    telemetry_run_keep_days = models.PositiveIntegerField(
+        blank=True, null=True,
+        help_text='Keep telemetry runs completed within the last N days.',
+    )
+
+    # --- IRR snapshots ---
+    irr_snapshot_keep_count = models.PositiveIntegerField(
+        blank=True, null=True,
+        help_text='Keep at least this many recent IRR snapshots per IRR source.',
+    )
+    irr_snapshot_keep_days = models.PositiveIntegerField(
+        blank=True, null=True,
+        help_text='Keep IRR snapshots completed within the last N days.',
+    )
+
+    class Meta:
+        ordering = ('name',)
+        verbose_name = 'Snapshot Retention Policy'
+        verbose_name_plural = 'Snapshot Retention Policies'
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return _plugin_get_action_url(type(self), kwargs={'pk': self.pk})
+
+
+class SnapshotPurgeRun(NamedRpkiStandardModel):
+    """Audit record for a single purge job execution."""
+
+    policy = models.ForeignKey(
+        to=SnapshotRetentionPolicy,
+        on_delete=models.PROTECT,
+        related_name='purge_runs',
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=ValidationRunStatus.choices,
+        default=ValidationRunStatus.PENDING,
+    )
+    dry_run = models.BooleanField(
+        default=True,
+        help_text='When True, no records were deleted (preview only).',
+    )
+    started_at = models.DateTimeField(blank=True, null=True)
+    completed_at = models.DateTimeField(blank=True, null=True)
+    summary_json = models.JSONField(default=dict, blank=True)
+    error_text = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ('-started_at', 'name')
+        verbose_name = 'Snapshot Purge Run'
+        verbose_name_plural = 'Snapshot Purge Runs'
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return _plugin_get_action_url(type(self), kwargs={'pk': self.pk})
+
+
 _register_plugin_action_urls()

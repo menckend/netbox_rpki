@@ -56,6 +56,7 @@ SUBSYSTEM_MATURITY: dict[str, MaturityLevel] = {
     "Linting": MaturityLevel.EXPERIMENTAL,
     "Delegated": MaturityLevel.EXPERIMENTAL,
     "Governance": MaturityLevel.EXPERIMENTAL,
+    "Lifecycle": MaturityLevel.EXPERIMENTAL,
 }
 
 #: Short badge text appended to navigation labels for non-GA subsystems.

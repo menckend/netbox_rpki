@@ -211,7 +211,7 @@ docker_compose() {
 wait_for_postgres() {
     local attempt
     for attempt in $(seq 1 30); do
-        if pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1; then
+        if pg_isready -h 127.0.0.1 -p 5433 >/dev/null 2>&1; then
             return 0
         fi
         sleep 1
@@ -223,7 +223,7 @@ wait_for_postgres() {
 wait_for_redis() {
     local attempt
     for attempt in $(seq 1 30); do
-        if redis-cli -h 127.0.0.1 -p 6379 ping >/dev/null 2>&1; then
+        if redis-cli -h 127.0.0.1 -p 6380 ping >/dev/null 2>&1; then
             return 0
         fi
         sleep 1

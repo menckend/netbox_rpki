@@ -154,7 +154,7 @@ DATABASES = {
         'USER': 'netbox',
         'PASSWORD': '$NETBOX_DATABASE_PASSWORD',
         'HOST': '127.0.0.1',
-        'PORT': '5432',
+        'PORT': '5433',
         'CONN_MAX_AGE': 300,
     }
 }
@@ -162,14 +162,14 @@ DATABASES = {
 REDIS = {
     'tasks': {
         'HOST': '127.0.0.1',
-        'PORT': 6379,
+        'PORT': 6380,
         'PASSWORD': '',
         'DATABASE': 0,
         'SSL': False,
     },
     'caching': {
         'HOST': '127.0.0.1',
-        'PORT': 6379,
+        'PORT': 6380,
         'PASSWORD': '',
         'DATABASE': 1,
         'SSL': False,

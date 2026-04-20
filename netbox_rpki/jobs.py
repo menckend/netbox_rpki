@@ -18,6 +18,7 @@ from netbox_rpki.services import (
     run_bulk_routing_intent_pipeline,
     run_irr_coordination,
     run_routing_intent_pipeline,
+    run_snapshot_purge,
     sync_telemetry_source,
     sync_irr_source,
     sync_provider_account,
@@ -1598,4 +1599,68 @@ class EvaluateLifecycleHealthJob(JobRunner):
             opened_count=result['opened_count'],
             repeated_count=result['repeated_count'],
             resolved_count=result['resolved_count'],
+        )
+
+
+class PurgeSnapshotRunJob(JobRunner):
+    """Background job that evaluates a SnapshotRetentionPolicy and purges eligible records."""
+
+    class Meta:
+        name = 'RPKI Snapshot Purge'
+
+    @classmethod
+    def get_job_name(cls, policy: rpki_models.SnapshotRetentionPolicy | int) -> str:
+        policy_pk = policy.pk if hasattr(policy, 'pk') else policy
+        return f'{cls.name} [policy:{policy_pk}]'
+
+    @classmethod
+    def enqueue_for_policy(
+        cls,
+        policy: rpki_models.SnapshotRetentionPolicy,
+        *,
+        dry_run: bool = True,
+        user=None,
+    ):
+        if not isinstance(policy, rpki_models.SnapshotRetentionPolicy):
+            policy = rpki_models.SnapshotRetentionPolicy.objects.get(pk=policy)
+
+        job_name = cls.get_job_name(policy)
+        return _enqueue_with_lineage(
+            job_runner_class=cls,
+            job_name=job_name,
+            dedupe_key=job_name,
+            request_payload={'policy_pk': policy.pk, 'dry_run': dry_run},
+            user=user,
+            enqueue_kwargs={'policy_pk': policy.pk, 'dry_run': dry_run},
+        )
+
+    def run(self, policy_pk: int, dry_run: bool = True):
+        policy = rpki_models.SnapshotRetentionPolicy.objects.get(pk=policy_pk)
+        emit_structured_log(
+            'job.run.start',
+            subsystem='jobs',
+            logger=self.logger,
+            job_class=type(self).__name__,
+            policy_id=policy.pk,
+            policy_name=policy.name,
+            dry_run=dry_run,
+        )
+        purge_run = run_snapshot_purge(policy, dry_run=dry_run)
+        self.job.data = {
+            'policy_pk': policy.pk,
+            'purge_run_pk': purge_run.pk,
+            'dry_run': dry_run,
+            'status': purge_run.status,
+            'summary': purge_run.summary_json,
+        }
+        self.job.save(update_fields=('data',))
+        emit_structured_log(
+            'job.run.complete',
+            subsystem='jobs',
+            logger=self.logger,
+            job_class=type(self).__name__,
+            policy_id=policy.pk,
+            purge_run_id=purge_run.pk,
+            dry_run=dry_run,
+            status=purge_run.status,
         )

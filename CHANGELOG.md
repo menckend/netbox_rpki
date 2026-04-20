@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+* Snapshot retention policies (closes #70): new `SnapshotRetentionPolicy` model configures automated purge behaviour for `ValidatorRun` snapshots — max age (days), minimum runs to retain, and dry-run mode. `SnapshotPurgeRun` records each purge execution with a count of deleted snapshots and elapsed time. The `PurgeSnapshotRunJob` background job (queued via `POST /api/plugins/netbox-rpki/snapshot-retention-policies/{id}/run-purge/`) enqueues the purge service and defaults to dry-run. The `GET …/storage-impact/` action returns the current snapshot count, estimated age distribution, and projected deletion counts for a policy. Both models are registered in the RPKI subsystem maturity map under the Governance group.
+
 ## 0.2.4 (2026-04-19)
 
 This release adds UX improvements, first-class tenant scoping, and a new cross-validator comparison API.

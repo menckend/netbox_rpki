@@ -128,6 +128,8 @@ from netbox_rpki.tests.utils import (
     create_test_object_validation_result,
     create_test_validated_roa_payload,
     create_test_validated_aspa_payload,
+    create_test_snapshot_retention_policy,
+    create_test_snapshot_purge_run,
 )
 from netbox_rpki.urls import urlpatterns
 
@@ -804,6 +806,12 @@ def _register_scenario_builders() -> None:
             ),
             "roavalidationsimulationresult": lambda: create_test_roa_validation_simulation_result(
                 name=f"ROA Validation Simulation Result {unique_token('roa-validation-simulation-result')}"
+            ),
+            "snapshotretentionpolicy": lambda: create_test_snapshot_retention_policy(
+                name=f"Retention Policy {unique_token('retention-policy')}",
+            ),
+            "snapshotpurgerun": lambda: create_test_snapshot_purge_run(
+                name=f"Purge Run {unique_token('purge-run')}",
             ),
         }
     )
@@ -1937,6 +1945,12 @@ SECTION_9_MODEL_SCENARIOS = (
     ModelScenario("TelemetrySource", build_telemetry_source_instance),
     ModelScenario("TelemetryRun", build_telemetry_run_instance),
     ModelScenario("BgpPathObservation", build_bgp_path_observation_instance),
+    ModelScenario("SnapshotRetentionPolicy", lambda: create_test_snapshot_retention_policy(
+        name=f"Retention Policy {unique_token('retention-policy')}",
+    )),
+    ModelScenario("SnapshotPurgeRun", lambda: create_test_snapshot_purge_run(
+        name=f"Purge Run {unique_token('purge-run')}",
+    )),
 )
 
 SECTION_9_SUPPORT_MODEL_SCENARIOS = (

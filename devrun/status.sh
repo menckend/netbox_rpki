@@ -77,6 +77,6 @@ esac
 
 docker_compose ps
 printf '\nPostgreSQL: '
-pg_isready -h 127.0.0.1 -p 5432 || true
+pg_isready -h 127.0.0.1 -p 5433 || true
 printf 'Redis: '
-redis-cli -h 127.0.0.1 -p 6379 ping || true
+redis-cli -h 127.0.0.1 -p 6380 ping || true

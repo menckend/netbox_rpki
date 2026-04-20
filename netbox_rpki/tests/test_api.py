@@ -33,6 +33,7 @@ from netbox_rpki.services.lifecycle_reporting import (
 )
 from netbox_rpki.services.provider_sync_contract import build_provider_sync_summary
 from netbox_rpki.services.rov_simulation import _build_plan_fingerprint
+from netbox_rpki.services.data_lifecycle import STORAGE_IMPACT_SCHEMA_VERSION
 from netbox_rpki.tests.base import PluginAPITestCase
 from netbox_rpki.tests.utils import (
     create_test_asn,
@@ -90,6 +91,7 @@ from netbox_rpki.tests.utils import (
     create_test_validated_roa_payload,
     create_test_validation_run,
     create_test_validator_instance,
+    create_test_snapshot_retention_policy,
 )
 
 
@@ -972,6 +974,7 @@ EXTRA_ACTION_NAME_CONTRACTS = {
     'roalintsuppression': ('lift',),
     'roachangeplan': ('acknowledge_findings', 'apply', 'approve', 'approve_secondary', 'preview', 'simulate', 'summary'),
     'roachangeplanrollbackbundle': ('apply', 'approve'),
+    'snapshotretentionpolicy': ('run_purge', 'storage_impact'),
 }
 
 CUSTOM_ACTION_CONTRACTS = {
@@ -4075,3 +4078,71 @@ class CrossValidatorComparisonAPITestCase(PluginAPITestCase):
         self.assertHttpStatus(response, 400)
         self.assertIn('other', response.data)
 
+
+
+class SnapshotRetentionPolicyAPITestCase(PluginAPITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.policy = create_test_snapshot_retention_policy(
+            name='API Test Retention Policy',
+            enabled=True,
+            validator_run_keep_count=5,
+        )
+
+    def test_storage_impact_requires_permission(self):
+        response = self.client.get(
+            reverse('plugins-api:netbox_rpki-api:snapshotretentionpolicy-storage-impact', kwargs={'pk': self.policy.pk}),
+            **self.header,
+        )
+        self.assertHttpStatus(response, 403)
+
+    def test_storage_impact_returns_schema_version(self):
+        self.add_permissions('netbox_rpki.view_snapshotretentionpolicy')
+
+        response = self.client.get(
+            reverse('plugins-api:netbox_rpki-api:snapshotretentionpolicy-storage-impact', kwargs={'pk': self.policy.pk}),
+            **self.header,
+        )
+
+        self.assertHttpStatus(response, 200)
+        self.assertEqual(response.data['schema_version'], STORAGE_IMPACT_SCHEMA_VERSION)
+        self.assertEqual(response.data['policy_id'], self.policy.pk)
+        self.assertIn('families', response.data)
+        self.assertIn('enabled', response.data)
+
+    def test_run_purge_requires_permission(self):
+        response = self.client.post(
+            reverse('plugins-api:netbox_rpki-api:snapshotretentionpolicy-run-purge', kwargs={'pk': self.policy.pk}),
+            data={},
+            content_type='application/json',
+            **self.header,
+        )
+        self.assertHttpStatus(response, 404)
+
+    def test_run_purge_enqueues_dry_run_by_default(self):
+        self.add_permissions('netbox_rpki.view_snapshotretentionpolicy')
+        self.add_permissions('netbox_rpki.change_snapshotretentionpolicy')
+
+        response = self.client.post(
+            reverse('plugins-api:netbox_rpki-api:snapshotretentionpolicy-run-purge', kwargs={'pk': self.policy.pk}),
+            data={},
+            content_type='application/json',
+            **self.header,
+        )
+
+        self.assertHttpStatus(response, 202)
+        self.assertIn('job', response.data)
+        self.assertIn('dry_run', response.data)
+
+    def test_run_purge_accepts_dry_run_false(self):
+        self.add_permissions('netbox_rpki.view_snapshotretentionpolicy')
+        self.add_permissions('netbox_rpki.change_snapshotretentionpolicy')
+
+        response = self.client.post(
+            reverse('plugins-api:netbox_rpki-api:snapshotretentionpolicy-run-purge', kwargs={'pk': self.policy.pk}),
+            data={'dry_run': False},
+            content_type='application/json',
+            **self.header,
+        )
+
+        self.assertHttpStatus(response, 202)

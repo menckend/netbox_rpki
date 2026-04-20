@@ -75,6 +75,7 @@ from netbox_rpki.services import (
     preview_aspa_change_plan_provider_write,
     preview_roa_change_plan_provider_write,
     build_cross_validator_comparison,
+    build_snapshot_storage_impact,
     build_telemetry_run_history_summary,
     build_validator_run_history_summary,
     lift_roa_lint_suppression,
@@ -1436,6 +1437,34 @@ VIEWSET_CLASS_MAP['roachangeplanrollbackbundle'] = ROAChangePlanRollbackBundleVi
 globals()['ROAChangePlanRollbackBundleViewSet'] = ROAChangePlanRollbackBundleViewSet
 VIEWSET_CLASS_MAP['aspachangeplanrollbackbundle'] = ASPAChangePlanRollbackBundleViewSet
 globals()['ASPAChangePlanRollbackBundleViewSet'] = ASPAChangePlanRollbackBundleViewSet
+
+
+class SnapshotRetentionPolicyViewSet(VIEWSET_CLASS_MAP['snapshotretentionpolicy']):
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        if getattr(self, 'action', None) == 'run_purge' and self.request.user.is_authenticated:
+            return self.queryset.model.objects.restrict(self.request.user, 'change')
+        return queryset
+
+    @action(detail=True, methods=['get'])
+    def storage_impact(self, request, pk=None):
+        policy = self.get_object()
+        return Response(build_snapshot_storage_impact(policy))
+
+    @action(detail=True, methods=['post'], permission_classes=[TokenWritePermission])
+    def run_purge(self, request, pk=None):
+        policy = self.get_object()
+        dry_run = bool(request.data.get('dry_run', True))
+        from netbox_rpki.jobs import PurgeSnapshotRunJob
+        job, created = PurgeSnapshotRunJob.enqueue_for_policy(policy, dry_run=dry_run, user=request.user)
+        job_data = None
+        if job is not None:
+            job_data = {'id': job.pk, 'status': job.status}
+        return Response({'enqueued': created if job is not None else False, 'job': job_data, 'dry_run': dry_run}, status=202)
+
+
+VIEWSET_CLASS_MAP['snapshotretentionpolicy'] = SnapshotRetentionPolicyViewSet
+globals()['SnapshotRetentionPolicyViewSet'] = SnapshotRetentionPolicyViewSet
 
 
 __all__ = ("RootView",) + tuple(spec.api.viewset_name for spec in API_OBJECT_SPECS)
